@@ -27,6 +27,9 @@ import java.io.IOException;
 /** A type serializer which provides paged serialize and deserialize methods. */
 public interface PagedTypeSerializer<T> extends Serializer<T> {
 
+    /** Creates a new instance for reusing. */
+    T createReuseInstance();
+
     /**
      * Serializes the given record to the given target paged output view. Some implementations may
      * skip some bytes if current page does not have enough space left, .e.g {@link BinaryRow}.

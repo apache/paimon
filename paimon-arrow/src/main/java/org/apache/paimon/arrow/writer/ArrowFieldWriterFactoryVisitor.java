@@ -39,6 +39,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.complex.ListVector;
@@ -139,6 +140,11 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
     }
 
     @Override
+    public ArrowFieldWriterFactory visit(VariantType variantType) {
+        throw new UnsupportedOperationException("Doesn't support VariantType.");
+    }
+
+    @Override
     public ArrowFieldWriterFactory visit(ArrayType arrayType) {
         ArrowFieldWriterFactory elementWriterFactory = arrayType.getElementType().accept(this);
         return fieldVector ->
@@ -158,6 +164,7 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
         ArrowFieldWriterFactory valueWriterFactory = mapType.getValueType().accept(this);
         return fieldVector -> {
             MapVector mapVector = (MapVector) fieldVector;
+            mapVector.reAlloc();
             List<FieldVector> keyValueVectors = mapVector.getDataVector().getChildrenFromFields();
             return new ArrowFieldWriters.MapWriter(
                     fieldVector,

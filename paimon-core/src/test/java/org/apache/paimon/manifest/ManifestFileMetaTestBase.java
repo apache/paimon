@@ -53,6 +53,16 @@ public abstract class ManifestFileMetaTestBase {
     }
 
     protected ManifestEntry makeEntry(boolean isAdd, String fileName, Integer partition) {
+        return makeEntry(isAdd, fileName, partition, 0, Collections.emptyList(), null);
+    }
+
+    protected ManifestEntry makeEntry(
+            boolean isAdd,
+            String fileName,
+            Integer partition,
+            int level,
+            List<String> extraFiles,
+            byte[] embeddedIndex) {
         BinaryRow binaryRow;
         if (partition != null) {
             binaryRow = new BinaryRow(1);
@@ -79,12 +89,14 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         0, // not used
-                        0, // not used
-                        Collections.emptyList(),
+                        level, // not used
+                        extraFiles,
                         Timestamp.fromEpochMillis(200000),
                         0L, // not used
-                        null, // not used
-                        FileSource.APPEND));
+                        embeddedIndex, // not used
+                        FileSource.APPEND,
+                        null,
+                        null));
     }
 
     protected ManifestFileMeta makeManifest(ManifestEntry... entries) {
@@ -133,7 +145,14 @@ public abstract class ManifestFileMetaTestBase {
                                 path,
                                 getPartitionType(),
                                 "default",
-                                CoreOptions.FILE_FORMAT.defaultValue()),
+                                CoreOptions.FILE_FORMAT.defaultValue(),
+                                CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                                CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                                null,
+                                null),
                         Long.MAX_VALUE,
                         null)
                 .create();
@@ -148,6 +167,19 @@ public abstract class ManifestFileMetaTestBase {
                                         getManifestFile().read(file.fileName(), file.fileSize())
                                                 .stream())
                         .map(f -> f.kind() + "-" + f.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(actual).hasSameElementsAs(expecteded);
+    }
+
+    protected void containSameIdentifyEntryFile(
+            List<ManifestFileMeta> mergedManifest, List<FileEntry.Identifier> expecteded) {
+        List<FileEntry.Identifier> actual =
+                mergedManifest.stream()
+                        .flatMap(
+                                file ->
+                                        getManifestFile().read(file.fileName(), file.fileSize())
+                                                .stream())
+                        .map(ManifestEntry::identifier)
                         .collect(Collectors.toList());
         assertThat(actual).hasSameElementsAs(expecteded);
     }
@@ -247,6 +279,7 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0L,
                         null,
-                        FileSource.APPEND));
+                        FileSource.APPEND,
+                        null));
     }
 }

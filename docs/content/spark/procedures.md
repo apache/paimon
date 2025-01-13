@@ -47,12 +47,14 @@ This section introduce all available spark procedures about paimon.
             <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
             <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
             <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
+            <li>compact_strategy: this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
       </td>
       <td>
          SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/><br/>
          CALL sys.compact(table => 'T', partitions => 'p=0;p=1',  order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
          CALL sys.compact(table => 'T', where => 'p>0 and p<3', order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
-         CALL sys.compact(table => 'T', partition_idle_time => '60s')
+         CALL sys.compact(table => 'T', partition_idle_time => '60s')<br/><br/>
+         CALL sys.compact(table => 'T', compact_strategy => 'minor')<br/><br/>
       </td>
     </tr>
     <tr>
@@ -110,6 +112,31 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>rename_tag</td>
+      <td>
+         Rename a tag with a new tag name. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag_name: name of the tag. Cannot be empty.</li>
+            <li>target_tag_name: the new tag name to rename. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.rename_tag(table => 'default.T', tag_name => 'tag1', target_tag_name => 'tag2')
+      </td>
+    </tr>
+    <tr>
+      <td>replace_tag</td>
+      <td>
+         Replace an existing tag with new tag info. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the existed tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the tag is based on, it is optional.</li>
+            <li>time_retained: The maximum time retained for the existing tag, it is optional.</li>
+      </td>
+      <td>
+         CALL sys.replace_tag(table => 'default.T', tag_name => 'tag1', snapshot => 10, time_retained => '1 d')
+      </td>
+    </tr>
+    <tr>
       <td>delete_tag</td>
       <td>
          To delete a tag. Arguments:
@@ -117,6 +144,17 @@ This section introduce all available spark procedures about paimon.
             <li>tag: name of the tag to be deleted. If you specify multiple tags, delimiter is ','.</li>
       </td>
       <td>CALL sys.delete_tag(table => 'default.T', tag => 'my_tag')</td>
+    </tr>
+    <tr>
+      <td>expire_tags</td>
+      <td>
+         To expire tags by time. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>older_than: tagCreateTime before which tags will be removed.</li>
+      </td>
+      <td>
+         CALL sys.expire_tags(table => 'default.T', older_than => '2024-09-06 11:00:00')
+      </td>
     </tr>
     <tr>
       <td>rollback</td>
@@ -131,6 +169,50 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>rollback_to_timestamp</td>
+      <td>
+         To rollback to the snapshot which earlier or equal than timestamp. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>timestamp: roll back to the snapshot which earlier or equal than timestamp.</li>
+      </td>
+      <td>
+          CALL sys.rollback_to_timestamp(table => 'default.T', timestamp => 1730292023000)<br/><br/>
+      </td>
+    </tr>
+    <tr>
+      <td>rollback_to_watermark</td>
+      <td>
+         To rollback to the snapshot which earlier or equal than watermark. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>watermark: roll back to the snapshot which earlier or equal than watermark.</li>
+      </td>
+      <td>
+          CALL sys.rollback_to_watermark(table => 'default.T', watermark => 1730292023000)<br/><br/>
+      </td>
+    </tr>
+    <tr>
+      <td>purge_files</td>
+      <td>
+         To clear table with purge files directly. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+          CALL sys.purge_files(table => 'default.T')<br/><br/>
+      </td>
+    </tr>
+    <tr>
+      <td>migrate_database</td>
+      <td>
+         Migrate hive table to a paimon table. Arguments:
+            <li>source_type: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
+            <li>database: name of the origin database to be migrated. Cannot be empty.</li>
+            <li>options: the table options of the paimon table to migrate.</li>
+            <li>options_map: Options map for adding key-value options which is a map.</li>
+            <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
+      </td>
+      <td>CALL sys.migrate_database(source_type => 'hive', database => 'db01', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => 6)</td>
+    </tr>
+    <tr>
       <td>migrate_table</td>
       <td>
          Migrate hive table to a paimon table. Arguments:
@@ -139,9 +221,10 @@ This section introduce all available spark procedures about paimon.
             <li>options: the table options of the paimon table to migrate.</li>
             <li>target_table: name of the target paimon table to migrate. If not set would keep the same name with origin table</li>
             <li>delete_origin: If had set target_table, can set delete_origin to decide whether delete the origin table metadata from hms after migrate. Default is true</li>
-            <li>options_map: Options map for adding key-value options which is a map.</li>      
+            <li>options_map: Options map for adding key-value options which is a map.</li>
+            <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
       </td>
-      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet', options_map => map('k1','v1'))</td>
+      <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => 6)</td>
     </tr>
     <tr>
       <td>migrate_file</td>
@@ -151,8 +234,9 @@ This section introduce all available spark procedures about paimon.
             <li>source_table: name of the origin table to migrate. Cannot be empty.</li>
             <li>target_table: name of the target table to be migrated. Cannot be empty.</li>
             <li>delete_origin: If had set target_table, can set delete_origin to decide whether delete the origin table metadata from hms after migrate. Default is true</li>
+            <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
       </td>
-      <td>CALL sys.migrate_file(source_type => 'hive', table => 'default.T', delete_origin => true)</td>
+      <td>CALL sys.migrate_file(source_type => 'hive', table => 'default.T', delete_origin => true, parallelism => 6)</td>
     </tr>
     <tr>
       <td>remove_orphan_files</td>
@@ -161,11 +245,15 @@ This section introduce all available spark procedures about paimon.
             <li>table: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
             <li>older_than: to avoid deleting newly written files, this procedure only deletes orphan files older than 1 day by default. This argument can modify the interval.</li>
             <li>dry_run: when true, view only orphan files, don't actually remove files. Default is false.</li>
+            <li>parallelism: The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</li>
+            <li>mode: The mode of remove orphan clean procedure (local or distributed) . By default is distributed.</li>
       </td>
       <td>
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(table => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
-          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => '5')<br/><br/>
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => '5', mode => 'local')
       </td>
     </tr>
     <tr>

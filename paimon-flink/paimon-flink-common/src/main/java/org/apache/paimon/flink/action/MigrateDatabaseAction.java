@@ -29,17 +29,19 @@ public class MigrateDatabaseAction extends ActionBase {
     private final String connector;
     private final String hiveDatabaseName;
     private final String tableProperties;
+    private final Integer parallelism;
 
     public MigrateDatabaseAction(
             String connector,
-            String warehouse,
             String hiveDatabaseName,
             Map<String, String> catalogConfig,
-            String tableProperties) {
-        super(warehouse, catalogConfig);
+            String tableProperties,
+            Integer parallelism) {
+        super(catalogConfig);
         this.connector = connector;
         this.hiveDatabaseName = hiveDatabaseName;
         this.tableProperties = tableProperties;
+        this.parallelism = parallelism;
     }
 
     @Override
@@ -47,6 +49,10 @@ public class MigrateDatabaseAction extends ActionBase {
         MigrateDatabaseProcedure migrateDatabaseProcedure = new MigrateDatabaseProcedure();
         migrateDatabaseProcedure.withCatalog(catalog);
         migrateDatabaseProcedure.call(
-                new DefaultProcedureContext(env), connector, hiveDatabaseName, tableProperties);
+                new DefaultProcedureContext(env),
+                connector,
+                hiveDatabaseName,
+                tableProperties,
+                parallelism);
     }
 }

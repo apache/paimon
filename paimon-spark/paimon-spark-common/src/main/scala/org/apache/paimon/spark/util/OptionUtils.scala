@@ -18,33 +18,61 @@
 
 package org.apache.paimon.spark.util
 
+import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 
-import java.util.{HashMap => JHashMap, Map => JMap}
+import java.util.{Map => JMap}
+import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
 
 object OptionUtils extends SQLConfHelper {
 
   private val PAIMON_OPTION_PREFIX = "spark.paimon."
+  private val SPARK_CATALOG_PREFIX = "spark.sql.catalog."
 
-  def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
-    val mergedOptions = new JHashMap[String, String](
-      conf.getAllConfs
-        .filterKeys(_.startsWith(PAIMON_OPTION_PREFIX))
-        .map {
-          case (key, value) =>
-            key.stripPrefix(PAIMON_OPTION_PREFIX) -> value
-        }
-        .asJava)
+  def extractCatalogName(): Option[String] = {
+    val sparkCatalogTemplate = String.format("%s([^.]*)$", SPARK_CATALOG_PREFIX)
+    val sparkCatalogPattern = Pattern.compile(sparkCatalogTemplate)
+    conf.getAllConfs.filterKeys(_.startsWith(SPARK_CATALOG_PREFIX)).foreach {
+      case (key, _) =>
+        val matcher = sparkCatalogPattern.matcher(key)
+        if (matcher.find())
+          return Option(matcher.group(1))
+    }
+    Option.empty
+  }
+
+  def mergeSQLConfWithIdentifier(
+      extraOptions: JMap[String, String],
+      catalogName: String,
+      ident: Identifier): JMap[String, String] = {
+    val tableOptionsTemplate = String.format(
+      "(%s)(%s|\\*)\\.(%s|\\*)\\.(%s|\\*)\\.(.+)",
+      PAIMON_OPTION_PREFIX,
+      catalogName,
+      ident.getDatabaseName,
+      ident.getObjectName)
+    val tableOptionsPattern = Pattern.compile(tableOptionsTemplate)
+    val mergedOptions = org.apache.paimon.options.OptionsUtils
+      .convertToDynamicTableProperties(
+        conf.getAllConfs.asJava,
+        PAIMON_OPTION_PREFIX,
+        tableOptionsPattern,
+        5)
     mergedOptions.putAll(extraOptions)
     mergedOptions
   }
 
-  def copyWithSQLConf[T <: Table](table: T, extraOptions: JMap[String, String]): T = {
-    val mergedOptions = mergeSQLConf(extraOptions)
+  def copyWithSQLConf[T <: Table](
+      table: T,
+      catalogName: String,
+      ident: Identifier,
+      extraOptions: JMap[String, String]): T = {
+    val mergedOptions: JMap[String, String] =
+      mergeSQLConfWithIdentifier(extraOptions, catalogName, ident)
     if (mergedOptions.isEmpty) {
       table
     } else {

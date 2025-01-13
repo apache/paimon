@@ -19,14 +19,18 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.ProcessRecordAttributesUtil;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
+import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 
 import java.io.IOException;
 import java.util.List;
@@ -43,10 +47,11 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     protected transient StoreSinkWrite write;
 
     public TableWriteOperator(
+            StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(Options.fromMap(table.options()));
+        super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
@@ -56,45 +61,46 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
 
-        // Each job can only have one user name and this name must be consistent across restarts.
-        // We cannot use job id as commit user name here because user may change job id by creating
-        // a savepoint, stop the job and then resume from savepoint.
-        String commitUser =
-                StateUtils.getSingleValueFromState(
-                        context, "commit_user_state", String.class, initialCommitUser);
-
         boolean containLogSystem = containLogSystem();
-        int numTasks = getRuntimeContext().getNumberOfParallelSubtasks();
+        int numTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
         StateValueFilter stateFilter =
                 (tableName, partition, bucket) -> {
                     int task =
                             containLogSystem
                                     ? ChannelComputer.select(bucket, numTasks)
                                     : ChannelComputer.select(partition, bucket, numTasks);
-                    return task == getRuntimeContext().getIndexOfThisSubtask();
+                    return task == RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
                 };
 
-        initStateAndWriter(
-                context,
-                stateFilter,
-                getContainingTask().getEnvironment().getIOManager(),
-                commitUser);
-    }
-
-    @VisibleForTesting
-    void initStateAndWriter(
-            StateInitializationContext context,
-            StateValueFilter stateFilter,
-            IOManager ioManager,
-            String commitUser)
-            throws Exception {
-        // We put state and write init in this method for convenient testing. Without construct a
-        // runtime context, we can test to construct a writer here
-        state = new StoreSinkWriteState(context, stateFilter);
-
+        state = createState(context, stateFilter);
         write =
                 storeSinkWriteProvider.provide(
-                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
+                        table,
+                        getCommitUser(context),
+                        state,
+                        getContainingTask().getEnvironment().getIOManager(),
+                        memoryPool,
+                        getMetricGroup());
+    }
+
+    protected StoreSinkWriteState createState(
+            StateInitializationContext context, StoreSinkWriteState.StateValueFilter stateFilter)
+            throws Exception {
+        return new StoreSinkWriteStateImpl(context, stateFilter);
+    }
+
+    protected String getCommitUser(StateInitializationContext context) throws Exception {
+        // Each job can only have one username and this name must be consistent across restarts.
+        // We cannot use job id as commit username here because user may change job id by creating
+        // a savepoint, stop the job and then resume from savepoint.
+        return StateUtils.getSingleValueFromState(
+                context, "commit_user_state", String.class, initialCommitUser);
+    }
+
+    @Override
+    public void processRecordAttributes(RecordAttributes recordAttributes) throws Exception {
+        ProcessRecordAttributesUtil.processWithWrite(recordAttributes, write);
+        super.processRecordAttributes(recordAttributes);
     }
 
     protected abstract boolean containLogSystem();
@@ -124,5 +130,23 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     @VisibleForTesting
     public StoreSinkWrite getWrite() {
         return write;
+    }
+
+    /** {@link StreamOperatorFactory} of {@link TableWriteOperator}. */
+    protected abstract static class Factory<IN>
+            extends PrepareCommitOperator.Factory<IN, Committable> {
+        protected final FileStoreTable table;
+        protected final StoreSinkWrite.Provider storeSinkWriteProvider;
+        protected final String initialCommitUser;
+
+        protected Factory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(Options.fromMap(table.options()));
+            this.table = table;
+            this.storeSinkWriteProvider = storeSinkWriteProvider;
+            this.initialCommitUser = initialCommitUser;
+        }
     }
 }

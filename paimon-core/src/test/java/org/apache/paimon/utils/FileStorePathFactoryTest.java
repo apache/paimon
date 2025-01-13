@@ -72,8 +72,9 @@ public class FileStorePathFactoryTest {
         FileStorePathFactory pathFactory = createNonPartFactory(new Path(tempDir.toString()));
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(new BinaryRow(0), 123);
-        assertThat(dataFilePathFactory.toPath("my-data-file-name"))
-                .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
+        assertThat(dataFilePathFactory.newPath("my-data-file-name").toString())
+                .startsWith(
+                        new Path(tempDir.toString() + "/bucket-123/my-data-file-name").toString());
     }
 
     @Test
@@ -85,7 +86,14 @@ public class FileStorePathFactoryTest {
                                 new DataType[] {new VarCharType(10), new IntType()},
                                 new String[] {"dt", "hr"}),
                         "default",
-                        CoreOptions.FILE_FORMAT.defaultValue().toString());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
+                        null);
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
         assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");
@@ -110,9 +118,10 @@ public class FileStorePathFactoryTest {
         writer.complete();
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(partition, 123);
-        assertThat(dataFilePathFactory.toPath("my-data-file-name"))
-                .isEqualTo(
-                        new Path(tempDir.toString() + expected + "/bucket-123/my-data-file-name"));
+        assertThat(dataFilePathFactory.newPath("my-data-file-name").toString())
+                .startsWith(
+                        new Path(tempDir.toString() + expected + "/bucket-123/my-data-file-name")
+                                .toString());
     }
 
     public static FileStorePathFactory createNonPartFactory(Path root) {
@@ -120,6 +129,13 @@ public class FileStorePathFactoryTest {
                 root,
                 RowType.builder().build(),
                 PARTITION_DEFAULT_NAME.defaultValue(),
-                CoreOptions.FILE_FORMAT.defaultValue().toString());
+                CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                null,
+                null);
     }
 }

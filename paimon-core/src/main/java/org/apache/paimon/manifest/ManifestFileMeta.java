@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -119,5 +120,18 @@ public class ManifestFileMeta {
         return String.format(
                 "{%s, %d, %d, %d, %s, %d}",
                 fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats, schemaId);
+    }
+
+    // ----------------------- Serialization -----------------------------
+
+    private static final ThreadLocal<ManifestFileMetaSerializer> SERIALIZER_THREAD_LOCAL =
+            ThreadLocal.withInitial(ManifestFileMetaSerializer::new);
+
+    public byte[] toBytes() throws IOException {
+        return SERIALIZER_THREAD_LOCAL.get().serializeToBytes(this);
+    }
+
+    public ManifestFileMeta fromBytes(byte[] bytes) throws IOException {
+        return SERIALIZER_THREAD_LOCAL.get().deserializeFromBytes(bytes);
     }
 }

@@ -58,9 +58,11 @@ By specifying `'changelog-producer' = 'input'`, Paimon writers rely on their inp
 
 ## Lookup
 
-If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you may consider using the `'lookup'` changelog producer.
+If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you
+may consider using the `'lookup'` changelog producer.
 
-By specifying `'changelog-producer' = 'lookup'`, Paimon will generate changelog through `'lookup'` before committing the data writing.
+By specifying `'changelog-producer' = 'lookup'`, Paimon will generate changelog through `'lookup'` before committing
+the data writing (You can also enable [Async Compaction]({{< ref "primary-key-table/compaction#asynchronous-compaction" >}})).
 
 {{< img src="/img/changelog-producer-lookup.png">}}
 
@@ -105,23 +107,37 @@ important for performance).
 
 ## Full Compaction
 
-If you think the resource consumption of 'lookup' is too large, you can consider using 'full-compaction' changelog producer,
-which can decouple data writing and changelog generation, and is more suitable for scenarios with high latency (For example, 10 minutes).
+You can also consider using 'full-compaction' changelog producer to generate changelog, and is more suitable for scenarios
+with large latency (For example, 30 minutes).
 
-By specifying `'changelog-producer' = 'full-compaction'`, Paimon will compare the results between full compactions and produce the differences as changelog. The latency of changelog is affected by the frequency of full compactions.
+1. By specifying `'changelog-producer' = 'full-compaction'`, Paimon will compare the results between full compactions and
+produce the differences as changelog. The latency of changelog is affected by the frequency of full compactions.
+2. By specifying `full-compaction.delta-commits` table property, full compaction will be constantly triggered after delta
+commits (checkpoints). This is set to 1 by default, so each checkpoint will have a full compression and generate a
+changelog.
 
-By specifying `full-compaction.delta-commits` table property, full compaction will be constantly triggered after delta commits (checkpoints). This is set to 1 by default, so each checkpoint will have a full compression and generate a change log.
+Generally speaking, the cost and consumption of full compaction are high, so we recommend using `'lookup'` changelog
+producer.
 
 {{< img src="/img/changelog-producer-full-compaction.png">}}
 
 {{< hint info >}}
 
-Full compaction changelog producer can produce complete changelog for any type of source. However it is not as efficient as the input changelog producer and the latency to produce changelog might be high.
+Full compaction changelog producer can produce complete changelog for any type of source. However it is not as
+efficient as the input changelog producer and the latency to produce changelog might be high.
 
 {{< /hint >}}
 
 Full-compaction changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
 changelog for the same record.
 
-(Note: Please increase `'execution.checkpointing.max-concurrent-checkpoints'` Flink configuration, this is very
-important for performance).
+## Changelog Merging
+
+For `input`, `lookup`, `full-compaction` 'changelog-producer'.
+
+If Flink's checkpoint interval is short (for example, 30 seconds) and the number of buckets is large, each snapshot may
+produce lots of small changelog files. Too many files may put a burden on the distributed storage cluster.
+
+In order to compact small changelog files into large ones, you can set the table option `changelog.precommit-compact = true`.
+Default value of this option is false, if true, it will add a compact coordinator and worker operator after the writer
+operator, which copies changelog files into large ones.

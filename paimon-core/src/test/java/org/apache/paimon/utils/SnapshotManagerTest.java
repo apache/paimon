@@ -39,6 +39,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Tests for {@link SnapshotManager}. */
 public class SnapshotManagerTest {
@@ -281,8 +282,8 @@ public class SnapshotManagerTest {
     @Test
     public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
-        SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        Path path = new Path(tempDir.toString());
+        SnapshotManager snapshotManager = new SnapshotManager(localFileIO, path);
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot =
@@ -369,7 +370,9 @@ public class SnapshotManagerTest {
         localFileIO.deleteQuietly(snapshotManager.snapshotPath(3));
         thread.join();
 
-        assertThat(exception.get()).hasMessageContaining("Fails to read snapshot from path");
+        assertThat(exception.get())
+                .hasMessageFindingMatch("Snapshot file .* does not exist")
+                .hasMessageContaining("dedicated compaction job");
     }
 
     @Test
@@ -395,5 +398,16 @@ public class SnapshotManagerTest {
         Assertions.assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
         Assertions.assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
         Assertions.assertThat(snapshotManager.changelog(1)).isNotNull();
+    }
+
+    @Test
+    public void testCommitChangelogWhenSameChangelogCommitTwice() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        long id = 1L;
+        Changelog changelog = createChangelogWithMillis(id, 1L);
+        snapshotManager.commitChangelog(changelog, id);
+        assertDoesNotThrow(() -> snapshotManager.commitChangelog(changelog, id));
     }
 }

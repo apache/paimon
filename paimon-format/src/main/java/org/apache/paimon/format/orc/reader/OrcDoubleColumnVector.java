@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc.reader;
 
 import org.apache.hadoop.hive.ql.exec.vector.DoubleColumnVector;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 /**
  * This column vector is used to adapt hive's DoubleColumnVector to Paimon's float and double
@@ -30,18 +31,20 @@ public class OrcDoubleColumnVector extends AbstractOrcColumnVector
 
     private final DoubleColumnVector vector;
 
-    public OrcDoubleColumnVector(DoubleColumnVector vector) {
-        super(vector);
+    public OrcDoubleColumnVector(DoubleColumnVector vector, VectorizedRowBatch orcBatch) {
+        super(vector, orcBatch);
         this.vector = vector;
     }
 
     @Override
     public double getDouble(int i) {
-        return vector.vector[vector.isRepeating ? 0 : i];
+        i = rowMapper(i);
+        return vector.vector[i];
     }
 
     @Override
     public float getFloat(int i) {
-        return (float) vector.vector[vector.isRepeating ? 0 : i];
+        i = rowMapper(i);
+        return (float) vector.vector[i];
     }
 }

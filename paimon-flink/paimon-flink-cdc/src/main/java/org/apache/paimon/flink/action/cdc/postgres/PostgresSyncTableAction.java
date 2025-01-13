@@ -77,18 +77,11 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
     private JdbcSchemasInfo postgresSchemasInfo;
 
     public PostgresSyncTableAction(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> postgresConfig) {
-        super(
-                warehouse,
-                database,
-                table,
-                catalogConfig,
-                postgresConfig,
-                SyncJobHandler.SourceType.POSTGRES);
+        super(database, table, catalogConfig, postgresConfig, SyncJobHandler.SourceType.POSTGRES);
     }
 
     @Override
@@ -103,6 +96,7 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
 
     @Override
     protected JdbcIncrementalSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         List<JdbcSchemasInfo.JdbcSchemaInfo> pkTables = postgresSchemasInfo.pkTables();
         Set<String> schemaList = new HashSet<>();
         String[] tableList = new String[pkTables.size()];

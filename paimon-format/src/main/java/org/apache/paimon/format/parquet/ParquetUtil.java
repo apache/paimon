@@ -79,7 +79,9 @@ public class ParquetUtil {
      */
     public static ParquetFileReader getParquetReader(FileIO fileIO, Path path) throws IOException {
         return new ParquetFileReader(
-                ParquetInputFile.fromPath(fileIO, path), ParquetReadOptions.builder().build());
+                ParquetInputFile.fromPath(fileIO, path),
+                ParquetReadOptions.builder().build(),
+                null);
     }
 
     static void assertStatsClass(

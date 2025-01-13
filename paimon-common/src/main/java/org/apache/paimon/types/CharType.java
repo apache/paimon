@@ -68,6 +68,11 @@ public class CharType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return length;
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new CharType(isNullable, length);
     }

@@ -30,36 +30,22 @@ This documentation is a guide for using Paimon in Trino.
 
 ## Version
 
-Paimon currently supports Trino 420 and above.
+Paimon currently supports Trino 440.
 
 ## Filesystem
 
-From version 0.8, paimon share trino filesystem for all actions, which means, you should 
-config trino filesystem before using trino-paimon. You can find information about how to config
-filesystems for trino on trino official website.
+From version 0.8, Paimon share Trino filesystem for all actions, which means, you should 
+config Trino filesystem before using trino-paimon. You can find information about how to config
+filesystems for Trino on Trino official website.
 
 ## Preparing Paimon Jar File
 
-{{< stable >}}
-
-Download from master:
-https://paimon.apache.org/docs/master/project/download/
-
-{{< /stable >}}
-
-{{< unstable >}}
-
-| Version       | Package                                                                                                                                       |
-|---------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| [420, 426]    | [paimon-trino-420-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-420/{{< version >}}/) |
-| [427, latest] | [paimon-trino-427-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-427/{{< version >}}/) |
-
-{{< /unstable >}}
+[Download]({{< ref "project/download" >}})
 
 You can also manually build a bundled jar from the source code. However, there are a few preliminary steps that need to be taken before compiling:
 
 - To build from the source code, [clone the git repository]({{< trino_github_repo >}}).
-- Install JDK17 locally, and configure JDK17 as a global environment variable;
+- Install JDK21 locally, and configure JDK21 as a global environment variable;
 
 Then,you can build bundled jar with the following command:
 
@@ -78,28 +64,17 @@ For example, if you want to use Hadoop 3.3.5-1, you can use the following comman
 mvn clean install -DskipTests -Dhadoop.apache.version=3.3.5-1
 ```
 
-## Tmp Dir
-
-Paimon will unzip some jars to the tmp directory for codegen. By default, Trino will use `'/tmp'` as the temporary
-directory, but `'/tmp'` may be periodically deleted.
-
-You can configure this environment variable when Trino starts: 
-```shell
--Djava.io.tmpdir=/path/to/other/tmpdir
-```
-
-Let Paimon use a secure temporary directory.
-
 ## Configure Paimon Catalog
 
 ### Install Paimon Connector
 ```bash
 tar -zxf paimon-trino-<trino-version>-{{< version >}}-plugin.tar.gz -C ${TRINO_HOME}/plugin
 ```
-the variable `trino-version` is module name, must be one of 420, 427.
-> NOTE: For JDK 17, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
+
+> NOTE: For JDK 21, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
 
 ### Configure
+
 Catalogs are registered by creating a catalog properties file in the etc/catalog directory. For example, create etc/catalog/paimon.properties with the following contents to mount the paimon connector as the paimon catalog:
 
 ```
@@ -113,7 +88,7 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 - set environment variable HADOOP_CONF_DIR.
 - configure `hadoop-conf-dir` in the properties.
 
-If you are using a hadoop filesystem, you can still use trino-hdfs and trino-hive to config it.
+If you are using a Hadoop filesystem, you can still use trino-hdfs and trino-hive to config it.
 For example, if you use oss as a storage, you can write in `paimon.properties` according to [Trino Reference](https://trino.io/docs/current/connector/hive.html#hdfs-configuration):
 
 ```
@@ -186,9 +161,6 @@ SELECT * FROM paimon.test_db.orders
 ```
 
 ## Query with Time Traveling
-{{< tabs "time-travel-example" >}}
-
-{{< tab "version >=420" >}}
 
 ```sql
 -- read the snapshot from specified timestamp
@@ -208,10 +180,15 @@ you have a tag named '1' based on snapshot 2, the statement `SELECT * FROM paimo
 instead of snapshot 1.
 {{< /hint >}}
 
-{{< /tab >}}
+## Insert
 
+```
+INSERT INTO paimon.test_db.orders VALUES (.....);
+```
 
-{{< /tabs >}}
+Supports:
+- primary key table with fixed bucket.
+- non-primary-key table with bucket -1.
 
 ## Trino to Paimon type mapping
 
@@ -319,3 +296,15 @@ All Trino's data types are available in package `io.trino.spi.type`.
     </tr>
     </tbody>
 </table>
+
+## Tmp Dir
+
+Paimon will unzip some jars to the tmp directory for codegen. By default, Trino will use `'/tmp'` as the temporary
+directory, but `'/tmp'` may be periodically deleted.
+
+You can configure this environment variable when Trino starts:
+```shell
+-Djava.io.tmpdir=/path/to/other/tmpdir
+```
+
+Let Paimon use a secure temporary directory.

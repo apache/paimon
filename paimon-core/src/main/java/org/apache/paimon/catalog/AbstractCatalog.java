@@ -19,14 +19,15 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -36,28 +37,36 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.options.CatalogOptions.ALLOW_UPPER_CASE;
-import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
+import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -66,20 +75,15 @@ public abstract class AbstractCatalog implements Catalog {
     protected final Map<String, String> tableDefaultOptions;
     protected final Options catalogOptions;
 
-    @Nullable protected final LineageMetaFactory lineageMetaFactory;
-
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
-        this.lineageMetaFactory = null;
         this.tableDefaultOptions = new HashMap<>();
         this.catalogOptions = new Options();
     }
 
     protected AbstractCatalog(FileIO fileIO, Options options) {
         this.fileIO = fileIO;
-        this.lineageMetaFactory =
-                findAndCreateLineageMeta(options, AbstractCatalog.class.getClassLoader());
-        this.tableDefaultOptions = Catalog.tableDefaultOptions(options.toMap());
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(options.toMap());
         this.catalogOptions = options;
     }
 
@@ -93,7 +97,6 @@ public abstract class AbstractCatalog implements Catalog {
         return fileIO;
     }
 
-    @Override
     public Optional<CatalogLockFactory> lockFactory() {
         if (!lockEnabled()) {
             return Optional.empty();
@@ -113,7 +116,6 @@ public abstract class AbstractCatalog implements Catalog {
         return Optional.empty();
     }
 
-    @Override
     public Optional<CatalogLockContext> lockContext() {
         return Optional.of(CatalogLockContext.fromOptions(catalogOptions));
     }
@@ -122,38 +124,41 @@ public abstract class AbstractCatalog implements Catalog {
         return catalogOptions.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
-    @Override
-    public boolean allowUpperCase() {
-        return catalogOptions.getOptional(ALLOW_UPPER_CASE).orElse(true);
+    protected boolean allowCustomTablePath() {
+        return false;
     }
 
     @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
         checkNotSystemDatabase(name);
-        if (databaseExists(name)) {
+        try {
+            getDatabase(name);
             if (ignoreIfExists) {
                 return;
             }
             throw new DatabaseAlreadyExistException(name);
+        } catch (DatabaseNotExistException ignored) {
         }
         createDatabaseImpl(name, properties);
     }
 
     @Override
-    public Map<String, String> loadDatabaseProperties(String name)
-            throws DatabaseNotExistException {
+    public Database getDatabase(String name) throws DatabaseNotExistException {
         if (isSystemDatabase(name)) {
-            return Collections.emptyMap();
+            return Database.of(name);
         }
-        return loadDatabasePropertiesImpl(name);
+        return getDatabaseImpl(name);
     }
 
-    protected abstract Map<String, String> loadDatabasePropertiesImpl(String name)
-            throws DatabaseNotExistException;
+    protected abstract Database getDatabaseImpl(String name) throws DatabaseNotExistException;
 
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "dropPartition");
         Table table = getTable(identifier);
@@ -163,9 +168,21 @@ public abstract class AbstractCatalog implements Catalog {
                         .store()
                         .newCommit(
                                 createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
-            commit.dropPartitions(
-                    Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
+            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
         }
+    }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {}
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
+
+    @Override
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
+        return listPartitionsFromFileSystem(getTable(identifier));
     }
 
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
@@ -174,7 +191,9 @@ public abstract class AbstractCatalog implements Catalog {
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         checkNotSystemDatabase(name);
-        if (!databaseExists(name)) {
+        try {
+            getDatabase(name);
+        } catch (DatabaseNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
@@ -191,13 +210,33 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract void dropDatabaseImpl(String name);
 
     @Override
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        checkNotSystemDatabase(name);
+        try {
+            if (changes == null || changes.isEmpty()) {
+                return;
+            }
+            alterDatabaseImpl(name, changes);
+        } catch (DatabaseNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new DatabaseNotExistException(name);
+        }
+    }
+
+    protected abstract void alterDatabaseImpl(String name, List<PropertyChange> changes)
+            throws DatabaseNotExistException;
+
+    @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
             return SystemTableLoader.loadGlobalTableNames();
         }
-        if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(databaseName);
-        }
+
+        // check db exists
+        getDatabase(databaseName);
 
         return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
@@ -210,7 +249,9 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(identifier, "dropTable");
         checkNotSystemTable(identifier, "dropTable");
 
-        if (!tableExists(identifier)) {
+        try {
+            getTable(identifier);
+        } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
@@ -227,24 +268,50 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateIdentifierNameCaseInsensitive(identifier);
-        validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
         validateAutoCreateClose(schema.options());
+        validateCustomTablePath(schema.options());
 
-        if (!databaseExists(identifier.getDatabaseName())) {
-            throw new DatabaseNotExistException(identifier.getDatabaseName());
-        }
+        // check db exists
+        getDatabase(identifier.getDatabaseName());
 
-        if (tableExists(identifier)) {
+        try {
+            getTable(identifier);
             if (ignoreIfExists) {
                 return;
             }
             throw new TableAlreadyExistException(identifier);
+        } catch (TableNotExistException ignored) {
         }
 
         copyTableDefaultOptions(schema.options());
 
-        createTableImpl(identifier, schema);
+        switch (Options.fromMap(schema.options()).get(TYPE)) {
+            case TABLE:
+            case MATERIALIZED_TABLE:
+                createTableImpl(identifier, schema);
+                break;
+            case OBJECT_TABLE:
+                createObjectTable(identifier, schema);
+                break;
+            case FORMAT_TABLE:
+                createFormatTable(identifier, schema);
+                break;
+        }
+    }
+
+    private void createObjectTable(Identifier identifier, Schema schema) {
+        RowType rowType = schema.rowType();
+        checkArgument(
+                rowType.getFields().isEmpty()
+                        || new HashSet<>(ObjectTable.SCHEMA.getFields())
+                                .containsAll(rowType.getFields()),
+                "Schema of Object Table can be empty or %s, but is %s.",
+                ObjectTable.SCHEMA,
+                rowType);
+        checkArgument(
+                schema.options().containsKey(CoreOptions.OBJECT_LOCATION.key()),
+                "Object table should have object-location option.");
+        createTableImpl(identifier, schema.copy(ObjectTable.SCHEMA));
     }
 
     protected abstract void createTableImpl(Identifier identifier, Schema schema);
@@ -256,17 +323,20 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(toTable, "renameTable");
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
-        validateIdentifierNameCaseInsensitive(toTable);
 
-        if (!tableExists(fromTable)) {
+        try {
+            getTable(fromTable);
+        } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
             throw new TableNotExistException(fromTable);
         }
 
-        if (tableExists(toTable)) {
+        try {
+            getTable(toTable);
             throw new TableAlreadyExistException(toTable);
+        } catch (TableNotExistException ignored) {
         }
 
         renameTableImpl(fromTable, toTable);
@@ -279,10 +349,10 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
-        validateIdentifierNameCaseInsensitive(identifier);
-        validateFieldNameCaseInsensitiveInSchemaChange(changes);
 
-        if (!tableExists(identifier)) {
+        try {
+            getTable(identifier);
+        } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
             }
@@ -295,80 +365,70 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
-    @Nullable
-    private LineageMetaFactory findAndCreateLineageMeta(Options options, ClassLoader classLoader) {
-        return options.getOptional(LINEAGE_META)
-                .map(
-                        meta ->
-                                FactoryUtil.discoverFactory(
-                                        classLoader, LineageMetaFactory.class, meta))
-                .orElse(null);
-    }
-
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemDatabase(identifier.getDatabaseName())) {
-            String tableName = identifier.getTableName();
-            Table table =
-                    SystemTableLoader.loadGlobal(
-                            tableName,
-                            fileIO,
-                            this::allTablePaths,
-                            catalogOptions,
-                            lineageMetaFactory);
-            if (table == null) {
-                throw new TableNotExistException(identifier);
-            }
-            return table;
-        } else if (isSpecifiedSystemTable(identifier)) {
-            FileStoreTable originTable =
-                    getDataTable(
+            return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), this);
+        } else if (identifier.isSystemTable()) {
+            Table originTable =
+                    getDataOrFormatTable(
                             new Identifier(
                                     identifier.getDatabaseName(),
                                     identifier.getTableName(),
                                     identifier.getBranchName(),
                                     null));
-            Table table =
-                    SystemTableLoader.load(
-                            Preconditions.checkNotNull(identifier.getSystemTableName()),
-                            originTable);
-            if (table == null) {
-                throw new TableNotExistException(identifier);
-            }
-            return table;
+            return CatalogUtils.createSystemTable(identifier, originTable);
         } else {
-            try {
-                return getDataTable(identifier);
-            } catch (TableNotExistException e) {
-                return getFormatTable(identifier);
-            }
+            return getDataOrFormatTable(identifier);
         }
     }
 
-    private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
+    protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        TableSchema tableSchema = getDataTableSchema(identifier);
-        return FileStoreTableFactory.create(
-                fileIO,
-                getTableLocation(identifier),
-                tableSchema,
-                new CatalogEnvironment(
-                        identifier,
-                        Lock.factory(
-                                lockFactory().orElse(null), lockContext().orElse(null), identifier),
-                        metastoreClientFactory(identifier).orElse(null),
-                        lineageMetaFactory));
+        TableMeta tableMeta = getDataTableMeta(identifier);
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        fileIO,
+                        getTableLocation(identifier),
+                        tableMeta.schema,
+                        new CatalogEnvironment(
+                                identifier,
+                                tableMeta.uuid,
+                                Lock.factory(
+                                        lockFactory().orElse(null),
+                                        lockContext().orElse(null),
+                                        identifier),
+                                catalogLoader()));
+        CoreOptions options = table.coreOptions();
+        if (options.type() == TableType.OBJECT_TABLE) {
+            String objectLocation = options.objectLocation();
+            checkNotNull(objectLocation, "Object location should not be null for object table.");
+            table =
+                    ObjectTable.builder()
+                            .underlyingTable(table)
+                            .objectLocation(objectLocation)
+                            .objectFileIO(objectFileIO(objectLocation))
+                            .build();
+        }
+        return table;
     }
 
     /**
-     * Return a {@link FormatTable} identified by the given {@link Identifier}.
+     * Catalog implementation may override this method to provide {@link FileIO} to object table.
+     */
+    protected FileIO objectFileIO(String objectLocation) {
+        return fileIO;
+    }
+
+    /**
+     * Create a {@link FormatTable} identified by the given {@link Identifier}.
      *
      * @param identifier Path of the table
-     * @return The requested table
-     * @throws Catalog.TableNotExistException if the target does not exist
+     * @param schema Schema of the table
      */
-    public FormatTable getFormatTable(Identifier identifier) throws Catalog.TableNotExistException {
-        throw new Catalog.TableNotExistException(identifier);
+    public void createFormatTable(Identifier identifier, Schema schema) {
+        throw new UnsupportedOperationException(
+                this.getClass().getName() + " currently does not support format table");
     }
 
     /**
@@ -382,38 +442,15 @@ public abstract class AbstractCatalog implements Catalog {
         return newDatabasePath(warehouse(), database);
     }
 
-    public Map<String, Map<String, Path>> allTablePaths() {
-        try {
-            Map<String, Map<String, Path>> allPaths = new HashMap<>();
-            for (String database : listDatabases()) {
-                Map<String, Path> tableMap =
-                        allPaths.computeIfAbsent(database, d -> new HashMap<>());
-                for (String table : listTables(database)) {
-                    tableMap.put(table, getTableLocation(Identifier.create(database, table)));
-                }
-            }
-            return allPaths;
-        } catch (DatabaseNotExistException e) {
-            throw new RuntimeException("Database is deleted while listing", e);
-        }
+    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
+        return new TableMeta(getDataTableSchema(identifier), null);
     }
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
 
-    @Override
     public Path getTableLocation(Identifier identifier) {
         return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getTableName());
-    }
-
-    protected static void checkNotBranch(Identifier identifier, String method) {
-        if (identifier.getBranchName() != null) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Cannot '%s' for branch table '%s', "
-                                    + "please modify the table with the default branch.",
-                            method, identifier));
-        }
     }
 
     protected void assertMainBranch(Identifier identifier) {
@@ -422,27 +459,6 @@ public abstract class AbstractCatalog implements Catalog {
             throw new UnsupportedOperationException(
                     this.getClass().getName() + " currently does not support table branches");
         }
-    }
-
-    public static boolean isSpecifiedSystemTable(Identifier identifier) {
-        return identifier.getSystemTableName() != null;
-    }
-
-    protected static boolean isSystemTable(Identifier identifier) {
-        return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
-    }
-
-    protected static void checkNotSystemTable(Identifier identifier, String method) {
-        if (isSystemTable(identifier)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Cannot '%s' for system table '%s', please use data table.",
-                            method, identifier));
-        }
-    }
-
-    private void copyTableDefaultOptions(Map<String, String> options) {
-        tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
     public static Path newTableLocation(String warehouse, Identifier identifier) {
@@ -457,49 +473,17 @@ public abstract class AbstractCatalog implements Catalog {
         return new Path(warehouse, database + DB_SUFFIX);
     }
 
-    public static boolean isSystemDatabase(String database) {
-        return SYSTEM_DATABASE_NAME.equals(database);
+    private void copyTableDefaultOptions(Map<String, String> options) {
+        tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
-    /** Validate database cannot be a system database. */
-    protected void checkNotSystemDatabase(String database) {
-        if (isSystemDatabase(database)) {
-            throw new ProcessSystemDatabaseException();
+    private void validateCustomTablePath(Map<String, String> options) {
+        if (!allowCustomTablePath() && options.containsKey(CoreOptions.PATH.key())) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "The current catalog %s does not support specifying the table path when creating a table.",
+                            this.getClass().getSimpleName()));
         }
-    }
-
-    protected void validateIdentifierNameCaseInsensitive(Identifier identifier) {
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Database", identifier.getDatabaseName());
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Table", identifier.getObjectName());
-    }
-
-    private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
-        List<String> fieldNames = new ArrayList<>();
-        for (SchemaChange change : changes) {
-            if (change instanceof SchemaChange.AddColumn) {
-                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
-                fieldNames.add(addColumn.fieldName());
-            } else if (change instanceof SchemaChange.RenameColumn) {
-                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
-                fieldNames.add(rename.newName());
-            }
-        }
-        validateFieldNameCaseInsensitive(fieldNames);
-    }
-
-    protected void validateFieldNameCaseInsensitive(List<String> fieldNames) {
-        Catalog.validateCaseInsensitive(allowUpperCase(), "Field", fieldNames);
-    }
-
-    private void validateAutoCreateClose(Map<String, String> options) {
-        checkArgument(
-                !Boolean.parseBoolean(
-                        options.getOrDefault(
-                                CoreOptions.AUTO_CREATE.key(),
-                                CoreOptions.AUTO_CREATE.defaultValue().toString())),
-                String.format(
-                        "The value of %s property should be %s.",
-                        CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
     }
 
     // =============================== Meta in File System =====================================
@@ -527,7 +511,16 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
-        return !new SchemaManager(fileIO, tablePath, branchName).listAllIds().isEmpty();
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath, branchName);
+
+        // in order to improve the performance, check the schema-0 firstly.
+        boolean schemaZeroExists = schemaManager.schemaExists(0);
+        if (schemaZeroExists) {
+            return true;
+        } else {
+            // if schema-0 not exists, fallback to check other schemas
+            return !schemaManager.listAllIds().isEmpty();
+        }
     }
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
@@ -543,5 +536,26 @@ public abstract class AbstractCatalog implements Catalog {
                                 return s;
                             }
                         });
+    }
+
+    /** Table metadata. */
+    protected static class TableMeta {
+
+        private final TableSchema schema;
+        @Nullable private final String uuid;
+
+        public TableMeta(TableSchema schema, @Nullable String uuid) {
+            this.schema = schema;
+            this.uuid = uuid;
+        }
+
+        public TableSchema schema() {
+            return schema;
+        }
+
+        @Nullable
+        public String uuid() {
+            return uuid;
+        }
     }
 }

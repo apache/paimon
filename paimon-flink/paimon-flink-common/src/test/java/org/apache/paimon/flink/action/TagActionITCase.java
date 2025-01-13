@@ -91,12 +91,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag2', snapshot_id => cast(2 as bigint))",
                                 database, tableName));
@@ -127,11 +127,11 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format("CALL sys.delete_tag('%s.%s', 'tag2')", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.delete_tag(`table` => '%s.%s', tag => 'tag2')",
                                 database, tableName));
@@ -160,12 +160,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag('%s.%s', 'tag1', 1)", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag1', snapshot_id => cast(1 as bigint))",
                                 database, tableName));
@@ -193,12 +193,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag('%s.%s', 'tag3', 3)", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag3', snapshot_id => cast(3 as bigint))",
                                 database, tableName));
@@ -223,12 +223,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.delete_tag('%s.%s', 'tag1,tag3')", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.delete_tag(`table` => '%s.%s', tag => 'tag1,tag3')",
                                 database, tableName));
@@ -238,6 +238,101 @@ public class TagActionITCase extends ActionITCaseBase {
         }
         assertThat(tagManager.tagExists("tag1")).isFalse();
         assertThat(tagManager.tagExists("tag3")).isFalse();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    public void testRenameTag(String invoker) throws Exception {
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        switch (invoker) {
+            case "action":
+                createAction(
+                                CreateTagAction.class,
+                                "create_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag2")
+                        .run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.create_tag('%s.%s', 'tag2',  2)", database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag2', snapshot_id => cast(2 as bigint))",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+        assertThat(tagManager.tagExists("tag2")).isTrue();
+
+        switch (invoker) {
+            case "action":
+                createAction(
+                                RenameTagAction.class,
+                                "rename_tag",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName,
+                                "--tag_name",
+                                "tag2",
+                                "--target_tag_name",
+                                "tag3")
+                        .run();
+                break;
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.rename_tag('%s.%s', 'tag2', 'tag3')",
+                                database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.rename_tag(`table` => '%s.%s', tagName => 'tag2', targetTagName => 'tag3')",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+
+        assertThat(tagManager.tagExists("tag2")).isFalse();
+        assertThat(tagManager.tagExists("tag3")).isTrue();
     }
 
     @ParameterizedTest(name = "{0}")
@@ -284,12 +379,12 @@ public class TagActionITCase extends ActionITCaseBase {
                         .run();
                 break;
             case "procedure_indexed":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag('%s.%s', 'tag2',  2)", database, tableName));
                 break;
             case "procedure_named":
-                callProcedure(
+                executeSQL(
                         String.format(
                                 "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag2', snapshot_id => cast(2 as bigint))",
                                 database, tableName));

@@ -48,4 +48,15 @@ public class MultipleParameterToolAdapter {
     public String fallback(String key) {
         return key.replaceAll("_", "-");
     }
+
+    public String getRequired(String key) {
+        String value = get(key);
+        if (value == null) {
+            throw new IllegalArgumentException(
+                    "Argument '"
+                            + key
+                            + "' is required. Run '<action> --help' for more information.");
+        }
+        return value;
+    }
 }

@@ -83,7 +83,7 @@ public interface MongoVersionStrategy {
             Configuration mongodbConfig)
             throws JsonProcessingException {
         SchemaAcquisitionMode mode =
-                SchemaAcquisitionMode.valueOf(mongodbConfig.getString(START_MODE).toUpperCase());
+                SchemaAcquisitionMode.valueOf(mongodbConfig.get(START_MODE).toUpperCase());
         ObjectNode objectNode =
                 JsonSerdeUtil.asSpecificNodeType(jsonNode.asText(), ObjectNode.class);
         JsonNode idNode = objectNode.get(ID_FIELD);
@@ -92,7 +92,7 @@ public interface MongoVersionStrategy {
                     "The provided MongoDB JSON document does not contain an _id field.");
         }
         JsonNode document =
-                mongodbConfig.getBoolean(DEFAULT_ID_GENERATION)
+                mongodbConfig.get(DEFAULT_ID_GENERATION)
                         ? objectNode.set(
                                 ID_FIELD,
                                 idNode.get(OID_FIELD) == null ? idNode : idNode.get(OID_FIELD))
@@ -101,8 +101,8 @@ public interface MongoVersionStrategy {
             case SPECIFIED:
                 return parseFieldsFromJsonRecord(
                         document.toString(),
-                        mongodbConfig.getString(PARSER_PATH),
-                        mongodbConfig.getString(FIELD_NAME),
+                        mongodbConfig.get(PARSER_PATH),
+                        mongodbConfig.get(FIELD_NAME),
                         computedColumns,
                         rowTypeBuilder);
             case DYNAMIC:

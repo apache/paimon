@@ -92,9 +92,7 @@ public class FileMetaUtils {
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));
     }
 
-    // -----------------------------private method---------------------------------------------
-
-    private static DataFileMeta constructFileMeta(
+    public static DataFileMeta constructFileMeta(
             String format,
             FileStatus fileStatus,
             FileIO fileIO,
@@ -109,9 +107,9 @@ public class FileMetaUtils {
                             table.rowType().getFieldNames());
 
             SimpleStatsExtractor simpleStatsExtractor =
-                    FileFormat.getFileFormat(
-                                    ((FileStoreTable) table).coreOptions().toConfiguration(),
-                                    format)
+                    FileFormat.fromIdentifier(
+                                    format,
+                                    ((FileStoreTable) table).coreOptions().toConfiguration())
                             .createStatsExtractor(table.rowType(), factories)
                             .orElseThrow(
                                     () ->
@@ -130,6 +128,8 @@ public class FileMetaUtils {
             throw new RuntimeException("error when construct file meta", e);
         }
     }
+
+    // -----------------------------private method---------------------------------------------
 
     private static Path renameFile(
             FileIO fileIO, Path originPath, Path newDir, String format, Map<Path, Path> rollback)
@@ -156,7 +156,7 @@ public class FileMetaUtils {
 
         Pair<SimpleColStats[], SimpleStatsExtractor.FileInfo> fileInfo =
                 simpleStatsExtractor.extractWithFileInfo(fileIO, path);
-        SimpleStats stats = statsArraySerializer.toBinary(fileInfo.getLeft());
+        SimpleStats stats = statsArraySerializer.toBinaryAllMode(fileInfo.getLeft());
 
         return DataFileMeta.forAppend(
                 fileName,
@@ -166,7 +166,11 @@ public class FileMetaUtils {
                 0,
                 0,
                 ((FileStoreTable) table).schema().id(),
-                FileSource.APPEND);
+                Collections.emptyList(),
+                null,
+                FileSource.APPEND,
+                null,
+                null);
     }
 
     public static BinaryRow writePartitionValue(

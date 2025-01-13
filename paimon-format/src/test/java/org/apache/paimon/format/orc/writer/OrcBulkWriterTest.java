@@ -43,7 +43,7 @@ class OrcBulkWriterTest {
     void testRowBatch(@TempDir java.nio.file.Path tempDir) throws IOException {
         Options options = new Options();
         options.set(CoreOptions.WRITE_BATCH_SIZE, 1);
-        FileFormat orc = FileFormat.getFileFormat(options, "orc");
+        FileFormat orc = FileFormat.fromIdentifier("orc", options);
         Assertions.assertThat(orc).isInstanceOf(OrcFileFormat.class);
 
         RowType rowType =

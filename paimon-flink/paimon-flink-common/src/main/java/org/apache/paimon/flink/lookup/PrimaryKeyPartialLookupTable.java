@@ -31,8 +31,11 @@ import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.Projection;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -40,31 +43,23 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
-
-import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
-import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
-import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
 public class PrimaryKeyPartialLookupTable implements LookupTable {
 
-    private final Function<Predicate, QueryExecutor> executorFactory;
+    private final QueryExecutorFactory executorFactory;
     private final FixedBucketFromPkExtractor extractor;
     @Nullable private final ProjectedRow keyRearrange;
     @Nullable private final ProjectedRow trimmedKeyRearrange;
 
     private Predicate specificPartition;
+    @Nullable private Filter<InternalRow> cacheRowFilter;
     private QueryExecutor queryExecutor;
 
     private PrimaryKeyPartialLookupTable(
-            Function<Predicate, QueryExecutor> executorFactory,
-            FileStoreTable table,
-            List<String> joinKey) {
+            QueryExecutorFactory executorFactory, FileStoreTable table, List<String> joinKey) {
         this.executorFactory = executorFactory;
 
         if (table.bucketMode() != BucketMode.HASH_FIXED) {
@@ -110,7 +105,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     @Override
     public void open() throws Exception {
-        this.queryExecutor = executorFactory.apply(specificPartition);
+        this.queryExecutor = executorFactory.create(specificPartition, cacheRowFilter);
         refresh();
     }
 
@@ -143,6 +138,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     }
 
     @Override
+    public void specifyCacheRowFilter(Filter<InternalRow> filter) {
+        this.cacheRowFilter = filter;
+    }
+
+    @Override
     public void close() throws IOException {
         if (queryExecutor != null) {
             queryExecutor.close();
@@ -156,9 +156,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             List<String> joinKey,
             Set<Integer> requireCachedBucketIds) {
         return new PrimaryKeyPartialLookupTable(
-                filter ->
+                (filter, cacheRowFilter) ->
                         new LocalQueryExecutor(
-                                table, projection, tempPath, filter, requireCachedBucketIds),
+                                new LookupFileStoreTable(table, joinKey),
+                                projection,
+                                tempPath,
+                                filter,
+                                requireCachedBucketIds,
+                                cacheRowFilter),
                 table,
                 joinKey);
     }
@@ -166,7 +171,13 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     public static PrimaryKeyPartialLookupTable createRemoteTable(
             FileStoreTable table, int[] projection, List<String> joinKey) {
         return new PrimaryKeyPartialLookupTable(
-                filter -> new RemoteQueryExecutor(table, projection), table, joinKey);
+                (filter, cacheRowFilter) -> new RemoteQueryExecutor(table, projection),
+                table,
+                joinKey);
+    }
+
+    interface QueryExecutorFactory {
+        QueryExecutor create(Predicate filter, @Nullable Filter<InternalRow> cacheRowFilter);
     }
 
     interface QueryExecutor extends Closeable {
@@ -178,32 +189,39 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     static class LocalQueryExecutor implements QueryExecutor {
 
+        private static final Logger LOG = LoggerFactory.getLogger(LocalQueryExecutor.class);
+
         private final LocalTableQuery tableQuery;
         private final StreamTableScan scan;
+        private final String tableName;
 
         private LocalQueryExecutor(
                 FileStoreTable table,
                 int[] projection,
                 File tempPath,
                 @Nullable Predicate filter,
-                Set<Integer> requireCachedBucketIds) {
+                Set<Integer> requireCachedBucketIds,
+                @Nullable Filter<InternalRow> cacheRowFilter) {
             this.tableQuery =
                     table.newLocalTableQuery()
-                            .withValueProjection(Projection.of(projection).toNestedIndexes())
+                            .withValueProjection(projection)
                             .withIOManager(new IOManagerImpl(tempPath.toString()));
 
-            Map<String, String> dynamicOptions = new HashMap<>();
-            dynamicOptions.put(STREAM_SCAN_MODE.key(), FILE_MONITOR.getValue());
-            dynamicOptions.put(SCAN_BOUNDED_WATERMARK.key(), null);
+            if (cacheRowFilter != null) {
+                this.tableQuery.withCacheRowFilter(cacheRowFilter);
+            }
+
             this.scan =
-                    table.copy(dynamicOptions)
-                            .newReadBuilder()
+                    table.newReadBuilder()
+                            .dropStats()
                             .withFilter(filter)
                             .withBucketFilter(
                                     requireCachedBucketIds == null
                                             ? null
                                             : requireCachedBucketIds::contains)
                             .newStreamScan();
+
+            this.tableName = table.name();
         }
 
         @Override
@@ -216,15 +234,13 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         public void refresh() {
             while (true) {
                 List<Split> splits = scan.plan().splits();
+                log(splits);
+
                 if (splits.isEmpty()) {
                     return;
                 }
 
                 for (Split split : splits) {
-                    if (!(split instanceof DataSplit)) {
-                        throw new IllegalArgumentException(
-                                "Unsupported split: " + split.getClass());
-                    }
                     BinaryRow partition = ((DataSplit) split).partition();
                     int bucket = ((DataSplit) split).bucket();
                     List<DataFileMeta> before = ((DataSplit) split).beforeFiles();
@@ -238,6 +254,19 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         @Override
         public void close() throws IOException {
             tableQuery.close();
+        }
+
+        private void log(List<Split> splits) {
+            if (splits.isEmpty()) {
+                LOG.info("LocalQueryExecutor didn't get splits from {}.", tableName);
+                return;
+            }
+
+            DataSplit dataSplit = (DataSplit) splits.get(0);
+            LOG.info(
+                    "LocalQueryExecutor get splits from {} with snapshotId {}.",
+                    tableName,
+                    dataSplit.snapshotId());
         }
     }
 

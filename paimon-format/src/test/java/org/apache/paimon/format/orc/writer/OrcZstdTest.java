@@ -59,9 +59,9 @@ class OrcZstdTest {
     @Test
     void testWriteOrcWithZstd(@TempDir java.nio.file.Path tempDir) throws IOException {
         Options options = new Options();
-        options.set("compress", "zstd");
-        options.set("stripe.size", "31457280");
-        options.set("compression.zstd.level", "1");
+        options.set("orc.compress", "zstd");
+        options.set("orc.stripe.size", "31457280");
+        options.set("orc.compression.zstd.level", "1");
         OrcFileFormat orc =
                 new OrcFileFormatFactory()
                         .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
@@ -92,9 +92,9 @@ class OrcZstdTest {
         Assertions.assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
 
         Options optionsWithLowLevel = new Options();
-        optionsWithLowLevel.set("compress", "zstd");
-        optionsWithLowLevel.set("stripe.size", "31457280");
-        optionsWithLowLevel.set("compression.zstd.level", "1");
+        optionsWithLowLevel.set("orc.compress", "zstd");
+        optionsWithLowLevel.set("orc.stripe.size", "31457280");
+        optionsWithLowLevel.set("orc.compression.zstd.level", "1");
 
         Random random = new Random();
         for (int i = 0; i < 1000; i++) {

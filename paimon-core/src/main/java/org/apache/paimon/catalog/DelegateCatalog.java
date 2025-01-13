@@ -19,18 +19,17 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.view.View;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /** A {@link Catalog} to delegate all operations to another {@link Catalog}. */
-public class DelegateCatalog implements Catalog {
+public abstract class DelegateCatalog implements Catalog {
 
     protected final Catalog wrapped;
 
@@ -43,8 +42,8 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean allowUpperCase() {
-        return wrapped.allowUpperCase();
+    public boolean caseSensitive() {
+        return wrapped.caseSensitive();
     }
 
     @Override
@@ -63,21 +62,6 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Optional<CatalogLockFactory> lockFactory() {
-        return wrapped.lockFactory();
-    }
-
-    @Override
-    public Optional<CatalogLockContext> lockContext() {
-        return wrapped.lockContext();
-    }
-
-    @Override
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
-        return wrapped.metastoreClientFactory(identifier);
-    }
-
-    @Override
     public List<String> listDatabases() {
         return wrapped.listDatabases();
     }
@@ -89,15 +73,20 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Map<String, String> loadDatabaseProperties(String name)
-            throws DatabaseNotExistException {
-        return wrapped.loadDatabaseProperties(name);
+    public Database getDatabase(String name) throws DatabaseNotExistException {
+        return wrapped.getDatabase(name);
     }
 
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
         wrapped.dropDatabase(name, ignoreIfNotExists, cascade);
+    }
+
+    @Override
+    public void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException {
+        wrapped.alterDatabase(name, changes, ignoreIfNotExists);
     }
 
     @Override
@@ -131,19 +120,65 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.createPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.dropPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {
+        wrapped.alterPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.markDonePartitions(identifier, partitions);
+    }
+
+    @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return wrapped.getTable(identifier);
     }
 
     @Override
-    public Path getTableLocation(Identifier identifier) {
-        return wrapped.getTableLocation(identifier);
+    public View getView(Identifier identifier) throws ViewNotExistException {
+        return wrapped.getView(identifier);
     }
 
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {
-        wrapped.dropPartition(identifier, partitions);
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        wrapped.dropView(identifier, ignoreIfNotExists);
+    }
+
+    @Override
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        wrapped.createView(identifier, view, ignoreIfExists);
+    }
+
+    @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listViews(databaseName);
+    }
+
+    @Override
+    public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        wrapped.renameView(fromView, toView, ignoreIfNotExists);
+    }
+
+    @Override
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
+        return wrapped.listPartitions(identifier);
     }
 
     @Override

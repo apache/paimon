@@ -27,9 +27,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.util.OversizedAllocationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Write from {@link InternalRow} to {@link VectorSchemaRoot}. */
 public class ArrowFormatWriter implements AutoCloseable {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ArrowFormatWriter.class);
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final ArrowFieldWriter[] fieldWriters;
@@ -39,10 +43,10 @@ public class ArrowFormatWriter implements AutoCloseable {
     private final RootAllocator allocator;
     private int rowId;
 
-    public ArrowFormatWriter(RowType rowType, int writeBatchSize, boolean allowUpperCase) {
+    public ArrowFormatWriter(RowType rowType, int writeBatchSize, boolean caseSensitive) {
         allocator = new RootAllocator();
 
-        vectorSchemaRoot = ArrowUtils.createVectorSchemaRoot(rowType, allocator, allowUpperCase);
+        vectorSchemaRoot = ArrowUtils.createVectorSchemaRoot(rowType, allocator, caseSensitive);
 
         fieldWriters = new ArrowFieldWriter[rowType.getFieldCount()];
 
@@ -72,6 +76,7 @@ public class ArrowFormatWriter implements AutoCloseable {
                 fieldWriters[i].write(rowId, currentRow, i);
             } catch (OversizedAllocationException | IndexOutOfBoundsException e) {
                 // maybe out of memory
+                LOG.warn("Arrow field writer failed while writing", e);
                 return false;
             }
         }

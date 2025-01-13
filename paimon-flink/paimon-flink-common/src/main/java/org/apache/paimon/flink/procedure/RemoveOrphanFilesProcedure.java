@@ -19,17 +19,19 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.operation.OrphanFilesClean;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
+import org.apache.paimon.operation.CleanOrphanFilesResult;
+import org.apache.paimon.operation.LocalOrphanFilesClean;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.List;
+import java.util.Locale;
 
-import static org.apache.paimon.operation.OrphanFilesClean.executeOrphanFilesClean;
+import static org.apache.paimon.operation.OrphanFilesClean.createFileCleaner;
+import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /**
  * Remove orphan files procedure. Usage:
@@ -56,35 +58,61 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                         name = "older_than",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
-                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true),
+                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true),
+                @ArgumentHint(name = "mode", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
-            String nullableOlderThan,
-            Boolean dryRun)
+            String olderThan,
+            Boolean dryRun,
+            Integer parallelism,
+            String mode)
             throws Exception {
-        final String olderThan = notnull(nullableOlderThan);
-        if (dryRun == null) {
-            dryRun = false;
-        }
-
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
         String tableName = identifier.getObjectName();
-
-        List<OrphanFilesClean> tableCleans =
-                OrphanFilesClean.createOrphanFilesCleans(catalog, databaseName, tableName);
-
-        if (!StringUtils.isNullOrWhitespaceOnly(olderThan)) {
-            tableCleans.forEach(clean -> clean.olderThan(olderThan));
+        if (mode == null) {
+            mode = "DISTRIBUTED";
         }
-
-        if (dryRun) {
-            tableCleans.forEach(clean -> clean.fileCleaner(path -> {}));
+        CleanOrphanFilesResult cleanOrphanFilesResult;
+        try {
+            switch (mode.toUpperCase(Locale.ROOT)) {
+                case "DISTRIBUTED":
+                    cleanOrphanFilesResult =
+                            FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+                                    procedureContext.getExecutionEnvironment(),
+                                    catalog,
+                                    olderThanMillis(olderThan),
+                                    createFileCleaner(catalog, dryRun),
+                                    parallelism,
+                                    databaseName,
+                                    tableName);
+                    break;
+                case "LOCAL":
+                    cleanOrphanFilesResult =
+                            LocalOrphanFilesClean.executeDatabaseOrphanFiles(
+                                    catalog,
+                                    databaseName,
+                                    tableName,
+                                    olderThanMillis(olderThan),
+                                    createFileCleaner(catalog, dryRun),
+                                    parallelism);
+                    break;
+                default:
+                    throw new IllegalArgumentException(
+                            "Unknown mode: "
+                                    + mode
+                                    + ". Only 'DISTRIBUTED' and 'LOCAL' are supported.");
+            }
+            return new String[] {
+                String.valueOf(cleanOrphanFilesResult.getDeletedFileCount()),
+                String.valueOf(cleanOrphanFilesResult.getDeletedFileTotalLenInBytes())
+            };
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
-
-        return executeOrphanFilesClean(tableCleans);
     }
 
     @Override

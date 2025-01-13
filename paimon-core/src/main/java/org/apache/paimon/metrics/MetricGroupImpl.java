@@ -21,7 +21,6 @@ package org.apache.paimon.metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -51,7 +50,7 @@ public class MetricGroupImpl implements MetricGroup {
 
     @Override
     public Map<String, String> getAllVariables() {
-        return Collections.unmodifiableMap(variables);
+        return variables;
     }
 
     @Override
@@ -117,7 +116,7 @@ public class MetricGroupImpl implements MetricGroup {
 
     @Override
     public Map<String, Metric> getMetrics() {
-        return Collections.unmodifiableMap(metrics);
+        return metrics;
     }
 
     @Override

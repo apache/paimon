@@ -18,15 +18,13 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -45,7 +43,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -68,13 +65,10 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
     public static final String ALL_TABLE_OPTIONS = "all_table_options";
 
-    private final FileIO fileIO;
-    private final Map<String, Map<String, Path>> allTablePaths;
+    private final Map<Identifier, Map<String, String>> allOptions;
 
-    public AllTableOptionsTable(FileIO fileIO, Map<String, Map<String, Path>> allTablePaths) {
-        // allTablePath is the map of  <database, <table_name, properties>>
-        this.fileIO = fileIO;
-        this.allTablePaths = allTablePaths;
+    public AllTableOptionsTable(Map<Identifier, Map<String, String>> allOptions) {
+        this.allOptions = allOptions;
     }
 
     @Override
@@ -104,12 +98,12 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new AllTableOptionsRead(fileIO);
+        return new AllTableOptionsRead();
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new AllTableOptionsTable(fileIO, allTablePaths);
+        return new AllTableOptionsTable(allOptions);
     }
 
     private class AllTableOptionsScan extends ReadOnceTableScan {
@@ -121,7 +115,7 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new AllTableSplit(allTablePaths));
+            return () -> Collections.singletonList(new AllTableSplit(allOptions));
         }
     }
 
@@ -129,10 +123,10 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final Map<String, Map<String, Path>> allTablePaths;
+        private final Map<Identifier, Map<String, String>> allOptions;
 
-        private AllTableSplit(Map<String, Map<String, Path>> allTablePaths) {
-            this.allTablePaths = allTablePaths;
+        private AllTableSplit(Map<Identifier, Map<String, String>> allOptions) {
+            this.allOptions = allOptions;
         }
 
         @Override
@@ -144,23 +138,18 @@ public class AllTableOptionsTable implements ReadonlyTable {
                 return false;
             }
             AllTableSplit that = (AllTableSplit) o;
-            return Objects.equals(allTablePaths, that.allTablePaths);
+            return Objects.equals(allOptions, that.allOptions);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(allTablePaths);
+            return Objects.hash(allOptions);
         }
     }
 
     private static class AllTableOptionsRead implements InnerTableRead {
 
-        private final FileIO fileIO;
-        private int[][] projection;
-
-        public AllTableOptionsRead(FileIO fileIO) {
-            this.fileIO = fileIO;
-        }
+        private RowType readType;
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
@@ -168,8 +157,8 @@ public class AllTableOptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -183,25 +172,12 @@ public class AllTableOptionsTable implements ReadonlyTable {
             if (!(split instanceof AllTableSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Map<String, Map<String, Path>> location = ((AllTableSplit) split).allTablePaths;
-            Iterator<InternalRow> rows = toRow(options(fileIO, location));
-            if (projection != null) {
-                rows =
-                        Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
-            }
-            return new IteratorRecordReader<>(rows);
-        }
-    }
-
-    protected static Iterator<InternalRow> toRow(
-            Map<String, Map<String, Map<String, String>>> option) {
-        List<InternalRow> rows = new ArrayList<>();
-        for (Map.Entry<String, Map<String, Map<String, String>>> entry0 : option.entrySet()) {
-            String database = entry0.getKey();
-            for (Map.Entry<String, Map<String, String>> entry1 : entry0.getValue().entrySet()) {
-                String tableName = entry1.getKey();
-                for (Map.Entry<String, String> entry2 : entry1.getValue().entrySet()) {
+            List<InternalRow> rows = new ArrayList<>();
+            for (Map.Entry<Identifier, Map<String, String>> entry :
+                    ((AllTableSplit) split).allOptions.entrySet()) {
+                String database = entry.getKey().getDatabaseName();
+                String tableName = entry.getKey().getTableName();
+                for (Map.Entry<String, String> entry2 : entry.getValue().entrySet()) {
                     String key = entry2.getKey();
                     String value = entry2.getValue();
                     rows.add(
@@ -212,25 +188,17 @@ public class AllTableOptionsTable implements ReadonlyTable {
                                     BinaryString.fromString(value)));
                 }
             }
-        }
-        return rows.iterator();
-    }
-
-    protected static Map<String, Map<String, Map<String, String>>> options(
-            FileIO fileIO, Map<String, Map<String, Path>> allTablePaths) {
-        Map<String, Map<String, Map<String, String>>> allOptions = new HashMap<>();
-        for (Map.Entry<String, Map<String, Path>> entry0 : allTablePaths.entrySet()) {
-            Map<String, Map<String, String>> m0 =
-                    allOptions.computeIfAbsent(entry0.getKey(), k -> new HashMap<>());
-            for (Map.Entry<String, Path> entry1 : entry0.getValue().entrySet()) {
-                Map<String, String> options =
-                        new SchemaManager(fileIO, entry1.getValue())
-                                .latest()
-                                .orElseThrow(() -> new RuntimeException("Table not exists."))
-                                .options();
-                m0.put(entry1.getKey(), options);
+            Iterator<InternalRow> iterator = rows.iterator();
+            if (readType != null) {
+                iterator =
+                        Iterators.transform(
+                                iterator,
+                                row ->
+                                        ProjectedRow.from(
+                                                        readType, AggregationFieldsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
+            return new IteratorRecordReader<>(iterator);
         }
-        return allOptions;
     }
 }

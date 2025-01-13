@@ -37,8 +37,10 @@ import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
 
@@ -76,7 +78,10 @@ public class LocalTableQuery implements TableQuery {
 
     @Nullable private Cache<String, LookupFile> lookupFileCache;
 
+    private final RowType rowType;
     private final RowType partitionType;
+
+    @Nullable private Filter<InternalRow> cacheRowFilter;
 
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
@@ -89,13 +94,16 @@ public class LocalTableQuery implements TableQuery {
         KeyValueFileStore store = (KeyValueFileStore) tableStore;
 
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
+        this.rowType = table.schema().logicalRowType();
         this.partitionType = table.schema().logicalPartitionType();
         RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.lookupStoreFactory =
                 LookupStoreFactory.create(
                         options,
-                        new CacheManager(options.lookupCacheMaxMemory()),
+                        new CacheManager(
+                                options.lookupCacheMaxMemory(),
+                                options.lookupCacheHighPrioPoolRatio()),
                         new RowCompactedSerializer(keyType).createSliceComparator());
 
         if (options.needLookup()) {
@@ -151,14 +159,16 @@ public class LocalTableQuery implements TableQuery {
                         levels,
                         keyComparatorSupplier.get(),
                         readerFactoryBuilder.keyType(),
-                        new LookupLevels.KeyValueProcessor(
-                                readerFactoryBuilder.projectedValueType()),
-                        file ->
-                                factory.createRecordReader(
-                                        file.schemaId(),
-                                        file.fileName(),
-                                        file.fileSize(),
-                                        file.level()),
+                        new LookupLevels.KeyValueProcessor(readerFactoryBuilder.readValueType()),
+                        file -> {
+                            RecordReader<KeyValue> reader = factory.createRecordReader(file);
+                            if (cacheRowFilter != null) {
+                                reader =
+                                        reader.filter(
+                                                keyValue -> cacheRowFilter.test(keyValue.value()));
+                            }
+                            return reader;
+                        },
                         file ->
                                 Preconditions.checkNotNull(ioManager, "IOManager is required.")
                                         .createChannel(
@@ -195,8 +205,8 @@ public class LocalTableQuery implements TableQuery {
     }
 
     @Override
-    public LocalTableQuery withValueProjection(int[][] projection) {
-        this.readerFactoryBuilder.withValueProjection(projection);
+    public LocalTableQuery withValueProjection(int[] projection) {
+        this.readerFactoryBuilder.withReadValueType(rowType.project(projection));
         return this;
     }
 
@@ -205,9 +215,14 @@ public class LocalTableQuery implements TableQuery {
         return this;
     }
 
+    public LocalTableQuery withCacheRowFilter(Filter<InternalRow> cacheRowFilter) {
+        this.cacheRowFilter = cacheRowFilter;
+        return this;
+    }
+
     @Override
     public InternalRowSerializer createValueSerializer() {
-        return InternalSerializers.create(readerFactoryBuilder.projectedValueType());
+        return InternalSerializers.create(readerFactoryBuilder.readValueType());
     }
 
     @Override

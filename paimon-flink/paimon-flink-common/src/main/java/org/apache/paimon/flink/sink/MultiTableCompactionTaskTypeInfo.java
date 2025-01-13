@@ -23,6 +23,7 @@ import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.table.sink.MultiTableCompactionTaskSerializer;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.serialization.SerializerConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
@@ -60,7 +61,17 @@ public class MultiTableCompactionTaskTypeInfo
         return false;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public TypeSerializer<MultiTableUnawareAppendCompactionTask> createSerializer(
+            SerializerConfig serializerConfig) {
+        return this.createSerializer((ExecutionConfig) null);
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public TypeSerializer<MultiTableUnawareAppendCompactionTask> createSerializer(
             ExecutionConfig executionConfig) {
         return new SimpleVersionedSerializerTypeSerializerProxy<

@@ -95,7 +95,7 @@ public class FirstRowITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE IF NOT EXISTS T1 ("
                         + "a INT, b INT, c STRING, PRIMARY KEY (a, b) NOT ENFORCED)"
-                        + " PARTITIONED BY (b) WITH ('merge-engine'='first-row', 'local-merge-buffer-size' = '1m',"
+                        + " PARTITIONED BY (b) WITH ('merge-engine'='first-row', 'local-merge-buffer-size' = '5m',"
                         + " 'file.format'='avro', 'changelog-producer' = 'lookup');");
         batchSql("INSERT INTO T1 VALUES (1, 1, '1'), (1, 1, '2'), (2, 3, '3')");
         List<Row> result = batchSql("SELECT * FROM T1");

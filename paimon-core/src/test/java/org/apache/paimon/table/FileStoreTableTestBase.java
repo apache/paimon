@@ -30,6 +30,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
@@ -387,6 +388,51 @@ public abstract class FileStoreTableTestBase {
                         .splits();
         assertThat(splits.size()).isEqualTo(1);
         assertThat(((DataSplit) splits.get(0)).bucket()).isEqualTo(1);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"avro", "orc", "parquet"})
+    public void testReadRowType(String format) throws Exception {
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "pt", DataTypes.INT()),
+                        DataTypes.FIELD(1, "a", DataTypes.INT()),
+                        DataTypes.FIELD(2, "f0", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                3,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(4, "f0", DataTypes.INT()),
+                                        DataTypes.FIELD(5, "f1", DataTypes.INT()),
+                                        DataTypes.FIELD(6, "f2", DataTypes.INT()))));
+
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.setString(FILE_FORMAT.key(), format), writeType);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                InnerTableCommit commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(0, 0, 0, GenericRow.of(10, 11, 12)));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                3,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(6, "f2", DataTypes.INT()),
+                                        DataTypes.FIELD(4, "f0", DataTypes.INT()))));
+
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits.get(0))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(readType);
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+        }
+
+        assertThat(result).containsExactly(GenericRow.of(GenericRow.of(12, 10)));
     }
 
     protected void innerTestWithShard(FileStoreTable table) throws Exception {
@@ -1034,7 +1080,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
-        Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+        Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
         Snapshot snapshot2 = table.snapshotManager().snapshot(2);
         assertThat(tagged.equals(snapshot2)).isTrue();
     }
@@ -1057,7 +1103,7 @@ public abstract class FileStoreTableTestBase {
             TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
             assertThat(tagManager.tagExists("test-tag")).isTrue();
             // verify that test-tag is equal to snapshot 1
-            Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+            Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
             Snapshot snapshot1 = table.snapshotManager().snapshot(1);
             assertThat(tagged.equals(snapshot1)).isTrue();
             // snapshot 2
@@ -1070,7 +1116,7 @@ public abstract class FileStoreTableTestBase {
             // verify that tag file exist
             assertThat(tagManager.tagExists("test-tag-2")).isTrue();
             // verify that test-tag is equal to snapshot 1
-            Snapshot tag2 = tagManager.taggedSnapshot("test-tag-2");
+            Snapshot tag2 = tagManager.getOrThrow("test-tag-2").trimToSnapshot();
             assertThat(tag2.equals(snapshot1)).isTrue();
         }
     }
@@ -1090,10 +1136,11 @@ public abstract class FileStoreTableTestBase {
             table.createTag("test-tag", 1);
             // verify that tag file exist
             assertThat(tagManager.tagExists("test-tag")).isTrue();
-            // Create again
-            table.createTag("test-tag", 1);
+            // Create again failed if tag existed
+            Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 1))
+                    .hasMessageContaining("Tag 'test-tag' already exists.");
             Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 2))
-                    .hasMessageContaining("Tag name 'test-tag' already exists.");
+                    .hasMessageContaining("Tag 'test-tag' already exists.");
         }
     }
 
@@ -1118,7 +1165,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
-        Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+        Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
         Snapshot snapshot2 = table.snapshotManager().snapshot(2);
         assertThat(tagged.equals(snapshot2)).isTrue();
 
@@ -1146,7 +1193,7 @@ public abstract class FileStoreTableTestBase {
         SchemaManager schemaManager =
                 new SchemaManager(new TraceableFileIO(), tablePath, "test-branch");
         TableSchema branchSchema =
-                SchemaManager.fromPath(new TraceableFileIO(), schemaManager.toSchemaPath(0));
+                TableSchema.fromPath(new TraceableFileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
@@ -1168,12 +1215,12 @@ public abstract class FileStoreTableTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Branch name 'main' is the default branch and cannot be created."));
+                                "Branch name 'main' is the default branch and cannot be used."));
 
         assertThatThrownBy(() -> table.createBranch("branch-1", "tag1"))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class, "Tag name 'tag1' not exists."));
+                                IllegalArgumentException.class, "Tag 'tag1' doesn't exist."));
 
         assertThatThrownBy(() -> table.createBranch("branch0", "test-tag"))
                 .satisfies(
@@ -1220,7 +1267,7 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
-    public void testfastForward() throws Exception {
+    public void testFastForward() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
         FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
@@ -1297,7 +1344,7 @@ public abstract class FileStoreTableTestBase {
         // verify schema in branch1 and main branch is same
         SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
         TableSchema branchSchema =
-                SchemaManager.fromPath(
+                TableSchema.fromPath(
                         new TraceableFileIO(),
                         schemaManager.copyWithBranch(BRANCH_NAME).toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
@@ -1362,8 +1409,7 @@ public abstract class FileStoreTableTestBase {
         assertThatThrownBy(() -> table.createTag("", 1))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class,
-                                String.format("Tag name '%s' is blank", "")));
+                                IllegalArgumentException.class, "Tag name shouldn't be blank"));
     }
 
     @Test
@@ -1379,10 +1425,7 @@ public abstract class FileStoreTableTestBase {
         table.createTag("tag1", 1);
         table.deleteTag("tag1");
 
-        assertThatThrownBy(() -> table.deleteTag("tag1"))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class, "Tag 'tag1' doesn't exist."));
+        assertThat(table.tagManager().tags().containsValue("tag1")).isFalse();
     }
 
     @Test
@@ -1429,10 +1472,10 @@ public abstract class FileStoreTableTestBase {
                 TestFileStore.getFilesInUse(
                         latestSnapshotId,
                         snapshotManager,
-                        store.newScan(),
                         table.fileIO(),
                         store.pathFactory(),
-                        store.manifestListFactory().create());
+                        store.manifestListFactory().create(),
+                        store.manifestFileFactory().create());
 
         List<Path> unusedFileList =
                 Files.walk(Paths.get(tempDir.toString()))
@@ -1701,8 +1744,12 @@ public abstract class FileStoreTableTestBase {
         return createFileStoreTable(1);
     }
 
-    protected abstract FileStoreTable createFileStoreTable(Consumer<Options> configure)
-            throws Exception;
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
+        return createFileStoreTable(configure, ROW_TYPE);
+    }
+
+    protected abstract FileStoreTable createFileStoreTable(
+            Consumer<Options> configure, RowType rowType) throws Exception;
 
     protected abstract FileStoreTable createFileStoreTable(
             String branch, Consumer<Options> configure) throws Exception;

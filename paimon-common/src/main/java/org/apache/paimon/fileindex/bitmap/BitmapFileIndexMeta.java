@@ -41,6 +41,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import java.io.DataInput;
 import java.io.DataOutput;
@@ -372,6 +373,11 @@ public class BitmapFileIndexMeta {
         @Override
         public final R visit(RowType rowType) {
             throw new UnsupportedOperationException("Does not support type row");
+        }
+
+        @Override
+        public final R visit(VariantType rowType) {
+            throw new UnsupportedOperationException("Does not support type variant");
         }
     }
 }

@@ -18,10 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
-import java.util.Map;
 import java.util.Optional;
-
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Factory to create {@link RemoveOrphanFilesAction}. */
 public class RemoveOrphanFilesActionFactory implements ActionFactory {
@@ -29,6 +26,7 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "remove_orphan_files";
     private static final String OLDER_THAN = "older_than";
     private static final String DRY_RUN = "dry_run";
+    private static final String PARALLELISM = "parallelism";
 
     @Override
     public String identifier() {
@@ -37,20 +35,12 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
-        checkNotNull(warehouse);
-        String database = params.get(DATABASE);
-        checkNotNull(database);
-        String table = params.get(TABLE);
-
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
-
-        RemoveOrphanFilesAction action;
-        try {
-            action = new RemoveOrphanFilesAction(warehouse, database, table, catalogConfig);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        RemoveOrphanFilesAction action =
+                new RemoveOrphanFilesAction(
+                        params.getRequired(DATABASE),
+                        params.getRequired(TABLE),
+                        params.get(PARALLELISM),
+                        catalogConfigMap(params));
 
         if (params.has(OLDER_THAN)) {
             action.olderThan(params.get(OLDER_THAN));

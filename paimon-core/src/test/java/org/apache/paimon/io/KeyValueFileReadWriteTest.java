@@ -37,11 +37,8 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.stats.StatsTestUtils;
-import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -64,6 +61,7 @@ import java.util.function.Function;
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.KEY_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.createTestSchemaManager;
+import static org.apache.paimon.io.DataFileTestUtils.newFile;
 import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,7 +79,10 @@ public class KeyValueFileReadWriteTest {
     public void testReadNonExistentFile() {
         KeyValueFileReaderFactory readerFactory =
                 createReaderFactory(tempDir.toString(), "avro", null, null);
-        assertThatThrownBy(() -> readerFactory.createRecordReader(0, "dummy_file.avro", 1, 0))
+        assertThatThrownBy(
+                        () ->
+                                readerFactory.createRecordReader(
+                                        newFile("non_avro_file.avro", 0, 0, 1, 0)))
                 .hasMessageContaining(
                         "you can configure 'snapshot.time-retained' option with a larger value.");
     }
@@ -150,7 +151,7 @@ public class KeyValueFileReadWriteTest {
     }
 
     @Test
-    public void testKeyProjection() throws Exception {
+    public void testReadKeyType() throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
@@ -162,15 +163,10 @@ public class KeyValueFileReadWriteTest {
         List<DataFileMeta> actualMetas = writer.result();
 
         // projection: (shopId, orderId) -> (orderId)
+        RowType readKeyType = KEY_TYPE.project(SpecialFields.KEY_FIELD_PREFIX + "orderId");
         KeyValueFileReaderFactory readerFactory =
-                createReaderFactory(tempDir.toString(), "avro", new int[][] {new int[] {1}}, null);
-        RowType projectedKeyType =
-                RowType.builder()
-                        .fields(
-                                new DataType[] {new BigIntType(false)},
-                                new String[] {"key_orderId"})
-                        .build();
-        InternalRowSerializer projectedKeySerializer = new InternalRowSerializer(projectedKeyType);
+                createReaderFactory(tempDir.toString(), "avro", readKeyType, null);
+        InternalRowSerializer projectedKeySerializer = new InternalRowSerializer(readKeyType);
         assertData(
                 data,
                 actualMetas,
@@ -188,7 +184,7 @@ public class KeyValueFileReadWriteTest {
     }
 
     @Test
-    public void testValueProjection() throws Exception {
+    public void testReadValueType() throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
@@ -202,23 +198,10 @@ public class KeyValueFileReadWriteTest {
         // projection:
         // (dt, hr, shopId, orderId, itemId, priceAmount, comment) ->
         // (shopId, itemId, dt, hr)
+        RowType readValueType = DEFAULT_ROW_TYPE.project("shopId", "itemId", "dt", "hr");
         KeyValueFileReaderFactory readerFactory =
-                createReaderFactory(
-                        tempDir.toString(),
-                        "avro",
-                        null,
-                        new int[][] {new int[] {2}, new int[] {4}, new int[] {0}, new int[] {1}});
-        RowType projectedValueType =
-                RowType.of(
-                        new DataType[] {
-                            new IntType(false),
-                            new BigIntType(),
-                            new VarCharType(false, 8),
-                            new IntType(false)
-                        },
-                        new String[] {"shopId", "itemId", "dt", "hr"});
-        InternalRowSerializer projectedValueSerializer =
-                new InternalRowSerializer(projectedValueType);
+                createReaderFactory(tempDir.toString(), "avro", null, readValueType);
+        InternalRowSerializer projectedValueSerializer = new InternalRowSerializer(readValueType);
         assertData(
                 data,
                 actualMetas,
@@ -248,7 +231,14 @@ public class KeyValueFileReadWriteTest {
                         path,
                         RowType.of(),
                         CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
-                        format);
+                        format,
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
+                        null);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         Options options = new Options();
@@ -262,7 +252,14 @@ public class KeyValueFileReadWriteTest {
                         path,
                         RowType.of(),
                         CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString()));
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
+                        null));
 
         return KeyValueFileWriterFactory.builder(
                         fileIO,
@@ -279,7 +276,7 @@ public class KeyValueFileReadWriteTest {
     }
 
     private KeyValueFileReaderFactory createReaderFactory(
-            String pathStr, String format, int[][] keyProjection, int[][] valueProjection) {
+            String pathStr, String format, RowType readKeyType, RowType readValueType) {
         Path path = new Path(pathStr);
         FileIO fileIO = FileIOFinder.find(path);
         FileStorePathFactory pathFactory = createNonPartFactory(path);
@@ -294,11 +291,11 @@ public class KeyValueFileReadWriteTest {
                         pathFactory,
                         new TestKeyValueGenerator.TestKeyValueFieldsExtractor(),
                         new CoreOptions(new HashMap<>()));
-        if (keyProjection != null) {
-            builder.withKeyProjection(keyProjection);
+        if (readKeyType != null) {
+            builder.withReadKeyType(readKeyType);
         }
-        if (valueProjection != null) {
-            builder.withValueProjection(valueProjection);
+        if (readValueType != null) {
+            builder.withReadValueType(readValueType);
         }
         return builder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
     }
@@ -316,12 +313,7 @@ public class KeyValueFileReadWriteTest {
         for (DataFileMeta meta : actualMetas) {
             // check the contents of data file
             CloseableIterator<KeyValue> actualKvsIterator =
-                    new RecordReaderIterator<>(
-                            readerFactory.createRecordReader(
-                                    meta.schemaId(),
-                                    meta.fileName(),
-                                    meta.fileSize(),
-                                    meta.level()));
+                    new RecordReaderIterator<>(readerFactory.createRecordReader(meta));
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();

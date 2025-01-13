@@ -48,6 +48,15 @@ public final class HiveCatalogOptions {
                                     + "If not configured, try to load from 'HADOOP_CONF_DIR' or 'HADOOP_HOME' system environment.\n"
                                     + "Configure Priority: 1.from 'hadoop-conf-dir' 2.from HADOOP_CONF_DIR  3.from HADOOP_HOME/conf 4.HADOOP_HOME/etc/hadoop.\n");
 
+    public static final ConfigOption<String> METASTORE_CLIENT_CLASS =
+            ConfigOptions.key("metastore.client.class")
+                    .stringType()
+                    .defaultValue("org.apache.hadoop.hive.metastore.HiveMetaStoreClient")
+                    .withDescription(
+                            "Class name of Hive metastore client.\n"
+                                    + "NOTE: This class must directly implements "
+                                    + "org.apache.hadoop.hive.metastore.IMetaStoreClient.");
+
     public static final ConfigOption<Boolean> LOCATION_IN_PROPERTIES =
             ConfigOptions.key("location-in-properties")
                     .booleanType()
@@ -84,15 +93,6 @@ public final class HiveCatalogOptions {
                                                             + "The value of the configuration will be extracted from catalog properties and added to the cache key. A conf element should start with a \"conf:\" prefix which is followed by the configuration name. "
                                                             + "E.g. specifying \"conf:a.b.c\" will add \"a.b.c\" to the key, and so that configurations with different default catalog wouldn't share the same client pool. Multiple conf elements can be specified."))
                                     .build());
-
-    public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
-            ConfigOptions.key("format-table.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to support format tables, format table corresponds to a regular Hive table, allowing read and write operations. "
-                                    + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
-                                    + " the metastore and need to be manually added as separate partition operations.");
 
     private HiveCatalogOptions() {}
 }

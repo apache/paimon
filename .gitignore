@@ -17,4 +17,5 @@ target
 .DS_Store
 *.ipr
 *.iws
+.java-version
 dependency-reduced-pom.xml

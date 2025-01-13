@@ -19,27 +19,26 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
-import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.TimeUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -140,7 +139,9 @@ public abstract class HiveCatalogITCaseBase {
                         EnvironmentSettings.newInstance().inStreamingMode().build());
         sEnv.getConfig()
                 .getConfiguration()
-                .set(ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL, Duration.ofSeconds(1));
+                .setString(
+                        "execution.checkpointing.interval",
+                        TimeUtils.formatWithHighestUnit(Duration.ofSeconds(1)));
         sEnv.getConfig().set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
 
         tEnv.executeSql(
@@ -203,7 +204,7 @@ public abstract class HiveCatalogITCaseBase {
     @Test
     @LocationInProperties
     public void testDbLocationWithMetastoreLocationInProperties()
-            throws Catalog.DatabaseAlreadyExistException {
+            throws Catalog.DatabaseAlreadyExistException, Catalog.DatabaseNotExistException {
         String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
@@ -211,7 +212,7 @@ public abstract class HiveCatalogITCaseBase {
         properties.put("location", dbLocation);
 
         catalog.createDatabase("location_test_db", false, properties);
-        assertThat(catalog.databaseExists("location_test_db"));
+        catalog.getDatabase("location_test_db");
 
         hiveShell.execute("USE location_test_db");
         hiveShell.execute("CREATE TABLE location_test_db ( a INT, b INT )");
@@ -275,7 +276,8 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("CREATE TABLE s ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        assertThat(collect("SHOW TABLES")).isEqualTo(Arrays.asList(Row.of("s"), Row.of("t")));
+        assertThat(collect("SHOW TABLES"))
+                .containsExactlyInAnyOrder(Row.of("s"), Row.of("t"), Row.of("hive_table"));
 
         tEnv.executeSql(
                         "CREATE TABLE IF NOT EXISTS s ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
@@ -294,16 +296,13 @@ public abstract class HiveCatalogITCaseBase {
         Path tablePath = new Path(path, "test_db.db/s");
         assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
         tEnv.executeSql("DROP TABLE s").await();
-        assertThat(collect("SHOW TABLES")).isEqualTo(Collections.singletonList(Row.of("t")));
+        assertThat(collect("SHOW TABLES"))
+                .containsExactlyInAnyOrder(Row.of("t"), Row.of("hive_table"));
         assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
         tEnv.executeSql("DROP TABLE IF EXISTS s").await();
         assertThatThrownBy(() -> tEnv.executeSql("DROP TABLE s").await())
                 .isInstanceOf(ValidationException.class)
                 .hasMessage("Table with identifier 'my_hive.test_db.s' does not exist.");
-
-        assertThatThrownBy(() -> tEnv.executeSql("DROP TABLE hive_table").await())
-                .isInstanceOf(ValidationException.class)
-                .hasMessage("Table with identifier 'my_hive.test_db.hive_table' does not exist.");
 
         // alter table
         tEnv.executeSql("ALTER TABLE t SET ( 'manifest.target-file-size' = '16MB' )").await();
@@ -329,9 +328,9 @@ public abstract class HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "ALTER TABLE hive_table SET ( 'manifest.target-file-size' = '16MB' )")
                                         .await())
-                .isInstanceOf(RuntimeException.class)
+                .rootCause()
                 .hasMessage(
-                        "Table `my_hive`.`test_db`.`hive_table` doesn't exist or is a temporary table.");
+                        "Only support alter data table, but is: class org.apache.paimon.table.FormatTable$FormatTableImpl");
     }
 
     @Test
@@ -578,8 +577,7 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL',",
-                                "  'allow-upper-case' = 'true'",
+                                "  'table.type' = 'EXTERNAL'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_01").await();
@@ -594,30 +592,6 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
         assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
-
-        tEnv.executeSql(
-                        String.join(
-                                "\n",
-                                "CREATE CATALOG paimon_catalog_02 WITH (",
-                                "  'type' = 'paimon',",
-                                "  'metastore' = 'hive',",
-                                "  'uri' = '',",
-                                "  'warehouse' = '" + path + "',",
-                                "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL',",
-                                "  'allow-upper-case' = 'false'",
-                                ")"))
-                .await();
-        tEnv.executeSql("USE CATALOG paimon_catalog_02").await();
-        tEnv.executeSql("USE test_db").await();
-
-        // set case-sensitive = false would throw exception out
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "CREATE TABLE t1 ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
-                                        .await())
-                .isInstanceOf(RuntimeException.class);
     }
 
     @Test
@@ -656,15 +630,6 @@ public abstract class HiveCatalogITCaseBase {
                         Arrays.asList(
                                 "true\t1\t1\t1\t1234567890123456789\t1.23\t3.14159\t1234.56\tABC\tv1\tHello, World!\t01\t010203\t2023-01-01\t2023-01-01 12:00:00.123\t[\"value1\",\"value2\",\"value3\"]\tvalue1\tvalue1\tvalue2\t{\"f0\":\"v1\",\"f1\":1}\tv1\t1",
                                 "false\t2\t2\t2\t234567890123456789\t2.34\t2.111111\t2345.67\tDEF\tv2\tApache Paimon\t04\t040506\t2023-02-01\t2023-02-01 12:00:00.456\t[\"value4\",\"value5\",\"value6\"]\tvalue4\tvalue11\tvalue22\t{\"f0\":\"v2\",\"f1\":2}\tv2\t2"));
-
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "INSERT INTO hive_table VALUES (1, 'Hi'), (2, 'Hello')")
-                                        .await())
-                .isInstanceOf(TableException.class)
-                .hasMessage(
-                        "Cannot find table '`my_hive`.`test_db`.`hive_table`' in any of the catalogs [default_catalog, my_hive], nor as a temporary table.");
     }
 
     @Test
@@ -1016,7 +981,8 @@ public abstract class HiveCatalogITCaseBase {
 
         // the target table name has upper case.
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
-                .hasMessage("Table name [T1] cannot contain upper case in the catalog.");
+                .hasMessage(
+                        "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1");
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
 
@@ -1128,11 +1094,12 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testHiveLock() throws InterruptedException {
+    public void testHiveLock() throws InterruptedException, Catalog.TableNotExistException {
         tEnv.executeSql("CREATE TABLE t (a INT)");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        CatalogLockFactory lockFactory = catalog.lockFactory().get();
+        FileStoreTable table = (FileStoreTable) catalog.getTable(new Identifier("test_db", "t"));
+        CatalogEnvironment catalogEnv = table.catalogEnvironment();
 
         AtomicInteger count = new AtomicInteger(0);
         List<Thread> threads = new ArrayList<>();
@@ -1147,11 +1114,10 @@ public abstract class HiveCatalogITCaseBase {
             Thread thread =
                     new Thread(
                             () -> {
-                                CatalogLock lock =
-                                        lockFactory.createLock(catalog.lockContext().get());
+                                Lock lock = catalogEnv.lockFactory().create();
                                 for (int j = 0; j < 10; j++) {
                                     try {
-                                        lock.runWithLock("test_db", "t", unsafeIncrement);
+                                        lock.runWithLock(unsafeIncrement);
                                     } catch (Exception e) {
                                         throw new RuntimeException(e);
                                     }
@@ -1170,24 +1136,16 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testUpperCase() {
+        tEnv.executeSql("CREATE TABLE T (a INT, b STRING ) WITH ( 'file.format' = 'avro' )");
+        tEnv.executeSql(
+                "CREATE TABLE tT (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')");
         assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
-                                                "CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                                                "CREATE TABLE tt ( A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro' )")
                                         .await())
                 .hasRootCauseMessage(
-                        String.format(
-                                "Table name [%s] cannot contain upper case in the catalog.", "T"));
-
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                "CREATE TABLE t (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')")
-                                        .await())
-                .hasRootCauseMessage(
-                        String.format(
-                                "Field name %s cannot contain upper case in the catalog.",
-                                "[A, C]"));
+                        "Table (or view) test_db.tt already exists in Catalog my_hive.");
     }
 
     @Test
@@ -1346,6 +1304,26 @@ public abstract class HiveCatalogITCaseBase {
         assertThat(hiveShell.executeQuery("show partitions t"))
                 .containsExactlyInAnyOrder(
                         "ptb=2a/pta=2", "ptb=2b/pta=2", "ptb=3a/pta=3", "ptb=3b/pta=3");
+    }
+
+    @Test
+    public void testCreatePartitionsToMetastore() throws Exception {
+        prepareTestAddPartitionsToMetastore();
+
+        // add partition
+        tEnv.executeSql(
+                        "ALTER TABLE t ADD PARTITION (ptb = '1c', pta = 1) PARTITION (ptb = '1d', pta = 6)")
+                .await();
+        assertThat(hiveShell.executeQuery("show partitions t"))
+                .containsExactlyInAnyOrder(
+                        "ptb=1a/pta=1",
+                        "ptb=1b/pta=1",
+                        "ptb=1c/pta=1",
+                        "ptb=1d/pta=6",
+                        "ptb=2a/pta=2",
+                        "ptb=2b/pta=2",
+                        "ptb=3a/pta=3",
+                        "ptb=3b/pta=3");
     }
 
     @Test
@@ -1535,11 +1513,11 @@ public abstract class HiveCatalogITCaseBase {
         Identifier identifier = new Identifier("test_db", "mark_done_t2");
         Table table = catalog.getTable(identifier);
         assertThat(table).isInstanceOf(FileStoreTable.class);
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-        MetastoreClient.Factory metastoreClientFactory =
-                fileStoreTable.catalogEnvironment().metastoreClientFactory();
-        HiveMetastoreClient metastoreClient = (HiveMetastoreClient) metastoreClientFactory.create();
-        IMetaStoreClient hmsClient = metastoreClient.client();
+        while (catalog instanceof DelegateCatalog) {
+            catalog = ((DelegateCatalog) catalog).wrapped();
+        }
+        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+        IMetaStoreClient hmsClient = hiveCatalog.getHmsClient();
         Map<String, String> partitionSpec = Collections.singletonMap("dt", "20240501");
         // LOAD_DONE event is not marked by now.
         assertThat(
@@ -1891,6 +1869,49 @@ public abstract class HiveCatalogITCaseBase {
                 .containsExactlyInAnyOrder("dt=9998-06-15", "dt=9999-06-15");
     }
 
+    @Test
+    public void testView() throws Exception {
+        tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
+
+        // test flink view
+        tEnv.executeSql("CREATE VIEW flink_v AS SELECT a + 1, b FROM t").await();
+        assertThat(collect("SELECT * FROM flink_v"))
+                .containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
+        assertThat(hiveShell.executeQuery("SELECT * FROM flink_v"))
+                .containsExactlyInAnyOrder("2\tHi", "3\tHello");
+
+        // test hive view
+        hiveShell.executeQuery("CREATE VIEW hive_v AS SELECT a + 1, b FROM t");
+        assertThat(collect("SELECT * FROM hive_v"))
+                .containsExactlyInAnyOrder(Row.of(2, "Hi"), Row.of(3, "Hello"));
+        assertThat(hiveShell.executeQuery("SELECT * FROM hive_v"))
+                .containsExactlyInAnyOrder("2\tHi", "3\tHello");
+
+        assertThat(collect("SHOW VIEWS"))
+                .containsExactlyInAnyOrder(Row.of("flink_v"), Row.of("hive_v"));
+
+        collect("DROP VIEW flink_v");
+        collect("DROP VIEW hive_v");
+    }
+
+    @Test
+    public void renameView() throws Exception {
+        tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
+
+        tEnv.executeSql("CREATE VIEW flink_v AS SELECT a + 1, b FROM t").await();
+        tEnv.executeSql("ALTER VIEW flink_v rename to flink_v_rename").await();
+        assertThat(collect("SHOW VIEWS")).containsExactlyInAnyOrder(Row.of("flink_v_rename"));
+
+        hiveShell.executeQuery("CREATE VIEW hive_v AS SELECT a + 1, b FROM t");
+        tEnv.executeSql("ALTER VIEW hive_v rename to hive_v_rename").await();
+        assertThat(collect("SHOW VIEWS"))
+                .containsExactlyInAnyOrder(Row.of("flink_v_rename"), Row.of("hive_v_rename"));
+    }
+
     /** Prepare to update a paimon table with a custom path in the paimon file system. */
     private void alterTableInFileSystem(TableEnvironment tEnv) throws Exception {
         tEnv.executeSql(
@@ -1950,16 +1971,6 @@ public abstract class HiveCatalogITCaseBase {
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
             while (it.hasNext()) {
                 result.add(it.next());
-            }
-        }
-        return result;
-    }
-
-    private List<String> collectString(String sql) throws Exception {
-        List<String> result = new ArrayList<>();
-        try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
-            while (it.hasNext()) {
-                result.add(it.next().toString());
             }
         }
         return result;

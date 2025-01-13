@@ -62,6 +62,11 @@ public class MultisetType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return elementType.defaultSize() + 4;
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new MultisetType(isNullable, elementType);
     }

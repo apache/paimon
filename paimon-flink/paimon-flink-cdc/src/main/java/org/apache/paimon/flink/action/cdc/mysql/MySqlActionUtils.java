@@ -214,6 +214,13 @@ public class MySqlActionUtils {
             sourceBuilder.startupOptions(
                     StartupOptions.timestamp(
                             mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_TIMESTAMP_MILLIS)));
+        } else if ("snapshot".equalsIgnoreCase(startupMode)) {
+            sourceBuilder.startupOptions(StartupOptions.snapshot());
+        } else {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Unknown scan.startup.mode='%s'. Valid scan.startup.mode for MySQL CDC are [initial, earliest-offset, latest-offset, specific-offset, timestamp, snapshot]",
+                            startupMode));
         }
 
         Properties jdbcProperties = new Properties();

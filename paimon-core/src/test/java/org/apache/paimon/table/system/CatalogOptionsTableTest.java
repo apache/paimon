@@ -27,8 +27,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.table.TableType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,7 +54,7 @@ public class CatalogOptionsTableTest extends TableTestBase {
     @BeforeEach
     public void before() throws Exception {
         catalogOptions = new Options();
-        catalogOptions.set(CatalogOptions.TABLE_TYPE, TableType.MANAGED);
+        catalogOptions.set(CatalogOptions.TABLE_TYPE, CatalogTableType.MANAGED);
         catalogOptions.set("table-default.scan.infer-parallelism", "false");
         catalogOptions.set(CatalogOptions.WAREHOUSE, tempDir.toUri().toString());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));

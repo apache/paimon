@@ -445,3 +445,14 @@ CREATE TABLE t (
     k INT PRIMARY KEY,
     v1 VARCHAR(10)
 );
+
+-- ################################################################################
+--  testRuntimeExecutionModeCheckForCdcSync
+-- ################################################################################
+
+CREATE DATABASE check_cdc_sync_runtime_execution_mode;
+USE check_cdc_sync_runtime_execution_mode;
+CREATE TABLE t (
+                   k INT PRIMARY KEY,
+                   v1 VARCHAR(10)
+);

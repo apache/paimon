@@ -18,7 +18,8 @@
 
 package org.apache.paimon.iceberg.manifest;
 
-import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -26,6 +27,7 @@ import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.IcebergPathFactory;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta.Content;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionSpec;
@@ -37,8 +39,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -82,29 +89,78 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         this.targetFileSize = targetFileSize;
     }
 
+    @VisibleForTesting
+    public String compression() {
+        return compression;
+    }
+
     public static IcebergManifestFile create(FileStoreTable table, IcebergPathFactory pathFactory) {
         RowType partitionType = table.schema().logicalPartitionType();
         RowType entryType = IcebergManifestEntry.schema(partitionType);
-        Options manifestFileAvroOptions = Options.fromMap(table.options());
+        Options avroOptions = Options.fromMap(table.options());
         // https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/ManifestReader.java
-        manifestFileAvroOptions.set(
+        avroOptions.set(
                 "avro.row-name-mapping",
                 "org.apache.paimon.avro.generated.record:manifest_entry,"
                         + "manifest_entry_data_file:r2,"
                         + "r2_partition:r102");
-        FileFormat manifestFileAvro = FileFormat.getFileFormat(manifestFileAvroOptions, "avro");
+        FileFormat manifestFileAvro = FileFormat.fromIdentifier("avro", avroOptions);
         return new IcebergManifestFile(
                 table.fileIO(),
                 partitionType,
                 manifestFileAvro.createReaderFactory(entryType),
                 manifestFileAvro.createWriterFactory(entryType),
-                table.coreOptions().manifestCompression(),
+                avroOptions.get(IcebergOptions.MANIFEST_COMPRESSION),
                 pathFactory.manifestFileFactory(),
                 table.coreOptions().manifestTargetSize());
     }
 
+    public List<IcebergManifestEntry> read(IcebergManifestFileMeta meta) {
+        return read(meta, null);
+    }
+
+    public List<IcebergManifestEntry> read(IcebergManifestFileMeta meta, @Nullable Long fileSize) {
+        String fileName = new Path(meta.manifestPath()).getName();
+        try {
+            Path path = pathFactory.toPath(fileName);
+
+            return readFromIterator(
+                    meta,
+                    createIterator(path, fileSize),
+                    (IcebergManifestEntrySerializer) serializer,
+                    Filter.alwaysTrue());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read " + fileName, e);
+        }
+    }
+
+    private CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize)
+            throws IOException {
+        return FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
+                .toCloseableIterator();
+    }
+
+    private static List<IcebergManifestEntry> readFromIterator(
+            IcebergManifestFileMeta meta,
+            CloseableIterator<InternalRow> inputIterator,
+            IcebergManifestEntrySerializer serializer,
+            Filter<InternalRow> readFilter) {
+        try (CloseableIterator<InternalRow> iterator = inputIterator) {
+            List<IcebergManifestEntry> result = new ArrayList<>();
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                if (readFilter.test(row)) {
+                    result.add(serializer.fromRow(row, meta));
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public List<IcebergManifestFileMeta> rollingWrite(
-            Iterator<IcebergManifestEntry> entries, long sequenceNumber) throws IOException {
+            Iterator<IcebergManifestEntry> entries, long sequenceNumber) {
         RollingFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> writer =
                 new RollingFileWriter<>(
                         () -> createWriter(sequenceNumber), targetFileSize.getBytes());
@@ -120,10 +176,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     public SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> createWriter(
             long sequenceNumber) {
         return new IcebergManifestEntryWriter(
-                writerFactory,
-                pathFactory.newPath(),
-                CoreOptions.FILE_COMPRESSION.defaultValue(),
-                sequenceNumber);
+                writerFactory, pathFactory.newPath(), compression, sequenceNumber);
     }
 
     private class IcebergManifestEntryWriter

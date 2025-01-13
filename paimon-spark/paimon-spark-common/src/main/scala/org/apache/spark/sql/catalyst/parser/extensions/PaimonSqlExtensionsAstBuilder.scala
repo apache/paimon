@@ -19,7 +19,8 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalyst.plans.logical
-import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument}
+import org.apache.paimon.spark.catalyst.plans.logical._
+import org.apache.paimon.utils.TimeUtils
 
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
@@ -57,8 +58,8 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
 
   /** Creates a [[PaimonCallStatement]] for a stored procedure call. */
   override def visitCall(ctx: CallContext): PaimonCallStatement = withOrigin(ctx) {
-    val name = toSeq(ctx.multipartIdentifier.parts).map(_.getText)
-    val args = toSeq(ctx.callArgument).map(typedVisit[PaimonCallArgument])
+    val name = ctx.multipartIdentifier.parts.asScala.map(_.getText).toSeq
+    val args = ctx.callArgument.asScala.map(typedVisit[PaimonCallArgument]).toSeq
     logical.PaimonCallStatement(name, args)
   }
 
@@ -89,8 +90,68 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   /** Returns a multi-part identifier as Seq[String]. */
   override def visitMultipartIdentifier(ctx: MultipartIdentifierContext): Seq[String] =
     withOrigin(ctx) {
-      ctx.parts.asScala.map(_.getText)
+      ctx.parts.asScala.map(_.getText).toSeq
     }
+
+  /** Create a SHOW TAGS logical command. */
+  override def visitShowTags(ctx: ShowTagsContext): ShowTagsCommand = withOrigin(ctx) {
+    ShowTagsCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
+  }
+
+  /** Create a CREATE OR REPLACE TAG logical command. */
+  override def visitCreateOrReplaceTag(ctx: CreateOrReplaceTagContext): CreateOrReplaceTagCommand =
+    withOrigin(ctx) {
+      val createTagClause = ctx.createReplaceTagClause()
+
+      val tagName = createTagClause.identifier().getText
+      val tagOptionsContext = Option(createTagClause.tagOptions())
+      val snapshotId =
+        tagOptionsContext
+          .flatMap(tagOptions => Option(tagOptions.snapshotId()))
+          .map(_.getText.toLong)
+      val timeRetainCtx = tagOptionsContext.flatMap(tagOptions => Option(tagOptions.timeRetain()))
+      val timeRetained = if (timeRetainCtx.nonEmpty) {
+        val (number, timeUnit) =
+          timeRetainCtx
+            .map(retain => (retain.number().getText.toLong, retain.timeUnit().getText))
+            .get
+        Option(TimeUtils.parseDuration(number, timeUnit))
+      } else {
+        None
+      }
+      val tagOptions = TagOptions(
+        snapshotId,
+        timeRetained
+      )
+
+      val create = createTagClause.CREATE() != null
+      val replace = createTagClause.REPLACE() != null
+      val ifNotExists = createTagClause.EXISTS() != null
+
+      CreateOrReplaceTagCommand(
+        typedVisit[Seq[String]](ctx.multipartIdentifier),
+        tagName,
+        tagOptions,
+        create,
+        replace,
+        ifNotExists)
+    }
+
+  /** Create a DELETE TAG logical command. */
+  override def visitDeleteTag(ctx: DeleteTagContext): DeleteTagCommand = withOrigin(ctx) {
+    DeleteTagCommand(
+      typedVisit[Seq[String]](ctx.multipartIdentifier),
+      ctx.identifier().getText,
+      ctx.EXISTS() != null)
+  }
+
+  /** Create a RENAME TAG logical command. */
+  override def visitRenameTag(ctx: RenameTagContext): RenameTagCommand = withOrigin(ctx) {
+    RenameTagCommand(
+      typedVisit[Seq[String]](ctx.multipartIdentifier),
+      ctx.identifier(0).getText,
+      ctx.identifier(1).getText)
+  }
 
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 
@@ -151,5 +212,16 @@ object CurrentOrigin {
   def get: Origin = value.get()
   def set(o: Origin): Unit = value.set(o)
   def reset(): Unit = value.set(Origin())
+
+  def withOrigin[A](o: Origin)(f: => A): A = {
+    // remember the previous one so it can be reset to this
+    // way withOrigin can be recursive
+    val previous = get
+    set(o)
+    val ret =
+      try f
+      finally { set(previous) }
+    ret
+  }
 }
 /* Apache Spark copy end */

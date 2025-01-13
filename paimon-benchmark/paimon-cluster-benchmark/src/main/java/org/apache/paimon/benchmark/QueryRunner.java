@@ -77,7 +77,7 @@ public class QueryRunner {
 
             String sinkPathConfig =
                     BenchmarkGlobalConfiguration.loadConfiguration()
-                            .getString(BenchmarkOptions.SINK_PATH);
+                            .get(BenchmarkOptions.SINK_PATH);
             if (sinkPathConfig == null) {
                 throw new IllegalArgumentException(
                         BenchmarkOptions.SINK_PATH.key() + " must be set");

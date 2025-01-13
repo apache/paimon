@@ -73,13 +73,13 @@ See [Apache Doris Website](https://doris.apache.org/docs/lakehouse/datalake-anal
 
 1. Query Paimon table with full qualified name
 
-    ```
+    ```sql
     SELECT * FROM paimon_hdfs.paimon_db.paimon_table;
     ```
 
 2. Switch to Paimon Catalog and query
 
-    ```
+    ```sql
     SWITCH paimon_hdfs;
     USE paimon_db;
     SELECT * FROM paimon_table;
@@ -89,11 +89,11 @@ See [Apache Doris Website](https://doris.apache.org/docs/lakehouse/datalake-anal
 
 - Read optimized for Primary Key Table
 
-    Doris can utilize the [Read optimized](https://paimon.apache.org/releases/release-0.6/#read-optimized) feature for Primary Key Table(release in Paimon 0.6), by reading base data files using native Parquet/ORC reader and delta file using JNI.
+    Doris can utilize the [Read optimized](https://paimon.apache.org/docs/0.8/primary-key-table/read-optimized/) feature for Primary Key Table(release in Paimon 0.6), by reading base data files using native Parquet/ORC reader and delta file using JNI.
 
 - Deletion Vectors
 
-    Doris(2.1.4+) natively supports [Deletion Vectors](https://paimon.apache.org/releases/release-0.8/#deletion-vectors)(released in Paimon 0.8).
+    Doris(2.1.4+) natively supports [Deletion Vectors](https://paimon.apache.org/docs/0.8/primary-key-table/deletion-vectors/)(released in Paimon 0.8).
 
 ## Doris to Paimon type mapping
 

@@ -83,6 +83,7 @@ public class LevelsTest {
                 level,
                 0L,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 }

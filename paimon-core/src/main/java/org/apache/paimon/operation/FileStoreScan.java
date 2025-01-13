@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -31,11 +32,13 @@ import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,11 +53,15 @@ public interface FileStoreScan {
 
     FileStoreScan withPartitionFilter(List<BinaryRow> partitions);
 
+    FileStoreScan withPartitionsFilter(List<Map<String, String>> partitions);
+
     FileStoreScan withPartitionFilter(PartitionPredicate predicate);
 
     FileStoreScan withBucket(int bucket);
 
     FileStoreScan withBucketFilter(Filter<Integer> bucketFilter);
+
+    FileStoreScan withTotalAwareBucketFilter(BiFilter<Integer, Integer> bucketFilter);
 
     FileStoreScan withPartitionBucket(BinaryRow partition, int bucket);
 
@@ -62,11 +69,11 @@ public interface FileStoreScan {
 
     FileStoreScan withSnapshot(Snapshot snapshot);
 
-    FileStoreScan withManifestList(List<ManifestFileMeta> manifests);
-
     FileStoreScan withKind(ScanMode scanMode);
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
+
+    FileStoreScan enableValueFilter();
 
     FileStoreScan withManifestEntryFilter(Filter<ManifestEntry> filter);
 
@@ -75,6 +82,15 @@ public interface FileStoreScan {
     FileStoreScan withDataFileNameFilter(Filter<String> fileNameFilter);
 
     FileStoreScan withMetrics(ScanMetrics metrics);
+
+    FileStoreScan dropStats();
+
+    @Nullable
+    Integer parallelism();
+
+    ManifestsReader manifestsReader();
+
+    List<ManifestEntry> readManifest(ManifestFileMeta manifest);
 
     /** Produce a {@link Plan}. */
     Plan plan();
@@ -97,6 +113,10 @@ public interface FileStoreScan {
     List<SimpleFileEntry> readSimpleEntries();
 
     List<PartitionEntry> readPartitionEntries();
+
+    List<BucketEntry> readBucketEntries();
+
+    Iterator<ManifestEntry> readFileIterator();
 
     default List<BinaryRow> listPartitions() {
         return readPartitionEntries().stream()

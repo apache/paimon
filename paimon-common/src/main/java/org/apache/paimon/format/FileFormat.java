@@ -19,7 +19,7 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.factories.FormatFactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -29,9 +29,10 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.ServiceLoader;
 
 /**
  * Factory class which creates reader and writer factories for specific file format.
@@ -74,43 +75,32 @@ public abstract class FileFormat {
         return Optional.empty();
     }
 
-    @VisibleForTesting
     public static FileFormat fromIdentifier(String identifier, Options options) {
-        return fromIdentifier(identifier, new FormatContext(options, 1024, 1024));
+        return fromIdentifier(
+                identifier,
+                new FormatContext(
+                        options,
+                        options.get(CoreOptions.READ_BATCH_SIZE),
+                        options.get(CoreOptions.WRITE_BATCH_SIZE),
+                        options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
+                        options.get(CoreOptions.FILE_BLOCK_SIZE)));
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        return fromIdentifier(identifier, context, FileFormat.class.getClassLoader())
-                .orElseThrow(
-                        () ->
-                                new RuntimeException(
-                                        String.format(
-                                                "Could not find a FileFormatFactory implementation class for %s format",
-                                                identifier)));
+        return FormatFactoryUtil.discoverFactory(
+                        FileFormat.class.getClassLoader(), identifier.toLowerCase())
+                .create(context);
     }
 
-    private static Optional<FileFormat> fromIdentifier(
-            String formatIdentifier, FormatContext context, ClassLoader classLoader) {
-        ServiceLoader<FileFormatFactory> serviceLoader =
-                ServiceLoader.load(FileFormatFactory.class, classLoader);
-        for (FileFormatFactory factory : serviceLoader) {
-            if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
-                return Optional.of(factory.create(context));
+    protected Options getIdentifierPrefixOptions(Options options) {
+        Map<String, String> result = new HashMap<>();
+        String prefix = formatIdentifier.toLowerCase() + ".";
+        for (String key : options.keySet()) {
+            if (key.toLowerCase().startsWith(prefix)) {
+                result.put(prefix + key.substring(prefix.length()), options.get(key));
             }
         }
-
-        return Optional.empty();
-    }
-
-    public static FileFormat getFileFormat(Options options, String formatIdentifier) {
-        FormatContext context =
-                new FormatContext(
-                        options.removePrefix(formatIdentifier + "."),
-                        options.get(CoreOptions.READ_BATCH_SIZE),
-                        options.get(CoreOptions.WRITE_BATCH_SIZE),
-                        options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
-                        options.get(CoreOptions.FILE_BLOCK_SIZE));
-        return FileFormat.fromIdentifier(formatIdentifier, context);
+        return new Options(result);
     }
 }

@@ -233,9 +233,10 @@ public class HiveSchema {
             }
         }
 
-        if (schemaFieldNames.size() != hiveFieldNames.size()) {
+        // It is OK that hive is a subset of paimon
+        if (schemaFieldNames.size() < hiveFieldNames.size()) {
             throw new IllegalArgumentException(
-                    "Hive DDL and paimon schema mismatched! "
+                    "Hive DDL is a superset of paimon schema! "
                             + "It is recommended not to write any column definition "
                             + "as Paimon external table can read schema from the specified location.\n"
                             + "There are "

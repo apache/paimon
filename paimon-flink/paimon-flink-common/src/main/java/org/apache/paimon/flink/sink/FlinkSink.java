@@ -21,10 +21,12 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
+import org.apache.paimon.flink.compact.changelog.ChangelogCompactCoordinateOperator;
+import org.apache.paimon.flink.compact.changelog.ChangelogCompactWorkerOperator;
+import org.apache.paimon.flink.compact.changelog.ChangelogTaskTypeInfo;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableRunnable;
@@ -32,6 +34,7 @@ import org.apache.paimon.utils.SerializableRunnable;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.operators.SlotSharingGroup;
 import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.api.java.typeutils.EitherTypeInfo;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.CheckpointingMode;
@@ -39,24 +42,22 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
@@ -64,7 +65,9 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_CPU;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_OPERATOR_CHAINING;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -217,7 +220,7 @@ public abstract class FlinkSink<T> implements Serializable {
                                         + " : "
                                         + table.name(),
                                 new CommittableTypeInfo(),
-                                createWriteOperator(
+                                createWriteOperatorFactory(
                                         createWriteProvider(
                                                 env.getCheckpointConfig(),
                                                 isStreaming,
@@ -225,17 +228,32 @@ public abstract class FlinkSink<T> implements Serializable {
                                         commitUser))
                         .setParallelism(parallelism == null ? input.getParallelism() : parallelism);
 
-        boolean writeMCacheEnabled = table.coreOptions().writeManifestCache().getBytes() > 0;
-        boolean hashDynamicMode = table.bucketMode() == BucketMode.HASH_DYNAMIC;
-        if (!isStreaming && (writeMCacheEnabled || hashDynamicMode)) {
-            assertBatchAdaptiveParallelism(
-                    env, written.getParallelism(), writeMCacheEnabled, hashDynamicMode);
+        Options options = Options.fromMap(table.options());
+
+        String uidSuffix = options.get(SINK_OPERATOR_UID_SUFFIX);
+        if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
+            written = written.uid(generateCustomUid(WRITER_NAME, table.name(), uidSuffix));
         }
 
-        Options options = Options.fromMap(table.options());
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
+
+        if (options.get(CHANGELOG_PRECOMMIT_COMPACT)) {
+            written =
+                    written.transform(
+                                    "Changelog Compact Coordinator",
+                                    new EitherTypeInfo<>(
+                                            new CommittableTypeInfo(), new ChangelogTaskTypeInfo()),
+                                    new ChangelogCompactCoordinateOperator(table))
+                            .forceNonParallel()
+                            .transform(
+                                    "Changelog Compact Worker",
+                                    new CommittableTypeInfo(),
+                                    new ChangelogCompactWorkerOperator(table))
+                            .setParallelism(written.getParallelism());
+        }
+
         return written;
     }
 
@@ -250,11 +268,10 @@ public abstract class FlinkSink<T> implements Serializable {
         }
 
         Options options = Options.fromMap(table.options());
-        OneInputStreamOperator<Committable, Committable> committerOperator =
-                new CommitterOperator<>(
+        OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
+                new CommitterOperatorFactory<>(
                         streamingCheckpointEnabled,
                         true,
-                        options.get(SINK_COMMITTER_OPERATOR_CHAINING),
                         commitUser,
                         createCommitterFactory(),
                         createCommittableStateManager(),
@@ -262,8 +279,9 @@ public abstract class FlinkSink<T> implements Serializable {
 
         if (options.get(SINK_AUTO_TAG_FOR_SAVEPOINT)) {
             committerOperator =
-                    new AutoTagForSavepointCommitterOperator<>(
-                            (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
+                    new AutoTagForSavepointCommitterOperatorFactory<>(
+                            (CommitterOperatorFactory<Committable, ManifestCommittable>)
+                                    committerOperator,
                             table::snapshotManager,
                             table::tagManager,
                             () -> table.store().newTagDeletion(),
@@ -273,8 +291,9 @@ public abstract class FlinkSink<T> implements Serializable {
         if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH
                 && table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {
             committerOperator =
-                    new BatchWriteGeneratorTagOperator<>(
-                            (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
+                    new BatchWriteGeneratorTagOperatorFactory<>(
+                            (CommitterOperatorFactory<Committable, ManifestCommittable>)
+                                    committerOperator,
                             table);
         }
         SingleOutputStreamOperator<?> committed =
@@ -284,9 +303,20 @@ public abstract class FlinkSink<T> implements Serializable {
                                 committerOperator)
                         .setParallelism(1)
                         .setMaxParallelism(1);
+        if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
+            committed =
+                    committed.uid(
+                            generateCustomUid(
+                                    GLOBAL_COMMITTER_NAME,
+                                    table.name(),
+                                    options.get(SINK_OPERATOR_UID_SUFFIX)));
+        }
+        if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
+            committed = committed.startNewChain();
+        }
         configureGlobalCommitter(
                 committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
-        return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+        return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     public static void configureGlobalCommitter(
@@ -311,13 +341,11 @@ public abstract class FlinkSink<T> implements Serializable {
         checkArgument(
                 !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
                 "Paimon sink currently does not support unaligned checkpoints. Please set "
-                        + ExecutionCheckpointingOptions.ENABLE_UNALIGNED.key()
-                        + " to false.");
+                        + "execution.checkpointing.unaligned.enabled to false.");
         checkArgument(
                 env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
                 "Paimon sink currently only supports EXACTLY_ONCE checkpoint mode. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
-                        + " to exactly-once");
+                        + "execution.checkpointing.mode to exactly-once");
     }
 
     public static void assertBatchAdaptiveParallelism(
@@ -325,26 +353,6 @@ public abstract class FlinkSink<T> implements Serializable {
         String msg =
                 "Paimon Sink does not support Flink's Adaptive Parallelism mode. "
                         + "Please manually turn it off or set Paimon `sink.parallelism` manually.";
-        assertBatchAdaptiveParallelism(env, sinkParallelism, msg);
-    }
-
-    public static void assertBatchAdaptiveParallelism(
-            StreamExecutionEnvironment env,
-            int sinkParallelism,
-            boolean writeMCacheEnabled,
-            boolean hashDynamicMode) {
-        List<String> messages = new ArrayList<>();
-        if (writeMCacheEnabled) {
-            messages.add("Write Manifest Cache");
-        }
-        if (hashDynamicMode) {
-            messages.add("Dynamic Bucket Mode");
-        }
-        String msg =
-                String.format(
-                        "Paimon Sink with %s does not support Flink's Adaptive Parallelism mode. "
-                                + "Please manually turn it off or set Paimon `sink.parallelism` manually.",
-                        messages);
         assertBatchAdaptiveParallelism(env, sinkParallelism, msg);
     }
 
@@ -358,7 +366,7 @@ public abstract class FlinkSink<T> implements Serializable {
         }
     }
 
-    protected abstract OneInputStreamOperator<T, Committable> createWriteOperator(
+    protected abstract OneInputStreamOperatorFactory<T, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser);
 
     protected abstract Committer.Factory<Committable, ManifestCommittable> createCommitterFactory();

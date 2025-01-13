@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.TableScan;
 
@@ -31,6 +32,8 @@ public interface StartingScanner {
     StartingContext startingContext();
 
     Result scan(SnapshotReader snapshotReader);
+
+    List<PartitionEntry> scanPartitions(SnapshotReader snapshotReader);
 
     /** Scan result of {@link #scan}. */
     interface Result {}

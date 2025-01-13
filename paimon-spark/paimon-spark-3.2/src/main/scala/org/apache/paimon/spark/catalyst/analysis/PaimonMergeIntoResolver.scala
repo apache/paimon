@@ -25,8 +25,6 @@ object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
 
   def resolveNotMatchedBySourceActions(
       merge: MergeIntoTable,
-      target: LogicalPlan,
-      source: LogicalPlan,
       resolve: (Expression, LogicalPlan) => Expression): Seq[MergeAction] = {
     Seq.empty
   }

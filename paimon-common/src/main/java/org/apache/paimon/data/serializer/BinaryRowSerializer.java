@@ -108,6 +108,11 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     // ============================ Page related operations ===================================
 
     @Override
+    public BinaryRow createReuseInstance() {
+        return new BinaryRow(numFields);
+    }
+
+    @Override
     public int serializeToPages(BinaryRow record, AbstractPagedOutputView headerLessView)
             throws IOException {
         int skip = checkSkipWriteForFixLengthPart(headerLessView);

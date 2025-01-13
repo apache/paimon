@@ -23,14 +23,19 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
 import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** A {@link CommitCallback} to add newly created partitions to metastore. */
 public class AddPartitionCommitCallback implements CommitCallback {
@@ -44,38 +49,49 @@ public class AddPartitionCommitCallback implements CommitCallback {
                     .softValues()
                     .build();
 
-    private final MetastoreClient client;
+    private final PartitionHandler partitionHandler;
+    private final InternalRowPartitionComputer partitionComputer;
 
-    public AddPartitionCommitCallback(MetastoreClient client) {
-        this.client = client;
+    public AddPartitionCommitCallback(
+            PartitionHandler partitionHandler, InternalRowPartitionComputer partitionComputer) {
+        this.partitionHandler = partitionHandler;
+        this.partitionComputer = partitionComputer;
     }
 
     @Override
     public void call(List<ManifestEntry> committedEntries, Snapshot snapshot) {
-        committedEntries.stream()
-                .filter(e -> FileKind.ADD.equals(e.kind()))
-                .map(ManifestEntry::partition)
-                .distinct()
-                .forEach(this::addPartition);
+        Set<BinaryRow> partitions =
+                committedEntries.stream()
+                        .filter(e -> FileKind.ADD.equals(e.kind()))
+                        .map(ManifestEntry::partition)
+                        .collect(Collectors.toSet());
+        addPartitions(partitions);
     }
 
     @Override
     public void retry(ManifestCommittable committable) {
-        committable.fileCommittables().stream()
-                .map(CommitMessage::partition)
-                .distinct()
-                .forEach(this::addPartition);
+        Set<BinaryRow> partitions =
+                committable.fileCommittables().stream()
+                        .map(CommitMessage::partition)
+                        .collect(Collectors.toSet());
+        addPartitions(partitions);
     }
 
-    private void addPartition(BinaryRow partition) {
+    private void addPartitions(Set<BinaryRow> partitions) {
         try {
-            boolean added = cache.get(partition, () -> false);
-            if (added) {
-                return;
+            List<BinaryRow> newPartitions = new ArrayList<>();
+            for (BinaryRow partition : partitions) {
+                if (!cache.get(partition, () -> false)) {
+                    newPartitions.add(partition);
+                }
             }
-
-            client.addPartition(partition);
-            cache.put(partition, true);
+            if (!newPartitions.isEmpty()) {
+                partitionHandler.createPartitions(
+                        newPartitions.stream()
+                                .map(partitionComputer::generatePartValues)
+                                .collect(Collectors.toList()));
+                newPartitions.forEach(partition -> cache.put(partition, true));
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -83,6 +99,6 @@ public class AddPartitionCommitCallback implements CommitCallback {
 
     @Override
     public void close() throws Exception {
-        client.close();
+        partitionHandler.close();
     }
 }

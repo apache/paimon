@@ -18,18 +18,20 @@
 
 package org.apache.paimon.metastore;
 
+import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.TagCallback;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 
 /** A {@link TagCallback} to add newly created partitions to metastore. */
 public class AddPartitionTagCallback implements TagCallback {
 
-    private final MetastoreClient client;
+    private final PartitionHandler partitionHandler;
     private final String partitionField;
 
-    public AddPartitionTagCallback(MetastoreClient client, String partitionField) {
-        this.client = client;
+    public AddPartitionTagCallback(PartitionHandler partitionHandler, String partitionField) {
+        this.partitionHandler = partitionHandler;
         this.partitionField = partitionField;
     }
 
@@ -38,7 +40,7 @@ public class AddPartitionTagCallback implements TagCallback {
         LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
         partitionSpec.put(partitionField, tagName);
         try {
-            client.addPartition(partitionSpec);
+            partitionHandler.createPartitions(Collections.singletonList(partitionSpec));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -49,7 +51,7 @@ public class AddPartitionTagCallback implements TagCallback {
         LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
         partitionSpec.put(partitionField, tagName);
         try {
-            client.deletePartition(partitionSpec);
+            partitionHandler.dropPartitions(Collections.singletonList(partitionSpec));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -57,6 +59,6 @@ public class AddPartitionTagCallback implements TagCallback {
 
     @Override
     public void close() throws Exception {
-        client.close();
+        partitionHandler.close();
     }
 }

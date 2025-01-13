@@ -26,7 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** {@link StartingScanner} for the {@link CoreOptions.StartupMode#LATEST_FULL} startup mode. */
-public class FullStartingScanner extends AbstractStartingScanner {
+public class FullStartingScanner extends ReadPlanStartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(FullStartingScanner.class);
 
@@ -41,16 +41,15 @@ public class FullStartingScanner extends AbstractStartingScanner {
     }
 
     @Override
-    public Result scan(SnapshotReader snapshotReader) {
+    public SnapshotReader configure(SnapshotReader snapshotReader) {
         if (startingSnapshotId == null) {
             // try to get first snapshot again
             startingSnapshotId = snapshotManager.latestSnapshotId();
         }
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
-            return new NoSnapshot();
+            return null;
         }
-        return StartingScanner.fromPlan(
-                snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId).read());
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
     }
 }

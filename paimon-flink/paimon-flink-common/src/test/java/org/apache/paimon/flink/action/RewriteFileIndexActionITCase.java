@@ -83,7 +83,7 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                     .withStreamExecutionEnvironment(env)
                     .run();
         } else {
-            callProcedure("CALL sys.rewrite_file_index('test_db.T')");
+            executeSQL("CALL sys.rewrite_file_index('test_db.T')");
         }
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(new Identifier("test_db", "T"));
@@ -102,7 +102,7 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                     table.store()
                             .pathFactory()
                             .createDataFilePathFactory(entry.partition(), entry.bucket())
-                            .toPath(file);
+                            .toAlignedPath(file, entry.file());
             try (FileIndexFormat.Reader reader =
                     FileIndexFormat.createReader(
                             table.fileIO().newInputStream(indexFilePath), table.rowType())) {

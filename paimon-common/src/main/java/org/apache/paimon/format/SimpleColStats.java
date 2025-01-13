@@ -33,6 +33,8 @@ import java.util.Objects;
  */
 public class SimpleColStats {
 
+    public static final SimpleColStats NONE = new SimpleColStats(null, null, null);
+
     @Nullable private final Object min;
     @Nullable private final Object max;
     private final Long nullCount;
@@ -56,6 +58,10 @@ public class SimpleColStats {
     @Nullable
     public Long nullCount() {
         return nullCount;
+    }
+
+    public boolean isNone() {
+        return min == null && max == null && nullCount == null;
     }
 
     @Override

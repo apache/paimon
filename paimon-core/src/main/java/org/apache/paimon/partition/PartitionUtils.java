@@ -21,58 +21,49 @@ package org.apache.paimon.partition;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 
 /** Utils to fetch partition map information from data schema and row type. */
 public class PartitionUtils {
 
-    public static Pair<int[], int[][]> constructPartitionMapping(
-            TableSchema dataSchema, int[][] projection) {
-        return constructPartitionMapping(
-                dataSchema.logicalRowType(), dataSchema.partitionKeys(), projection);
-    }
+    public static Pair<Pair<int[], RowType>, List<DataField>> constructPartitionMapping(
+            TableSchema dataSchema, List<DataField> dataFields) {
+        if (dataSchema.partitionKeys().isEmpty()) {
+            return Pair.of(null, dataFields);
+        }
 
-    public static Pair<int[], int[][]> constructPartitionMapping(
-            RowType rowType, List<String> partitions, int[][] projection) {
-        List<String> fields = rowType.getFieldNames();
-        int[][] dataProjection = Arrays.copyOf(projection, projection.length);
+        List<String> partitionNames = dataSchema.partitionKeys();
+        List<DataField> fieldsWithoutPartition = new ArrayList<>();
 
-        int[] map = new int[dataProjection.length + 1];
+        int[] map = new int[dataFields.size() + 1];
         int pCount = 0;
-
-        for (int i = 0; i < dataProjection.length; i++) {
-            String field = fields.get(dataProjection[i][0]);
-            if (partitions.contains(field)) {
+        for (int i = 0; i < dataFields.size(); i++) {
+            DataField field = dataFields.get(i);
+            if (partitionNames.contains(field.name())) {
                 // if the map[i] is minus, represent the related column is stored in partition row
-                map[i] = -(partitions.indexOf(field) + 1);
+                map[i] = -(partitionNames.indexOf(field.name()) + 1);
                 pCount++;
-                dataProjection[i][0] = -1;
             } else {
                 // else if the map[i] is positive, the related column is stored in the file-read row
                 map[i] = (i - pCount) + 1;
+                fieldsWithoutPartition.add(dataFields.get(i));
             }
         }
 
-        // partition field is not selected, we just return null back
-        if (pCount == 0) {
-            return null;
-        }
-
-        int[][] projectionReturn = new int[dataProjection.length - pCount][];
-        int count = 0;
-        for (int i = 0; i < dataProjection.length; i++) {
-            if (dataProjection[i][0] != -1) {
-                projectionReturn[count++] = dataProjection[i];
-            }
-        }
-
-        return Pair.of(map, projectionReturn);
+        Pair<int[], RowType> partitionMapping =
+                fieldsWithoutPartition.size() == dataFields.size()
+                        ? null
+                        : Pair.of(
+                                map,
+                                dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
+        return Pair.of(partitionMapping, fieldsWithoutPartition);
     }
 
     public static PartitionInfo create(@Nullable Pair<int[], RowType> pair, BinaryRow binaryRow) {

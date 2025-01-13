@@ -245,6 +245,22 @@ is needed in order to reduce the number of small files.
 Let's trigger the full-compaction now, and run a dedicated compaction job through `flink run`:
 
 {{< label Batch >}}
+
+{{< tabs "compact" >}}
+
+{{< tab "Flink SQL" >}}
+```sql  
+CALL sys.compact(
+   `table` => 'database_name.table_name', 
+   partitions => 'partition_name', 
+   order_strategy => 'order_strategy',
+   order_by => 'order_by',
+   options => 'paimon_table_dynamic_conf'
+);
+```
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 ```bash  
 <FLINK_HOME>/bin/flink run \
     -D execution.runtime-mode=batch \
@@ -257,8 +273,22 @@ Let's trigger the full-compaction now, and run a dedicated compaction job throug
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-dynamic-conf> [--table_conf <paimon-table-dynamic-conf>] ...]
 ```
+{{< /tab >}}
+
+{{< /tabs >}}
 
 an example would be (suppose you're already in Flink home)
+
+{{< tabs "compact example" >}}
+
+{{< tab "Flink SQL" >}}
+
+```sql
+CALL sys.compact('T');
+```
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
 
 ```bash
 ./bin/flink run \
@@ -266,6 +296,9 @@ an example would be (suppose you're already in Flink home)
     compact \
     --path file:///tmp/paimon/default.db/T
 ```
+{{< /tab >}}
+
+{{< /tabs >}}
 
 All current table files will be compacted and a new snapshot, namely `snapshot-4`, is
 made and contains the following information:
@@ -283,8 +316,8 @@ made and contains the following information:
   "commitKind" : "COMPACT",
   "timeMillis" : 1684163217960,
   "logOffsets" : { },
-  "totalRecordCount" : 38,
-  "deltaRecordCount" : 20,
+  "totalRecordCount" : 2,
+  "deltaRecordCount" : -16,
   "changelogRecordCount" : 0,
   "watermark" : -9223372036854775808
 }
@@ -295,9 +328,9 @@ The new file layout as of snapshot-4 looks like
 
 Note that `manifest-4-0` contains 20 manifest entries (18 `DELETE` operations and 2 `ADD` operations)
 1. For partition `20230503` to `20230510`, two `DELETE` operations for two data files
-2. For partition `20230501` to `20230502`, one `DELETE` operation and one `ADD` operation
-   for the same data file.
-
+2. For partition `20230501` to `20230502`, one `DELETE` operation and one `ADD` operation for the same data file.
+   This is because there has been an upgrade of the file from level 0 to the highest level. Please rest assured that
+   this is only a change in metadata, and the file is still the same.
 
 ### Alter Table
 Execute the following statement to configure full-compaction:

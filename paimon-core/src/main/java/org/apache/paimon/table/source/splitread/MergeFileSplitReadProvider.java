@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
 
 import java.util.function.Consumer;
@@ -47,7 +48,7 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
     }
 
     private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
-        final MergeFileSplitRead read = supplier.get().withKeyProjection(new int[0][]);
+        final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
         return SplitRead.convert(read, split -> unwrap(read.createReader(split)));
     }
 

@@ -71,6 +71,11 @@ public class TimestampType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return 8;
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new TimestampType(isNullable, precision);
     }

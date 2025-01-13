@@ -18,14 +18,15 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
-import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
@@ -90,26 +91,9 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     private final Long endInputWatermark;
 
     public CommitterOperator(
+            StreamOperatorParameters<CommitT> parameters,
             boolean streamingCheckpointEnabled,
             boolean forceSingleParallelism,
-            boolean chaining,
-            String initialCommitUser,
-            Committer.Factory<CommitT, GlobalCommitT> committerFactory,
-            CommittableStateManager<GlobalCommitT> committableStateManager) {
-        this(
-                streamingCheckpointEnabled,
-                forceSingleParallelism,
-                chaining,
-                initialCommitUser,
-                committerFactory,
-                committableStateManager,
-                null);
-    }
-
-    public CommitterOperator(
-            boolean streamingCheckpointEnabled,
-            boolean forceSingleParallelism,
-            boolean chaining,
             String initialCommitUser,
             Committer.Factory<CommitT, GlobalCommitT> committerFactory,
             CommittableStateManager<GlobalCommitT> committableStateManager,
@@ -121,7 +105,10 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         this.committerFactory = checkNotNull(committerFactory);
         this.committableStateManager = committableStateManager;
         this.endInputWatermark = endInputWatermark;
-        setChainingStrategy(chaining ? ChainingStrategy.ALWAYS : ChainingStrategy.HEAD);
+        this.setup(
+                parameters.getContainingTask(),
+                parameters.getStreamConfig(),
+                parameters.getOutput());
     }
 
     @Override
@@ -129,7 +116,9 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         super.initializeState(context);
 
         Preconditions.checkArgument(
-                !forceSingleParallelism || getRuntimeContext().getNumberOfParallelSubtasks() == 1,
+                !forceSingleParallelism
+                        || RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext())
+                                == 1,
                 "Committer Operator parallelism in paimon MUST be one.");
 
         this.currentWatermark = Long.MIN_VALUE;

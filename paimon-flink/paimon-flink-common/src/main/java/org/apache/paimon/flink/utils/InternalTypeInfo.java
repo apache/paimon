@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.serialization.SerializerConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 
@@ -73,8 +74,17 @@ public class InternalTypeInfo<T> extends TypeInformation<T> {
         return false;
     }
 
-    @Override
-    public TypeSerializer<T> createSerializer(ExecutionConfig config) {
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public TypeSerializer<T> createSerializer(SerializerConfig config) {
+        return this.createSerializer((ExecutionConfig) null);
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
+    public TypeSerializer<T> createSerializer(ExecutionConfig executionConfig) {
         return serializer.duplicate();
     }
 

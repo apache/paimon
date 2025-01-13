@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link RepairAction}. */
@@ -35,10 +34,8 @@ public class RepairActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String identifier = params.get(IDENTIFIER_KEY);
-        RepairAction action = new RepairAction(warehouse, identifier, catalogConfig);
+        RepairAction action = new RepairAction(identifier, catalogConfigMap(params));
         return Optional.of(action);
     }
 

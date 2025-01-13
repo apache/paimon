@@ -37,8 +37,8 @@ public class IcebergPathFactory {
     private int manifestFileCount;
     private int manifestListCount;
 
-    public IcebergPathFactory(Path root) {
-        this.metadataDirectory = new Path(root, "metadata");
+    public IcebergPathFactory(Path metadataDirectory) {
+        this.metadataDirectory = metadataDirectory;
         this.uuid = UUID.randomUUID().toString();
     }
 
@@ -66,6 +66,10 @@ public class IcebergPathFactory {
 
     public Path toMetadataPath(long snapshotId) {
         return new Path(metadataDirectory(), String.format("v%d.metadata.json", snapshotId));
+    }
+
+    public Path toMetadataPath(String metadataName) {
+        return new Path(metadataDirectory(), metadataName);
     }
 
     public Stream<Path> getAllMetadataPathBefore(FileIO fileIO, long snapshotId)

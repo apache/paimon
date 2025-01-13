@@ -201,4 +201,20 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
         assertThat(result)
                 .contains(Row.of("compact"), Row.of("merge_into"), Row.of("migrate_table"));
     }
+
+    @Test
+    public void testCreateTag() {
+        sql(
+                "CREATE TABLE paimon_t ( "
+                        + "f0 INT, "
+                        + "f1 INT "
+                        + ") WITH ('connector'='paimon', 'file.format' = 'avro' )");
+        sql("INSERT INTO paimon_t VALUES (1, 1), (2, 2)");
+        assertThat(sql("SELECT * FROM paimon_t"))
+                .containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
+        sql("CALL sys.create_tag('test_db.paimon_t', 'tag_1')");
+
+        List<Row> result = sql("SELECT tag_name FROM paimon_t$tags");
+        assertThat(result).contains(Row.of("tag_1"));
+    }
 }

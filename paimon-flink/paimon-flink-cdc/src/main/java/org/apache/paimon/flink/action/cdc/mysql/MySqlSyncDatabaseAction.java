@@ -102,11 +102,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     private final List<Identifier> excludedTables = new ArrayList<>();
 
     public MySqlSyncDatabaseAction(
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> mySqlConfig) {
-        super(warehouse, database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
+            String database, Map<String, String> catalogConfig, Map<String, String> mySqlConfig) {
+        super(database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
         this.mode = DIVIDED;
     }
 
@@ -138,11 +135,13 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         + ", or MySQL database does not exist.");
 
         TableNameConverter tableNameConverter =
-                new TableNameConverter(allowUpperCase, mergeShards, tablePrefix, tableSuffix);
+                new TableNameConverter(
+                        caseSensitive, mergeShards, tablePrefix, tableSuffix, tableMapping);
         for (JdbcTableInfo tableInfo : jdbcTableInfos) {
             Identifier identifier =
                     Identifier.create(
-                            database, tableNameConverter.convert(tableInfo.toPaimonTableName()));
+                            database,
+                            tableNameConverter.convert("", tableInfo.toPaimonTableName()));
             FileStoreTable table;
             Schema fromMySql =
                     CdcActionCommonUtils.buildPaimonSchema(
@@ -153,7 +152,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             tableConfig,
                             tableInfo.schema(),
                             metadataConverters,
-                            allowUpperCase,
+                            caseSensitive,
                             false,
                             true);
             try {
@@ -188,6 +187,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
 
     @Override
     protected MySqlSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         return MySqlActionUtils.buildMySqlSource(
                 cdcSourceConfig,
                 tableList(
@@ -258,5 +258,10 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     @VisibleForTesting
     public List<Identifier> excludedTables() {
         return excludedTables;
+    }
+
+    @Override
+    protected boolean requirePrimaryKeys() {
+        return true;
     }
 }

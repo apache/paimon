@@ -21,14 +21,18 @@ package org.apache.paimon.format;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.RoaringBitmap32;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 
 /** A factory to create {@link RecordReader} for file. */
 public interface FormatReaderFactory {
 
-    RecordReader<InternalRow> createReader(Context context) throws IOException;
+    FileRecordReader<InternalRow> createReader(Context context) throws IOException;
 
     /** Context for creating reader. */
     interface Context {
@@ -38,5 +42,8 @@ public interface FormatReaderFactory {
         Path filePath();
 
         long fileSize();
+
+        @Nullable
+        RoaringBitmap32 selection();
     }
 }

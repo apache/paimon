@@ -19,8 +19,10 @@
 package org.apache.paimon.flink.util;
 
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
@@ -28,19 +30,26 @@ import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.api.internal.TableEnvironmentImpl;
+import org.apache.flink.table.operations.CollectModifyOperation;
+import org.apache.flink.table.operations.Operation;
+import org.apache.flink.table.operations.QueryOperation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 
 /** Similar to Flink's AbstractTestBase but using Junit5. */
@@ -155,6 +164,11 @@ public class AbstractTestBase {
             return this;
         }
 
+        public TableEnvironmentBuilder setString(String key, String value) {
+            conf.setString(key, value);
+            return this;
+        }
+
         public TableEnvironmentBuilder setConf(Configuration conf) {
             this.conf.addAll(conf);
             return this;
@@ -173,9 +187,10 @@ public class AbstractTestBase {
                 if (checkpointIntervalMs != null) {
                     tEnv.getConfig()
                             .getConfiguration()
-                            .set(
-                                    ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL,
-                                    Duration.ofMillis(checkpointIntervalMs));
+                            .setString(
+                                    "execution.checkpointing.interval",
+                                    TimeUtils.formatWithHighestUnit(
+                                            Duration.ofMillis(checkpointIntervalMs)));
                 }
             } else {
                 tEnv =
@@ -301,6 +316,41 @@ public class AbstractTestBase {
             env.configure(conf);
 
             return env;
+        }
+    }
+
+    public static Transformation<?> translate(TableEnvironment env, String statement) {
+        TableEnvironmentImpl envImpl = (TableEnvironmentImpl) env;
+        List<Operation> operations = envImpl.getParser().parse(statement);
+
+        if (operations.size() != 1) {
+            throw new RuntimeException("No operation after parsing for " + statement);
+        }
+
+        Operation operation = operations.get(0);
+        if (operation instanceof QueryOperation) {
+            QueryOperation queryOperation = (QueryOperation) operation;
+            CollectModifyOperation sinkOperation = new CollectModifyOperation(queryOperation);
+            List<Transformation<?>> transformations;
+            try {
+                Method translate =
+                        TableEnvironmentImpl.class.getDeclaredMethod("translate", List.class);
+                translate.setAccessible(true);
+                //noinspection unchecked
+                transformations =
+                        (List<Transformation<?>>)
+                                translate.invoke(envImpl, Collections.singletonList(sinkOperation));
+            } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
+                throw new RuntimeException(e);
+            }
+
+            if (transformations.size() != 1) {
+                throw new RuntimeException("No transformation after translating for " + statement);
+            }
+
+            return transformations.get(0);
+        } else {
+            throw new RuntimeException();
         }
     }
 }

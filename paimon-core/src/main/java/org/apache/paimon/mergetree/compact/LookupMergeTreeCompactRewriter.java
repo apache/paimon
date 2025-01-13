@@ -152,18 +152,15 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     public static class LookupMergeFunctionWrapperFactory<T>
             implements MergeFunctionWrapperFactory<T> {
 
-        private final RecordEqualiser valueEqualiser;
-        private final boolean changelogRowDeduplicate;
+        @Nullable private final RecordEqualiser valueEqualiser;
         private final LookupStrategy lookupStrategy;
         @Nullable private final UserDefinedSeqComparator userDefinedSeqComparator;
 
         public LookupMergeFunctionWrapperFactory(
-                RecordEqualiser valueEqualiser,
-                boolean changelogRowDeduplicate,
+                @Nullable RecordEqualiser valueEqualiser,
                 LookupStrategy lookupStrategy,
                 @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
             this.valueEqualiser = valueEqualiser;
-            this.changelogRowDeduplicate = changelogRowDeduplicate;
             this.lookupStrategy = lookupStrategy;
             this.userDefinedSeqComparator = userDefinedSeqComparator;
         }
@@ -184,7 +181,6 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                         }
                     },
                     valueEqualiser,
-                    changelogRowDeduplicate,
                     lookupStrategy,
                     deletionVectorsMaintainer,
                     userDefinedSeqComparator);

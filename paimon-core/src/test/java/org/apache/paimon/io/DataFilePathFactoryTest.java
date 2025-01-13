@@ -36,7 +36,12 @@ public class DataFilePathFactoryTest {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
                         new Path(tempDir + "/bucket-123"),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -51,8 +56,9 @@ public class DataFilePathFactoryTest {
                                             + "."
                                             + CoreOptions.FILE_FORMAT.defaultValue()));
         }
-        assertThat(pathFactory.toPath("my-data-file-name"))
-                .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
+        assertThat(pathFactory.newPath("my-data-file-name").toString())
+                .startsWith(
+                        new Path(tempDir.toString() + "/bucket-123/my-data-file-name").toString());
     }
 
     @Test
@@ -60,7 +66,12 @@ public class DataFilePathFactoryTest {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
                         new Path(tempDir + "/dt=20211224/bucket-123"),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -75,8 +86,9 @@ public class DataFilePathFactoryTest {
                                             + "."
                                             + CoreOptions.FILE_FORMAT.defaultValue()));
         }
-        assertThat(pathFactory.toPath("my-data-file-name"))
-                .isEqualTo(
-                        new Path(tempDir.toString() + "/dt=20211224/bucket-123/my-data-file-name"));
+        assertThat(pathFactory.newPath("my-data-file-name").toString())
+                .startsWith(
+                        new Path(tempDir.toString() + "/dt=20211224/bucket-123/my-data-file-name")
+                                .toString());
     }
 }

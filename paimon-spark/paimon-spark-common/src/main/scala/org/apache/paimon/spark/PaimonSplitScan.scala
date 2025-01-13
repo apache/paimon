@@ -19,35 +19,50 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.Table
+import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.table.{KnownSplitsTable, Table}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.connector.read.{Batch, Scan}
 import org.apache.spark.sql.types.StructType
 
+class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonBaseScanBuilder(table) {
+  override def build(): Scan = {
+    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPredicates.map(_._2))
+  }
+}
+
 /** For internal use only. */
 case class PaimonSplitScan(
     table: Table,
     dataSplits: Array[DataSplit],
-    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
-  extends Scan
+    requiredSchema: StructType,
+    filters: Seq[Predicate])
+  extends ColumnPruningAndPushDown
   with ScanHelper {
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
-  override def readSchema(): StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
-
   override def toBatch: Batch = {
     PaimonBatch(
       getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
-      table.newReadBuilder,
+      readBuilder,
       metadataColumns)
+  }
+
+  override def description(): String = {
+    val pushedFiltersStr = if (filters.nonEmpty) {
+      ", PushedFilters: [" + filters.mkString(",") + "]"
+    } else {
+      ""
+    }
+    s"PaimonSplitScan: [${table.name}]" + pushedFiltersStr
   }
 }
 
 object PaimonSplitScan {
   def apply(table: Table, dataSplits: Array[DataSplit]): PaimonSplitScan = {
-    new PaimonSplitScan(table, dataSplits)
+    val requiredSchema = SparkTypeUtils.fromPaimonRowType(table.rowType)
+    new PaimonSplitScan(table, dataSplits, requiredSchema, Seq.empty)
   }
 }

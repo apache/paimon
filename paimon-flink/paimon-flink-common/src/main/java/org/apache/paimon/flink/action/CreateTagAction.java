@@ -31,14 +31,13 @@ public class CreateTagAction extends TableActionBase {
     private final @Nullable Duration timeRetained;
 
     public CreateTagAction(
-            String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
             String tagName,
             @Nullable Long snapshotId,
             @Nullable Duration timeRetained) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.tagName = tagName;
         this.timeRetained = timeRetained;
         this.snapshotId = snapshotId;

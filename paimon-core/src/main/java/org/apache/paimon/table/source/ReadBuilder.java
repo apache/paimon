@@ -22,11 +22,11 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
 import java.io.Serializable;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -40,7 +40,7 @@ import java.util.Map;
  * Table table = catalog.getTable(...);
  * ReadBuilder builder = table.newReadBuilder()
  *     .withFilter(...)
- *     .withProjection(...);
+ *     .withReadType(...);
  *
  * // 2. Plan splits in 'Coordinator' (or named 'Driver'):
  * List<Split> splits = builder.newScan().plan().splits();
@@ -75,7 +75,7 @@ public interface ReadBuilder extends Serializable {
     /** A name to identify the table. */
     String tableName();
 
-    /** Returns read row type, projected by {@link #withProjection}. */
+    /** Returns read row type. */
     RowType readType();
 
     /**
@@ -111,24 +111,18 @@ public interface ReadBuilder extends Serializable {
     ReadBuilder withBucketFilter(Filter<Integer> bucketFilter);
 
     /**
-     * Apply projection to the reader.
+     * Push read row type to the reader, support nested row pruning.
      *
-     * <p>NOTE: Nested row projection is currently not supported.
+     * @param readType read row type, can be a pruned type from {@link Table#rowType()}
+     * @since 1.0.0
      */
-    default ReadBuilder withProjection(int[] projection) {
-        if (projection == null) {
-            return this;
-        }
-        int[][] nestedProjection =
-                Arrays.stream(projection).mapToObj(i -> new int[] {i}).toArray(int[][]::new);
-        return withProjection(nestedProjection);
-    }
+    ReadBuilder withReadType(RowType readType);
 
     /**
-     * Push nested projection. For example, {@code [[0, 2, 1], ...]} specifies to include the 2nd
-     * field of the 3rd field of the 1st field in the top-level row.
+     * Apply projection to the reader, if you need nested row pruning, use {@link
+     * #withReadType(RowType)} instead.
      */
-    ReadBuilder withProjection(int[][] projection);
+    ReadBuilder withProjection(int[] projection);
 
     /** the row number pushed down. */
     ReadBuilder withLimit(int limit);
@@ -142,6 +136,9 @@ public interface ReadBuilder extends Serializable {
      * criteria.
      */
     ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
+
+    /** Delete stats in scan plan result. */
+    ReadBuilder dropStats();
 
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();

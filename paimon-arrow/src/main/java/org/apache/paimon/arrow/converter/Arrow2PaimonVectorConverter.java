@@ -63,6 +63,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
@@ -390,7 +391,7 @@ public interface Arrow2PaimonVectorConverter {
                                 return Timestamp.fromMicros(value);
                             } else {
                                 return Timestamp.fromEpochMillis(
-                                        value / 1_000_000, (int) value % 1_000_000);
+                                        value / 1_000_000, (int) (value % 1_000_000));
                             }
                         }
                     };
@@ -417,10 +418,15 @@ public interface Arrow2PaimonVectorConverter {
                                 return Timestamp.fromMicros(value);
                             } else {
                                 return Timestamp.fromEpochMillis(
-                                        value / 1_000_000, (int) value % 1_000_000);
+                                        value / 1_000_000, (int) (value % 1_000_000));
                             }
                         }
                     };
+        }
+
+        @Override
+        public Arrow2PaimonVectorConverter visit(VariantType variantType) {
+            throw new UnsupportedOperationException();
         }
 
         @Override

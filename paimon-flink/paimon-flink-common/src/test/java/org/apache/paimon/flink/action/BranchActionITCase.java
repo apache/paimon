@@ -71,30 +71,30 @@ class BranchActionITCase extends ActionITCaseBase {
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
         TagManager tagManager = new TagManager(table.fileIO(), table.location());
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.create_tag('%s.%s', 'tag2', 2, '5 d')", database, tableName));
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
         BranchManager branchManager = table.branchManager();
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.create_branch('%s.%s', 'branch_name', 'tag2')",
                         database, tableName));
         assertThat(branchManager.branchExists("branch_name")).isTrue();
 
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.create_branch(`table` => '%s.%s', branch => 'branch_name_named_argument', tag => 'tag2')",
                         database, tableName));
         assertThat(branchManager.branchExists("branch_name_named_argument")).isTrue();
 
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.delete_branch('%s.%s', 'branch_name')", database, tableName));
         assertThat(branchManager.branchExists("branch_name")).isFalse();
 
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.delete_branch(`table` => '%s.%s', branch => 'branch_name_named_argument')",
                         database, tableName));
@@ -158,25 +158,25 @@ class BranchActionITCase extends ActionITCaseBase {
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
         BranchManager branchManager = table.branchManager();
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.create_branch('%s.%s', 'empty_branch_name')",
                         database, tableName));
         assertThat(branchManager.branchExists("empty_branch_name")).isTrue();
 
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.create_branch(`table` => '%s.%s', branch => 'empty_branch_named_argument')",
                         database, tableName));
         assertThat(branchManager.branchExists("empty_branch_named_argument")).isTrue();
 
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.delete_branch('%s.%s', 'empty_branch_name')",
                         database, tableName));
         assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
 
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.delete_branch(`table` => '%s.%s', branch => 'empty_branch_named_argument')",
                         database, tableName));
@@ -237,17 +237,15 @@ class BranchActionITCase extends ActionITCaseBase {
 
         // Create tag2
         TagManager tagManager = new TagManager(table.fileIO(), table.location());
-        callProcedure(
-                String.format("CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
+        executeSQL(String.format("CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
         assertThat(tagManager.tagExists("tag2")).isTrue();
         // Create tag3
-        callProcedure(
-                String.format("CALL sys.create_tag('%s.%s', 'tag3', 3)", database, tableName));
+        executeSQL(String.format("CALL sys.create_tag('%s.%s', 'tag3', 3)", database, tableName));
         assertThat(tagManager.tagExists("tag3")).isTrue();
 
         // Create branch_name branch
         BranchManager branchManager = table.branchManager();
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.create_branch('%s.%s', 'branch_name', 'tag2')",
                         database, tableName));
@@ -270,7 +268,7 @@ class BranchActionITCase extends ActionITCaseBase {
         assertThat(branchManager.branchExists("branch_name_action")).isTrue();
 
         // Fast-forward branch branch_name
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.fast_forward('%s.%s', 'branch_name')", database, tableName));
 
@@ -325,7 +323,7 @@ class BranchActionITCase extends ActionITCaseBase {
         Assert.assertEquals(expected, sortedActual);
 
         // Fast-forward branch branch_name again
-        callProcedure(
+        executeSQL(
                 String.format(
                         "CALL sys.fast_forward(`table` => '%s.%s', branch => 'branch_name')",
                         database, tableName));

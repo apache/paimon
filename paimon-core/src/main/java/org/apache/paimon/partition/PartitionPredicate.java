@@ -19,8 +19,10 @@
 package org.apache.paimon.partition;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
@@ -33,6 +35,7 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -40,6 +43,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
+import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -230,5 +234,16 @@ public interface PartitionPredicate {
                 partitions.stream()
                         .map(p -> createPartitionPredicate(p, rowType, defaultPartValue))
                         .toArray(Predicate[]::new));
+    }
+
+    static List<BinaryRow> createBinaryPartitions(
+            List<Map<String, String>> partitions, RowType partitionType, String defaultPartValue) {
+        InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
+        List<BinaryRow> result = new ArrayList<>();
+        for (Map<String, String> spec : partitions) {
+            GenericRow row = convertSpecToInternalRow(spec, partitionType, defaultPartValue);
+            result.add(serializer.toBinaryRow(row).copy());
+        }
+        return result;
     }
 }

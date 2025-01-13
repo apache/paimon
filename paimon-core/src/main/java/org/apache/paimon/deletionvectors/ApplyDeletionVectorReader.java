@@ -20,23 +20,22 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** A {@link RecordReader} which apply {@link DeletionVector} to filter record. */
-public class ApplyDeletionVectorReader implements RecordReader<InternalRow> {
+public class ApplyDeletionVectorReader implements FileRecordReader<InternalRow> {
 
-    private final RecordReader<InternalRow> reader;
+    private final FileRecordReader<InternalRow> reader;
 
     private final DeletionVector deletionVector;
 
     public ApplyDeletionVectorReader(
-            RecordReader<InternalRow> reader, DeletionVector deletionVector) {
+            FileRecordReader<InternalRow> reader, DeletionVector deletionVector) {
         this.reader = reader;
         this.deletionVector = deletionVector;
     }
@@ -51,19 +50,14 @@ public class ApplyDeletionVectorReader implements RecordReader<InternalRow> {
 
     @Nullable
     @Override
-    public RecordIterator<InternalRow> readBatch() throws IOException {
-        RecordIterator<InternalRow> batch = reader.readBatch();
+    public FileRecordIterator<InternalRow> readBatch() throws IOException {
+        FileRecordIterator<InternalRow> batch = reader.readBatch();
 
         if (batch == null) {
             return null;
         }
 
-        checkArgument(
-                batch instanceof FileRecordIterator,
-                "There is a bug, RecordIterator in ApplyDeletionVectorReader must be RecordWithPositionIterator");
-
-        return new ApplyDeletionFileRecordIterator(
-                (FileRecordIterator<InternalRow>) batch, deletionVector);
+        return new ApplyDeletionFileRecordIterator(batch, deletionVector);
     }
 
     @Override

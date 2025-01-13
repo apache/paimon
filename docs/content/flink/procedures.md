@@ -59,12 +59,25 @@ All available procedures are listed below.
    <tr>
       <td>compact</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.compact(
+            `table` => 'table', 
+            partitions => 'partitions', 
+            order_strategy => 'order_strategy', 
+            order_by => 'order_by', 
+            options => 'options', 
+            `where` => 'where', 
+            partition_idle_time => 'partition_idle_time',
+            compact_strategy => 'compact_strategy') <br/><br/>
+         -- Use indexed argument<br/>
          CALL [catalog.]sys.compact('table') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions') <br/><br/> 
+         CALL [catalog.]sys.compact('table', 'order_strategy', 'order_by') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where') <br/><br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where', 'partition_idle_time') <br/><br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where', 'partition_idle_time', 'compact_strategy') <br/><br/>
       </td>
       <td>
          To compact a table. Arguments:
@@ -75,6 +88,7 @@ All available procedures are listed below.
             <li>options(optional): additional dynamic options of the table.</li>
             <li>where(optional): partition predicate(Can't be used together with "partitions"). Note: as where is a keyword,a pair of backticks need to add around like `where`.</li>
             <li>partition_idle_time(optional): this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted. This argument can not be used with order compact.</li>
+            <li>compact_strategy(optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
       </td>
       <td>
          -- use partition filter <br/>
@@ -86,13 +100,24 @@ All available procedures are listed below.
    <tr>
       <td>compact_database</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.compact_database(
+            including_databases => 'includingDatabases', 
+            mode => 'mode', 
+            including_tables => 'includingTables', 
+            excluding_tables => 'excludingTables', 
+            table_options => 'tableOptions', 
+            partition_idle_time => 'partitionIdleTime',
+            compact_strategy => 'compact_strategy') <br/><br/>
+         -- Use indexed argument<br/>
          CALL [catalog.]sys.compact_database() <br/><br/>
          CALL [catalog.]sys.compact_database('includingDatabases') <br/><br/> 
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode') <br/><br/> 
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables') <br/><br/> 
          CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables') <br/><br/>
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions')
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime')
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions') <br/><br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime')<br/><br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime', 'compact_strategy')<br/><br/>
       </td>
       <td>
          To compact databases. Arguments:
@@ -104,14 +129,27 @@ All available procedures are listed below.
             <li>excludingTables: to specify tables that are not compacted. You can use regular expression.</li>
             <li>tableOptions: additional dynamic options of the table.</li>
             <li>partition_idle_time: this is used to do a full compaction for partition which had not received any new data for 'partition_idle_time'. And only these partitions will be compacted.</li>
+            <li>compact_strategy(optional): this determines how to pick files to be merged, the default is determined by the runtime execution mode. 'full' strategy only supports batch mode. All files will be selected for merging. 'minor' strategy: Pick the set of files that need to be merged based on specified conditions.</li>
       </td>
       <td>
-         CALL sys.compact_database('db1|db2', 'combined', 'table_.*', 'ignore', 'sink.parallelism=4')
+         CALL sys.compact_database(
+            including_databases => 'db1|db2', 
+            mode => 'combined', 
+            including_tables => 'table_.*', 
+            excluding_tables => 'ignore', 
+            table_options => 'sink.parallelism=4',
+            compat_strategy => 'full')
       </td>
    </tr>
    <tr>
       <td>create_tag</td>
       <td>
+         -- Use named argument<br/>
+         -- based on the specified snapshot <br/>
+         CALL [catalog.]sys.create_tag(`table` => 'identifier', tag => 'tagName', snapshot_id => snapshotId) <br/>
+         -- based on the latest snapshot <br/>
+         CALL [catalog.]sys.create_tag(`table` => 'identifier', tag => 'tagName') <br/><br/>
+         -- Use indexed argument<br/>
          -- based on the specified snapshot <br/>
          CALL [catalog.]sys.create_tag('identifier', 'tagName', snapshotId) <br/>
          -- based on the latest snapshot <br/>
@@ -125,13 +163,16 @@ All available procedures are listed below.
             <li>time_retained: The maximum time retained for newly created tags.</li>
       </td>
       <td>
-         CALL sys.create_tag('default.T', 'my_tag', 10, '1 d')
+         CALL sys.create_tag(`table` => 'default.T', tag => 'my_tag', snapshot_id => cast(10 as bigint), time_retained => '1 d')
       </td>
    </tr>
     <tr>
       <td>create_tag_from_timestamp</td>
       <td>
          -- Create a tag from the first snapshot whose commit-time greater than the specified timestamp. <br/>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.create_tag_from_timestamp(`table` => 'identifier', tag => 'tagName', timestamp => timestamp, time_retained => time_retained) <br/><br/>
+         -- Use indexed argument<br/>
          CALL [catalog.]sys.create_tag_from_timestamp('identifier', 'tagName', timestamp, time_retained)
       </td>
       <td>
@@ -152,6 +193,9 @@ All available procedures are listed below.
       <td>create_tag_from_watermark</td>
       <td>
          -- Create a tag from the first snapshot whose watermark greater than the specified timestamp.<br/>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.create_tag_from_watermark(`table` => 'identifier', tag => 'tagName', watermark => watermark, time_retained => time_retained) <br/><br/>
+         -- Use indexed argument<br/>
          CALL [catalog.]sys.create_tag_from_watermark('identifier', 'tagName', watermark, time_retained)
       </td>
       <td>
@@ -171,6 +215,9 @@ All available procedures are listed below.
    <tr>
       <td>delete_tag</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.delete_tag(`table` => 'identifier', tag => 'tagName') <br/><br/>
+         -- Use indexed argument<br/>
          CALL [catalog.]sys.delete_tag('identifier', 'tagName')
       </td>
       <td>
@@ -179,20 +226,76 @@ All available procedures are listed below.
             <li>tagName: name of the tag to be deleted. If you specify multiple tags, delimiter is ','.</li>
       </td>
       <td>
-         CALL sys.delete_tag('default.T', 'my_tag')
+         CALL sys.delete_tag(`table` => 'default.T', tag => 'my_tag')
+      </td>
+   </tr>
+   <tr>
+      <td>replace_tag</td>
+      <td>
+         -- Use named argument<br/>
+         -- replace tag with new time retained <br/>
+         CALL [catalog.]sys.replace_tag(`table` => 'identifier', tag => 'tagName', time_retained => 'timeRetained') <br/>
+         -- replace tag with new snapshot id and time retained <br/>
+         CALL [catalog.]sys.replace_tag(`table` => 'identifier', snapshot_id => 'snapshotId') <br/><br/>
+         -- Use indexed argument<br/>
+         -- replace tag with new snapshot id and time retained <br/>
+         CALL [catalog.]sys.replace_tag('identifier', 'tagName', 'snapshotId', 'timeRetained') <br/>
+      </td>
+      <td>
+         To replace an existing tag with new tag info. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the existed tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the tag is based on, it is optional.</li>
+            <li>time_retained: The maximum time retained for the existing tag, it is optional.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.replace_tag('default.T', 'my_tag', 5, '1 d')<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL sys.replace_tag(`table` => 'default.T', tag => 'my_tag', snapshot_id => 5, time_retained => '1 d')<br/><br/>
+      </td>
+   </tr>
+   <tr>
+      <td>expire_tags</td>
+      <td>
+         CALL [catalog.]sys.expire_tags('identifier', 'older_than')
+      </td>
+      <td>
+         To expire tags by time. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>older_than: tagCreateTime before which tags will be removed.</li>
+      </td>
+      <td>
+         CALL sys.expire_tags(table => 'default.T', older_than => '2024-09-06 11:00:00')
       </td>
    </tr>
    <tr>
       <td>merge_into</td>
       <td>
+         -- for Flink 1.18<br/>
          CALL [catalog].sys.merge_into('identifier','targetAlias',<br/>
             'sourceSqls','sourceTable','mergeCondition',<br/>
             'matchedUpsertCondition','matchedUpsertSetting',<br/>
             'notMatchedInsertCondition','notMatchedInsertValues',<br/>
             'matchedDeleteCondition')<br/><br/>
+         -- for Flink 1.19 and later <br/>
+         CALL [catalog].sys.merge_into(<br/>
+            target_table => 'identifier',<br/>
+            target_alias => 'targetAlias',<br/>
+            source_sqls => 'sourceSqls',<br/>
+            source_table => 'sourceTable',<br/>
+            merge_condition => 'mergeCondition',<br/>
+            matched_upsert_condition => 'matchedUpsertCondition',<br/>
+            matched_upsert_setting => 'matchedUpsertSetting',<br/>
+            not_matched_insert_condition => 'notMatchedInsertCondition',<br/>
+            not_matched_insert_values => 'notMatchedInsertValues',<br/>
+            matched_delete_condition => 'matchedDeleteCondition',<br/>
+            not_matched_by_source_upsert_condition => 'notMatchedBySourceUpsertCondition',<br/>
+            not_matched_by_source_upsert_setting => 'notMatchedBySourceUpsertSetting',<br/>
+            not_matched_by_source_delete_condition => 'notMatchedBySourceDeleteCondition') <br/><br/>
       </td>
       <td>
-         To perform "MERGE INTO" syntax. See <a href="/how-to/writing-tables#merging-into-table">merge_into action</a> for
+         To perform "MERGE INTO" syntax. See <a href="/flink/action-jars#merging-into-table">merge_into action</a> for
          details of arguments.
       </td>
       <td>
@@ -201,6 +304,9 @@ All available procedures are listed below.
          -- and if there is no match,<br/> 
          -- insert the order from<br/>
          -- the source table<br/>
+         -- for Flink 1.18<br/>
+         CALL [catalog].sys.merge_into('default.T','','','default.S','T.id=S.order_id','','price=T.price+20','','*','')<br/><br/>
+         -- for Flink 1.19 and later <br/>
          CALL sys.merge_into(<br/>
             target_table => 'default.T',<br/>
             source_table => 'default.S',<br/>
@@ -212,9 +318,14 @@ All available procedures are listed below.
    <tr>
       <td>remove_orphan_files</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.remove_orphan_files(`table` => 'identifier', older_than => 'olderThan', dry_run => 'dryRun', mode => 'mode') <br/><br/>
+         -- Use indexed argument<br/>
          CALL [catalog.]sys.remove_orphan_files('identifier')<br/><br/>
          CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan')<br/><br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')<br/><br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism')<br/><br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism','mode')
       </td>
       <td>
          To remove the orphan data files and metadata files. Arguments:
@@ -223,15 +334,22 @@ All available procedures are listed below.
                deletes orphan files older than 1 day by default. This argument can modify the interval.
             </li>
             <li>dryRun: when true, view only orphan files, don't actually remove files. Default is false.</li>
+            <li>parallelism: The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</li>
+            <li>mode: The mode of remove orphan clean procedure (local or distributed) . By default is distributed.</li>
       </td>
-      <td>CALL remove_orphan_files('default.T', '2023-10-31 12:00:00')<br/><br/>
-          CALL remove_orphan_files('default.*', '2023-10-31 12:00:00')<br/><br/>
-          CALL remove_orphan_files('default.T', '2023-10-31 12:00:00', true)
+      <td>CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
+          CALL remove_orphan_files(`table` => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
+          CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
+          CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5')<br/><br/>
+          CALL remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5', mode => 'local')
       </td>
    </tr>
    <tr>
       <td>reset_consumer</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.reset_consumer(`table` => 'identifier', consumer_id => 'consumerId', next_snapshot_id => 'nextSnapshotId') <br/><br/>
+         -- Use indexed argument<br/>
          -- reset the new next snapshot id in the consumer<br/>
          CALL [catalog.]sys.reset_consumer('identifier', 'consumerId', nextSnapshotId)<br/><br/>
          -- delete consumer<br/>
@@ -243,11 +361,17 @@ All available procedures are listed below.
             <li>consumerId: consumer to be reset or deleted.</li>
             <li>nextSnapshotId (Long): the new next snapshot id of the consumer.</li>
       </td>
-      <td>CALL sys.reset_consumer('default.T', 'myid', 10)</td>
+      <td>CALL sys.reset_consumer(`table` => 'default.T', consumer_id => 'myid', next_snapshot_id => cast(10 as bigint))</td>
    </tr>
    <tr>
       <td>rollback_to</td>
       <td>
+         -- for Flink 1.18<br/>
+         -- rollback to a snapshot<br/>
+         CALL sys.rollback_to('identifier', snapshotId)<br/><br/>
+         -- rollback to a tag<br/>
+         CALL sys.rollback_to('identifier', 'tagName')<br/><br/>
+         -- for Flink 1.19 and later<br/>
          -- rollback to a snapshot<br/>
          CALL sys.rollback_to(`table` => 'identifier', snapshot_id => snapshotId)<br/><br/>
          -- rollback to a tag<br/>
@@ -259,11 +383,89 @@ All available procedures are listed below.
             <li>snapshotId (Long): id of the snapshot that will roll back to.</li>
             <li>tagName: name of the tag that will roll back to.</li>
       </td>
-      <td>CALL sys.rollback_to(`table` => 'default.T', snapshot_id => 10)</td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to('default.T', 10)
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to(`table` => 'default.T', snapshot_id => 10)
+      </td>
+   </tr>
+   <tr>
+      <td>rollback_to_timestamp</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- rollback to the snapshot which earlier or equal than timestamp.<br/>
+         CALL sys.rollback_to_timestamp('identifier', timestamp)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- rollback to the snapshot which earlier or equal than timestamp.<br/>
+         CALL sys.rollback_to_timestamp(`table` => 'default.T', `timestamp` => timestamp)<br/><br/>
+      </td>
+      <td>
+         To rollback to the snapshot which earlier or equal than timestamp. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>timestamp (Long): Roll back to the snapshot which earlier or equal than timestamp.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to_timestamp('default.T', 10)
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to_timestamp(`table` => 'default.T', timestamp => 1730292023000)
+      </td>
+   </tr>
+   <tr>
+          <td>rollback_to_watermark</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- rollback to the snapshot which earlier or equal than watermark.<br/>
+         CALL sys.rollback_to_watermark('identifier', watermark)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- rollback to the snapshot which earlier or equal than watermark.<br/>
+         CALL sys.rollback_to_watermark(`table` => 'default.T', `watermark` => watermark)<br/><br/>
+      </td>
+      <td>
+         To rollback to the snapshot which earlier or equal than watermark. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>watermark (Long): Roll back to the snapshot which earlier or equal than watermark.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to_watermark('default.T', 1730292023000)
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to_watermark(`table` => 'default.T', watermark => 1730292023000)
+      </td>
+   </tr>
+   <tr>
+          <td>purge_files</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- clear table with purge files directly.<br/>
+         CALL sys.purge_files('identifier')<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- clear table with purge files directly.<br/>
+         CALL sys.purge_files(`table` => 'default.T')<br/><br/>
+      </td>
+      <td>
+         To clear table with purge files directly. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.purge_files('default.T')
+         -- for Flink 1.19 and later<br/>
+         CALL sys.purge_files(`table` => 'default.T')
+      </td>
    </tr>
    <tr>
       <td>expire_snapshots</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.expire_snapshots(<br/>
+            `table` => 'identifier', <br/>
+            retain_max => 'retain_max', <br/>
+            retain_min => 'retain_min', <br/>
+            older_than => 'older_than', <br/>
+            max_deletes => 'max_deletes') <br/><br/>
+         -- Use indexed argument<br/>
          -- for Flink 1.18<br/>
          CALL sys.expire_snapshots(table, retain_max)<br/><br/>
          -- for Flink 1.19 and later<br/>
@@ -326,11 +528,14 @@ All available procedures are listed below.
             <li>databaseName : the target database name.</li>
             <li>tableName: the target table identifier.</li>
       </td>
-      <td>CALL sys.repair('test_db.T')</td>
+      <td>CALL sys.repair(`table` => 'test_db.T')</td>
    </tr>
     <tr>
       <td>rewrite_file_index</td>
       <td>
+         -- Use named argument<br/>
+         CALL sys.rewrite_file_index(&lt`table` => identifier&gt [, &ltpartitions => partitions&gt])<br/><br/>
+         -- Use indexed argument<br/>
          CALL sys.rewrite_file_index(&ltidentifier&gt [, &ltpartitions&gt])<br/><br/>
       </td>
       <td>
@@ -340,13 +545,16 @@ All available procedures are listed below.
       </td>
       <td>
          -- rewrite the file index for the whole table<br/>
-         CALL sys.rewrite_file_index('test_db.T')<br/><br/>
+         CALL sys.rewrite_file_index(`table` => 'test_db.T')<br/><br/>
          -- repair all tables in a specific partition<br/>
-         CALL sys.rewrite_file_index('test_db.T', 'pt=a')<br/><br/>
+         CALL sys.rewrite_file_index(`table` => 'test_db.T', partitions => 'pt=a')<br/><br/>
      </td>
    <tr>
       <td>create_branch</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.create_branch(`table` => 'identifier', branch => 'branchName', tag => 'tagName')<br/><br/>
+         -- Use indexed argument<br/>
          -- based on the specified tag <br/>
          CALL [catalog.]sys.create_branch('identifier', 'branchName', 'tagName')
          -- create empty branch <br/>
@@ -359,13 +567,16 @@ All available procedures are listed below.
             <li>tagName: name of the tag which the new branch is based on.</li>
       </td>
       <td>
-         CALL sys.create_branch('default.T', 'branch1', 'tag1')<br/><br/>
-         CALL sys.create_branch('default.T', 'branch1')<br/><br/>
+         CALL sys.create_branch(`table` => 'default.T', branch => 'branch1', tag => 'tag1')<br/><br/>
+         CALL sys.create_branch(`table` => 'default.T', branch => 'branch1')<br/><br/>
       </td>
    </tr>
    <tr>
       <td>delete_branch</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.delete_branch(`table` => 'identifier', branch => 'branchName')<br/><br/>
+         -- Use indexed argument<br/>
          CALL [catalog.]sys.delete_branch('identifier', 'branchName')
       </td>
       <td>
@@ -374,12 +585,15 @@ All available procedures are listed below.
             <li>branchName: name of the branch to be deleted. If you specify multiple branches, delimiter is ','.</li>
       </td>
       <td>
-         CALL sys.delete_branch('default.T', 'branch1')
+         CALL sys.delete_branch(`table` => 'default.T', branch => 'branch1')
       </td>
    </tr>
    <tr>
       <td>fast_forward</td>
       <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.fast_forward(`table` => 'identifier', branch => 'branchName')<br/><br/>
+         -- Use indexed argument<br/>
          CALL [catalog.]sys.fast_forward('identifier', 'branchName')
       </td>
       <td>
@@ -388,7 +602,7 @@ All available procedures are listed below.
             <li>branchName: name of the branch to be merged.</li>
       </td>
       <td>
-         CALL sys.fast_forward('default.T', 'branch1')
+         CALL sys.fast_forward(`table` => 'default.T', branch => 'branch1')
       </td>
    </tr>
    </tbody>

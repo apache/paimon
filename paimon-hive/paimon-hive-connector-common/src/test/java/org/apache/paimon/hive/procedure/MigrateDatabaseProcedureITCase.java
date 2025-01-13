@@ -130,7 +130,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
             tEnv.executeSql(
                             "CALL sys.migrate_database(connector => 'hive', source_database => 'my_database', options => 'file.format="
                                     + format
-                                    + "')")
+                                    + "', parallelism => 6)")
                     .await();
         } else {
             tEnv.executeSql(
@@ -251,13 +251,10 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
         catalogConf.put("uri", "thrift://localhost:" + PORT);
+        catalogConf.put(
+                "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         MigrateDatabaseAction migrateDatabaseAction =
-                new MigrateDatabaseAction(
-                        "hive",
-                        System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
-                        "my_database",
-                        catalogConf,
-                        "");
+                new MigrateDatabaseAction("hive", "my_database", catalogConf, "", 6);
         migrateDatabaseAction.run();
 
         tEnv.executeSql(

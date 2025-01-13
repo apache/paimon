@@ -1,6 +1,6 @@
 ---
 title: "SQL Lookup"
-weight: 5
+weight: 6
 type: docs
 aliases:
 - /flink/sql-lookup.html

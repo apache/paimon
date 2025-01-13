@@ -34,30 +34,26 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.format.parquet.ParquetFileFormat.getParquetConfiguration;
-import static org.apache.paimon.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ParquetFileFormatFactory}. */
 public class ParquetFileFormatTest {
-    private static final ConfigOption<String> KEY1 =
-            ConfigOptions.key("k1").stringType().defaultValue("absent");
 
     @Test
-    public void testAbsent() {
-        Options options = new Options();
-        ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(options, 1024, 1024));
-        assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("absent");
-    }
+    public void testConfiguration() {
+        ConfigOption<String> parquetKey =
+                ConfigOptions.key("parquet.mykey").stringType().noDefaultValue();
+        ConfigOption<String> otherKey = ConfigOptions.key("other").stringType().noDefaultValue();
 
-    @Test
-    public void testPresent() {
         Options options = new Options();
-        options.setString(KEY1.key(), "v1");
-        ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(options, 1024, 1024));
-        assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("v1");
+        options.set(parquetKey, "hello");
+        options.set(otherKey, "test");
+        FormatContext context = new FormatContext(options, 1024, 1024, 2, null);
+
+        Options actual = new ParquetFileFormat(context).getOptions();
+        assertThat(actual.get(parquetKey)).isEqualTo("hello");
+        assertThat(actual.contains(otherKey)).isFalse();
+        assertThat(actual.get("parquet.compression.codec.zstd.level")).isEqualTo("2");
     }
 
     @Test
@@ -68,9 +64,7 @@ public class ParquetFileFormatTest {
         RowDataParquetBuilder builder =
                 new RowDataParquetBuilder(
                         new RowType(new ArrayList<>()),
-                        getParquetConfiguration(
-                                new FormatContext(
-                                        conf.removePrefix(IDENTIFIER + "."), 1024, 1024)));
+                        new ParquetFileFormat(new FormatContext(conf, 1024, 1024)).getOptions());
         assertThat(builder.getCompression(null)).isEqualTo(lz4);
         assertThat(builder.getCompression("SNAPPY")).isEqualTo(lz4);
     }

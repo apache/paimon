@@ -114,18 +114,18 @@ public class TestTable {
                 }
                 events.add(new TestCdcEvent(tableName, currentDataFieldList(fieldNames, isBigInt)));
             } else {
-                Map<String, String> fields = new HashMap<>();
+                Map<String, String> data = new HashMap<>();
                 int key = random.nextInt(numKeys);
-                fields.put("k", String.valueOf(key));
+                data.put("k", String.valueOf(key));
                 int pt = key % numPartitions;
-                fields.put("pt", String.valueOf(pt));
+                data.put("pt", String.valueOf(pt));
 
                 for (int j = 0; j < fieldNames.size(); j++) {
                     String fieldName = fieldNames.get(j);
                     if (isBigInt.get(j)) {
-                        fields.put(fieldName, String.valueOf(random.nextLong()));
+                        data.put(fieldName, String.valueOf(random.nextLong()));
                     } else {
-                        fields.put(fieldName, String.valueOf(random.nextInt()));
+                        data.put(fieldName, String.valueOf(random.nextInt()));
                     }
                 }
 
@@ -140,8 +140,8 @@ public class TestTable {
                         shouldInsert = random.nextInt(5) > 0;
                     }
                     if (shouldInsert) {
-                        records.add(new CdcRecord(RowKind.INSERT, fields));
-                        expected.put(key, fields);
+                        records.add(new CdcRecord(RowKind.INSERT, data));
+                        expected.put(key, data);
                     }
                 }
                 // Generate test data for append table
@@ -149,8 +149,8 @@ public class TestTable {
                     if (expected.containsKey(key)) {
                         records.add(new CdcRecord(RowKind.DELETE, expected.get(key)));
                     } else {
-                        records.add(new CdcRecord(RowKind.INSERT, fields));
-                        expected.put(key, fields);
+                        records.add(new CdcRecord(RowKind.INSERT, data));
+                        expected.put(key, data);
                     }
                 }
                 events.add(new TestCdcEvent(tableName, records, Objects.hash(tableName, key)));

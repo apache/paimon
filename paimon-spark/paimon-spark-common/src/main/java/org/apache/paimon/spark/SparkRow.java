@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -33,9 +34,8 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 
 import java.io.Serializable;
 import java.sql.Date;
@@ -48,7 +48,6 @@ import java.util.List;
 import java.util.Map;
 
 import scala.collection.JavaConverters;
-import scala.collection.mutable.WrappedArray;
 
 /** A {@link InternalRow} wraps spark {@link Row}. */
 public class SparkRow implements InternalRow, Serializable {
@@ -144,6 +143,11 @@ public class SparkRow implements InternalRow, Serializable {
     @Override
     public byte[] getBinary(int i) {
         return row.getAs(i);
+    }
+
+    @Override
+    public Variant getVariant(int i) {
+        return SparkShimLoader.getSparkShim().toPaimonVariant(row.getAs(i));
     }
 
     @Override
@@ -304,27 +308,28 @@ public class SparkRow implements InternalRow, Serializable {
         }
 
         @Override
+        public Variant getVariant(int i) {
+            return SparkShimLoader.getSparkShim().toPaimonVariant(getAs(i));
+        }
+
+        @Override
         public InternalArray getArray(int i) {
-            Object array = getAs(i);
-            if (array instanceof WrappedArray) {
-                List<Object> result = Lists.newArrayList();
-                ((WrappedArray) array).iterator().foreach(x -> result.add(x));
-                return new PaimonArray(((ArrayType) elementType).getElementType(), result);
-            }
-            return new PaimonArray(
-                    ((ArrayType) elementType).getElementType(), (List<Object>) array);
+            Object o = getAs(i);
+            List<Object> array =
+                    o instanceof scala.collection.Seq
+                            ? JavaConverters.seqAsJavaList((scala.collection.Seq<Object>) o)
+                            : (List<Object>) o;
+            return new PaimonArray(((ArrayType) elementType).getElementType(), array);
         }
 
         @Override
         public InternalMap getMap(int i) {
-            Object map = getAs(i);
-            if (map instanceof scala.collection.immutable.Map) {
-                return toPaimonMap(
-                        (MapType) elementType,
-                        JavaConverters.mapAsJavaMap(
-                                (scala.collection.immutable.Map<Object, Object>) map));
-            }
-            return toPaimonMap((MapType) elementType, (Map<Object, Object>) map);
+            Object o = getAs(i);
+            Map<Object, Object> map =
+                    o instanceof scala.collection.Map
+                            ? JavaConverters.mapAsJavaMap((scala.collection.Map<Object, Object>) o)
+                            : (Map<Object, Object>) o;
+            return toPaimonMap((MapType) elementType, map);
         }
 
         @Override

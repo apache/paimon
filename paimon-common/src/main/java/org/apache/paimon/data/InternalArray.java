@@ -130,6 +130,9 @@ public interface InternalArray extends DataGetters {
                 final int rowFieldCount = getFieldCount(elementType);
                 elementGetter = (array, pos) -> array.getRow(pos, rowFieldCount);
                 break;
+            case VARIANT:
+                elementGetter = InternalArray::getVariant;
+                break;
             default:
                 String msg =
                         String.format(

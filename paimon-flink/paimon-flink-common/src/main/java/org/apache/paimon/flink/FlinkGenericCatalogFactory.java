@@ -89,6 +89,7 @@ public class FlinkGenericCatalogFactory implements CatalogFactory {
             ClassLoader cl, Map<String, String> optionMap, String name, Catalog flinkCatalog) {
         Options options = Options.fromMap(optionMap);
         options.set(CatalogOptions.METASTORE, "hive");
+        options.set(CatalogOptions.FORMAT_TABLE_ENABLED, false);
         FlinkCatalog paimon =
                 new FlinkCatalog(
                         org.apache.paimon.catalog.CatalogFactory.createCatalog(

@@ -72,7 +72,6 @@ public class KafkaDebeziumAvroSyncTableActionITCase extends KafkaActionITCaseBas
 
     @BeforeEach
     public void setup() {
-        super.setup();
         // Init avro serializer for kafka key/value
         Map<String, Object> props = new HashMap<>();
         props.put(SCHEMA_REGISTRY_URL_CONFIG, getSchemaRegistryUrl());

@@ -23,13 +23,13 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.PrimaryKeyIcebergCommitCallback;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
@@ -72,8 +72,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     public KeyValueFileStore store() {
         if (lazyStore == null) {
             RowType rowType = tableSchema.logicalRowType();
-            Options conf = Options.fromMap(tableSchema.options());
-            CoreOptions options = new CoreOptions(conf);
+            CoreOptions options = CoreOptions.fromMap(tableSchema.options());
             KeyValueFieldsExtractor extractor =
                     PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
 
@@ -185,7 +184,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
         List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
         CoreOptions options = coreOptions();
 
-        if (options.metadataIcebergCompatible()) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
             callbacks.add(new PrimaryKeyIcebergCommitCallback(this, commitUser));
         }
 

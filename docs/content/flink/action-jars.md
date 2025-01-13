@@ -50,7 +50,7 @@ Paimon supports "MERGE INTO" via submitting the 'merge_into' job through `flink 
 
 {{< hint info >}}
 Important table properties setting:
-1. Only [primary key table]({{< ref "primary-key-table" >}}) supports this feature.
+1. Only [primary key table]({{< ref "primary-key-table/overview" >}}) supports this feature.
 2. The action won't produce UPDATE_BEFORE, so it's not recommended to set 'changelog-producer' = 'input'.
    {{< /hint >}}
 
@@ -260,7 +260,7 @@ For more information of 'delete', see
 
 ## Drop Partition
 
-Run the following command to submit a drop_partition job for the table.
+Run the following command to submit a 'drop_partition' job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -276,7 +276,7 @@ partition_spec:
 key1=value1,key2=value2...
 ```
 
-For more information of drop_partition, see
+For more information of 'drop_partition', see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -286,7 +286,7 @@ For more information of drop_partition, see
 
 ## Rewrite File Index
 
-Run the following command to submit a rewrite_file_index job for the table.
+Run the following command to submit a 'rewrite_file_index' job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -297,7 +297,7 @@ Run the following command to submit a rewrite_file_index job for the table.
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
-For more information of rewrite_file_index, see
+For more information of 'rewrite_file_index', see
 
 ```bash
 <FLINK_HOME>/bin/flink run \

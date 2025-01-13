@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.lookup.LookupStrategy;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
@@ -43,6 +44,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
+import java.util.List;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
@@ -108,6 +111,12 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         } else {
             return nextPlan();
         }
+    }
+
+    @Override
+    public List<PartitionEntry> listPartitionEntries() {
+        throw new UnsupportedOperationException(
+                "List Partition Entries is not supported in Stream Scan.");
     }
 
     private void initScanner() {
@@ -185,16 +194,16 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 return SnapshotNotExistPlan.INSTANCE;
             }
 
-            // first check changes of overwrite
-            if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
-                    && supportStreamingReadOverwrite) {
-                LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
-                SnapshotReader.Plan overwritePlan =
-                        followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader);
-                currentWatermark = overwritePlan.watermark();
-                nextSnapshotId++;
-                return overwritePlan;
-            } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
+            // first try to get overwrite changes
+            if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
+                SnapshotReader.Plan overwritePlan = handleOverwriteSnapshot(snapshot);
+                if (overwritePlan != null) {
+                    nextSnapshotId++;
+                    return overwritePlan;
+                }
+            }
+
+            if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
                 SnapshotReader.Plan plan = followUpScanner.scan(snapshot, snapshotReader);
                 currentWatermark = plan.watermark();
@@ -219,7 +228,19 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         return false;
     }
 
-    private FollowUpScanner createFollowUpScanner() {
+    @Nullable
+    protected SnapshotReader.Plan handleOverwriteSnapshot(Snapshot snapshot) {
+        if (supportStreamingReadOverwrite) {
+            LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
+            SnapshotReader.Plan overwritePlan =
+                    followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader);
+            currentWatermark = overwritePlan.watermark();
+            return overwritePlan;
+        }
+        return null;
+    }
+
+    protected FollowUpScanner createFollowUpScanner() {
         CoreOptions.StreamScanMode type =
                 options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         switch (type) {
@@ -249,7 +270,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         return followUpScanner;
     }
 
-    private BoundedChecker createBoundedChecker() {
+    protected BoundedChecker createBoundedChecker() {
         Long boundedWatermark = options.scanBoundedWatermark();
         return boundedWatermark != null
                 ? BoundedChecker.watermark(boundedWatermark)

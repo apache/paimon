@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyRecordReader;
@@ -47,7 +46,6 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -65,27 +63,18 @@ public class StatisticTable implements ReadonlyTable {
 
     public static final String STATISTICS = "statistics";
 
-    public static final RowType TABLE_TYPE =
+    private static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
                             new DataField(0, "snapshot_id", new BigIntType(false)),
                             new DataField(1, "schema_id", new BigIntType(false)),
                             new DataField(2, "mergedRecordCount", new BigIntType(true)),
                             new DataField(3, "mergedRecordSize", new BigIntType(true)),
-                            new DataField(2, "colstat", SerializationUtils.newStringType(true))));
-
-    private final FileIO fileIO;
-    private final Path location;
+                            new DataField(4, "colstat", SerializationUtils.newStringType(true))));
 
     private final FileStoreTable dataTable;
 
     public StatisticTable(FileStoreTable dataTable) {
-        this(dataTable.fileIO(), dataTable.location(), dataTable);
-    }
-
-    public StatisticTable(FileIO fileIO, Path location, FileStoreTable dataTable) {
-        this.fileIO = fileIO;
-        this.location = location;
         this.dataTable = dataTable;
     }
 
@@ -111,12 +100,12 @@ public class StatisticTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new StatisticRead(fileIO, dataTable);
+        return new StatisticRead(dataTable);
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new StatisticTable(fileIO, location, dataTable.copy(dynamicOptions));
+        return new StatisticTable(dataTable.copy(dynamicOptions));
     }
 
     private class StatisticScan extends ReadOnceTableScan {
@@ -129,7 +118,9 @@ public class StatisticTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new StatisticTable.StatisticSplit(location));
+            return () ->
+                    Collections.singletonList(
+                            new StatisticTable.StatisticSplit(dataTable.location()));
         }
     }
 
@@ -163,13 +154,11 @@ public class StatisticTable implements ReadonlyTable {
 
     private static class StatisticRead implements InnerTableRead {
 
-        private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         private final FileStoreTable dataTable;
 
-        public StatisticRead(FileIO fileIO, FileStoreTable dataTable) {
-            this.fileIO = fileIO;
+        public StatisticRead(FileStoreTable dataTable) {
             this.dataTable = dataTable;
         }
 
@@ -180,8 +169,8 @@ public class StatisticTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -191,7 +180,7 @@ public class StatisticTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof StatisticTable.StatisticSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
@@ -202,10 +191,13 @@ public class StatisticTable implements ReadonlyTable {
                 Iterator<Statistics> statisticsIterator =
                         Collections.singletonList(statistics).iterator();
                 Iterator<InternalRow> rows = Iterators.transform(statisticsIterator, this::toRow);
-                if (projection != null) {
+                if (readType != null) {
                     rows =
                             Iterators.transform(
-                                    rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                    rows,
+                                    row ->
+                                            ProjectedRow.from(readType, StatisticTable.TABLE_TYPE)
+                                                    .replaceRow(row));
                 }
                 return new IteratorRecordReader<>(rows);
             } else {

@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.position;
 
 /** To delegate repetition level and definition level. */
 public class LevelDelegation {
+
     private final int[] repetitionLevel;
     private final int[] definitionLevel;
 

@@ -35,4 +35,8 @@ class SparkWrite(val table: FileStoreTable, saveMode: SaveMode, options: Options
         WriteIntoPaimonTable(table, saveMode, data, options).run(data.sparkSession)
       }
   }
+
+  override def toString: String = {
+    s"table: ${table.fullName()}, saveMode: $saveMode, options: ${options.toMap}"
+  }
 }

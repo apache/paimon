@@ -24,6 +24,7 @@ import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -914,5 +915,49 @@ public class BinaryRowTest {
 
         assertThat(nestedBinaryRow.getRow(1, 2)).isEqualTo(innerBinaryRow);
         assertThat(innerBinaryRow).isEqualTo(nestedBinaryRow.getRow(1, 2));
+    }
+
+    @Test
+    public void testVariant() {
+        BinaryRow row = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+
+        writer.writeVariant(0, GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}"));
+        writer.setNullAt(1);
+        writer.complete();
+
+        assertThat(row.getVariant(0).toJson()).isEqualTo("{\"age\":27,\"city\":\"Beijing\"}");
+        assertThat(row.isNullAt(1)).isTrue();
+    }
+
+    @Test
+    public void testVariantArray() {
+        // 1. array test
+        BinaryArray array = new BinaryArray();
+        BinaryArrayWriter arrayWriter =
+                new BinaryArrayWriter(
+                        array, 3, BinaryArray.calculateFixLengthPartSize(DataTypes.VARIANT()));
+
+        arrayWriter.writeVariant(0, GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}"));
+        arrayWriter.setNullAt(1);
+        arrayWriter.writeVariant(2, GenericVariant.fromJson("{\"age\":27,\"city\":\"Hangzhou\"}"));
+        arrayWriter.complete();
+
+        assertThat(array.getVariant(0).toJson()).isEqualTo("{\"age\":27,\"city\":\"Beijing\"}");
+        assertThat(array.isNullAt(1)).isTrue();
+        assertThat(array.getVariant(2).toJson()).isEqualTo("{\"age\":27,\"city\":\"Hangzhou\"}");
+
+        // 2. test write array to binary row
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter rowWriter = new BinaryRowWriter(row);
+        InternalArraySerializer serializer = new InternalArraySerializer(DataTypes.VARIANT());
+        rowWriter.writeArray(0, array, serializer);
+        rowWriter.complete();
+
+        BinaryArray array2 = (BinaryArray) row.getArray(0);
+        assertThat(array2).isEqualTo(array);
+        assertThat(array2.getVariant(0).toJson()).isEqualTo("{\"age\":27,\"city\":\"Beijing\"}");
+        assertThat(array2.isNullAt(1)).isTrue();
+        assertThat(array2.getVariant(2).toJson()).isEqualTo("{\"age\":27,\"city\":\"Hangzhou\"}");
     }
 }

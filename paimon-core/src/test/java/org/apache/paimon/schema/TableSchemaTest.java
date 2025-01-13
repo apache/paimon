@@ -31,6 +31,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
@@ -44,14 +46,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class TableSchemaTest {
 
     @Test
+    public void testTableSchemaCopy() {
+        Map<String, String> options = new HashMap<>();
+        options.put("my-key", "my-value");
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        singletonList(new DataField(0, "f0", DataTypes.INT())),
+                        10,
+                        emptyList(),
+                        emptyList(),
+                        options,
+                        "");
+        schema = schema.copy(schema.options());
+        assertThat(schema.options()).isSameAs(options);
+    }
+
+    @Test
     public void testCrossPartition() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", DataTypes.INT()),
                         new DataField(2, "f2", DataTypes.INT()));
-        List<String> partitionKeys = Collections.singletonList("f0");
-        List<String> primaryKeys = Collections.singletonList("f1");
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = singletonList("f1");
         Map<String, String> options = new HashMap<>();
 
         TableSchema schema =
@@ -130,8 +149,8 @@ public class TableSchemaTest {
                         new DataField(1, "f1", DataTypes.INT()),
                         new DataField(2, "f2", DataTypes.INT()),
                         new DataField(3, "f3", DataTypes.INT()));
-        List<String> partitionKeys = Collections.singletonList("f0");
-        List<String> primaryKeys = Collections.singletonList("f1");
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = singletonList("f1");
         Map<String, String> options = new HashMap<>();
 
         TableSchema schema =
@@ -154,7 +173,7 @@ public class TableSchemaTest {
         options.put(MERGE_ENGINE.key(), CoreOptions.MergeEngine.FIRST_ROW.toString());
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining(
-                        "Do not support use sequence field on FIRST_MERGE merge engine.");
+                        "Do not support use sequence field on FIRST_ROW merge engine.");
 
         options.put(FIELDS_PREFIX + ".f3." + AGG_FUNCTION, "max");
         assertThatThrownBy(() -> validateTableSchema(schema))
@@ -168,7 +187,7 @@ public class TableSchemaTest {
                         new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", DataTypes.INT()),
                         new DataField(2, "f2", DataTypes.INT()));
-        List<String> primaryKeys = Collections.singletonList("f0");
+        List<String> primaryKeys = singletonList("f0");
         Map<String, String> options = new HashMap<>();
         options.put(MERGE_ENGINE.key(), CoreOptions.MergeEngine.AGGREGATE.toString());
         options.put(FIELDS_PREFIX + ".f1." + AGG_FUNCTION, "max");
@@ -186,8 +205,8 @@ public class TableSchemaTest {
                         new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", DataTypes.INT()),
                         new DataField(2, "f2", DataTypes.INT()));
-        List<String> partitionKeys = Collections.singletonList("f0");
-        List<String> primaryKeys = Collections.singletonList("f1");
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = singletonList("f1");
         Map<String, String> options = new HashMap<>();
 
         TableSchema schema =
@@ -200,7 +219,6 @@ public class TableSchemaTest {
 
     static RowType newRowType(boolean isNullable, int fieldId) {
         return new RowType(
-                isNullable,
-                Collections.singletonList(new DataField(fieldId, "nestedField", DataTypes.INT())));
+                isNullable, singletonList(new DataField(fieldId, "nestedField", DataTypes.INT())));
     }
 }

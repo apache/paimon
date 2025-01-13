@@ -30,11 +30,20 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
+import javax.annotation.Nullable;
+
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
 import static org.apache.paimon.flink.FlinkCatalogFactory.IDENTIFIER;
 
 /** A paimon {@link DynamicTableFactory} to create source and sink. */
 public class FlinkTableFactory extends AbstractFlinkTableFactory {
+    public FlinkTableFactory() {
+        this(null);
+    }
+
+    public FlinkTableFactory(@Nullable FlinkCatalog flinkCatalog) {
+        super(flinkCatalog);
+    }
 
     @Override
     public String factoryIdentifier() {

@@ -44,12 +44,11 @@ public class DeleteAction extends TableActionBase {
     private final String filter;
 
     public DeleteAction(
-            String warehouse,
             String databaseName,
             String tableName,
             String filter,
             Map<String, String> catalogConfig) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.filter = filter;
     }
 

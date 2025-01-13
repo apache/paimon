@@ -188,7 +188,7 @@ public class BitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> {
                         readInternalMeta(fieldRef.type());
                         return getInListResultBitmap(literals);
@@ -197,7 +197,7 @@ public class BitmapFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
-            return new BitmapIndexResultLazy(
+            return new BitmapIndexResult(
                     () -> {
                         readInternalMeta(fieldRef.type());
                         RoaringBitmap32 bitmap = getInListResultBitmap(literals);

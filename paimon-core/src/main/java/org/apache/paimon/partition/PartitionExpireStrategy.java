@@ -26,6 +26,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,11 +43,19 @@ public abstract class PartitionExpireStrategy {
     }
 
     public Map<String, String> toPartitionString(Object[] array) {
-        Map<String, String> map = new LinkedHashMap<>();
+        Map<String, String> map = new LinkedHashMap<>(partitionKeys.size());
         for (int i = 0; i < partitionKeys.size(); i++) {
             map.put(partitionKeys.get(i), array[i].toString());
         }
         return map;
+    }
+
+    public List<String> toPartitionValue(Object[] array) {
+        List<String> list = new ArrayList<>(partitionKeys.size());
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            list.add(array[i].toString());
+        }
+        return list;
     }
 
     public Object[] convertPartition(BinaryRow partition) {

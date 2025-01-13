@@ -39,6 +39,10 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
+    default InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+        return this;
+    }
+
     default InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
         return this;
     }
@@ -52,6 +56,11 @@ public interface InnerTableScan extends TableScan {
     }
 
     default InnerTableScan withMetricsRegistry(MetricRegistry metricRegistry) {
+        // do nothing, should implement this if need
+        return this;
+    }
+
+    default InnerTableScan dropStats() {
         // do nothing, should implement this if need
         return this;
     }

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.kafka;
 import org.apache.paimon.flink.sink.LogSinkFunction;
 import org.apache.paimon.table.sink.SinkRecord;
 
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaException;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
@@ -65,7 +66,16 @@ public class KafkaSinkFunction extends FlinkKafkaProducer<SinkRecord> implements
         this.writeCallback = writeCallback;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public void open(OpenContext openContext) throws Exception {
+        open(new Configuration());
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public void open(Configuration configuration) throws Exception {
         super.open(configuration);
         Callback baseCallback = requireNonNull(callback);

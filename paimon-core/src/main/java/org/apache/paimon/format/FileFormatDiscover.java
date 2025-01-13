@@ -39,7 +39,7 @@ public interface FileFormatDiscover {
             }
 
             private FileFormat create(String identifier) {
-                return FileFormat.getFileFormat(options.toConfiguration(), identifier);
+                return FileFormat.fromIdentifier(identifier, options.toConfiguration());
             }
         };
     }

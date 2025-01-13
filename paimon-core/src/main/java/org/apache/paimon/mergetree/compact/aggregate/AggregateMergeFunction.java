@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
@@ -142,7 +143,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
                 boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
                 fieldAggregators[i] =
-                        FieldAggregator.createFieldAggregator(
+                        FieldAggregatorFactory.create(
                                 fieldType,
                                 strAggFunc,
                                 ignoreRetract,

@@ -19,6 +19,7 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.variant.Variant;
 
 /**
  * Getters to get data.
@@ -73,6 +74,9 @@ public interface DataGetters {
 
     /** Returns the binary value at the given position. */
     byte[] getBinary(int pos);
+
+    /** Returns the variant value at the given position. */
+    Variant getVariant(int pos);
 
     /** Returns the array value at the given position. */
     InternalArray getArray(int pos);

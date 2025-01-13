@@ -38,15 +38,17 @@ import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 @ExtendWith(ParameterizedTestExtension.class)
 public class LookupWriterBenchmark extends AbstractLookupBenchmark {
     private final int recordCount;
+    private final boolean bloomFilterEnabled;
     @TempDir Path tempDir;
 
-    public LookupWriterBenchmark(int recordCount) {
-        this.recordCount = recordCount;
+    public LookupWriterBenchmark(List<Object> countBloomList) {
+        this.recordCount = (Integer) countBloomList.get(0);
+        this.bloomFilterEnabled = (Boolean) countBloomList.get(1);
     }
 
-    @Parameters(name = "record-count-{0}")
-    public static List<Integer> getVarSeg() {
-        return RECORD_COUNT_LIST;
+    @Parameters(name = "countBloom-{0}")
+    public static List<List<Object>> getVarSeg() {
+        return getCountBloomList();
     }
 
     @TestTemplate
@@ -78,7 +80,13 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
                         5,
                         () -> {
                             try {
-                                writeData(tempDir, options, inputs, valueLength, sameValue);
+                                writeData(
+                                        tempDir,
+                                        options,
+                                        inputs,
+                                        valueLength,
+                                        sameValue,
+                                        bloomFilterEnabled);
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }

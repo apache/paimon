@@ -21,7 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.utils.Preconditions;
@@ -36,6 +36,8 @@ import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
+
+import static org.apache.paimon.table.ExpireSnapshotsImpl.findSkippingTags;
 
 /** Cleanup the changelog in changelog directory. */
 public class ExpireChangelogImpl implements ExpireSnapshots {
@@ -137,8 +139,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
 
         List<Snapshot> skippingSnapshots =
-                SnapshotManager.findOverlappedSnapshots(
-                        taggedSnapshots, earliestId, endExclusiveId);
+                findSkippingTags(taggedSnapshots, earliestId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.changelog(endExclusiveId));
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {
@@ -146,7 +147,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                 LOG.debug("Ready to delete changelog files from changelog #" + id);
             }
             Changelog changelog = snapshotManager.longLivedChangelog(id);
-            Predicate<ManifestEntry> skipper;
+            Predicate<ExpireFileEntry> skipper;
             try {
                 skipper = changelogDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
             } catch (Exception e) {

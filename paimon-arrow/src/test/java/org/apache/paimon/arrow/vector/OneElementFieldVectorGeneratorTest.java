@@ -49,7 +49,7 @@ public class OneElementFieldVectorGeneratorTest {
                     new OneElementFieldVectorGenerator(rootAllocator, dataField, value);
             try (FieldVector fieldVector = oneElementFieldVectorGenerator.get(10000)) {
                 ArrowBatchReader reader =
-                        new ArrowBatchReader(new RowType(Arrays.asList(dataField)));
+                        new ArrowBatchReader(new RowType(Arrays.asList(dataField)), true);
                 Iterable<InternalRow> it =
                         reader.readBatch(new VectorSchemaRoot(Arrays.asList(fieldVector)));
                 it.forEach(
@@ -68,7 +68,7 @@ public class OneElementFieldVectorGeneratorTest {
                     new OneElementFieldVectorGenerator(rootAllocator, dataField, value)) {
                 FieldVector fieldVector = oneElementFieldVectorGenerator.get(10000);
                 ArrowBatchReader reader =
-                        new ArrowBatchReader(new RowType(Arrays.asList(dataField)));
+                        new ArrowBatchReader(new RowType(Arrays.asList(dataField)), true);
                 Iterable<InternalRow> it =
                         reader.readBatch(new VectorSchemaRoot(Arrays.asList(fieldVector)));
                 it.forEach(i -> Assertions.assertThat(i.getInt(0)).isEqualTo(genericRow.getInt(0)));
@@ -85,7 +85,7 @@ public class OneElementFieldVectorGeneratorTest {
             try (FieldVector fieldVector = oneElementFieldVectorGenerator.get(100000)) {
                 Assertions.assertThat(fieldVector.getValueCount()).isEqualTo(100000);
                 ArrowBatchReader reader =
-                        new ArrowBatchReader(new RowType(Arrays.asList(dataField)));
+                        new ArrowBatchReader(new RowType(Arrays.asList(dataField)), true);
                 Iterable<InternalRow> it =
                         reader.readBatch(new VectorSchemaRoot(Arrays.asList(fieldVector)));
                 it.forEach(

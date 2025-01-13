@@ -22,12 +22,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.flink.action.ActionFactory.printDefaultHelp;
 
-/**
- * Table maintenance actions for Flink.
- *
- * @deprecated Compatible with older versions of usage
- */
-@Deprecated
+/** Table maintenance actions for Flink. */
 public class FlinkActions {
 
     // ------------------------------------------------------------------------

@@ -69,8 +69,6 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.RECORD_LEVEL_EXPIRE_TIME, Duration.ofSeconds(1));
         options.set(CoreOptions.RECORD_LEVEL_TIME_FIELD, "col1");
-        options.set(
-                CoreOptions.RECORD_LEVEL_TIME_FIELD_TYPE, CoreOptions.TimeFieldType.MILLIS_LONG);
         return options;
     }
 
@@ -98,5 +96,15 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
         // compact, expired
         compact(1);
         assertThat(query(new int[] {0, 1})).containsExactlyInAnyOrder(GenericRow.of(1, 4));
+
+        writeCommit(GenericRow.of(1, 5, null));
+        assertThat(query(new int[] {0, 1}))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 4), GenericRow.of(1, 5));
+
+        writeCommit(GenericRow.of(1, 5, currentSecs + 60 * 60 * 1000));
+        // compact, merged
+        compact(1);
+        assertThat(query(new int[] {0, 1}))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 4), GenericRow.of(1, 5));
     }
 }

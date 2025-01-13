@@ -22,6 +22,7 @@ import org.apache.paimon.format.parquet.ParquetInputFile;
 import org.apache.paimon.format.parquet.ParquetInputStream;
 import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.VectoredReadable;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.ParquetReadOptions;
@@ -77,6 +78,8 @@ import org.apache.yetus.audience.InterfaceAudience.Private;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
@@ -92,6 +95,7 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -216,6 +220,7 @@ public class ParquetFileReader implements Closeable {
     private final List<ColumnIndexStore> blockIndexStores;
     private final List<RowRanges> blockRowRanges;
     private final boolean blocksFiltered;
+    @Nullable private final RoaringBitmap32 selection;
 
     // not final. in some cases, this may be lazily loaded for backward-compat.
     private ParquetMetadata footer;
@@ -224,13 +229,16 @@ public class ParquetFileReader implements Closeable {
     private ColumnChunkPageReadStore currentRowGroup = null;
     private DictionaryPageReader nextDictionaryReader = null;
 
-    private InternalFileDecryptor fileDecryptor = null;
+    private InternalFileDecryptor fileDecryptor;
 
-    public ParquetFileReader(InputFile file, ParquetReadOptions options) throws IOException {
+    public ParquetFileReader(
+            InputFile file, ParquetReadOptions options, @Nullable RoaringBitmap32 selection)
+            throws IOException {
         this.converter = new ParquetMetadataConverter(options);
         this.file = (ParquetInputFile) file;
         this.f = this.file.newStream();
         this.options = options;
+        this.selection = selection;
         try {
             this.footer = readFooter(file, options, f, converter);
         } catch (Exception e) {
@@ -333,22 +341,35 @@ public class ParquetFileReader implements Closeable {
 
     private List<BlockMetaData> filterRowGroups(List<BlockMetaData> blocks) throws IOException {
         FilterCompat.Filter recordFilter = options.getRecordFilter();
-        if (checkRowIndexOffsetExists(blocks) && FilterCompat.isFilteringRequired(recordFilter)) {
-            // set up data filters based on configured levels
-            List<RowGroupFilter.FilterLevel> levels = new ArrayList<>();
+        if (checkRowIndexOffsetExists(blocks)) {
+            if (FilterCompat.isFilteringRequired(recordFilter)) {
+                // set up data filters based on configured levels
+                List<RowGroupFilter.FilterLevel> levels = new ArrayList<>();
 
-            if (options.useStatsFilter()) {
-                levels.add(STATISTICS);
+                if (options.useStatsFilter()) {
+                    levels.add(STATISTICS);
+                }
+
+                if (options.useDictionaryFilter()) {
+                    levels.add(DICTIONARY);
+                }
+
+                if (options.useBloomFilter()) {
+                    levels.add(BLOOMFILTER);
+                }
+                blocks = RowGroupFilter.filterRowGroups(levels, recordFilter, blocks, this);
             }
 
-            if (options.useDictionaryFilter()) {
-                levels.add(DICTIONARY);
+            if (selection != null) {
+                blocks =
+                        blocks.stream()
+                                .filter(
+                                        it ->
+                                                selection.intersects(
+                                                        it.getRowIndexOffset(),
+                                                        it.getRowIndexOffset() + it.getRowCount()))
+                                .collect(Collectors.toList());
             }
-
-            if (options.useBloomFilter()) {
-                levels.add(BLOOMFILTER);
-            }
-            return RowGroupFilter.filterRowGroups(levels, recordFilter, blocks, this);
         }
 
         return blocks;
@@ -736,7 +757,9 @@ public class ParquetFileReader implements Closeable {
                             options.getRecordFilter(),
                             getColumnIndexStore(blockIndex),
                             paths.keySet(),
-                            blocks.get(blockIndex).getRowCount());
+                            blocks.get(blockIndex).getRowCount(),
+                            blocks.get(blockIndex).getRowIndexOffset(),
+                            selection);
             blockRowRanges.set(blockIndex, rowRanges);
         }
         return rowRanges;

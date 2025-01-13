@@ -1,6 +1,6 @@
 ---
 title: "Dedicated Compaction"
-weight: 3
+weight: 4
 type: docs
 aliases:
 - /maintenance/dedicated-compaction.html
@@ -81,6 +81,20 @@ To run a dedicated job for compaction, follow these instructions.
 
 {{< tabs "dedicated-compaction-job" >}}
 
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.compact(
+  `table` => 'default.T', 
+  partitions => 'p=0', 
+  options => 'sink.parallelism=4',
+  `where` => 'dt>10 and h<20'
+);
+```
+{{< /tab >}}
+
 {{< tab "Flink Action Jar" >}}
 
 Run the following command to submit a compaction job for the table.
@@ -93,6 +107,7 @@ Run the following command to submit a compaction job for the table.
     --database <database-name> \ 
     --table <table-name> \
     [--partition <partition-name>] \
+    [--compact_strategy <minor / full>] \
     [--table_conf <table_conf>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
@@ -109,10 +124,14 @@ Example: compact table
     --partition dt=20221126,hh=08 \
     --partition dt=20221127,hh=09 \
     --table_conf sink.parallelism=10 \
+    --compact_strategy minor \
     --catalog_conf s3.endpoint=https://****.com \
     --catalog_conf s3.access-key=***** \
     --catalog_conf s3.secret-key=*****
 ```
+* `--compact_strategy` Determines how to pick files to be merged, the default is determined by the runtime execution mode, streaming-mode use `minor` strategy and batch-mode use `full` strategy.
+  * `full` : Only supports batch mode. All files will be selected for merging.
+  * `minor` : Pick the set of files that need to be merged based on specified conditions.
 
 You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=batch` (for the ON-YARN scenario) to control batch or streaming mode. If you submit a batch job, all
 current table files will be compacted. If you submit a streaming job, the job will continuously monitor new changes
@@ -128,30 +147,11 @@ For more usage of the compact action, see
 
 {{< /tab >}}
 
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
--- compact table
-CALL sys.compact(`table` => 'default.T');
-
--- compact table with options
-CALL sys.compact(`table` => 'default.T', `options` => 'sink.parallelism=4');
-
--- compact table partition
-CALL sys.compact(`table` => 'default.T', `partitions` => 'p=0');
-
--- compact table partition with filter
-CALL sys.compact(`table` => 'default.T', `where` => 'dt>10 and h<20');
-```
-{{< /tab >}}
-
 {{< /tabs >}}
 
 {{< hint info >}}
 Similarly, the default is synchronous compaction, which may cause checkpoint timeouts.
-You can configure `table_conf` to use [Asynchronous Compaction]({{< ref "maintenance/write-performance#asynchronous-compaction" >}}).
+You can configure `table_conf` to use [Asynchronous Compaction]({{< ref "primary-key-table/compaction#asynchronous-compaction" >}}).
 {{< /hint >}}
 
 ## Database Compaction Job
@@ -159,6 +159,30 @@ You can configure `table_conf` to use [Asynchronous Compaction]({{< ref "mainten
 You can run the following command to submit a compaction job for multiple database.
 
 {{< tabs "database-compaction-job" >}}
+
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.compact_database(
+  including_databases => 'includingDatabases', 
+  mode => 'mode', 
+  including_tables => 'includingTables', 
+  excluding_tables => 'excludingTables', 
+  table_options => 'tableOptions'
+)
+
+-- example
+CALL sys.compact_database(
+  including_databases => 'db1|db2', 
+  mode => 'combined', 
+  including_tables => 'table_.*', 
+  excluding_tables => 'ignore', 
+  table_options => 'sink.parallelism=4'
+)
+```
+{{< /tab >}}
 
 {{< tab "Flink Action Jar" >}}
 
@@ -171,6 +195,7 @@ You can run the following command to submit a compaction job for multiple databa
     [--including_tables <paimon-table-name|name-regular-expr>] \
     [--excluding_tables <paimon-table-name|name-regular-expr>] \
     [--mode <compact-mode>] \
+    [--compact_strategy <minor / full>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table_conf> [--table_conf <paimon-table_conf> ...]]
 ```
@@ -243,26 +268,6 @@ For more usage of the compact_database action, see
 
 {{< /tab >}}
 
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
-CALL sys.compact_database('includingDatabases')
-
-CALL sys.compact_database('includingDatabases', 'mode')
-
-CALL sys.compact_database('includingDatabases', 'mode', 'includingTables')
-
-CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables')
-
-CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions')
-
--- example
-CALL sys.compact_database('db1|db2', 'combined', 'table_.*', 'ignore', 'sink.parallelism=4')
-```
-{{< /tab >}}
-
 {{< /tabs >}}
 
 ## Sort Compact
@@ -272,6 +277,16 @@ or [append table]({{< ref "append-table/overview" >}}) ,
 you can trigger a compact with specified column sort to speed up queries.
 
 {{< tabs "sort-compaction-job" >}}
+
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+-- sort compact table
+CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'a,b')
+```
+{{< /tab >}}
 
 {{< tab "Flink Action Jar" >}}
 
@@ -296,16 +311,6 @@ The sort parallelism is the same as the sink parallelism, you can dynamically sp
 
 {{< /tab >}}
 
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
--- sort compact table
-CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'a,b')
-```
-{{< /tab >}}
-
 {{< /tabs >}}
 
 ## Historical Partition Compact
@@ -324,6 +329,17 @@ This feature now is only used in batch mode.
 This is for one table.
 {{< tabs "history-partition-compaction-job for table" >}}
 
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+-- history partition compact table
+CALL sys.compact(`table` => 'default.T', 'partition_idle_time' => '1 d')
+```
+
+{{< /tab >}}
+
 {{< tab "Flink Action Jar" >}}
 
 ```bash  
@@ -336,6 +352,7 @@ This is for one table.
     --table <table-name> \
     --partition_idle_time <partition-idle-time> \ 
     [--partition <partition-name>] \
+    [--compact_strategy <minor / full>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-dynamic-conf> [--table_conf <paimon-table-dynamic-conf>] ...]
 ```
@@ -347,23 +364,41 @@ There are one new configuration in `Historical Partition Compact`
 
 {{< /tab >}}
 
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
--- history partition compact table
-CALL sys.compact(`table` => 'default.T', 'partition_idle_time' => '1 d')
-```
-
-{{< /tab >}}
-
 {{< /tabs >}}
 
 ### For Databases
 
 This is for multiple tables in different databases.
 {{< tabs "history-partition-compaction-job for databases" >}}
+
+{{< tab "Flink SQL" >}}
+
+Run the following sql:
+
+```sql
+-- history partition compact table
+CALL sys.compact_database(
+  including_databases => 'includingDatabases', 
+  mode => 'mode', 
+  including_tables => 'includingTables',
+  excluding_tables => 'excludingTables',
+  table_options => 'tableOptions',
+  partition_idle_time => 'partition_idle_time'
+);
+```
+
+Example: compact historical partitions for tables in database
+
+```sql
+-- history partition compact table
+CALL sys.compact_database(
+  includingDatabases => 'test_db', 
+  mode => 'combined', 
+  partition_idle_time => '1 d'
+);
+```
+
+{{< /tab >}}
 
 {{< tab "Flink Action Jar" >}}
 
@@ -378,6 +413,7 @@ This is for multiple tables in different databases.
     [--including_tables <paimon-table-name|name-regular-expr>] \
     [--excluding_tables <paimon-table-name|name-regular-expr>] \
     [--mode <compact-mode>] \
+    [--compact_strategy <minor / full>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table_conf> [--table_conf <paimon-table_conf> ...]]
 ```
@@ -394,24 +430,6 @@ Example: compact historical partitions for tables in database
     --catalog_conf s3.endpoint=https://****.com \
     --catalog_conf s3.access-key=***** \
     --catalog_conf s3.secret-key=*****
-```
-
-{{< /tab >}}
-
-{{< tab "Flink SQL" >}}
-
-Run the following sql:
-
-```sql
--- history partition compact table
-CALL sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partition_idle_time')
-```
-
-Example: compact historical partitions for tables in database
-
-```sql
--- history partition compact table
-CALL sys.compact_database('test_db', 'combined', '', '', '', '1 d')
 ```
 
 {{< /tab >}}

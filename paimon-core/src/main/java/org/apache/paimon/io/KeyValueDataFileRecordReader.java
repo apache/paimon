@@ -21,6 +21,8 @@ package org.apache.paimon.io;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
 
@@ -29,14 +31,14 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /** {@link RecordReader} for reading {@link KeyValue} data files. */
-public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
+public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> {
 
-    private final RecordReader<InternalRow> reader;
+    private final FileRecordReader<InternalRow> reader;
     private final KeyValueSerializer serializer;
     private final int level;
 
     public KeyValueDataFileRecordReader(
-            RecordReader<InternalRow> reader, RowType keyType, RowType valueType, int level) {
+            FileRecordReader<InternalRow> reader, RowType keyType, RowType valueType, int level) {
         this.reader = reader;
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
@@ -44,8 +46,8 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
 
     @Nullable
     @Override
-    public RecordIterator<KeyValue> readBatch() throws IOException {
-        RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+    public FileRecordIterator<KeyValue> readBatch() throws IOException {
+        FileRecordIterator<InternalRow> iterator = reader.readBatch();
         if (iterator == null) {
             return null;
         }

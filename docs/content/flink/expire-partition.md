@@ -134,7 +134,7 @@ More options:
             <td><h5>end-input.check-partition-expire</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether check partition expire after batch mode or bounded stream job finish.</li></ul></td>
+            <td>Whether check partition expire after batch mode or bounded stream job finish.</td>
         </tr>
     </tbody>
 </table>

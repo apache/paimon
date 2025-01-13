@@ -40,6 +40,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.Types;
@@ -148,6 +149,11 @@ public class ArrowFieldTypeConversion {
             ArrowType arrowType =
                     new ArrowType.Timestamp(timeUnit, ZoneId.systemDefault().toString());
             return new FieldType(localZonedTimestampType.isNullable(), arrowType, null);
+        }
+
+        @Override
+        public FieldType visit(VariantType variantType) {
+            throw new UnsupportedOperationException();
         }
 
         private TimeUnit getTimeUnit(int precision) {

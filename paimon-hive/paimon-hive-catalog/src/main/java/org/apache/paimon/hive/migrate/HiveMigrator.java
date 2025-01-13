@@ -19,6 +19,7 @@
 package org.apache.paimon.hive.migrate;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryWriter;
@@ -66,9 +67,7 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 public class HiveMigrator implements Migrator {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveMigrator.class);
-
-    private static final ThreadPoolExecutor EXECUTOR =
-            createCachedThreadPool(Runtime.getRuntime().availableProcessors(), "HIVE_MIGRATOR");
+    private ThreadPoolExecutor executor;
 
     private static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
@@ -83,7 +82,8 @@ public class HiveMigrator implements Migrator {
     private final String targetDatabase;
     private final String targetTable;
     private final CoreOptions coreOptions;
-    private Boolean delete = true;
+
+    private Boolean deleteOriginTable = true;
 
     public HiveMigrator(
             HiveCatalog hiveCatalog,
@@ -91,6 +91,7 @@ public class HiveMigrator implements Migrator {
             String sourceTable,
             String targetDatabase,
             String targetTable,
+            Integer parallelism,
             Map<String, String> options) {
         this.hiveCatalog = hiveCatalog;
         this.fileIO = hiveCatalog.fileIO();
@@ -100,10 +101,14 @@ public class HiveMigrator implements Migrator {
         this.targetDatabase = targetDatabase;
         this.targetTable = targetTable;
         this.coreOptions = new CoreOptions(options);
+        this.executor = createCachedThreadPool(parallelism, "HIVE_MIGRATOR");
     }
 
     public static List<Migrator> databaseMigrators(
-            HiveCatalog hiveCatalog, String sourceDatabase, Map<String, String> options) {
+            HiveCatalog hiveCatalog,
+            String sourceDatabase,
+            Map<String, String> options,
+            Integer parallelism) {
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         try {
             return client.getAllTables(sourceDatabase).stream()
@@ -115,6 +120,7 @@ public class HiveMigrator implements Migrator {
                                             sourceTable,
                                             sourceDatabase,
                                             sourceTable + PAIMON_SUFFIX,
+                                            parallelism,
                                             options))
                     .collect(Collectors.toList());
         } catch (TException e) {
@@ -123,8 +129,8 @@ public class HiveMigrator implements Migrator {
     }
 
     @Override
-    public void deleteOriginTable(boolean delete) {
-        this.delete = delete;
+    public void deleteOriginTable(boolean deleteOriginTable) {
+        this.deleteOriginTable = deleteOriginTable;
     }
 
     @Override
@@ -139,14 +145,18 @@ public class HiveMigrator implements Migrator {
 
         // create paimon table if not exists
         Identifier identifier = Identifier.create(targetDatabase, targetTable);
-        boolean alreadyExist = hiveCatalog.tableExists(identifier);
-        if (!alreadyExist) {
+
+        boolean deleteIfFail = false;
+        try {
+            hiveCatalog.getTable(identifier);
+        } catch (Catalog.TableNotExistException e) {
             Schema schema =
                     from(
                             client.getSchema(sourceDatabase, sourceTable),
                             sourceHiveTable.getPartitionKeys(),
                             properties);
             hiveCatalog.createTable(identifier, schema, false);
+            deleteIfFail = true;
         }
 
         try {
@@ -175,7 +185,7 @@ public class HiveMigrator implements Migrator {
             }
 
             List<Future<CommitMessage>> futures =
-                    tasks.stream().map(EXECUTOR::submit).collect(Collectors.toList());
+                    tasks.stream().map(executor::submit).collect(Collectors.toList());
             List<CommitMessage> commitMessages = new ArrayList<>();
             try {
                 for (Future<CommitMessage> future : futures) {
@@ -205,14 +215,14 @@ public class HiveMigrator implements Migrator {
                 commit.commit(new ArrayList<>(commitMessages));
             }
         } catch (Exception e) {
-            if (!alreadyExist) {
+            if (deleteIfFail) {
                 hiveCatalog.dropTable(identifier, true);
             }
             throw new RuntimeException("Migrating failed", e);
         }
 
         // if all success, drop the origin table according the delete field
-        if (delete) {
+        if (deleteOriginTable) {
             client.dropTable(sourceDatabase, sourceTable, true, true);
         }
     }

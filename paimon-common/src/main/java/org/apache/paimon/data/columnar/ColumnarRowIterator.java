@@ -23,7 +23,6 @@ import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.utils.RecyclableIterator;
 import org.apache.paimon.utils.VectorMappingUtils;
 
@@ -34,15 +33,15 @@ import javax.annotation.Nullable;
  * {@link ColumnarRow#setRowId}.
  */
 public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
-        implements FileRecordIterator<InternalRow>, VectorizedRecordIterator {
+        implements FileRecordIterator<InternalRow> {
 
-    private final Path filePath;
-    private final ColumnarRow row;
-    private final Runnable recycler;
+    protected final Path filePath;
+    protected final ColumnarRow row;
+    protected final Runnable recycler;
 
-    private int num;
-    private int nextPos;
-    private long nextFilePos;
+    protected int num;
+    protected int nextPos;
+    protected long nextFilePos;
 
     public ColumnarRowIterator(Path filePath, ColumnarRow row, @Nullable Runnable recycler) {
         super(recycler);
@@ -79,7 +78,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         return this.filePath;
     }
 
-    public ColumnarRowIterator copy(ColumnVector[] vectors) {
+    protected ColumnarRowIterator copy(ColumnVector[] vectors) {
         ColumnarRowIterator newIterator =
                 new ColumnarRowIterator(filePath, row.copy(vectors), recycler);
         newIterator.reset(nextFilePos);
@@ -95,15 +94,10 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
                 vectors = VectorMappingUtils.createPartitionMappedVectors(partitionInfo, vectors);
             }
             if (indexMapping != null) {
-                vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
+                vectors = VectorMappingUtils.createMappedVectors(indexMapping, vectors);
             }
             return copy(vectors);
         }
         return this;
-    }
-
-    @Override
-    public VectorizedColumnBatch batch() {
-        return row.batch();
     }
 }

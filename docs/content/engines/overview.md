@@ -28,15 +28,15 @@ under the License.
 
 ## Compatibility Matrix
 
-|                                     Engine                                      |    Version    |  Batch Read | Batch Write |  Create Table |  Alter Table  | Streaming Write  |  Streaming Read  | Batch Overwrite |  DELETE & UPDATE   | MERGE INTO  | Time Travel |
-|:-------------------------------------------------------------------------------:|:-------------:|:-----------:|:-----------:|:-------------:|:-------------:|:----------------:|:----------------:|:---------------:|:------------------:|:-----------:|:-----------:|
-|                                      Flink                                      |  1.15 - 1.20  |     ✅      |      ✅      |      ✅       |  ✅(1.17+)   |        ✅        |       ✅        |        ✅        |    ✅(1.17+)      |      ❌     |      ✅      |
-|                                      Spark                                      |   3.1 - 3.5   |     ✅      |   ✅(3.2+)   |      ✅       |      ✅      |      ✅(3.3+)    |    ✅(3.3+)     |     ✅(3.2+)     |     ✅(3.2+)      |   ✅(3.2+)  |   ✅(3.3+)   |
-|                                      Hive                                       |   2.1 - 3.1   |     ✅      |      ✅      |      ✅       |      ❌      |        ❌        |       ❌        |        ❌        |         ❌        |      ❌     |      ✅      |
-|                                      Trino                                      |   420 - 439   |     ✅      |   ✅(427+)   |   ✅(427+)    |   ✅(427+)   |        ❌        |       ❌        |        ❌        |         ❌        |      ❌     |      ✅      |
-|                                     Presto                                      | 0.236 - 0.280 |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |         ❌        |      ❌     |      ❌      |
-| [StarRocks](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/) |     3.1+      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |         ❌        |      ❌     |      ✅      |
-| [Doris](https://doris.apache.org/docs/lakehouse/datalake-analytics/paimon)      |    2.0.6+     |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |         ❌        |      ❌     |      ✅      |
+|                                     Engine                                      |    Version    |  Batch Read | Batch Write |  Create Table |  Alter Table  | Streaming Write  |  Streaming Read  | Batch Overwrite | DELETE & UPDATE | MERGE INTO | Time Travel |
+|:-------------------------------------------------------------------------------:|:-------------:|:-----------:|:-----------:|:-------------:|:-------------:|:----------------:|:----------------:|:---------------:|:---------------:|:----------:|:-----------:|
+|                                      Flink                                      |  1.15 - 1.20  |     ✅      |      ✅      |      ✅       |  ✅(1.17+)   |        ✅        |       ✅        |        ✅        |    ✅(1.17+)     |     ❌      |      ✅      |
+|                                      Spark                                      |   3.2 - 3.5   |     ✅      |      ✅      |      ✅       |      ✅      |      ✅(3.3+)    |    ✅(3.3+)     |        ✅        |        ✅        |     ✅      |   ✅(3.3+)   |
+|                                      Hive                                       |   2.1 - 3.1   |     ✅      |      ✅      |      ✅       |      ❌      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
+|                                      Trino                                      |   420 - 439   |     ✅      |   ✅(427+)   |   ✅(427+)    |   ✅(427+)   |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
+|                                     Presto                                      | 0.236 - 0.280 |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ❌      |
+| [StarRocks](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/) |     3.1+      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
+| [Doris](https://doris.apache.org/docs/lakehouse/datalake-analytics/paimon)      |    2.0.6+     |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
 
 ## Streaming Engines
 

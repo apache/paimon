@@ -23,15 +23,10 @@ import org.apache.paimon.types.DataType;
 /** last non-null value aggregate a field of a row. */
 public class FieldLastNonNullValueAgg extends FieldAggregator {
 
-    public static final String NAME = "last_non_null_value";
+    private static final long serialVersionUID = 1L;
 
-    public FieldLastNonNullValueAgg(DataType dataType) {
-        super(dataType);
-    }
-
-    @Override
-    String name() {
-        return NAME;
+    public FieldLastNonNullValueAgg(String name, DataType dataType) {
+        super(name, dataType);
     }
 
     @Override

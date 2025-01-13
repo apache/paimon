@@ -41,6 +41,11 @@ public final class SmallIntType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return 2;
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new SmallIntType(isNullable);
     }

@@ -25,12 +25,11 @@ public class FastForwardAction extends TableActionBase {
     private final String branchName;
 
     public FastForwardAction(
-            String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
             String branchName) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.branchName = branchName;
     }
 

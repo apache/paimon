@@ -90,6 +90,7 @@ public class ResetConsumerProcedure extends BaseProcedure {
                     if (nextSnapshotId == null) {
                         consumerManager.deleteConsumer(consumerId);
                     } else {
+                        fileStoreTable.snapshotManager().snapshot(nextSnapshotId);
                         consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
                     }
 

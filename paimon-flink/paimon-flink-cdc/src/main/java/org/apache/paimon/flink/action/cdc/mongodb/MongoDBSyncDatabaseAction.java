@@ -52,11 +52,8 @@ import java.util.Map;
 public class MongoDBSyncDatabaseAction extends SyncDatabaseActionBase {
 
     public MongoDBSyncDatabaseAction(
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> mongodbConfig) {
-        super(warehouse, database, catalogConfig, mongodbConfig, SyncJobHandler.SourceType.MONGODB);
+            String database, Map<String, String> catalogConfig, Map<String, String> mongodbConfig) {
+        super(database, catalogConfig, mongodbConfig, SyncJobHandler.SourceType.MONGODB);
     }
 
     @Override
@@ -66,11 +63,17 @@ public class MongoDBSyncDatabaseAction extends SyncDatabaseActionBase {
 
     @Override
     protected MongoDBSource<CdcSourceRecord> buildSource() {
+        validateRuntimeExecutionMode();
         return MongoDBActionUtils.buildMongodbSource(
                 cdcSourceConfig,
                 CdcActionCommonUtils.combinedModeTableList(
                         cdcSourceConfig.get(MongoDBSourceOptions.DATABASE),
                         includingTables,
                         Collections.emptyList()));
+    }
+
+    @Override
+    protected boolean requirePrimaryKeys() {
+        return true;
     }
 }

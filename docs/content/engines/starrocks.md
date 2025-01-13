@@ -81,7 +81,7 @@ SELECT * FROM paimon_catalog.test_db.partition_tbl$partitions;
 ## StarRocks to Paimon type mapping
 
 This section lists all supported type conversion between StarRocks and Paimon. 
-All StarRocks’s data types can be found in this doc [StarRocks Data type overview](https://docs.starrocks.io/docs/sql-reference/data-types/data-type-list/).
+All StarRocks’s data types can be found in this doc [StarRocks Data type overview](https://docs.starrocks.io/docs/sql-reference/data-types/).
 
 <table class="table table-bordered">
     <thead>

@@ -146,7 +146,7 @@ public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
         return new PrimaryKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
             @Override
-            protected SchemaManager schemaManager() {
+            public SchemaManager schemaManager() {
                 return schemaManager;
             }
         };

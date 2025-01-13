@@ -23,15 +23,15 @@ import org.apache.spark.sql.sources.{AlwaysTrue, Filter}
 
 sealed private[spark] trait SaveMode extends Serializable
 
-object InsertInto extends SaveMode
+case object InsertInto extends SaveMode
 
 case class Overwrite(filters: Option[Filter]) extends SaveMode
 
-object DynamicOverWrite extends SaveMode
+case object DynamicOverWrite extends SaveMode
 
-object ErrorIfExists extends SaveMode
+case object ErrorIfExists extends SaveMode
 
-object Ignore extends SaveMode
+case object Ignore extends SaveMode
 
 object SaveMode {
   def transform(saveMode: SparkSaveMode): SaveMode = {

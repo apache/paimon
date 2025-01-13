@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_FILE_CREATION_TIME} startup
  * mode.
  */
-public class FileCreationTimeStartingScanner extends AbstractStartingScanner {
+public class FileCreationTimeStartingScanner extends ReadPlanStartingScanner {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(FileCreationTimeStartingScanner.class);
@@ -47,18 +47,16 @@ public class FileCreationTimeStartingScanner extends AbstractStartingScanner {
     }
 
     @Override
-    public Result scan(SnapshotReader snapshotReader) {
+    public SnapshotReader configure(SnapshotReader snapshotReader) {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
-            return new NoSnapshot();
+            return null;
         }
-        return StartingScanner.fromPlan(
-                snapshotReader
-                        .withMode(ScanMode.ALL)
-                        .withSnapshot(startingSnapshotId)
-                        .withManifestEntryFilter(
-                                entry -> entry.file().creationTimeEpochMillis() >= startupMillis)
-                        .read());
+        return snapshotReader
+                .withMode(ScanMode.ALL)
+                .withSnapshot(startingSnapshotId)
+                .withManifestEntryFilter(
+                        entry -> entry.file().creationTimeEpochMillis() >= startupMillis);
     }
 }

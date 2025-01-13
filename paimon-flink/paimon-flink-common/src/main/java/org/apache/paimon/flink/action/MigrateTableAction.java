@@ -30,17 +30,19 @@ public class MigrateTableAction extends ActionBase {
     private final String connector;
     private final String hiveTableFullName;
     private final String tableProperties;
+    private final Integer parallelism;
 
     public MigrateTableAction(
             String connector,
-            String warehouse,
             String hiveTableFullName,
             Map<String, String> catalogConfig,
-            String tableProperties) {
-        super(warehouse, catalogConfig);
+            String tableProperties,
+            Integer parallelism) {
+        super(catalogConfig);
         this.connector = connector;
         this.hiveTableFullName = hiveTableFullName;
         this.tableProperties = tableProperties;
+        this.parallelism = parallelism;
     }
 
     @Override
@@ -48,6 +50,10 @@ public class MigrateTableAction extends ActionBase {
         MigrateTableProcedure migrateTableProcedure = new MigrateTableProcedure();
         migrateTableProcedure.withCatalog(catalog);
         migrateTableProcedure.call(
-                new DefaultProcedureContext(env), connector, hiveTableFullName, tableProperties);
+                new DefaultProcedureContext(env),
+                connector,
+                hiveTableFullName,
+                tableProperties,
+                parallelism);
     }
 }

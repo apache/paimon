@@ -34,32 +34,32 @@ public interface FileFormatFactory {
     /** the format context. */
     class FormatContext {
 
-        private final Options formatOptions;
+        private final Options options;
         private final int readBatchSize;
         private final int writeBatchSize;
         private final int zstdLevel;
         @Nullable private final MemorySize blockSize;
 
         @VisibleForTesting
-        public FormatContext(Options formatOptions, int readBatchSize, int writeBatchSize) {
-            this(formatOptions, readBatchSize, writeBatchSize, 1, null);
+        public FormatContext(Options options, int readBatchSize, int writeBatchSize) {
+            this(options, readBatchSize, writeBatchSize, 1, null);
         }
 
         public FormatContext(
-                Options formatOptions,
+                Options options,
                 int readBatchSize,
                 int writeBatchSize,
                 int zstdLevel,
                 @Nullable MemorySize blockSize) {
-            this.formatOptions = formatOptions;
+            this.options = options;
             this.readBatchSize = readBatchSize;
             this.writeBatchSize = writeBatchSize;
             this.zstdLevel = zstdLevel;
             this.blockSize = blockSize;
         }
 
-        public Options formatOptions() {
-            return formatOptions;
+        public Options options() {
+            return options;
         }
 
         public int readBatchSize() {

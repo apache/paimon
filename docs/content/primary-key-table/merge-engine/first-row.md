@@ -3,7 +3,7 @@ title: "First Row"
 weight: 4
 type: docs
 aliases:
-- /cdc-ingestion/merge-engin/first-row.html
+- /primary-key-table/merge-engin/first-row.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -30,10 +30,15 @@ By specifying `'merge-engine' = 'first-row'`, users can keep the first row of th
 `deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog.
 
 {{< hint info >}}
+`first-row` merge engine only supports `none` and `lookup` changelog producer. 
+For streaming queries must be used with the `lookup` [changelog producer]({{< ref "primary-key-table/changelog-producer" >}}).
+{{< /hint >}}
+
+{{< hint info >}}
 1. You can not specify [sequence.field]({{< ref "primary-key-table/sequence-rowkind#sequence-field" >}}).
 2. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `ignore-delete` to ignore these two kinds records.
 3. Visibility guarantee: Tables with First Row engine, the files with level 0 will only be visible after compaction.
    So by default, compaction is synchronous, and if asynchronous is turned on, there may be delays in the data.
-   {{< /hint >}}
+{{< /hint >}}
 
 This is of great help in replacing log deduplication in streaming computation.

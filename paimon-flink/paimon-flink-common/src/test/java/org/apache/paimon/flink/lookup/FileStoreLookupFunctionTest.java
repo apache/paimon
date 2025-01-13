@@ -34,6 +34,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -52,6 +53,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -59,8 +63,11 @@ import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
 import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Tests for {@link FileStoreLookupFunction}. */
 public class FileStoreLookupFunctionTest {
@@ -91,6 +98,18 @@ public class FileStoreLookupFunctionTest {
             boolean dynamicPartition,
             boolean refreshAsync)
             throws Exception {
+        table = createFileStoreTable(isPartition, dynamicPartition, refreshAsync);
+        lookupFunction = createLookupFunction(table, joinEqualPk);
+        lookupFunction.open(tempDir.toString());
+    }
+
+    private FileStoreLookupFunction createLookupFunction(Table table, boolean joinEqualPk) {
+        return new FileStoreLookupFunction(
+                table, new int[] {0, 1}, joinEqualPk ? new int[] {0, 1} : new int[] {1}, null);
+    }
+
+    private FileStoreTable createFileStoreTable(
+            boolean isPartition, boolean dynamicPartition, boolean refreshAsync) throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
@@ -106,7 +125,6 @@ public class FileStoreLookupFunctionTest {
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
                         new String[] {"pt", "k", "v"});
-
         Schema schema =
                 new Schema(
                         rowType.getFields(),
@@ -115,17 +133,8 @@ public class FileStoreLookupFunctionTest {
                         conf.toMap(),
                         "");
         TableSchema tableSchema = schemaManager.createTable(schema);
-        table =
-                FileStoreTableFactory.create(
-                        fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
-
-        lookupFunction =
-                new FileStoreLookupFunction(
-                        table,
-                        new int[] {0, 1},
-                        joinEqualPk ? new int[] {0, 1} : new int[] {1},
-                        null);
-        lookupFunction.open(tempDir.toString());
+        return FileStoreTableFactory.create(
+                fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
     }
 
     @AfterEach
@@ -212,6 +221,68 @@ public class FileStoreLookupFunctionTest {
                                         s -> s.toString().contains(tempDir.toString()))
                                 .size())
                 .isEqualTo(0);
+    }
+
+    @Test
+    public void testParseWrongTimePeriodsBlacklist() throws Exception {
+        Table table = createFileStoreTable(false, false, false);
+
+        Table table1 =
+                table.copy(
+                        Collections.singletonMap(
+                                LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
+                                "2024-10-31 12:00,2024-10-31 16:00"));
+        assertThatThrownBy(() -> createLookupFunction(table1, true))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Incorrect time periods format: [2024-10-31 12:00,2024-10-31 16:00]."));
+
+        Table table2 =
+                table.copy(
+                        Collections.singletonMap(
+                                LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
+                                "20241031 12:00->20241031 16:00"));
+        assertThatThrownBy(() -> createLookupFunction(table2, true))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Date time format error: [20241031 12:00]"));
+
+        Table table3 =
+                table.copy(
+                        Collections.singletonMap(
+                                LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
+                                "2024-10-31 12:00->2024-10-31 16:00,2024-10-31 20:00->2024-10-31 18:00"));
+        assertThatThrownBy(() -> createLookupFunction(table3, true))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Incorrect time period: [2024-10-31 20:00->2024-10-31 18:00]"));
+    }
+
+    @Test
+    public void testCheckRefreshInBlacklist() throws Exception {
+        Instant now = Instant.now();
+        Instant start = Instant.ofEpochSecond(now.getEpochSecond() / 60 * 60);
+        Instant end = start.plusSeconds(30 * 60);
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        String left = start.atZone(ZoneId.systemDefault()).format(formatter);
+        String right = end.atZone(ZoneId.systemDefault()).format(formatter);
+
+        Table table =
+                createFileStoreTable(false, false, false)
+                        .copy(
+                                Collections.singletonMap(
+                                        LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
+                                        left + "->" + right));
+
+        FileStoreLookupFunction lookupFunction = createLookupFunction(table, true);
+
+        lookupFunction.tryRefresh();
+
+        assertThat(lookupFunction.nextBlacklistCheckTime()).isEqualTo(end.toEpochMilli() + 1);
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {

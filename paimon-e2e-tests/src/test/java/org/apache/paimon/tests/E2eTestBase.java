@@ -111,7 +111,8 @@ public abstract class E2eTestBase {
             for (String s : kafkaServices) {
                 environment.withLogConsumer(s + "-1", new Slf4jLogConsumer(LOG));
             }
-            environment.waitingFor("kafka-1", buildWaitStrategy(".*Recorded new controller.*", 2));
+            environment.waitingFor(
+                    "kafka-1", buildWaitStrategy(".*Recorded new ZK controller.*", 2));
         }
         if (withHive) {
             List<String> hiveServices =
@@ -190,7 +191,7 @@ public abstract class E2eTestBase {
                 "cat >" + TEST_DATA_DIR + "/" + filename + " <<EOF\n" + content + "EOF\n");
     }
 
-    protected void createKafkaTopic(String topicName, int partitionNum)
+    protected synchronized void createKafkaTopic(String topicName, int partitionNum)
             throws IOException, InterruptedException {
         assert withKafka;
         ContainerState kafka = environment.getContainerByServiceName("kafka-1").get();

@@ -26,8 +26,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.stats.SimpleStatsConverters;
+import org.apache.paimon.stats.SimpleStatsEvolution;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 
@@ -54,7 +54,7 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
         return new PrimaryKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
             @Override
-            protected SchemaManager schemaManager() {
+            public SchemaManager schemaManager() {
                 return schemaManager;
             }
         };
@@ -122,12 +122,13 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
             List<DataFileMeta> fileMetaList) {
         Function<Long, List<DataField>> schemaFields =
                 id -> tableSchemas.get(id).logicalTrimmedPrimaryKeysType().getFields();
-        SimpleStatsConverters converters = new SimpleStatsConverters(schemaFields, schemaId);
+        SimpleStatsEvolutions converters = new SimpleStatsEvolutions(schemaFields, schemaId);
         for (DataFileMeta fileMeta : fileMetaList) {
             SimpleStats stats = getTableValueStats(fileMeta);
-            SimpleStatsConverter serializer = converters.getOrCreate(fileMeta.schemaId());
-            InternalRow min = serializer.evolution(stats.minValues());
-            InternalRow max = serializer.evolution(stats.maxValues());
+            SimpleStatsEvolution.Result result =
+                    converters.getOrCreate(fileMeta.schemaId()).evolution(stats, null, null);
+            InternalRow min = result.minValues();
+            InternalRow max = result.maxValues();
             assertThat(min.getFieldCount()).isEqualTo(4);
             if (filesName.contains(fileMeta.fileName())) {
                 // parquet does not support padding

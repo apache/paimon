@@ -35,7 +35,7 @@ case class SparkDataFileMeta(
 
   def relativePath(fileStorePathFactory: FileStorePathFactory): String = {
     fileStorePathFactory
-      .relativePartitionAndBucketPath(partition, bucket)
+      .relativeBucketPath(partition, bucket)
       .toUri
       .toString + "/" + dataFileMeta.fileName()
   }
@@ -58,7 +58,7 @@ object SparkDataFileMeta {
           file,
           dvFactory.create(file.fileName()))
     }
-  }
+  }.toSeq
 
   def convertToDataSplits(
       sparkDataFiles: Array[SparkDataFileMeta],

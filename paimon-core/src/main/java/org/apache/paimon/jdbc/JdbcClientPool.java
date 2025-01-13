@@ -23,9 +23,9 @@ import org.apache.paimon.client.ClientPool;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.sql.SQLNonTransientConnectionException;
 import java.util.Map;
 import java.util.Properties;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,14 +33,11 @@ import java.util.regex.Pattern;
 public class JdbcClientPool extends ClientPool.ClientPoolImpl<Connection, SQLException> {
 
     private static final Pattern PROTOCOL_PATTERN = Pattern.compile("jdbc:([^:]+):(.*)");
-    private final String dbUrl;
-    private final Map<String, String> properties;
+
     private final String protocol;
 
     public JdbcClientPool(int poolSize, String dbUrl, Map<String, String> props) {
-        super(poolSize, SQLNonTransientConnectionException.class, true);
-        properties = props;
-        this.dbUrl = dbUrl;
+        super(poolSize, clientSupplier(dbUrl, props));
         Matcher matcher = PROTOCOL_PATTERN.matcher(dbUrl);
         if (matcher.matches()) {
             this.protocol = matcher.group(1);
@@ -49,21 +46,16 @@ public class JdbcClientPool extends ClientPool.ClientPoolImpl<Connection, SQLExc
         }
     }
 
-    @Override
-    protected Connection newClient() {
-        try {
-            Properties dbProps =
-                    JdbcUtils.extractJdbcConfiguration(properties, JdbcCatalog.PROPERTY_PREFIX);
-            return DriverManager.getConnection(dbUrl, dbProps);
-        } catch (SQLException e) {
-            throw new RuntimeException(String.format("Failed to connect: %s", dbUrl), e);
-        }
-    }
-
-    @Override
-    protected Connection reconnect(Connection client) {
-        close(client);
-        return newClient();
+    private static Supplier<Connection> clientSupplier(String dbUrl, Map<String, String> props) {
+        return () -> {
+            try {
+                Properties dbProps =
+                        JdbcUtils.extractJdbcConfiguration(props, JdbcCatalog.PROPERTY_PREFIX);
+                return DriverManager.getConnection(dbUrl, dbProps);
+            } catch (SQLException e) {
+                throw new RuntimeException(String.format("Failed to connect: %s", dbUrl), e);
+            }
+        };
     }
 
     public String getProtocol() {

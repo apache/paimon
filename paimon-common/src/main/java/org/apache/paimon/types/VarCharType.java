@@ -72,6 +72,11 @@ public final class VarCharType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return length == MAX_LENGTH ? 20 : length;
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new VarCharType(isNullable, length);
     }

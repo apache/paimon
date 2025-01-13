@@ -65,8 +65,17 @@ public class MapType extends DataType {
     }
 
     @Override
+    public int defaultSize() {
+        return keyType.defaultSize() + valueType.defaultSize();
+    }
+
+    @Override
     public DataType copy(boolean isNullable) {
         return new MapType(isNullable, keyType.copy(), valueType.copy());
+    }
+
+    public DataType newKeyValueType(DataType newKeyType, DataType newValueType) {
+        return new MapType(isNullable(), newKeyType, newValueType);
     }
 
     @Override
@@ -98,6 +107,37 @@ public class MapType extends DataType {
         }
         MapType mapType = (MapType) o;
         return keyType.equals(mapType.keyType) && valueType.equals(mapType.valueType);
+    }
+
+    @Override
+    public boolean equalsIgnoreFieldId(DataType o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MapType mapType = (MapType) o;
+        return keyType.equalsIgnoreFieldId(mapType.keyType)
+                && valueType.equalsIgnoreFieldId(mapType.valueType);
+    }
+
+    @Override
+    public boolean isPrunedFrom(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MapType mapType = (MapType) o;
+        return keyType.isPrunedFrom(mapType.keyType) && valueType.isPrunedFrom(mapType.valueType);
     }
 
     @Override

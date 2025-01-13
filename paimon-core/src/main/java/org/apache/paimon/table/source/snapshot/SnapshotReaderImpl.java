@@ -24,15 +24,19 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -53,6 +57,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -116,8 +121,23 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public Integer parallelism() {
+        return scan.parallelism();
+    }
+
+    @Override
     public SnapshotManager snapshotManager() {
         return snapshotManager;
+    }
+
+    @Override
+    public ManifestsReader manifestsReader() {
+        return scan.manifestsReader();
+    }
+
+    @Override
+    public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
+        return scan.readManifest(manifest);
     }
 
     @Override
@@ -128,6 +148,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SplitGenerator splitGenerator() {
         return splitGenerator;
+    }
+
+    @Override
+    public FileStorePathFactory pathFactory() {
+        return pathFactory;
     }
 
     @Override
@@ -164,6 +189,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withPartitionFilter(List<BinaryRow> partitions) {
         scan.withPartitionFilter(partitions);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions) {
+        scan.withPartitionsFilter(partitions);
         return this;
     }
 
@@ -211,6 +242,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader enableValueFilter() {
+        scan.enableValueFilter();
+        return this;
+    }
+
+    @Override
     public SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter) {
         scan.withManifestEntryFilter(filter);
         return this;
@@ -237,6 +274,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
         scan.withDataFileNameFilter(fileNameFilter);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader dropStats() {
+        scan.dropStats();
         return this;
     }
 
@@ -336,6 +379,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public List<BucketEntry> bucketEntries() {
+        return scan.readBucketEntries();
+    }
+
+    @Override
+    public Iterator<ManifestEntry> readFileIterator() {
+        return scan.readFileIterator();
+    }
+
+    @Override
     public Plan readChanges() {
         withMode(ScanMode.DELTA);
         FileStoreScan.Plan plan = scan.plan();
@@ -344,14 +397,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.DELETE));
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
-
-        return toChangesPlan(true, plan, plan.snapshot().id() - 1, beforeFiles, dataFiles);
+        Snapshot beforeSnapshot = snapshotManager.snapshot(plan.snapshot().id() - 1);
+        return toChangesPlan(true, plan, beforeSnapshot, beforeFiles, dataFiles);
     }
 
     private Plan toChangesPlan(
             boolean isStreaming,
             FileStoreScan.Plan plan,
-            long beforeSnapshotId,
+            Snapshot beforeSnapshot,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles) {
         Snapshot snapshot = plan.snapshot();
@@ -369,7 +422,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> beforDeletionIndexFilesMap =
                 deletionVectors
                         ? indexFileHandler.scan(
-                                beforeSnapshotId, DELETION_VECTORS_INDEX, beforeFiles.keySet())
+                                beforeSnapshot, DELETION_VECTORS_INDEX, beforeFiles.keySet())
                         : Collections.emptyMap();
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap =
                 deletionVectors
@@ -429,7 +482,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.ADD));
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
-        return toChangesPlan(false, plan, before.id(), beforeFiles, dataFiles);
+        return toChangesPlan(false, plan, before, beforeFiles, dataFiles);
     }
 
     private RecordComparator partitionComparator() {
@@ -446,23 +499,24 @@ public class SnapshotReaderImpl implements SnapshotReader {
         List<DeletionFile> deletionFiles = new ArrayList<>(dataFiles.size());
         Map<String, IndexFileMeta> dataFileToIndexFileMeta = new HashMap<>();
         for (IndexFileMeta indexFileMeta : indexFileMetas) {
-            if (indexFileMeta.deletionVectorsRanges() != null) {
-                for (String dataFileName : indexFileMeta.deletionVectorsRanges().keySet()) {
-                    dataFileToIndexFileMeta.put(dataFileName, indexFileMeta);
+            if (indexFileMeta.deletionVectorMetas() != null) {
+                for (DeletionVectorMeta dvMeta : indexFileMeta.deletionVectorMetas().values()) {
+                    dataFileToIndexFileMeta.put(dvMeta.dataFileName(), indexFileMeta);
                 }
             }
         }
         for (DataFileMeta file : dataFiles) {
             IndexFileMeta indexFileMeta = dataFileToIndexFileMeta.get(file.fileName());
             if (indexFileMeta != null) {
-                Map<String, Pair<Integer, Integer>> ranges = indexFileMeta.deletionVectorsRanges();
-                if (ranges != null && ranges.containsKey(file.fileName())) {
-                    Pair<Integer, Integer> range = ranges.get(file.fileName());
+                LinkedHashMap<String, DeletionVectorMeta> dvMetas =
+                        indexFileMeta.deletionVectorMetas();
+                if (dvMetas != null && dvMetas.containsKey(file.fileName())) {
                     deletionFiles.add(
                             new DeletionFile(
                                     indexFileHandler.filePath(indexFileMeta).toString(),
-                                    range.getKey(),
-                                    range.getValue()));
+                                    dvMetas.get(file.fileName()).offset(),
+                                    dvMetas.get(file.fileName()).length(),
+                                    dvMetas.get(file.fileName()).cardinality()));
                     continue;
                 }
             }

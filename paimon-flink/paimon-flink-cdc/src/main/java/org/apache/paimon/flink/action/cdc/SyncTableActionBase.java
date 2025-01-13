@@ -58,14 +58,12 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
     protected List<ComputedColumn> computedColumns = new ArrayList<>();
 
     public SyncTableActionBase(
-            String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> cdcSourceConfig,
             SyncJobHandler.SourceType sourceType) {
         super(
-                warehouse,
                 database,
                 catalogConfig,
                 cdcSourceConfig,
@@ -107,22 +105,16 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                 tableConfig,
                 retrievedSchema,
                 metadataConverters,
-                allowUpperCase,
+                caseSensitive,
                 true,
                 true);
-    }
-
-    @Override
-    protected void validateCaseSensitivity() {
-        Catalog.validateCaseInsensitive(allowUpperCase, "Database", database);
-        Catalog.validateCaseInsensitive(allowUpperCase, "Table", table);
     }
 
     @Override
     protected void beforeBuildingSourceSink() throws Exception {
         Identifier identifier = new Identifier(database, table);
         // Check if table exists before trying to get or create it
-        if (catalog.tableExists(identifier)) {
+        try {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = alterTableOptions(identifier, fileStoreTable);
             try {
@@ -142,11 +134,11 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                         buildComputedColumns(
                                 computedColumnArgs,
                                 fileStoreTable.schema().fields(),
-                                allowUpperCase);
+                                caseSensitive);
                 // check partition keys and primary keys in case that user specified them
                 checkConstraints();
             }
-        } else {
+        } catch (Catalog.TableNotExistException e) {
             Schema retrievedSchema = retrieveSchema();
             computedColumns = buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
             Schema paimonSchema = buildPaimonSchema(retrievedSchema);
@@ -162,7 +154,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
 
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
-        boolean caseSensitive = this.allowUpperCase;
+        boolean caseSensitive = this.caseSensitive;
         return () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
     }
 

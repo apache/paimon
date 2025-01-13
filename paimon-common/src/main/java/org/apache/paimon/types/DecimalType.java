@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.Decimal;
 
 import java.util.Objects;
 
@@ -84,6 +85,11 @@ public class DecimalType extends DataType {
 
     public int getScale() {
         return scale;
+    }
+
+    @Override
+    public int defaultSize() {
+        return Decimal.isCompact(precision) ? 8 : 16;
     }
 
     @Override

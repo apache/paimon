@@ -18,8 +18,10 @@
 
 package org.apache.paimon.tag;
 
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -27,8 +29,10 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /** A manager to expire tags by time. */
@@ -41,6 +45,8 @@ public class TagTimeExpire {
     private final TagDeletion tagDeletion;
     private final List<TagCallback> callbacks;
 
+    private LocalDateTime olderThanTime;
+
     private TagTimeExpire(
             SnapshotManager snapshotManager,
             TagManager tagManager,
@@ -52,24 +58,53 @@ public class TagTimeExpire {
         this.callbacks = callbacks;
     }
 
-    public void run() {
+    public List<String> expire() {
         List<Pair<Tag, String>> tags = tagManager.tagObjects();
+        List<String> expired = new ArrayList<>();
         for (Pair<Tag, String> pair : tags) {
             Tag tag = pair.getLeft();
             String tagName = pair.getRight();
             LocalDateTime createTime = tag.getTagCreateTime();
             Duration timeRetained = tag.getTagTimeRetained();
             if (createTime == null || timeRetained == null) {
-                continue;
+                if (olderThanTime != null) {
+                    FileStatus tagFileStatus;
+                    try {
+                        tagFileStatus =
+                                snapshotManager.fileIO().getFileStatus(tagManager.tagPath(tagName));
+                    } catch (IOException e) {
+                        LOG.warn(
+                                "Tag path {} not exist, skip expire it.",
+                                tagManager.tagPath(tagName));
+                        continue;
+                    }
+                    createTime = DateTimeUtils.toLocalDateTime(tagFileStatus.getModificationTime());
+                } else {
+                    continue;
+                }
             }
-            if (LocalDateTime.now().isAfter(createTime.plus(timeRetained))) {
+            boolean isReachTimeRetained =
+                    timeRetained != null
+                            && LocalDateTime.now().isAfter(createTime.plus(timeRetained));
+            boolean isOlderThan = olderThanTime != null && olderThanTime.isAfter(createTime);
+            if (isReachTimeRetained || isOlderThan) {
                 LOG.info(
-                        "Delete tag {}, because its existence time has reached its timeRetained of {}.",
+                        "Delete tag {}, because its existence time has reached its timeRetained of {} or"
+                                + " its createTime {} is olderThan olderThanTime {}.",
                         tagName,
-                        timeRetained);
+                        timeRetained,
+                        createTime,
+                        olderThanTime);
                 tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
+                expired.add(tagName);
             }
         }
+        return expired;
+    }
+
+    public TagTimeExpire withOlderThanTime(LocalDateTime olderThanTime) {
+        this.olderThanTime = olderThanTime;
+        return this;
     }
 
     public static TagTimeExpire create(

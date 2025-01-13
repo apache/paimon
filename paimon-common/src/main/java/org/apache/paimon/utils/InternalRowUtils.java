@@ -43,6 +43,8 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 
+import javax.annotation.Nullable;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
@@ -193,12 +195,18 @@ public class InternalRowUtils {
             case BINARY:
             case VARBINARY:
                 return dataGetters.getBinary(pos);
+            case VARIANT:
+                return dataGetters.getVariant(pos);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }
     }
 
-    public static InternalArray toStringArrayData(List<String> list) {
+    public static InternalArray toStringArrayData(@Nullable List<String> list) {
+        if (list == null) {
+            return null;
+        }
+
         return new GenericArray(list.stream().map(BinaryString::fromString).toArray());
     }
 

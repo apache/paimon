@@ -43,10 +43,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SplitGeneratorTest {
 
     public static DataFileMeta newFileFromSequence(
-            String name, int rowCount, long minSequence, long maxSequence) {
+            String name, int fileSize, long minSequence, long maxSequence) {
         return new DataFileMeta(
                 name,
-                rowCount,
+                fileSize,
                 1,
                 EMPTY_ROW,
                 EMPTY_ROW,
@@ -58,7 +58,8 @@ public class SplitGeneratorTest {
                 0,
                 0L,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 
     @Test

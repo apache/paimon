@@ -23,7 +23,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.metrics.Gauge;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
-import org.apache.paimon.metrics.MetricRegistryImpl;
+import org.apache.paimon.metrics.TestMetricRegistry;
 
 import org.junit.jupiter.api.Test;
 
@@ -234,6 +234,6 @@ public class CommitMetricsTest {
     }
 
     private CommitMetrics getCommitMetrics() {
-        return new CommitMetrics(new MetricRegistryImpl(), TABLE_NAME);
+        return new CommitMetrics(new TestMetricRegistry(), TABLE_NAME);
     }
 }

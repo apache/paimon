@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -37,6 +38,7 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -78,19 +80,21 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final int appendUdsFieldNumber;
 
     protected RocksDBStateFactory stateFactory;
-    @Nullable private final ExecutorService refreshExecutor;
+    @Nullable private ExecutorService refreshExecutor;
     private final AtomicReference<Exception> cachedException;
     private final int maxPendingSnapshotCount;
     private final FileStoreTable table;
     private Future<?> refreshFuture;
     private LookupStreamingReader reader;
     private Predicate specificPartition;
+    @Nullable private Filter<InternalRow> cacheRowFilter;
 
     public FullCacheLookupTable(Context context) {
         this.table = context.table;
         List<String> sequenceFields = new ArrayList<>();
+        CoreOptions coreOptions = new CoreOptions(table.options());
         if (table.primaryKeys().size() > 0) {
-            sequenceFields = new CoreOptions(table.options()).sequenceField();
+            sequenceFields = coreOptions.sequenceField();
         }
         RowType projectedType = TypeUtils.project(table.rowType(), context.projection);
         if (sequenceFields.size() > 0) {
@@ -109,7 +113,10 @@ public abstract class FullCacheLookupTable implements LookupTable {
             projectedType = builder.build();
             context = context.copy(table.rowType().getFieldIndices(projectedType.getFieldNames()));
             this.userDefinedSeqComparator =
-                    UserDefinedSeqComparator.create(projectedType, sequenceFields);
+                    UserDefinedSeqComparator.create(
+                            projectedType,
+                            sequenceFields,
+                            coreOptions.sequenceFieldSortOrderIsAscending());
             this.appendUdsFieldNumber = appendUdsFieldNumber.get();
         } else {
             this.userDefinedSeqComparator = null;
@@ -121,14 +128,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
         Options options = Options.fromMap(context.table.options());
         this.projectedType = projectedType;
         this.refreshAsync = options.get(LOOKUP_REFRESH_ASYNC);
-        this.refreshExecutor =
-                this.refreshAsync
-                        ? Executors.newSingleThreadExecutor(
-                                new ExecutorThreadFactory(
-                                        String.format(
-                                                "%s-lookup-refresh",
-                                                Thread.currentThread().getName())))
-                        : null;
         this.cachedException = new AtomicReference<>();
         this.maxPendingSnapshotCount = options.get(LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT);
     }
@@ -138,12 +137,25 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.specificPartition = filter;
     }
 
-    protected void openStateFactory() throws Exception {
+    @Override
+    public void specifyCacheRowFilter(Filter<InternalRow> filter) {
+        this.cacheRowFilter = filter;
+    }
+
+    protected void init() throws Exception {
         this.stateFactory =
                 new RocksDBStateFactory(
                         context.tempPath.toString(),
                         context.table.coreOptions().toConfiguration(),
                         null);
+        this.refreshExecutor =
+                this.refreshAsync
+                        ? Executors.newSingleThreadExecutor(
+                                new ExecutorThreadFactory(
+                                        String.format(
+                                                "%s-lookup-refresh",
+                                                Thread.currentThread().getName())))
+                        : null;
     }
 
     protected void bootstrap() throws Exception {
@@ -154,7 +166,8 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         context.table,
                         context.projection,
                         scanPredicate,
-                        context.requiredCachedBucketIds);
+                        context.requiredCachedBucketIds,
+                        cacheRowFilter);
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
@@ -310,6 +323,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
         }
     }
 
+    @VisibleForTesting
+    public Future<?> getRefreshFuture() {
+        return refreshFuture;
+    }
+
     /** Bulk loader for the table. */
     public interface TableBulkLoader {
 
@@ -334,7 +352,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     /** Context for {@link LookupTable}. */
     public static class Context {
 
-        public final FileStoreTable table;
+        public final LookupFileStoreTable table;
         public final int[] projection;
         @Nullable public final Predicate tablePredicate;
         @Nullable public final Predicate projectedPredicate;
@@ -350,7 +368,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 File tempPath,
                 List<String> joinKey,
                 @Nullable Set<Integer> requiredCachedBucketIds) {
-            this.table = table;
+            this.table = new LookupFileStoreTable(table, joinKey);
             this.projection = projection;
             this.tablePredicate = tablePredicate;
             this.projectedPredicate = projectedPredicate;
@@ -361,7 +379,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
         public Context copy(int[] newProjection) {
             return new Context(
-                    table,
+                    table.wrapped(),
                     newProjection,
                     tablePredicate,
                     projectedPredicate,

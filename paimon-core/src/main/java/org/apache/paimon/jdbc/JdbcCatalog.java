@@ -20,9 +20,12 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
@@ -32,11 +35,13 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,11 +56,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
+import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
+import static org.apache.paimon.jdbc.JdbcUtils.updateProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
@@ -142,6 +151,11 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
+    public CatalogLoader catalogLoader() {
+        return new JdbcCatalogLoader(fileIO, catalogKey, options, warehouse);
+    }
+
+    @Override
     public List<String> listDatabases() {
         List<String> databases = Lists.newArrayList();
         databases.addAll(
@@ -155,22 +169,21 @@ public class JdbcCatalog extends AbstractCatalog {
                         row -> row.getString(JdbcUtils.DATABASE_NAME),
                         JdbcUtils.LIST_ALL_PROPERTY_DATABASES_SQL,
                         catalogKey));
-        return databases;
+        return databases.stream().distinct().collect(Collectors.toList());
     }
 
     @Override
-    protected Map<String, String> loadDatabasePropertiesImpl(String databaseName)
-            throws DatabaseNotExistException {
+    protected Database getDatabaseImpl(String databaseName) throws DatabaseNotExistException {
         if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
             throw new DatabaseNotExistException(databaseName);
         }
-        Map<String, String> properties = Maps.newHashMap();
-        properties.putAll(fetchProperties(databaseName));
-        if (!properties.containsKey(DB_LOCATION_PROP)) {
-            properties.put(DB_LOCATION_PROP, newDatabasePath(databaseName).getName());
+        Map<String, String> options = Maps.newHashMap();
+        options.putAll(fetchProperties(databaseName));
+        if (!options.containsKey(DB_LOCATION_PROP)) {
+            options.put(DB_LOCATION_PROP, newDatabasePath(databaseName).getName());
         }
-        properties.remove(DATABASE_EXISTS_PROPERTY);
-        return ImmutableMap.copyOf(properties);
+        options.remove(DATABASE_EXISTS_PROPERTY);
+        return Database.of(databaseName, options, null);
     }
 
     @Override
@@ -194,6 +207,45 @@ public class JdbcCatalog extends AbstractCatalog {
         execute(connections, JdbcUtils.DELETE_TABLES_SQL, catalogKey, name);
         // Delete properties from paimon_database_properties
         execute(connections, JdbcUtils.DELETE_ALL_DATABASE_PROPERTIES_SQL, catalogKey, name);
+    }
+
+    @Override
+    protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
+        Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
+                PropertyChange.getSetPropertiesToRemoveKeys(changes);
+        Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
+        Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
+        Map<String, String> startingProperties = fetchProperties(name);
+        Map<String, String> inserts = Maps.newHashMap();
+        Map<String, String> updates = Maps.newHashMap();
+        Set<String> removes = Sets.newHashSet();
+        if (!setProperties.isEmpty()) {
+            setProperties.forEach(
+                    (k, v) -> {
+                        if (!startingProperties.containsKey(k)) {
+                            inserts.put(k, v);
+                        } else {
+                            updates.put(k, v);
+                        }
+                    });
+        }
+        if (!removeKeys.isEmpty()) {
+            removeKeys.forEach(
+                    k -> {
+                        if (startingProperties.containsKey(k)) {
+                            removes.add(k);
+                        }
+                    });
+        }
+        if (!inserts.isEmpty()) {
+            insertProperties(connections, catalogKey, name, inserts);
+        }
+        if (!updates.isEmpty()) {
+            updateProperties(connections, catalogKey, name, updates);
+        }
+        if (!removes.isEmpty()) {
+            deleteProperties(connections, catalogKey, name, removes);
+        }
     }
 
     @Override
@@ -319,7 +371,7 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean allowUpperCase() {
+    public boolean caseSensitive() {
         return false;
     }
 
@@ -348,9 +400,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public void close() throws Exception {
-        if (!connections.isClosed()) {
-            connections.close();
-        }
+        connections.close();
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {

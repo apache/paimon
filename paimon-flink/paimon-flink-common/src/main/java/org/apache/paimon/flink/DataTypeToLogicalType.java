@@ -41,6 +41,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.flink.table.types.logical.LogicalType;
 
@@ -138,6 +139,11 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
     public LogicalType visit(LocalZonedTimestampType localZonedTimestampType) {
         return new org.apache.flink.table.types.logical.LocalZonedTimestampType(
                 localZonedTimestampType.isNullable(), localZonedTimestampType.getPrecision());
+    }
+
+    @Override
+    public LogicalType visit(VariantType variantType) {
+        throw new UnsupportedOperationException("VariantType is not supported.");
     }
 
     @Override

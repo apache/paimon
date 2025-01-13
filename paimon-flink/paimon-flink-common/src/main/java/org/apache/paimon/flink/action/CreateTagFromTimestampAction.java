@@ -26,19 +26,22 @@ import java.util.Map;
 
 /** Create tag from timestamp action for Flink. */
 public class CreateTagFromTimestampAction extends ActionBase {
+
+    private final String database;
     private final String table;
     private final String tag;
     private final Long timestamp;
     private final String timeRetained;
 
     public CreateTagFromTimestampAction(
-            String warehouse,
+            String database,
             String table,
             String tag,
             Long timestamp,
             String timeRetained,
             Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+        super(catalogConfig);
+        this.database = database;
         this.table = table;
         this.tag = tag;
         this.timestamp = timestamp;
@@ -51,6 +54,10 @@ public class CreateTagFromTimestampAction extends ActionBase {
                 new CreateTagFromTimestampProcedure();
         createTagFromTimestampProcedure.withCatalog(catalog);
         createTagFromTimestampProcedure.call(
-                new DefaultProcedureContext(env), table, tag, timestamp, timeRetained);
+                new DefaultProcedureContext(env),
+                database + "." + table,
+                tag,
+                timestamp,
+                timeRetained);
     }
 }

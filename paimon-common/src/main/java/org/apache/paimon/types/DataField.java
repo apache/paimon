@@ -84,6 +84,10 @@ public final class DataField implements Serializable {
         return new DataField(id, newName, type, description);
     }
 
+    public DataField newType(DataType newType) {
+        return new DataField(id, name, newType, description);
+    }
+
     public DataField newDescription(String newDescription) {
         return new DataField(id, name, type, newDescription);
     }
@@ -144,6 +148,31 @@ public final class DataField implements Serializable {
                 && Objects.equals(description, field.description);
     }
 
+    public boolean equalsIgnoreFieldId(DataField other) {
+        if (this == other) {
+            return true;
+        }
+        if (other == null) {
+            return false;
+        }
+        return Objects.equals(name, other.name)
+                && type.equalsIgnoreFieldId(other.type)
+                && Objects.equals(description, other.description);
+    }
+
+    public boolean isPrunedFrom(DataField other) {
+        if (this == other) {
+            return true;
+        }
+        if (other == null) {
+            return false;
+        }
+        return Objects.equals(id, other.id)
+                && Objects.equals(name, other.name)
+                && type.isPrunedFrom(other.type)
+                && Objects.equals(description, other.description);
+    }
+
     @Override
     public int hashCode() {
         return Objects.hash(id, name, type, description);
@@ -152,5 +181,21 @@ public final class DataField implements Serializable {
     @Override
     public String toString() {
         return asSQLString();
+    }
+
+    /**
+     * When the order of the same field is different, its ID may also be different, so the
+     * comparison should not include the ID.
+     */
+    public static boolean dataFieldEqualsIgnoreId(DataField dataField1, DataField dataField2) {
+        if (dataField1 == dataField2) {
+            return true;
+        } else if (dataField1 != null && dataField2 != null) {
+            return Objects.equals(dataField1.name(), dataField2.name())
+                    && Objects.equals(dataField1.type(), dataField2.type())
+                    && Objects.equals(dataField1.description(), dataField2.description());
+        } else {
+            return false;
+        }
     }
 }

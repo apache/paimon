@@ -19,9 +19,11 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -61,20 +63,29 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
 
     private final EventParser.Factory<T> parserFactory;
     private final String database;
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
 
     private transient EventParser<T> parser;
     private transient Catalog catalog;
 
     public CdcDynamicTableParsingProcessFunction(
-            String database, Catalog.Loader catalogLoader, EventParser.Factory<T> parserFactory) {
+            String database, CatalogLoader catalogLoader, EventParser.Factory<T> parserFactory) {
         // for now, only support single database
         this.database = database;
         this.catalogLoader = catalogLoader;
         this.parserFactory = parserFactory;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
+    public void open(OpenContext openContext) throws Exception {
+        open(new Configuration());
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
     public void open(Configuration parameters) throws Exception {
         parser = parserFactory.create();
         catalog = catalogLoader.load();

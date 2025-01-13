@@ -34,6 +34,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -132,6 +133,11 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SchemaManager schemaManager() {
+        return wrapped.schemaManager();
+    }
+
+    @Override
     public TagManager tagManager() {
         return wrapped.tagManager();
     }
@@ -211,11 +217,6 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
         public InnerTableRead withFilter(Predicate predicate) {
             // filter is done by scan
             return this;
-        }
-
-        @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            throw new UnsupportedOperationException("BucketsRead does not support projection");
         }
 
         @Override

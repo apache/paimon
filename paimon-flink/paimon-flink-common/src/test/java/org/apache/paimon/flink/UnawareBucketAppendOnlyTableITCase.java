@@ -19,14 +19,34 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.TimeUtils;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.File;
 import java.time.Duration;
@@ -38,7 +58,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -191,7 +210,11 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");
 
-        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(500));
+        sEnv.getConfig()
+                .getConfiguration()
+                .setString(
+                        "execution.checkpointing.interval",
+                        TimeUtils.formatWithHighestUnit(Duration.ofMillis(500)));
         sEnv.executeSql(
                 "CREATE TEMPORARY TABLE Orders_in (\n"
                         + "    f0        INT,\n"
@@ -212,7 +235,11 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");
 
-        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(500));
+        sEnv.getConfig()
+                .getConfiguration()
+                .setString(
+                        "execution.checkpointing.interval",
+                        TimeUtils.formatWithHighestUnit(Duration.ofMillis(500)));
         sEnv.executeSql(
                 "CREATE TEMPORARY TABLE Orders_in (\n"
                         + "    f0        INT,\n"
@@ -344,6 +371,107 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
         assertThat(batchSql("SELECT * FROM index_table WHERE indexc = 'c' and (id = 2 or id = 3)"))
                 .containsExactlyInAnyOrder(Row.of(2, "c", "BBB"), Row.of(3, "c", "BBB"));
+    }
+
+    @Timeout(60)
+    @Test
+    public void testStatelessWriter() throws Exception {
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), new Path(path, "default.db/append_table"));
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(2)
+                        .checkpointIntervalMs(500)
+                        .build();
+        DataStream<Integer> source =
+                env.fromSource(
+                                new TestStatelessWriterSource(table),
+                                WatermarkStrategy.noWatermarks(),
+                                "TestStatelessWriterSource")
+                        .setParallelism(2)
+                        .forward();
+
+        StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
+        tEnv.registerCatalog("mycat", sEnv.getCatalog("PAIMON").get());
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.createTemporaryView("S", tEnv.fromDataStream(source).as("id"));
+
+        tEnv.executeSql("INSERT INTO append_table SELECT id, 'test' FROM S").await();
+        assertThat(batchSql("SELECT * FROM append_table"))
+                .containsExactlyInAnyOrder(Row.of(1, "test"), Row.of(2, "test"));
+    }
+
+    private static class TestStatelessWriterSource extends AbstractNonCoordinatedSource<Integer> {
+
+        private final FileStoreTable table;
+
+        private TestStatelessWriterSource(FileStoreTable table) {
+            this.table = table;
+        }
+
+        @Override
+        public Boundedness getBoundedness() {
+            return Boundedness.CONTINUOUS_UNBOUNDED;
+        }
+
+        @Override
+        public SourceReader<Integer, SimpleSourceSplit> createReader(
+                SourceReaderContext sourceReaderContext) throws Exception {
+            return new Reader(sourceReaderContext.getIndexOfSubtask());
+        }
+
+        private class Reader extends AbstractNonCoordinatedSourceReader<Integer> {
+            private final int taskId;
+            private int waitCount;
+
+            private Reader(int taskId) {
+                this.taskId = taskId;
+                this.waitCount = (taskId == 0 ? 0 : 10);
+            }
+
+            @Override
+            public InputStatus pollNext(ReaderOutput<Integer> readerOutput) throws Exception {
+                if (taskId == 0) {
+                    if (waitCount == 0) {
+                        readerOutput.collect(1);
+                    } else if (countNumRecords() >= 1) {
+                        // wait for the record to commit before exiting
+                        Thread.sleep(1000);
+                        return InputStatus.END_OF_INPUT;
+                    }
+                } else {
+                    int numRecords = countNumRecords();
+                    if (numRecords >= 1) {
+                        if (waitCount == 0) {
+                            readerOutput.collect(2);
+                        } else if (countNumRecords() >= 2) {
+                            // make sure the next checkpoint is successful
+                            Thread.sleep(1000);
+                            return InputStatus.END_OF_INPUT;
+                        }
+                    }
+                }
+                waitCount--;
+                Thread.sleep(1000);
+                return InputStatus.MORE_AVAILABLE;
+            }
+        }
+
+        private int countNumRecords() throws Exception {
+            int ret = 0;
+            RecordReader<InternalRow> reader =
+                    table.newRead().createReader(table.newSnapshotReader().read());
+            try (RecordReaderIterator<InternalRow> it = new RecordReaderIterator<>(reader)) {
+                while (it.hasNext()) {
+                    it.next();
+                    ret++;
+                }
+            }
+            return ret;
+        }
     }
 
     @Override

@@ -26,8 +26,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.stats.SimpleStatsConverters;
+import org.apache.paimon.stats.SimpleStatsEvolution;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 
@@ -236,12 +236,13 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
             List<String> filesName,
             List<DataFileMeta> fileMetaList) {
         Function<Long, List<DataField>> schemaFields = id -> tableSchemas.get(id).fields();
-        SimpleStatsConverters converters = new SimpleStatsConverters(schemaFields, schemaId);
+        SimpleStatsEvolutions converters = new SimpleStatsEvolutions(schemaFields, schemaId);
         for (DataFileMeta fileMeta : fileMetaList) {
             SimpleStats stats = getTableValueStats(fileMeta);
-            SimpleStatsConverter serializer = converters.getOrCreate(fileMeta.schemaId());
-            InternalRow min = serializer.evolution(stats.minValues());
-            InternalRow max = serializer.evolution(stats.maxValues());
+            SimpleStatsEvolution.Result result =
+                    converters.getOrCreate(fileMeta.schemaId()).evolution(stats, null, null);
+            InternalRow min = result.minValues();
+            InternalRow max = result.maxValues();
             assertThat(stats.minValues().getFieldCount()).isEqualTo(12);
             if (filesName.contains(fileMeta.fileName())) {
                 checkTwoValues(min, max);

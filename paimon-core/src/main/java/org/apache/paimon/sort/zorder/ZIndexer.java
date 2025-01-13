@@ -46,6 +46,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.ZOrderByteUtils;
 
 import java.io.Serializable;
@@ -346,6 +347,11 @@ public class ZIndexer implements Serializable {
                                         ((Timestamp) o).getMillisecond(), reuse)
                                 .array();
             };
+        }
+
+        @Override
+        public ZProcessFunction visit(VariantType variantType) {
+            throw new RuntimeException("Unsupported type");
         }
 
         @Override

@@ -26,7 +26,7 @@ import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.{NamedRelation, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.{Alias, ArrayTransform, Attribute, CreateStruct, Expression, GetArrayItem, GetStructField, LambdaFunction, Literal, NamedExpression, NamedLambdaVariable}
+import org.apache.spark.sql.catalyst.expressions.{Alias, ArrayTransform, Attribute, CreateNamedStruct, CreateStruct, Expression, GetArrayItem, GetStructField, If, IsNull, LambdaFunction, Literal, NamedExpression, NamedLambdaVariable}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
@@ -148,7 +148,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       case (s1: StructType, s2: StructType) =>
         s1.zip(s2).forall { case (d1, d2) => schemaCompatible(d1.dataType, d2.dataType) }
       case (a1: ArrayType, a2: ArrayType) =>
-        a1.containsNull == a2.containsNull && schemaCompatible(a1.elementType, a2.elementType)
+        // todo: support array type nullable evaluation
+        schemaCompatible(a1.elementType, a2.elementType)
       case (m1: MapType, m2: MapType) =>
         m1.valueContainsNull == m2.valueContainsNull &&
         schemaCompatible(m1.keyType, m2.keyType) &&
@@ -205,10 +206,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         val sourceField = source(sourceIndex)
         castStructField(parent, sourceIndex, sourceField.name, targetField)
     }
-    Alias(CreateStruct(fields), parent.name)(
-      parent.exprId,
-      parent.qualifier,
-      Option(parent.metadata))
+    structAlias(fields, parent)
   }
 
   private def addCastToStructByPosition(
@@ -233,10 +231,19 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         val sourceField = source(i)
         castStructField(parent, i, sourceField.name, targetField)
     }
-    Alias(CreateStruct(fields), parent.name)(
-      parent.exprId,
-      parent.qualifier,
-      Option(parent.metadata))
+    structAlias(fields, parent)
+  }
+
+  private def structAlias(
+      fields: Seq[NamedExpression],
+      parent: NamedExpression): NamedExpression = {
+    val struct = CreateStruct(fields)
+    val res = if (parent.nullable) {
+      If(IsNull(parent), Literal(null, struct.dataType), struct)
+    } else {
+      struct
+    }
+    Alias(res, parent.name)(parent.exprId, parent.qualifier, Option(parent.metadata))
   }
 
   private def castStructField(

@@ -277,7 +277,8 @@ class OrcReaderFactoryTest {
                 new Configuration(),
                 Projection.of(selectedFields).project(formatType),
                 conjunctPredicates,
-                BATCH_SIZE);
+                BATCH_SIZE,
+                false);
     }
 
     private RecordReader<InternalRow> createReader(OrcReaderFactory format, Path split)

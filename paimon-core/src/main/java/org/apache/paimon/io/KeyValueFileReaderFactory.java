@@ -32,32 +32,27 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
-import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
-import org.apache.paimon.utils.BulkFormatMapping;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Projection;
+import org.apache.paimon.utils.FormatReaderMapping;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
-
-import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
 public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
@@ -68,11 +63,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
 
-    private final BulkFormatMappingBuilder bulkFormatMappingBuilder;
+    private final FormatReaderMapping.Builder formatReaderMappingBuilder;
     private final DataFilePathFactory pathFactory;
     private final long asyncThreshold;
 
-    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
 
@@ -82,7 +77,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             TableSchema schema,
             RowType keyType,
             RowType valueType,
-            BulkFormatMappingBuilder bulkFormatMappingBuilder,
+            FormatReaderMapping.Builder formatReaderMappingBuilder,
             DataFilePathFactory pathFactory,
             long asyncThreshold,
             BinaryRow partition,
@@ -92,71 +87,62 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.schema = schema;
         this.keyType = keyType;
         this.valueType = valueType;
-        this.bulkFormatMappingBuilder = bulkFormatMappingBuilder;
+        this.formatReaderMappingBuilder = formatReaderMappingBuilder;
         this.pathFactory = pathFactory;
         this.asyncThreshold = asyncThreshold;
         this.partition = partition;
-        this.bulkFormatMappings = new HashMap<>();
+        this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
     }
 
     @Override
     public RecordReader<KeyValue> createRecordReader(DataFileMeta file) throws IOException {
-        return createRecordReader(file.schemaId(), file.fileName(), file.fileSize(), file.level());
-    }
-
-    public RecordReader<KeyValue> createRecordReader(
-            long schemaId, String fileName, long fileSize, int level) throws IOException {
-        if (fileSize >= asyncThreshold && fileName.endsWith(".orc")) {
-            return new AsyncRecordReader<>(
-                    () -> createRecordReader(schemaId, fileName, level, false, 2, fileSize));
+        if (file.fileSize() >= asyncThreshold && file.fileName().endsWith(".orc")) {
+            return new AsyncRecordReader<>(() -> createRecordReader(file, false, 2));
         }
-        return createRecordReader(schemaId, fileName, level, true, null, fileSize);
+        return createRecordReader(file, true, null);
     }
 
-    private RecordReader<KeyValue> createRecordReader(
-            long schemaId,
-            String fileName,
-            int level,
-            boolean reuseFormat,
-            @Nullable Integer orcPoolSize,
-            long fileSize)
+    private FileRecordReader<KeyValue> createRecordReader(
+            DataFileMeta file, boolean reuseFormat, @Nullable Integer orcPoolSize)
             throws IOException {
-        String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
+        String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+        long schemaId = file.schemaId();
 
-        Supplier<BulkFormatMapping> formatSupplier =
+        Supplier<FormatReaderMapping> formatSupplier =
                 () ->
-                        bulkFormatMappingBuilder.build(
+                        formatReaderMappingBuilder.build(
                                 formatIdentifier,
                                 schema,
                                 schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
 
-        BulkFormatMapping bulkFormatMapping =
+        FormatReaderMapping formatReaderMapping =
                 reuseFormat
-                        ? bulkFormatMappings.computeIfAbsent(
+                        ? formatReaderMappings.computeIfAbsent(
                                 new FormatKey(schemaId, formatIdentifier),
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
-        Path filePath = pathFactory.toPath(fileName);
+        Path filePath = pathFactory.toPath(file);
 
-        RecordReader<InternalRow> fileRecordReader =
-                new FileRecordReader(
-                        bulkFormatMapping.getReaderFactory(),
+        long fileSize = file.fileSize();
+        FileRecordReader<InternalRow> fileRecordReader =
+                new DataFileRecordReader(
+                        formatReaderMapping.getReaderFactory(),
                         orcPoolSize == null
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
                                 : new OrcFormatReaderContext(
                                         fileIO, filePath, fileSize, orcPoolSize),
-                        bulkFormatMapping.getIndexMapping(),
-                        bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+                        formatReaderMapping.getIndexMapping(),
+                        formatReaderMapping.getCastMapping(),
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition));
 
-        Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
+        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             fileRecordReader =
                     new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
         }
 
-        return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, level);
+        return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, file.level());
     }
 
     public static Builder builder(
@@ -192,13 +178,10 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         private final FileFormatDiscover formatDiscover;
         private final FileStorePathFactory pathFactory;
         private final KeyValueFieldsExtractor extractor;
-        private final int[][] fullKeyProjection;
         private final CoreOptions options;
 
-        private int[][] keyProjection;
-        private int[][] valueProjection;
-        private RowType projectedKeyType;
-        private RowType projectedValueType;
+        private RowType readKeyType;
+        private RowType readValueType;
 
         private Builder(
                 FileIO fileIO,
@@ -218,12 +201,10 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             this.formatDiscover = formatDiscover;
             this.pathFactory = pathFactory;
             this.extractor = extractor;
-
-            this.fullKeyProjection = Projection.range(0, keyType.getFieldCount()).toNestedIndexes();
             this.options = options;
-            this.keyProjection = fullKeyProjection;
-            this.valueProjection = Projection.range(0, valueType.getFieldCount()).toNestedIndexes();
-            applyProjection();
+
+            this.readKeyType = keyType;
+            this.readValueType = valueType;
         }
 
         public Builder copyWithoutProjection() {
@@ -239,15 +220,13 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     options);
         }
 
-        public Builder withKeyProjection(int[][] projection) {
-            keyProjection = projection;
-            applyProjection();
+        public Builder withReadKeyType(RowType readKeyType) {
+            this.readKeyType = readKeyType;
             return this;
         }
 
-        public Builder withValueProjection(int[][] projection) {
-            valueProjection = projection;
-            applyProjection();
+        public Builder withReadValueType(RowType readValueType) {
+            this.readValueType = readValueType;
             return this;
         }
 
@@ -255,8 +234,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             return keyType;
         }
 
-        public RowType projectedValueType() {
-            return projectedValueType;
+        public RowType readValueType() {
+            return readValueType;
         }
 
         public KeyValueFileReaderFactory build(
@@ -270,141 +249,33 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 DeletionVector.Factory dvFactory,
                 boolean projectKeys,
                 @Nullable List<Predicate> filters) {
-            int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
-            RowType projectedKeyType = projectKeys ? this.projectedKeyType : keyType;
+            RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
+            Function<TableSchema, List<DataField>> fieldsExtractor =
+                    schema -> {
+                        List<DataField> dataKeyFields = extractor.keyFields(schema);
+                        List<DataField> dataValueFields = extractor.valueFields(schema);
+                        return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
+                    };
+            List<DataField> readTableFields =
+                    KeyValue.createKeyValueFields(
+                            finalReadKeyType.getFields(), readValueType.getFields());
 
             return new KeyValueFileReaderFactory(
                     fileIO,
                     schemaManager,
                     schema,
-                    projectedKeyType,
-                    projectedValueType,
-                    new BulkFormatMappingBuilder(
-                            formatDiscover, extractor, keyProjection, valueProjection, filters),
+                    finalReadKeyType,
+                    readValueType,
+                    new FormatReaderMapping.Builder(
+                            formatDiscover, readTableFields, fieldsExtractor, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
                     partition,
                     dvFactory);
         }
 
-        private void applyProjection() {
-            projectedKeyType = Projection.of(keyProjection).project(keyType);
-            projectedValueType = Projection.of(valueProjection).project(valueType);
-        }
-
         public FileIO fileIO() {
             return fileIO;
-        }
-    }
-
-    /** Builder to build {@link BulkFormatMapping}. */
-    private static class BulkFormatMappingBuilder {
-
-        private final FileFormatDiscover formatDiscover;
-        private final KeyValueFieldsExtractor extractor;
-        private final int[][] keyProjection;
-        private final int[][] valueProjection;
-        @Nullable private final List<Predicate> filters;
-
-        private BulkFormatMappingBuilder(
-                FileFormatDiscover formatDiscover,
-                KeyValueFieldsExtractor extractor,
-                int[][] keyProjection,
-                int[][] valueProjection,
-                @Nullable List<Predicate> filters) {
-            this.formatDiscover = formatDiscover;
-            this.extractor = extractor;
-            this.keyProjection = keyProjection;
-            this.valueProjection = valueProjection;
-            this.filters = filters;
-        }
-
-        public BulkFormatMapping build(
-                String formatIdentifier, TableSchema tableSchema, TableSchema dataSchema) {
-            List<DataField> tableKeyFields = extractor.keyFields(tableSchema);
-            List<DataField> tableValueFields = extractor.valueFields(tableSchema);
-            int[][] tableProjection =
-                    KeyValue.project(keyProjection, valueProjection, tableKeyFields.size());
-
-            List<DataField> dataKeyFields = extractor.keyFields(dataSchema);
-            List<DataField> dataValueFields = extractor.valueFields(dataSchema);
-
-            RowType keyType = new RowType(dataKeyFields);
-            RowType valueType = new RowType(dataValueFields);
-            RowType dataRecordType = KeyValue.schema(keyType, valueType);
-
-            int[][] dataKeyProjection =
-                    SchemaEvolutionUtil.createDataProjection(
-                            tableKeyFields, dataKeyFields, keyProjection);
-            int[][] dataValueProjection =
-                    SchemaEvolutionUtil.createDataProjection(
-                            tableValueFields, dataValueFields, valueProjection);
-            int[][] dataProjection =
-                    KeyValue.project(dataKeyProjection, dataValueProjection, dataKeyFields.size());
-
-            /*
-             * We need to create index mapping on projection instead of key and value separately
-             * here, for example
-             *
-             * <ul>
-             *   <li>the table key fields: 1->d, 3->a, 4->b, 5->c
-             *   <li>the data key fields: 1->a, 2->b, 3->c
-             * </ul>
-             *
-             * <p>The value fields of table and data are 0->value_count, the key and value
-             * projections are as follows
-             *
-             * <ul>
-             *   <li>table key projection: [0, 1, 2, 3], value projection: [0], data projection: [0,
-             *       1, 2, 3, 4, 5, 6] which 4/5 is seq/kind and 6 is value
-             *   <li>data key projection: [0, 1, 2], value projection: [0], data projection: [0, 1,
-             *       2, 3, 4, 5] where 3/4 is seq/kind and 5 is value
-             * </ul>
-             *
-             * <p>We will get value index mapping null from above and we can't create projection
-             * index mapping based on key and value index mapping any more.
-             */
-            IndexCastMapping indexCastMapping =
-                    SchemaEvolutionUtil.createIndexCastMapping(
-                            Projection.of(tableProjection).toTopLevelIndexes(),
-                            tableKeyFields,
-                            tableValueFields,
-                            Projection.of(dataProjection).toTopLevelIndexes(),
-                            dataKeyFields,
-                            dataValueFields);
-
-            List<Predicate> dataFilters =
-                    tableSchema.id() == dataSchema.id()
-                            ? filters
-                            : SchemaEvolutionUtil.createDataFilters(
-                                    tableSchema.fields(), dataSchema.fields(), filters);
-            // Skip pushing down partition filters to reader
-            List<Predicate> nonPartitionFilters =
-                    excludePredicateWithFields(
-                            dataFilters, new HashSet<>(dataSchema.partitionKeys()));
-
-            Pair<int[], RowType> partitionPair = null;
-            if (!dataSchema.partitionKeys().isEmpty()) {
-                Pair<int[], int[][]> partitionMapping =
-                        PartitionUtils.constructPartitionMapping(
-                                dataRecordType, dataSchema.partitionKeys(), dataProjection);
-                // is partition fields are not selected, we just do nothing.
-                if (partitionMapping != null) {
-                    dataProjection = partitionMapping.getRight();
-                    partitionPair =
-                            Pair.of(
-                                    partitionMapping.getLeft(),
-                                    dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
-                }
-            }
-            RowType projectedRowType = Projection.of(dataProjection).project(dataRecordType);
-            return new BulkFormatMapping(
-                    indexCastMapping.getIndexMapping(),
-                    indexCastMapping.getCastMapping(),
-                    partitionPair,
-                    formatDiscover
-                            .discover(formatIdentifier)
-                            .createReaderFactory(projectedRowType, nonPartitionFilters));
         }
     }
 }

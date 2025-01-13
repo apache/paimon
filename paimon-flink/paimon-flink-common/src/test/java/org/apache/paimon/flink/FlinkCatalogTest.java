@@ -19,17 +19,22 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreRegister;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableDescriptor;
@@ -37,11 +42,17 @@ import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
+import org.apache.flink.table.catalog.CatalogMaterializedTable;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.Column;
+import org.apache.flink.table.catalog.IntervalFreshness;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.ResolvedCatalogMaterializedTable;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.catalog.TableChange;
+import org.apache.flink.table.catalog.TestSchemaResolver;
 import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
@@ -54,6 +65,8 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.utils.ResolvedExpressionMock;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.refresh.RefreshHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -71,6 +84,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -81,13 +95,22 @@ import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
+import static org.apache.paimon.flink.FlinkTestBase.createResolvedTable;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatCollection;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link FlinkCatalog}. */
 public class FlinkCatalogTest {
+
     private static final String TESTING_LOG_STORE = "testing";
 
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
@@ -98,6 +121,10 @@ public class FlinkCatalogTest {
     private final ObjectPath tableInDefaultDb1 = new ObjectPath("default-db", "t1");
     private final ObjectPath nonExistDbPath = ObjectPath.fromString("non.exist");
     private final ObjectPath nonExistObjectPath = ObjectPath.fromString("db1.nonexist");
+
+    private static final String DEFINITION_QUERY = "SELECT id, region, county FROM T";
+
+    private static final IntervalFreshness FRESHNESS = IntervalFreshness.ofMinute("3");
 
     private String warehouse;
     private Catalog catalog;
@@ -186,6 +213,96 @@ public class FlinkCatalogTest {
         return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 
+    private CatalogMaterializedTable createMaterializedTable(Map<String, String> options) {
+        ResolvedSchema resolvedSchema = this.createSchema();
+        return new ResolvedCatalogMaterializedTable(
+                CatalogMaterializedTable.newBuilder()
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .comment("test materialized table comment")
+                        .partitionKeys(Collections.emptyList())
+                        .options(options)
+                        .definitionQuery(DEFINITION_QUERY)
+                        .freshness(FRESHNESS)
+                        .logicalRefreshMode(CatalogMaterializedTable.LogicalRefreshMode.AUTOMATIC)
+                        .refreshMode(CatalogMaterializedTable.RefreshMode.CONTINUOUS)
+                        .refreshStatus(CatalogMaterializedTable.RefreshStatus.INITIALIZING)
+                        .build(),
+                resolvedSchema);
+    }
+
+    @ParameterizedTest
+    @MethodSource("batchOptionProvider")
+    public void testCreateAndGetCatalogMaterializedTable(Map<String, String> options)
+            throws Exception {
+        ObjectPath tablePath = path1;
+        CatalogMaterializedTable materializedTable = createMaterializedTable(options);
+        catalog.createDatabase(tablePath.getDatabaseName(), null, false);
+        // test create materialized table
+        catalog.createTable(tablePath, materializedTable, true);
+
+        // test materialized table exist
+        assertThat(catalog.tableExists(tablePath)).isTrue();
+
+        // test get materialized table
+        CatalogBaseTable actualTable = catalog.getTable(tablePath);
+        // validate table type
+        assertThat(actualTable.getTableKind())
+                .isEqualTo(CatalogBaseTable.TableKind.MATERIALIZED_TABLE);
+
+        CatalogMaterializedTable actualMaterializedTable = (CatalogMaterializedTable) actualTable;
+        checkCreateTable(tablePath, materializedTable, actualMaterializedTable);
+        // test create exist materialized table
+        assertThrows(
+                TableAlreadyExistException.class,
+                () -> catalog.createTable(tablePath, materializedTable, false));
+    }
+
+    @ParameterizedTest
+    @MethodSource("batchOptionProvider")
+    public void testDropMaterializedTable(Map<String, String> options) throws Exception {
+        ObjectPath tablePath = path1;
+        catalog.createDatabase(tablePath.getDatabaseName(), null, false);
+        catalog.createTable(tablePath, this.createTable(options), false);
+        assertThat(catalog.tableExists(tablePath)).isTrue();
+        catalog.dropTable(tablePath, false);
+        assertThat(catalog.tableExists(tablePath)).isFalse();
+    }
+
+    @ParameterizedTest
+    @MethodSource("batchOptionProvider")
+    public void testAlterMaterializedTable(Map<String, String> options) throws Exception {
+        ObjectPath tablePath = path1;
+        CatalogMaterializedTable materializedTable = createMaterializedTable(options);
+        catalog.createDatabase(tablePath.getDatabaseName(), null, false);
+        catalog.createTable(tablePath, materializedTable, true);
+        TestRefreshHandler refreshHandler = new TestRefreshHandler("jobID: xxx, clusterId: yyy");
+
+        // alter materialized table refresh handler
+        CatalogMaterializedTable expectedMaterializedTable =
+                materializedTable.copy(
+                        CatalogMaterializedTable.RefreshStatus.ACTIVATED,
+                        refreshHandler.asSummaryString(),
+                        refreshHandler.toBytes());
+        List<TableChange> tableChanges = new ArrayList<>();
+        tableChanges.add(
+                new TableChange.ModifyRefreshStatus(
+                        CatalogMaterializedTable.RefreshStatus.ACTIVATED));
+        tableChanges.add(
+                new TableChange.ModifyRefreshHandler(
+                        refreshHandler.asSummaryString(), refreshHandler.toBytes()));
+        catalog.alterTable(tablePath, expectedMaterializedTable, tableChanges, false);
+
+        CatalogBaseTable updatedTable = catalog.getTable(tablePath);
+        checkEquals(
+                tablePath,
+                expectedMaterializedTable,
+                updatedTable,
+                Collections.singletonMap(
+                        FlinkCatalogOptions.REGISTER_TIMEOUT.key(),
+                        FlinkCatalogOptions.REGISTER_TIMEOUT.defaultValue().toString()),
+                Collections.emptySet());
+    }
+
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
     public void testAlterTable(Map<String, String> options) throws Exception {
@@ -240,12 +357,7 @@ public class FlinkCatalogTest {
         CatalogTable table1 = createTable(options);
         assertThatThrownBy(() -> catalog.createTable(this.path1, table1, false))
                 .hasMessageContaining(
-                        "You specified the Path when creating the table, "
-                                + "but the Path '/unknown/path' is different from where it should be");
-
-        options.put(PATH.key(), warehouse + "/db1.db/t1");
-        CatalogTable table2 = createTable(options);
-        catalog.createTable(this.path1, table2, false);
+                        "The current catalog FileSystemCatalog does not support specifying the table path when creating a table.");
     }
 
     @ParameterizedTest
@@ -467,11 +579,9 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateDb_DatabaseWithCommentException() {
+    public void testCreateDb_DatabaseWithCommentSuccessful() throws DatabaseAlreadyExistException {
         CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), "haha");
-        assertThatThrownBy(() -> catalog.createDatabase(path1.getDatabaseName(), database, false))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Create database with description is unsupported.");
+        assertDoesNotThrow(() -> catalog.createDatabase(path1.getDatabaseName(), database, false));
     }
 
     @ParameterizedTest
@@ -490,6 +600,75 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.dropDatabase(path1.getDatabaseName(), false, false))
                 .isInstanceOf(DatabaseNotExistException.class)
                 .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testAlterDb() throws DatabaseAlreadyExistException, DatabaseNotExistException {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        catalog.createDatabase(path1.getDatabaseName(), database, false);
+        Map<String, String> properties = Collections.singletonMap("haa", "ccc");
+        CatalogDatabaseImpl newDatabase = new CatalogDatabaseImpl(properties, "haha");
+        // as file system catalog don't support alter database, so we have to use mock to overview
+        // this method to test
+        Catalog mockCatalog = spy(catalog);
+        doNothing().when(mockCatalog).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        when(mockCatalog.getDatabase(path1.getDatabaseName())).thenReturn(database);
+        mockCatalog.alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).getDatabase(path1.getDatabaseName());
+    }
+
+    @Test
+    public void testAlterDbComment()
+            throws DatabaseAlreadyExistException, DatabaseNotExistException {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        catalog.createDatabase(path1.getDatabaseName(), database, false);
+        Catalog mockCatalog = spy(catalog);
+        when(mockCatalog.getDatabase(path1.getDatabaseName())).thenReturn(database);
+        CatalogDatabaseImpl newDatabase = new CatalogDatabaseImpl(Collections.emptyMap(), "aa");
+        doNothing().when(mockCatalog).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        mockCatalog.alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).alterDatabase(path1.getDatabaseName(), newDatabase, false);
+        verify(mockCatalog, times(1)).getDatabase(path1.getDatabaseName());
+    }
+
+    @Test
+    public void testAlterDb_DatabaseNotExistException() {
+        CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
+        assertThatThrownBy(() -> catalog.alterDatabase(path1.getDatabaseName(), database, false))
+                .isInstanceOf(DatabaseNotExistException.class)
+                .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testGetProperties() throws Exception {
+        Map<String, String> oldProperties = Collections.emptyMap();
+        Map<String, String> newProperties = Collections.singletonMap("haa", "ccc");
+        List<PropertyChange> propertyChanges =
+                FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(1);
+        oldProperties = newProperties;
+        propertyChanges = FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(0);
+        oldProperties = Collections.singletonMap("aa", "ccc");
+        propertyChanges = FlinkCatalog.getPropertyChanges(oldProperties, newProperties);
+        assertThat(propertyChanges.size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testGetPropertyChangeFromComment() {
+        Optional<PropertyChange> commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.empty(), Optional.empty());
+        assertThat(commentChange.isPresent()).isFalse();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.of("aa"), Optional.of("bb"));
+        assertThat(commentChange.isPresent()).isTrue();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.of("aa"), Optional.empty());
+        assertThat(commentChange.isPresent()).isFalse();
+        commentChange =
+                FlinkCatalog.getPropertyChangeFromComment(Optional.empty(), Optional.of("bb"));
+        assertThat(commentChange.isPresent()).isTrue();
     }
 
     @Test
@@ -530,6 +709,7 @@ public class FlinkCatalogTest {
 
         Map<String, String> expected = got.getOptions();
         expected.remove("path");
+        expected.remove("table.data.path");
         expected.remove(FlinkCatalogOptions.REGISTER_TIMEOUT.key());
         assertThat(catalogTable.getOptions()).isEqualTo(expected);
     }
@@ -644,7 +824,54 @@ public class FlinkCatalogTest {
         checkCreateTable(path1, catalogTable, (CatalogTable) catalog.getTable(path1));
     }
 
-    private void checkCreateTable(ObjectPath path, CatalogTable expected, CatalogTable actual) {
+    @Test
+    void testBuildPaimonTableWithCustomScheme() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        CatalogTable table = createTable(optionProvider(false).iterator().next());
+        catalog.createTable(path1, table, false);
+        checkCreateTable(path1, table, catalog.getTable(path1));
+
+        List<Column> columns =
+                Arrays.asList(
+                        Column.physical("first", DataTypes.STRING()),
+                        Column.physical("second", DataTypes.INT()),
+                        Column.physical("third", DataTypes.STRING()),
+                        Column.physical(
+                                "four",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD("f1", DataTypes.STRING()),
+                                        DataTypes.FIELD("f2", DataTypes.INT()),
+                                        DataTypes.FIELD(
+                                                "f3",
+                                                DataTypes.MAP(
+                                                        DataTypes.STRING(), DataTypes.INT())))));
+        DynamicTableFactory.Context context =
+                new FactoryUtil.DefaultDynamicTableContext(
+                        ObjectIdentifier.of(
+                                "default", path1.getDatabaseName(), path1.getObjectName()),
+                        createResolvedTable(
+                                new HashMap<String, String>() {
+                                    {
+                                        put("path", "unsupported-scheme://foobar");
+                                    }
+                                },
+                                columns,
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        Collections.emptyMap(),
+                        new Configuration(),
+                        Thread.currentThread().getContextClassLoader(),
+                        false);
+
+        FlinkTableFactory factory = (FlinkTableFactory) catalog.getFactory().get();
+        Table builtTable = factory.buildPaimonTable(context);
+        assertThat(builtTable).isInstanceOf(FileStoreTable.class);
+        assertThat(((FileStoreTable) builtTable).schema().fieldNames())
+                .containsExactly("first", "second", "third", "four");
+    }
+
+    private void checkCreateTable(
+            ObjectPath path, CatalogBaseTable expected, CatalogBaseTable actual) {
         checkEquals(
                 path,
                 expected,
@@ -661,19 +888,19 @@ public class FlinkCatalogTest {
 
     private void checkEquals(
             ObjectPath path,
-            CatalogTable t1,
-            CatalogTable t2,
+            CatalogBaseTable t1,
+            CatalogBaseTable t2,
             Map<String, String> optionsToAdd,
             Set<String> optionsToRemove) {
         Path tablePath;
+        Path tableDataPath;
         try {
-            tablePath =
-                    new Path(
-                            ((FlinkCatalog) catalog)
-                                    .catalog()
-                                    .getTable(FlinkCatalog.toIdentifier(path))
-                                    .options()
-                                    .get(PATH.key()));
+            Map<String, String> options =
+                    ((FlinkCatalog) catalog)
+                            .catalog()
+                            .getTable(FlinkCatalog.toIdentifier(path))
+                            .options();
+            tablePath = new Path(options.get(PATH.key()));
         } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
@@ -681,17 +908,58 @@ public class FlinkCatalogTest {
         options.put("path", tablePath.toString());
         options.putAll(optionsToAdd);
         optionsToRemove.forEach(options::remove);
-        t1 = ((ResolvedCatalogTable) t1).copy(options);
+        if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {
+            t1 = ((ResolvedCatalogTable) t1).copy(options);
+        } else {
+            options.put(CoreOptions.TYPE.key(), TableType.MATERIALIZED_TABLE.toString());
+            t1 = ((ResolvedCatalogMaterializedTable) t1).copy(options);
+        }
         checkEquals(t1, t2);
     }
 
-    private static void checkEquals(CatalogTable t1, CatalogTable t2) {
+    private static void checkEquals(CatalogBaseTable t1, CatalogBaseTable t2) {
         assertThat(t2.getTableKind()).isEqualTo(t1.getTableKind());
-        assertThat(t2.getSchema()).isEqualTo(t1.getSchema());
         assertThat(t2.getComment()).isEqualTo(t1.getComment());
-        assertThat(t2.getPartitionKeys()).isEqualTo(t1.getPartitionKeys());
-        assertThat(t2.isPartitioned()).isEqualTo(t1.isPartitioned());
         assertThat(t2.getOptions()).isEqualTo(t1.getOptions());
+        if (t1.getTableKind() == CatalogBaseTable.TableKind.TABLE) {
+            assertThat(t2.getUnresolvedSchema()).isEqualTo(t1.getUnresolvedSchema());
+            assertThat(((CatalogTable) (t2)).getPartitionKeys())
+                    .isEqualTo(((CatalogTable) (t1)).getPartitionKeys());
+            assertThat(((CatalogTable) (t2)).isPartitioned())
+                    .isEqualTo(((CatalogTable) (t1)).isPartitioned());
+        } else {
+            CatalogMaterializedTable mt1 = (CatalogMaterializedTable) t1;
+            CatalogMaterializedTable mt2 = (CatalogMaterializedTable) t2;
+            assertThat(
+                            Schema.newBuilder()
+                                    .fromResolvedSchema(
+                                            t2.getUnresolvedSchema()
+                                                    .resolve(new TestSchemaResolver()))
+                                    .build())
+                    .isEqualTo(
+                            Schema.newBuilder()
+                                    .fromResolvedSchema(
+                                            t1.getUnresolvedSchema()
+                                                    .resolve(new TestSchemaResolver()))
+                                    .build());
+            assertThat(mt2.getPartitionKeys()).isEqualTo(mt1.getPartitionKeys());
+            assertThat(mt2.isPartitioned()).isEqualTo(mt1.isPartitioned());
+            // validate definition query
+            assertThat(mt2.getDefinitionQuery()).isEqualTo(mt1.getDefinitionQuery());
+            // validate freshness
+            assertThat(mt2.getDefinitionFreshness()).isEqualTo(mt1.getDefinitionFreshness());
+            // validate logical refresh mode
+            assertThat(mt2.getLogicalRefreshMode()).isEqualTo(mt1.getLogicalRefreshMode());
+            // validate refresh mode
+            assertThat(mt2.getRefreshMode()).isEqualTo(mt1.getRefreshMode());
+            // validate refresh status
+            assertThat(mt2.getRefreshStatus()).isEqualTo(mt1.getRefreshStatus());
+            // validate refresh handler
+            assertThat(mt2.getRefreshHandlerDescription())
+                    .isEqualTo(mt1.getRefreshHandlerDescription());
+            assertThat(mt2.getSerializedRefreshHandler())
+                    .isEqualTo(mt1.getSerializedRefreshHandler());
+        }
     }
 
     static Stream<Map<String, String>> streamingOptionProvider() {
@@ -772,6 +1040,24 @@ public class FlinkCatalogTest {
         @Override
         public void unRegisterTopic() {
             throw new UnsupportedOperationException("Check unregister log store topic here.");
+        }
+    }
+
+    private static class TestRefreshHandler implements RefreshHandler {
+
+        private final String handlerString;
+
+        public TestRefreshHandler(String handlerString) {
+            this.handlerString = handlerString;
+        }
+
+        @Override
+        public String asSummaryString() {
+            return "test refresh handler";
+        }
+
+        public byte[] toBytes() {
+            return handlerString.getBytes();
         }
     }
 }

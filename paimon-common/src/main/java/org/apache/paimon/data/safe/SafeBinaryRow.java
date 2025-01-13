@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.BytesUtils;
 import org.apache.paimon.types.RowKind;
 
@@ -150,6 +151,11 @@ public final class SafeBinaryRow implements InternalRow {
     @Override
     public byte[] getBinary(int pos) {
         return BytesUtils.readBinary(bytes, offset, getFieldOffset(pos), getLong(pos));
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        return BytesUtils.readVariant(bytes, offset, getLong(pos));
     }
 
     @Override

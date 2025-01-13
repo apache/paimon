@@ -42,8 +42,7 @@ import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.Upg
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for each full compaction. */
 public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
 
-    private final RecordEqualiser valueEqualiser;
-    private final boolean changelogRowDeduplicate;
+    @Nullable private final RecordEqualiser valueEqualiser;
 
     public FullChangelogMergeTreeCompactRewriter(
             int maxLevel,
@@ -54,8 +53,7 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
-            RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate) {
+            @Nullable RecordEqualiser valueEqualiser) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -68,7 +66,6 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 true,
                 false);
         this.valueEqualiser = valueEqualiser;
-        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     @Override
@@ -90,8 +87,7 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
 
     @Override
     protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
-        return new FullChangelogMergeFunctionWrapper(
-                mfFactory.create(), maxLevel, valueEqualiser, changelogRowDeduplicate);
+        return new FullChangelogMergeFunctionWrapper(mfFactory.create(), maxLevel, valueEqualiser);
     }
 
     @Override

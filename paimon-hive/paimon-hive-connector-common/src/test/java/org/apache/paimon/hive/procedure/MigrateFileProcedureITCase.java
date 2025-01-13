@@ -161,15 +161,17 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
         catalogConf.put("uri", "thrift://localhost:" + PORT);
+        catalogConf.put(
+                "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         MigrateFileAction migrateFileAction =
                 new MigrateFileAction(
                         "hive",
-                        System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "default.hivetable02",
                         "default.paimontable02",
                         false,
                         catalogConf,
-                        "");
+                        "",
+                        6);
         migrateFileAction.run();
 
         tEnv.useCatalog("HIVE");

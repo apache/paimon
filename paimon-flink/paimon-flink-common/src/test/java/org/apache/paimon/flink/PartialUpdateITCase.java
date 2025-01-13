@@ -351,7 +351,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         + "d INT,"
                         + "PRIMARY KEY (k, d) NOT ENFORCED) PARTITIONED BY (d) "
                         + " WITH ('merge-engine'='partial-update', "
-                        + "'local-merge-buffer-size'='1m'"
+                        + "'local-merge-buffer-size'='5m'"
                         + ");");
 
         sql("INSERT INTO T1 VALUES (1, CAST(NULL AS INT), 1), (2, 1, 1), (1, 2, 1)");
@@ -588,7 +588,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         + " 'changelog-producer' = 'lookup'"
                         + ")");
         if (localMerge) {
-            sql("ALTER TABLE ignore_delete SET ('local-merge-buffer-size' = '256 kb')");
+            sql("ALTER TABLE ignore_delete SET ('local-merge-buffer-size' = '5m')");
         }
 
         sql("INSERT INTO ignore_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
@@ -619,6 +619,108 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         Row.ofKind(RowKind.INSERT, 1, null, "apple"),
                         Row.ofKind(RowKind.UPDATE_BEFORE, 1, null, "apple"),
                         Row.ofKind(RowKind.UPDATE_AFTER, 1, "A", "apple"));
+        iterator.close();
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteWithoutSequenceGroup() {
+        sql(
+                "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
+                        + " 'merge-engine' = 'partial-update',"
+                        + " 'partial-update.remove-record-on-delete' = 'true'"
+                        + ")");
+
+        sql("INSERT INTO remove_record_on_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
+
+        // delete record
+        sql("DELETE FROM remove_record_on_delete WHERE pk = 1");
+
+        // batch read
+        assertThat(sql("SELECT * FROM remove_record_on_delete")).isEmpty();
+
+        // insert records
+        sql("INSERT INTO remove_record_on_delete VALUES (1, CAST (NULL AS STRING), 'apache')");
+        sql("INSERT INTO remove_record_on_delete VALUES (1, 'A', CAST (NULL AS STRING))");
+
+        // batch read
+        assertThat(sql("SELECT * FROM remove_record_on_delete"))
+                .containsExactlyInAnyOrder(Row.of(1, "A", "apache"));
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteWithSequenceGroup() throws Exception {
+        sql(
+                "CREATE TABLE remove_record_on_delete_sequence_group"
+                        + " (pk INT PRIMARY KEY NOT ENFORCED, a STRING, seq_a INT, b STRING, seq_b INT) WITH ("
+                        + " 'merge-engine' = 'partial-update',"
+                        + " 'fields.seq_a.sequence-group' = 'a',"
+                        + " 'fields.seq_b.sequence-group' = 'b',"
+                        + " 'partial-update.remove-record-on-sequence-group' = 'seq_a'"
+                        + ")");
+
+        sql("INSERT INTO remove_record_on_delete_sequence_group VALUES (1, 'apple', 2, 'a', 1)");
+        sql("INSERT INTO remove_record_on_delete_sequence_group VALUES (1, 'banana', 1, 'b', 2)");
+        assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group"))
+                .containsExactlyInAnyOrder(Row.of(1, "apple", 2, "b", 2));
+
+        // delete with seq_b won't delete record but retract b
+        String id =
+                TestValuesTableFactory.registerData(
+                        Collections.singletonList(
+                                Row.ofKind(RowKind.DELETE, 1, null, null, "b", 2)));
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE delete_source1 (pk INT, a STRING, seq_a INT, b STRING, seq_b INT) "
+                                + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
+                                + "'changelog-mode' = 'I,D,UA,UB')",
+                        id));
+        sEnv.executeSql(
+                        "INSERT INTO remove_record_on_delete_sequence_group SELECT * FROM delete_source1")
+                .await();
+        assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group"))
+                .containsExactlyInAnyOrder(Row.of(1, "apple", 2, null, 2));
+
+        // delete record
+        sql("DELETE FROM remove_record_on_delete_sequence_group WHERE pk = 1");
+        assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group")).isEmpty();
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteLookup() throws Exception {
+        sql(
+                "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
+                        + " 'merge-engine' = 'partial-update',"
+                        + " 'partial-update.remove-record-on-delete' = 'true',"
+                        + " 'changelog-producer' = 'lookup'"
+                        + ")");
+
+        sql("INSERT INTO remove_record_on_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
+
+        // delete record
+        sql("DELETE FROM remove_record_on_delete WHERE pk = 1");
+
+        // batch read
+        assertThat(sql("SELECT * FROM remove_record_on_delete")).isEmpty();
+
+        // insert records
+        sql("INSERT INTO remove_record_on_delete VALUES (1, CAST (NULL AS STRING), 'apache')");
+        sql("INSERT INTO remove_record_on_delete VALUES (1, 'A', CAST (NULL AS STRING))");
+
+        // batch read
+        assertThat(sql("SELECT * FROM remove_record_on_delete"))
+                .containsExactlyInAnyOrder(Row.of(1, "A", "apache"));
+
+        // streaming read results has -U
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT * FROM remove_record_on_delete /*+ OPTIONS('scan.timestamp-millis' = '0') */");
+        assertThat(iterator.collect(5))
+                .containsExactly(
+                        Row.ofKind(RowKind.INSERT, 1, null, "apple"),
+                        Row.ofKind(RowKind.DELETE, 1, null, "apple"),
+                        Row.ofKind(RowKind.INSERT, 1, null, "apache"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, null, "apache"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, "A", "apache"));
         iterator.close();
     }
 }

@@ -22,40 +22,30 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 /** roaring bitmap aggregate a field of a row. */
 public class FieldRoaringBitmap32Agg extends FieldAggregator {
-
-    public static final String NAME = "rbm32";
 
     private static final long serialVersionUID = 1L;
     private final RoaringBitmap32 roaringBitmapAcc;
     private final RoaringBitmap32 roaringBitmapInput;
 
-    public FieldRoaringBitmap32Agg(VarBinaryType dataType) {
-        super(dataType);
+    public FieldRoaringBitmap32Agg(String name, VarBinaryType dataType) {
+        super(name, dataType);
         this.roaringBitmapAcc = new RoaringBitmap32();
         this.roaringBitmapInput = new RoaringBitmap32();
     }
 
     @Override
-    public String name() {
-        return NAME;
-    }
-
-    @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null && inputField == null) {
-            return null;
-        }
-
         if (accumulator == null || inputField == null) {
             return accumulator == null ? inputField : accumulator;
         }
 
         try {
-            roaringBitmapAcc.deserialize((byte[]) accumulator);
-            roaringBitmapInput.deserialize((byte[]) inputField);
+            roaringBitmapAcc.deserialize(ByteBuffer.wrap((byte[]) accumulator));
+            roaringBitmapInput.deserialize(ByteBuffer.wrap((byte[]) inputField));
             roaringBitmapAcc.or(roaringBitmapInput);
             return roaringBitmapAcc.serialize();
         } catch (IOException e) {

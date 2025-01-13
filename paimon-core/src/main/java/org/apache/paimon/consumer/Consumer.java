@@ -61,14 +61,14 @@ public class Consumer {
     public static Optional<Consumer> fromPath(FileIO fileIO, Path path) {
         int retryNumber = 0;
         MismatchedInputException exception = null;
-        while (retryNumber++ < 5) {
+        while (retryNumber++ < 10) {
             try {
                 return fileIO.readOverwrittenFileUtf8(path).map(Consumer::fromJson);
             } catch (MismatchedInputException e) {
                 // retry
                 exception = e;
                 try {
-                    Thread.sleep(100);
+                    Thread.sleep(1_000);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(ie);

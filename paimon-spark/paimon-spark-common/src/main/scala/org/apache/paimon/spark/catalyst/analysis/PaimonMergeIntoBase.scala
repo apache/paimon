@@ -53,7 +53,7 @@ trait PaimonMergeIntoBase
         merge.notMatchedActions.flatMap(_.condition).foreach(checkCondition)
 
         val updateActions = merge.matchedActions.collect { case a: UpdateAction => a }
-        val primaryKeys = v2Table.getTable.primaryKeys().asScala
+        val primaryKeys = v2Table.getTable.primaryKeys().asScala.toSeq
         if (primaryKeys.nonEmpty) {
           checkUpdateActionValidity(
             AttributeSet(targetOutput),

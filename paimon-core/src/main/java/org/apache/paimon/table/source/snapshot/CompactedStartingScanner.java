@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 /** {@link StartingScanner} for the {@link CoreOptions.StartupMode#COMPACTED_FULL} startup mode. */
-public class CompactedStartingScanner extends AbstractStartingScanner {
+public class CompactedStartingScanner extends ReadPlanStartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactedStartingScanner.class);
 
@@ -44,13 +44,13 @@ public class CompactedStartingScanner extends AbstractStartingScanner {
     }
 
     @Override
-    public Result scan(SnapshotReader snapshotReader) {
+    public SnapshotReader configure(SnapshotReader snapshotReader) {
         Long startingSnapshotId = pick();
         if (startingSnapshotId == null) {
             startingSnapshotId = snapshotManager.latestSnapshotId();
             if (startingSnapshotId == null) {
                 LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
-                return new NoSnapshot();
+                return null;
             } else {
                 LOG.debug(
                         "No compact snapshot found, reading from the latest snapshot {}.",
@@ -58,8 +58,7 @@ public class CompactedStartingScanner extends AbstractStartingScanner {
             }
         }
 
-        return StartingScanner.fromPlan(
-                snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId).read());
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
     }
 
     @Nullable

@@ -44,8 +44,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PARTITION_TIME_INTERVAL;
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
@@ -183,7 +183,10 @@ public class PartitionMarkDoneTrigger {
         public List<String> restore() throws Exception {
             List<String> pendingPartitions = new ArrayList<>();
             if (isRestored) {
-                pendingPartitions.addAll(pendingPartitionsState.get().iterator().next());
+                Iterator<List<String>> state = pendingPartitionsState.get().iterator();
+                if (state.hasNext()) {
+                    pendingPartitions.addAll(state.next());
+                }
             }
             return pendingPartitions;
         }

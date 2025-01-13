@@ -26,6 +26,10 @@ under the License.
 
 # Upsert To Partitioned
 
+{{< hint warning >}}
+__Note:__ Only Hive Engine can be used to query these upsert-to-partitioned tables.
+{{< /hint >}}
+
 The [Tag Management]({{< ref "maintenance/manage-tags" >}}) will maintain the manifests and data files of the snapshot.
 A typical usage is creating tags daily, then you can maintain the historical data of each day for batch reading.
 

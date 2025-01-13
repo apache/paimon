@@ -18,9 +18,9 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.stats
+import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.stats.ColStats
-import org.apache.paimon.types.DataType
+import org.apache.paimon.types.{DataField, DataType, RowType}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
@@ -40,10 +40,47 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
   private lazy val paimonStats = if (scan.statistics.isPresent) scan.statistics.get() else null
 
-  lazy val paimonStatsEnabled: Boolean = paimonStats != null
+  lazy val paimonStatsEnabled: Boolean = {
+    paimonStats != null &&
+    paimonStats.mergedRecordSize().isPresent &&
+    paimonStats.mergedRecordCount().isPresent
+  }
 
-  override def sizeInBytes(): OptionalLong =
-    if (paimonStatsEnabled) paimonStats.mergedRecordSize() else OptionalLong.of(scannedTotalSize)
+  private def getSizeForField(field: DataField): Long = {
+    Option(paimonStats.colStats().get(field.name()))
+      .map(_.avgLen())
+      .filter(_.isPresent)
+      .map(_.getAsLong)
+      .getOrElse(field.`type`().defaultSize().toLong)
+  }
+
+  private def getSizeForRow(schema: RowType): Long = {
+    schema.getFields.asScala.map(field => getSizeForField(field)).sum
+  }
+
+  override def sizeInBytes(): OptionalLong = {
+    if (!paimonStatsEnabled) {
+      return OptionalLong.of(scannedTotalSize)
+    }
+
+    val wholeSchemaSize = getSizeForRow(scan.tableRowType)
+
+    val requiredDataSchemaSize =
+      scan.readTableRowType.getFields.asScala.map(field => getSizeForField(field)).sum
+    val requiredDataSizeInBytes =
+      paimonStats.mergedRecordSize().getAsLong * (requiredDataSchemaSize.toDouble / wholeSchemaSize)
+
+    val metadataSchemaSize =
+      scan.metadataColumns.map(field => getSizeForField(field.toPaimonDataField)).sum
+    val metadataSizeInBytes = paimonStats.mergedRecordCount().getAsLong * metadataSchemaSize
+
+    val sizeInBytes = (requiredDataSizeInBytes + metadataSizeInBytes).toLong
+    // Avoid return 0 bytes if there are some valid rows.
+    // Avoid return too small size in bytes which may less than row count,
+    // note the compression ratio on disk is usually bigger than memory.
+    val normalized = Math.max(sizeInBytes, paimonStats.mergedRecordCount().getAsLong)
+    OptionalLong.of(normalized)
+  }
 
   override def numRows(): OptionalLong =
     if (paimonStatsEnabled) paimonStats.mergedRecordCount() else OptionalLong.of(rowCount)
@@ -82,8 +119,10 @@ object PaimonColumnStats {
   def apply(dateType: DataType, paimonColStats: ColStats[_]): PaimonColumnStats = {
     PaimonColumnStats(
       paimonColStats.nullCount,
-      Optional.ofNullable(SparkInternalRow.fromPaimon(paimonColStats.min().orElse(null), dateType)),
-      Optional.ofNullable(SparkInternalRow.fromPaimon(paimonColStats.max().orElse(null), dateType)),
+      Optional.ofNullable(
+        DataConverter
+          .fromPaimon(paimonColStats.min().orElse(null), dateType)),
+      Optional.ofNullable(DataConverter.fromPaimon(paimonColStats.max().orElse(null), dateType)),
       paimonColStats.distinctCount,
       paimonColStats.avgLen,
       paimonColStats.maxLen
@@ -93,12 +132,12 @@ object PaimonColumnStats {
   def apply(v1ColStats: ColumnStat): PaimonColumnStats = {
     import PaimonImplicits._
     PaimonColumnStats(
-      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue())
+      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue)
       else OptionalLong.empty(),
       v1ColStats.min,
       v1ColStats.max,
       if (v1ColStats.distinctCount.isDefined)
-        OptionalLong.of(v1ColStats.distinctCount.get.longValue())
+        OptionalLong.of(v1ColStats.distinctCount.get.longValue)
       else OptionalLong.empty(),
       if (v1ColStats.avgLen.isDefined) OptionalLong.of(v1ColStats.avgLen.get.longValue())
       else OptionalLong.empty(),

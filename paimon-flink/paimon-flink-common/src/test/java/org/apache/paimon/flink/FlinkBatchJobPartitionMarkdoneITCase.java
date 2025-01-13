@@ -161,7 +161,7 @@ public class FlinkBatchJobPartitionMarkdoneITCase extends CatalogITCaseBase {
         options.set(BUCKET, 3);
         options.set(PATH, getTempDirPath());
         options.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
-        options.set(FlinkConnectorOptions.PARTITION_MARK_DONE_WHEN_END_INPUT.key(), "true");
+        options.set(CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT.key(), "true");
 
         Path tablePath = new CoreOptions(options.toMap()).path();
         if (primaryKey.length == 0) {

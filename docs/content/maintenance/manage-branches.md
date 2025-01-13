@@ -38,7 +38,7 @@ Paimon supports creating branch from a specific tag or snapshot, or just creatin
 
 {{< tabs "create-branches" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
 
 Run the following sql:
 
@@ -68,15 +68,32 @@ Run the following command:
 ```
 {{< /tab >}}
 
+{{< tab "Spark SQL" >}}
+
+Run the following sql:
+
+```sql
+-- create branch named 'branch1' from tag 'tag1'
+CALL sys.create_branch('default.T', 'branch1', 'tag1');
+
+-- create empty branch named 'branch1'
+CALL sys.create_branch('default.T', 'empty_branch');
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Delete Branches
 
 You can delete branch by its name.
 
+{{< hint warning >}}
+__Note:__ The `Delete Branches` operation only deletes the metadata file. If you want to clear the data written during the branch, use [remove_orphan_files]({{< ref "flink/procedures" >}})
+{{< /hint >}}
+
 {{< tabs "delete-branches" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
 
 Run the following sql:
 
@@ -101,6 +118,15 @@ Run the following command:
 ```
 {{< /tab >}}
 
+{{< tab "Spark SQL" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.delete_branch('default.T', 'branch1');
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Read / Write With Branch
@@ -122,6 +148,27 @@ INSERT INTO `t$branch_branch1` SELECT ...
 
 {{< /tab >}}
 
+{{< tab "Spark SQL" >}}
+
+```sql
+-- read from branch 'branch1'
+SELECT * FROM `t$branch_branch1`;
+
+-- write to branch 'branch1'
+INSERT INTO `t$branch_branch1` SELECT ...
+```
+
+{{< /tab >}}
+
+{{< tab "Spark DataFrame" >}}
+
+```sql
+-- read from branch 'branch1'
+spark.read.format("paimon").option("branch", "branch1").table("t")
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Fast Forward
@@ -130,7 +177,7 @@ Fast-Forward the custom branch to main will delete all the snapshots, tags and s
 
 {{< tabs "fast_forward" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink SQL" >}}
 
 ```sql
 CALL sys.fast_forward('default.T', 'branch1');
@@ -156,7 +203,7 @@ Run the following command:
 
 {{< /tabs >}}
 
-### Batch Reading from Fallback Branch
+## Batch Reading from Fallback Branch
 
 You can set the table option `scan.fallback-branch`
 so that when a batch job reads from the current branch, if a partition does not exist,

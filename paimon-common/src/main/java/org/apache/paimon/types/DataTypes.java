@@ -103,6 +103,10 @@ public class DataTypes {
         return new LocalZonedTimestampType(precision);
     }
 
+    public static LocalZonedTimestampType TIMESTAMP_LTZ_MILLIS() {
+        return new LocalZonedTimestampType(3);
+    }
+
     public static DecimalType DECIMAL(int precision, int scale) {
         return new DecimalType(precision, scale);
     }
@@ -145,6 +149,10 @@ public class DataTypes {
 
     public static MultisetType MULTISET(DataType elementType) {
         return new MultisetType(elementType);
+    }
+
+    public static VariantType VARIANT() {
+        return new VariantType();
     }
 
     public static OptionalInt getPrecision(DataType dataType) {

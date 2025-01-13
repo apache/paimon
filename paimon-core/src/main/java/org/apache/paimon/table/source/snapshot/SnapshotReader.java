@@ -21,31 +21,45 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
 /** Read splits from specified {@link Snapshot} with given configuration. */
 public interface SnapshotReader {
 
+    @Nullable
+    Integer parallelism();
+
     SnapshotManager snapshotManager();
+
+    ManifestsReader manifestsReader();
+
+    List<ManifestEntry> readManifest(ManifestFileMeta manifest);
 
     ConsumerManager consumerManager();
 
     SplitGenerator splitGenerator();
+
+    FileStorePathFactory pathFactory();
 
     SnapshotReader withSnapshot(long snapshotId);
 
@@ -59,9 +73,13 @@ public interface SnapshotReader {
 
     SnapshotReader withPartitionFilter(List<BinaryRow> partitions);
 
+    SnapshotReader withPartitionsFilter(List<Map<String, String>> partitions);
+
     SnapshotReader withMode(ScanMode scanMode);
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
+
+    SnapshotReader enableValueFilter();
 
     SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter);
 
@@ -70,6 +88,8 @@ public interface SnapshotReader {
     SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);
 
     SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter);
+
+    SnapshotReader dropStats();
 
     SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
@@ -87,6 +107,10 @@ public interface SnapshotReader {
     List<BinaryRow> partitions();
 
     List<PartitionEntry> partitionEntries();
+
+    List<BucketEntry> bucketEntries();
+
+    Iterator<ManifestEntry> readFileIterator();
 
     /** Result plan of this scan. */
     interface Plan extends TableScan.Plan {

@@ -18,8 +18,33 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.CatalogOptionsTable;
+import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.Preconditions;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGCY_NAME;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
+import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
+import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {
@@ -50,5 +75,120 @@ public class CatalogUtils {
 
     public static String table(String path) {
         return SchemaManager.identifierFromPath(path, false).getObjectName();
+    }
+
+    public static Map<String, String> tableDefaultOptions(Map<String, String> options) {
+        return convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
+    }
+
+    public static boolean isSystemDatabase(String database) {
+        return SYSTEM_DATABASE_NAME.equals(database);
+    }
+
+    /** Validate database cannot be a system database. */
+    public static void checkNotSystemDatabase(String database) {
+        if (isSystemDatabase(database)) {
+            throw new Catalog.ProcessSystemDatabaseException();
+        }
+    }
+
+    public static boolean isTableInSystemDatabase(Identifier identifier) {
+        return isSystemDatabase(identifier.getDatabaseName()) || identifier.isSystemTable();
+    }
+
+    public static void checkNotSystemTable(Identifier identifier, String method) {
+        if (isTableInSystemDatabase(identifier)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot '%s' for system table '%s', please use data table.",
+                            method, identifier));
+        }
+    }
+
+    public static void checkNotBranch(Identifier identifier, String method) {
+        if (identifier.getBranchName() != null) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot '%s' for branch table '%s', "
+                                    + "please modify the table with the default branch.",
+                            method, identifier));
+        }
+    }
+
+    public static void validateAutoCreateClose(Map<String, String> options) {
+        checkArgument(
+                !Boolean.parseBoolean(
+                        options.getOrDefault(
+                                CoreOptions.AUTO_CREATE.key(),
+                                CoreOptions.AUTO_CREATE.defaultValue().toString())),
+                String.format(
+                        "The value of %s property should be %s.",
+                        CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+    }
+
+    public static Table createGlobalSystemTable(String tableName, Catalog catalog)
+            throws Catalog.TableNotExistException {
+        switch (tableName.toLowerCase()) {
+            case ALL_TABLE_OPTIONS:
+                try {
+                    Map<Identifier, Map<String, String>> allOptions = new HashMap<>();
+                    for (String database : catalog.listDatabases()) {
+                        for (String name : catalog.listTables(database)) {
+                            Identifier identifier = Identifier.create(database, name);
+                            Table table = catalog.getTable(identifier);
+                            allOptions.put(identifier, table.options());
+                        }
+                    }
+                    return new AllTableOptionsTable(allOptions);
+                } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException e) {
+                    throw new RuntimeException("Database is deleted while listing", e);
+                }
+            case CATALOG_OPTIONS:
+                return new CatalogOptionsTable(Options.fromMap(catalog.options()));
+            default:
+                throw new Catalog.TableNotExistException(
+                        Identifier.create(SYSTEM_DATABASE_NAME, tableName));
+        }
+    }
+
+    public static Table createSystemTable(Identifier identifier, Table originTable)
+            throws Catalog.TableNotExistException {
+        if (!(originTable instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Only data table support system tables, but this table %s is %s.",
+                            identifier, originTable.getClass()));
+        }
+        Table table =
+                SystemTableLoader.load(
+                        Preconditions.checkNotNull(identifier.getSystemTableName()),
+                        (FileStoreTable) originTable);
+        if (table == null) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        return table;
+    }
+
+    public static List<Partition> listPartitionsFromFileSystem(Table table) {
+        Options options = Options.fromMap(table.options());
+        InternalRowPartitionComputer computer =
+                new InternalRowPartitionComputer(
+                        options.get(PARTITION_DEFAULT_NAME),
+                        table.rowType().project(table.partitionKeys()),
+                        table.partitionKeys().toArray(new String[0]),
+                        options.get(PARTITION_GENERATE_LEGCY_NAME));
+        List<PartitionEntry> partitionEntries =
+                table.newReadBuilder().newScan().listPartitionEntries();
+        List<Partition> partitions = new ArrayList<>(partitionEntries.size());
+        for (PartitionEntry entry : partitionEntries) {
+            partitions.add(
+                    new Partition(
+                            computer.generatePartValues(entry.partition()),
+                            entry.recordCount(),
+                            entry.fileSizeInBytes(),
+                            entry.fileCount(),
+                            entry.lastFileCreationTime()));
+        }
+        return partitions;
     }
 }

@@ -21,7 +21,6 @@ package org.apache.paimon.compression;
 import com.github.luben.zstd.RecyclingBufferPool;
 import com.github.luben.zstd.ZstdOutputStream;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 
@@ -56,8 +55,10 @@ public class ZstdBlockCompressor implements BlockCompressor {
     public int compress(byte[] src, int srcOff, int srcLen, byte[] dst, int dstOff)
             throws BufferCompressionException {
         ByteArrayOutputStream stream = new ByteArrayOutputStream(dst, dstOff);
+        // Using two-argument constructors to avoid zstd-jni collisions
         try (ZstdOutputStream zstdStream =
-                new ZstdOutputStream(stream, RecyclingBufferPool.INSTANCE, level)) {
+                new ZstdOutputStream(stream, RecyclingBufferPool.INSTANCE)) {
+            zstdStream.setLevel(level);
             zstdStream.setWorkers(0);
             zstdStream.write(src, srcOff, srcLen);
         } catch (IOException e) {
@@ -84,8 +85,14 @@ public class ZstdBlockCompressor implements BlockCompressor {
 
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
+            if (b == null || buf == null) {
+                throw new NullPointerException("Input array or buffer is null");
+            }
             if ((off < 0) || (off > b.length) || (len < 0) || ((off + len) - b.length > 0)) {
-                throw new IndexOutOfBoundsException();
+                throw new IndexOutOfBoundsException("Invalid offset or length");
+            }
+            if (b.length == 0) {
+                return;
             }
             try {
                 System.arraycopy(b, off, buf, position, len);

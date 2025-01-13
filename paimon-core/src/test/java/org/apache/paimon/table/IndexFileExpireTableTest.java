@@ -107,8 +107,8 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         assertThat(indexManifestSize()).isEqualTo(3);
 
         TagManager tagManager = new TagManager(LocalFileIO.create(), table.location());
-        checkIndexFiles(tagManager.taggedSnapshot("tag3"));
-        checkIndexFiles(tagManager.taggedSnapshot("tag5"));
+        checkIndexFiles(tagManager.getOrThrow("tag3"));
+        checkIndexFiles(tagManager.getOrThrow("tag5"));
     }
 
     @Test
@@ -135,7 +135,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
 
         TagManager tagManager = new TagManager(LocalFileIO.create(), table.location());
         checkIndexFiles(7);
-        checkIndexFiles(tagManager.taggedSnapshot("tag5"));
+        checkIndexFiles(tagManager.getOrThrow("tag5"));
         assertThat(indexFileSize()).isEqualTo(4);
         assertThat(indexManifestSize()).isEqualTo(2);
     }
@@ -190,7 +190,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         assertThat(indexManifestSize()).isEqualTo(1);
     }
 
-    private void prepareExpireTable() throws Exception {
+    protected void prepareExpireTable() throws Exception {
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
         StreamTableWrite write = writeBuilder.newWrite();
         StreamTableCommit commit = writeBuilder.newCommit();

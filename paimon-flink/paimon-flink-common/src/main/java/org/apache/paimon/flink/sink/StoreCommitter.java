@@ -20,9 +20,10 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
-import org.apache.paimon.flink.sink.partition.PartitionMarkDone;
+import org.apache.paimon.flink.sink.partition.PartitionListeners;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -43,7 +44,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
-    @Nullable private final PartitionMarkDone partitionMarkDone;
+    private final PartitionListeners partitionListeners;
+    private final boolean allowLogOffsetDuplicate;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
         this.commit = (TableCommitImpl) commit;
@@ -56,15 +58,11 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         }
 
         try {
-            this.partitionMarkDone =
-                    PartitionMarkDone.create(
-                            context.streamingCheckpointEnabled(),
-                            context.isRestored(),
-                            context.stateStore(),
-                            table);
+            this.partitionListeners = PartitionListeners.create(context, table);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        allowLogOffsetDuplicate = table.bucketMode() == BucketMode.BUCKET_UNAWARE;
     }
 
     @VisibleForTesting
@@ -99,7 +97,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
                 case LOG_OFFSET:
                     LogOffsetCommittable offset =
                             (LogOffsetCommittable) committable.wrappedCommittable();
-                    manifestCommittable.addLogOffset(offset.bucket(), offset.offset());
+                    manifestCommittable.addLogOffset(
+                            offset.bucket(), offset.offset(), allowLogOffsetDuplicate);
                     break;
             }
         }
@@ -111,29 +110,23 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             throws IOException, InterruptedException {
         commit.commitMultiple(committables, false);
         calcNumBytesAndRecordsOut(committables);
-        if (partitionMarkDone != null) {
-            partitionMarkDone.notifyCommittable(committables);
-        }
+        partitionListeners.notifyCommittable(committables);
     }
 
     @Override
     public int filterAndCommit(
             List<ManifestCommittable> globalCommittables, boolean checkAppendFiles) {
         int committed = commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles);
-        if (partitionMarkDone != null) {
-            partitionMarkDone.notifyCommittable(globalCommittables);
-        }
+        partitionListeners.notifyCommittable(globalCommittables);
         return committed;
     }
 
     @Override
     public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
-        if (partitionMarkDone != null) {
-            try {
-                partitionMarkDone.snapshotState();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+        try {
+            partitionListeners.snapshotState();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
 
         Map<Long, List<Committable>> grouped = new HashMap<>();
@@ -146,6 +139,11 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void close() throws Exception {
         commit.close();
+        partitionListeners.close();
+    }
+
+    public boolean allowLogOffsetDuplicate() {
+        return allowLogOffsetDuplicate;
     }
 
     private void calcNumBytesAndRecordsOut(List<ManifestCommittable> committables) {

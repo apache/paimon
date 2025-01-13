@@ -18,6 +18,9 @@
 
 package org.apache.paimon.factories;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,13 +32,17 @@ import java.util.stream.Collectors;
 
 /** Utility for working with {@link Factory}s. */
 public class FactoryUtil {
+
     private static final Logger LOG = LoggerFactory.getLogger(FactoryUtil.class);
+
+    private static final Cache<ClassLoader, List<Factory>> FACTORIES =
+            Caffeine.newBuilder().softValues().maximumSize(100).executor(Runnable::run).build();
 
     /** Discovers a factory using the given factory base class and identifier. */
     @SuppressWarnings("unchecked")
     public static <T extends Factory> T discoverFactory(
             ClassLoader classLoader, Class<T> factoryClass, String identifier) {
-        final List<Factory> factories = discoverFactories(classLoader);
+        final List<Factory> factories = getFactories(classLoader);
 
         final List<Factory> foundFactories =
                 factories.stream()
@@ -85,7 +92,7 @@ public class FactoryUtil {
 
     public static <T extends Factory> List<String> discoverIdentifiers(
             ClassLoader classLoader, Class<T> factoryClass) {
-        final List<Factory> factories = discoverFactories(classLoader);
+        final List<Factory> factories = getFactories(classLoader);
 
         return factories.stream()
                 .filter(f -> factoryClass.isAssignableFrom(f.getClass()))
@@ -93,11 +100,22 @@ public class FactoryUtil {
                 .collect(Collectors.toList());
     }
 
-    private static List<Factory> discoverFactories(ClassLoader classLoader) {
-        final Iterator<Factory> serviceLoaderIterator =
-                ServiceLoader.load(Factory.class, classLoader).iterator();
+    private static List<Factory> getFactories(ClassLoader classLoader) {
+        return FACTORIES.get(classLoader, s -> discoverFactories(classLoader, Factory.class));
+    }
 
-        final List<Factory> loadResults = new ArrayList<>();
+    /**
+     * Discover factories.
+     *
+     * @param classLoader the class loader
+     * @param klass the klass
+     * @param <T> the type of the factory
+     * @return the list of factories
+     */
+    public static <T> List<T> discoverFactories(ClassLoader classLoader, Class<T> klass) {
+        final Iterator<T> serviceLoaderIterator = ServiceLoader.load(klass, classLoader).iterator();
+
+        final List<T> loadResults = new ArrayList<>();
         while (true) {
             try {
                 // error handling should also be applied to the hasNext() call because service
@@ -110,9 +128,8 @@ public class FactoryUtil {
             } catch (Throwable t) {
                 if (t instanceof NoClassDefFoundError) {
                     LOG.debug(
-                            "NoClassDefFoundError when loading a "
-                                    + Factory.class.getCanonicalName()
-                                    + ". This is expected when trying to load factory but no implementation is loaded.",
+                            "NoClassDefFoundError when loading a {}. This is expected when trying to load factory but no implementation is loaded.",
+                            Factory.class.getCanonicalName(),
                             t);
                 } else {
                     throw new RuntimeException(

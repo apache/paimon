@@ -21,6 +21,8 @@ package org.apache.paimon.flink;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.ThreadLocalRandom;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Predicate ITCase. */
@@ -48,6 +50,42 @@ public class PredicateITCase extends CatalogITCaseBase {
         writeRecords();
         innerTestSingleField();
         innerTestAllFields();
+    }
+
+    @Test
+    public void testIntegerFilter() {
+        int rand = ThreadLocalRandom.current().nextInt(3);
+        String fileFormat;
+        if (rand == 0) {
+            fileFormat = "avro";
+        } else if (rand == 1) {
+            fileFormat = "parquet";
+        } else {
+            fileFormat = "orc";
+        }
+
+        sql(
+                "CREATE TABLE T ("
+                        + "a TINYINT,"
+                        + "b SMALLINT,"
+                        + "c INT,"
+                        + "d BIGINT"
+                        + ") WITH ("
+                        + "'file.format' = '%s'"
+                        + ")",
+                fileFormat);
+        sql(
+                "INSERT INTO T VALUES (CAST (1 AS TINYINT), CAST (1 AS SMALLINT), 1, 1), "
+                        + "(CAST (2 AS TINYINT), CAST (2 AS SMALLINT), 2, 2)");
+
+        Row expectedResult = Row.of((byte) 1, (short) 1, 1, 1L);
+        assertThat(sql("SELECT * FROM T WHERE a = CAST (1 AS TINYINT)"))
+                .containsExactly(expectedResult);
+        assertThat(sql("SELECT * FROM T WHERE b = CAST (1 AS SMALLINT)"))
+                .containsExactly(expectedResult);
+        assertThat(sql("SELECT * FROM T WHERE c = 1")).containsExactly(expectedResult);
+        assertThat(sql("SELECT * FROM T WHERE d = CAST (1 AS BIGINT)"))
+                .containsExactly(expectedResult);
     }
 
     private void writeRecords() throws Exception {

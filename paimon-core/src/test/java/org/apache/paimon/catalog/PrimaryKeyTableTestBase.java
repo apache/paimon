@@ -123,7 +123,11 @@ public abstract class PrimaryKeyTableTestBase {
                         r -> {
                             GenericRow newR = new GenericRow(projection.length);
                             for (int i = 0; i < projection.length; i++) {
-                                newR.setField(i, r.getInt(i));
+                                if (r.isNullAt(i)) {
+                                    newR.setField(i, null);
+                                } else {
+                                    newR.setField(i, r.getInt(i));
+                                }
                             }
                             rows.add(newR);
                         });

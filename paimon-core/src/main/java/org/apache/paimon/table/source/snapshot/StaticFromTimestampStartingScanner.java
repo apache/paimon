@@ -32,7 +32,7 @@ import javax.annotation.Nullable;
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_TIMESTAMP} startup mode of a
  * batch read.
  */
-public class StaticFromTimestampStartingScanner extends AbstractStartingScanner {
+public class StaticFromTimestampStartingScanner extends ReadPlanStartingScanner {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(StaticFromTimestampStartingScanner.class);
@@ -49,15 +49,14 @@ public class StaticFromTimestampStartingScanner extends AbstractStartingScanner 
     }
 
     @Override
-    public Result scan(SnapshotReader snapshotReader) {
+    public SnapshotReader configure(SnapshotReader snapshotReader) {
         if (startingSnapshotId == null) {
             LOG.debug(
                     "There is currently no snapshot earlier than or equal to timestamp[{}]",
                     startupMillis);
-            return new NoSnapshot();
+            return null;
         }
-        return StartingScanner.fromPlan(
-                snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId).read());
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
     }
 
     @Nullable

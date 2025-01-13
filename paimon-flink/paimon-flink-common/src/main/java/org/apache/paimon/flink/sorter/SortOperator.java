@@ -23,6 +23,7 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.types.RowType;
@@ -48,6 +49,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final CompressOptions spillCompression;
     private final int sinkParallelism;
     private final MemorySize maxDiskSize;
+    private final boolean sequenceOrder;
 
     private transient BinaryExternalSortBuffer buffer;
     private transient IOManager ioManager;
@@ -60,7 +62,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
             int spillSortMaxNumFiles,
             CompressOptions spillCompression,
             int sinkParallelism,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            boolean sequenceOrder) {
         this.keyType = keyType;
         this.rowType = rowType;
         this.maxMemory = maxMemory;
@@ -70,13 +73,15 @@ public class SortOperator extends TableStreamOperator<InternalRow>
         this.spillCompression = spillCompression;
         this.sinkParallelism = sinkParallelism;
         this.maxDiskSize = maxDiskSize;
+        this.sequenceOrder = sequenceOrder;
     }
 
     @Override
     public void open() throws Exception {
         super.open();
         initBuffer();
-        if (sinkParallelism != getRuntimeContext().getNumberOfParallelSubtasks()) {
+        if (sinkParallelism
+                != RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext())) {
             throw new IllegalArgumentException(
                     "Please ensure that the runtime parallelism of the sink matches the initial configuration "
                             + "to avoid potential issues with skewed range partitioning.");
@@ -100,7 +105,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
                         pageSize,
                         spillSortMaxNumFiles,
                         spillCompression,
-                        maxDiskSize);
+                        maxDiskSize,
+                        sequenceOrder);
     }
 
     @Override

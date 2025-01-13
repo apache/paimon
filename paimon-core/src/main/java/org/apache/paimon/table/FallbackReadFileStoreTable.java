@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -32,6 +33,7 @@ import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -44,9 +46,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -58,11 +60,11 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     private final FileStoreTable fallback;
 
-    public FallbackReadFileStoreTable(FileStoreTable main, FileStoreTable fallback) {
-        super(main);
+    public FallbackReadFileStoreTable(FileStoreTable wrapped, FileStoreTable fallback) {
+        super(wrapped);
         this.fallback = fallback;
 
-        Preconditions.checkArgument(!(main instanceof FallbackReadFileStoreTable));
+        Preconditions.checkArgument(!(wrapped instanceof FallbackReadFileStoreTable));
         Preconditions.checkArgument(!(fallback instanceof FallbackReadFileStoreTable));
     }
 
@@ -96,7 +98,25 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public FileStoreTable switchToBranch(String branchName) {
-        return new FallbackReadFileStoreTable(wrapped.switchToBranch(branchName), fallback);
+        return new FallbackReadFileStoreTable(switchWrappedToBranch(branchName), fallback);
+    }
+
+    private FileStoreTable switchWrappedToBranch(String branchName) {
+        Optional<TableSchema> optionalSchema =
+                wrapped.schemaManager().copyWithBranch(branchName).latest();
+        Preconditions.checkArgument(
+                optionalSchema.isPresent(), "Branch " + branchName + " does not exist");
+
+        TableSchema branchSchema = optionalSchema.get();
+        Options branchOptions = new Options(branchSchema.options());
+        branchOptions.set(CoreOptions.BRANCH, branchName);
+        branchSchema = branchSchema.copy(branchOptions.toMap());
+        return FileStoreTableFactory.createWithoutFallbackBranch(
+                wrapped.fileIO(),
+                wrapped.location(),
+                branchSchema,
+                new Options(),
+                wrapped.catalogEnvironment());
     }
 
     private Map<String, String> rewriteFallbackOptions(Map<String, String> options) {
@@ -240,6 +260,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
+        public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+            mainScan.withPartitionsFilter(partitions);
+            fallbackScan.withPartitionsFilter(partitions);
+            return this;
+        }
+
+        @Override
         public Scan withBucketFilter(Filter<Integer> bucketFilter) {
             mainScan.withBucketFilter(bucketFilter);
             fallbackScan.withBucketFilter(bucketFilter);
@@ -284,15 +311,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
-        public List<BinaryRow> listPartitions() {
-            Set<BinaryRow> partitions = new LinkedHashSet<>(mainScan.listPartitions());
-            partitions.addAll(fallbackScan.listPartitions());
-            return new ArrayList<>(partitions);
-        }
-
-        @Override
         public List<PartitionEntry> listPartitionEntries() {
-            List<PartitionEntry> partitionEntries = mainScan.listPartitionEntries();
+            List<PartitionEntry> partitionEntries =
+                    new ArrayList<>(mainScan.listPartitionEntries());
             Set<BinaryRow> partitions =
                     partitionEntries.stream()
                             .map(PartitionEntry::partition)
@@ -328,9 +349,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            mainRead.withProjection(projection);
-            fallbackRead.withProjection(projection);
+        public InnerTableRead withReadType(RowType readType) {
+            mainRead.withReadType(readType);
+            fallbackRead.withReadType(readType);
             return this;
         }
 

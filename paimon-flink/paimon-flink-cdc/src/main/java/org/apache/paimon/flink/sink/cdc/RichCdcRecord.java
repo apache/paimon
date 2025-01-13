@@ -48,7 +48,7 @@ public class RichCdcRecord implements Serializable {
     }
 
     public boolean hasPayload() {
-        return !cdcRecord.fields().isEmpty();
+        return !cdcRecord.data().isEmpty();
     }
 
     public RowKind kind() {
@@ -95,7 +95,7 @@ public class RichCdcRecord implements Serializable {
         private final RowKind kind;
         private final AtomicInteger fieldId;
         private final List<DataField> fields = new ArrayList<>();
-        private final Map<String, String> fieldValues = new HashMap<>();
+        private final Map<String, String> data = new HashMap<>();
 
         public Builder(RowKind kind, AtomicInteger fieldId) {
             this.kind = kind;
@@ -109,12 +109,12 @@ public class RichCdcRecord implements Serializable {
         public Builder field(
                 String name, DataType type, String value, @Nullable String description) {
             fields.add(new DataField(fieldId.incrementAndGet(), name, type, description));
-            fieldValues.put(name, value);
+            data.put(name, value);
             return this;
         }
 
         public RichCdcRecord build() {
-            return new RichCdcRecord(new CdcRecord(kind, fieldValues), fields);
+            return new RichCdcRecord(new CdcRecord(kind, data), fields);
         }
     }
 }

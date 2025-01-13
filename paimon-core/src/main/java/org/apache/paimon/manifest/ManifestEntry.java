@@ -26,6 +26,9 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -91,6 +94,12 @@ public class ManifestEntry implements FileEntry {
         return file.fileName();
     }
 
+    @Nullable
+    @Override
+    public String externalPath() {
+        return file.externalPath().orElse(null);
+    }
+
     @Override
     public BinaryRow minKey() {
         return file.minKey();
@@ -99,6 +108,11 @@ public class ManifestEntry implements FileEntry {
     @Override
     public BinaryRow maxKey() {
         return file.maxKey();
+    }
+
+    @Override
+    public List<String> extraFiles() {
+        return file.extraFiles();
     }
 
     public int totalBuckets() {
@@ -117,7 +131,12 @@ public class ManifestEntry implements FileEntry {
                 file.level(),
                 file.fileName(),
                 file.extraFiles(),
-                file.embeddedIndex());
+                file.embeddedIndex(),
+                externalPath());
+    }
+
+    public ManifestEntry copyWithoutStats() {
+        return new ManifestEntry(kind, partition, bucket, totalBuckets, file.copyWithoutStats());
     }
 
     @Override
@@ -159,5 +178,18 @@ public class ManifestEntry implements FileEntry {
                 .filter(manifestEntry -> FileKind.DELETE.equals(manifestEntry.kind()))
                 .mapToLong(manifest -> manifest.file().rowCount())
                 .sum();
+    }
+
+    // ----------------------- Serialization -----------------------------
+
+    private static final ThreadLocal<ManifestEntrySerializer> SERIALIZER_THREAD_LOCAL =
+            ThreadLocal.withInitial(ManifestEntrySerializer::new);
+
+    public byte[] toBytes() throws IOException {
+        return SERIALIZER_THREAD_LOCAL.get().serializeToBytes(this);
+    }
+
+    public ManifestEntry fromBytes(byte[] bytes) throws IOException {
+        return SERIALIZER_THREAD_LOCAL.get().deserializeFromBytes(bytes);
     }
 }

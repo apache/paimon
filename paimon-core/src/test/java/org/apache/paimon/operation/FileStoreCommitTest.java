@@ -31,8 +31,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -79,6 +83,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -238,6 +243,8 @@ public class FileStoreCommitTest {
 
         testRandomConcurrent(
                 dataPerThread,
+                // overwrite cannot produce changelog
+                // so only enable it when changelog producer is none
                 changelogProducer == CoreOptions.ChangelogProducer.NONE,
                 failing,
                 changelogProducer);
@@ -908,16 +915,125 @@ public class FileStoreCommitTest {
         assertThat(dvs.get("f2").isDeleted(3)).isTrue();
     }
 
+    @Test
+    public void testManifestCompact() throws Exception {
+        TestFileStore store = createStore(false);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        // commit 1
+        Snapshot snapshot1 =
+                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        // commit 2
+        Snapshot snapshot2 =
+                store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
+                        .get(0);
+        // commit 3
+        Snapshot snapshot3 =
+                store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
+                        .get(0);
+
+        long deleteNum =
+                store.manifestListFactory().create().readDataManifests(snapshot3).stream()
+                        .mapToLong(ManifestFileMeta::numDeletedFiles)
+                        .sum();
+        assertThat(deleteNum).isGreaterThan(0);
+        store.newCommit().compactManifest();
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        assertThat(
+                        store.manifestListFactory().create().readDataManifests(latest).stream()
+                                .mapToLong(ManifestFileMeta::numDeletedFiles)
+                                .sum())
+                .isEqualTo(0);
+    }
+
+    @Test
+    public void testDropStatsForOverwrite() throws Exception {
+        TestFileStore store = createStore(false);
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS, true);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        // commit 1
+        Snapshot snapshot1 =
+                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        // overwrite commit 2
+        Snapshot snapshot2 =
+                store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
+                        .get(0);
+        ManifestFile manifestFile = store.manifestFileFactory().create();
+        List<ManifestEntry> entries =
+                store.manifestListFactory().create().readDataManifests(snapshot2).stream()
+                        .flatMap(meta -> manifestFile.read(meta.fileName()).stream())
+                        .collect(Collectors.toList());
+        for (ManifestEntry manifestEntry : entries) {
+            if (manifestEntry.kind() == FileKind.DELETE) {
+                assertThat(manifestEntry.file().valueStats()).isEqualTo(EMPTY_STATS);
+            }
+        }
+    }
+
+    @Test
+    public void testManifestCompactFull() throws Exception {
+        // Disable full compaction by options.
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(),
+                                String.valueOf(Long.MAX_VALUE)));
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        // commit 1
+        Snapshot snapshot =
+                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+
+        for (int i = 0; i < 100; i++) {
+            snapshot =
+                    store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
+                            .get(0);
+        }
+
+        long deleteNum =
+                store.manifestListFactory().create().readDataManifests(snapshot).stream()
+                        .mapToLong(ManifestFileMeta::numDeletedFiles)
+                        .sum();
+        assertThat(deleteNum).isGreaterThan(0);
+        store.newCommit().compactManifest();
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        assertThat(
+                        store.manifestListFactory().create().readDataManifests(latest).stream()
+                                .mapToLong(ManifestFileMeta::numDeletedFiles)
+                                .sum())
+                .isEqualTo(0);
+    }
+
+    private TestFileStore createStore(boolean failing, Map<String, String> options)
+            throws Exception {
+        return createStore(failing, 1, CoreOptions.ChangelogProducer.NONE, options);
+    }
+
     private TestFileStore createStore(boolean failing) throws Exception {
         return createStore(failing, 1);
     }
 
     private TestFileStore createStore(boolean failing, int numBucket) throws Exception {
-        return createStore(failing, numBucket, CoreOptions.ChangelogProducer.NONE);
+        return createStore(
+                failing, numBucket, CoreOptions.ChangelogProducer.NONE, Collections.emptyMap());
     }
 
     private TestFileStore createStore(
             boolean failing, int numBucket, CoreOptions.ChangelogProducer changelogProducer)
+            throws Exception {
+        return createStore(failing, numBucket, changelogProducer, Collections.emptyMap());
+    }
+
+    private TestFileStore createStore(
+            boolean failing,
+            int numBucket,
+            CoreOptions.ChangelogProducer changelogProducer,
+            Map<String, String> options)
             throws Exception {
         String root =
                 failing
@@ -932,7 +1048,7 @@ public class FileStoreCommitTest {
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
                                 TestKeyValueGenerator.getPrimaryKeys(
                                         TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
-                                Collections.emptyMap(),
+                                options,
                                 null));
         return new TestFileStore.Builder(
                         "avro",

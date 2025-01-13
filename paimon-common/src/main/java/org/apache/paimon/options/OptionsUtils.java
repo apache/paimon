@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.StructuredOptionsSplitter.escapeWithSingleQuote;
@@ -300,6 +302,34 @@ public class OptionsUtils {
                 });
 
         return properties;
+    }
+
+    public static Map<String, String> convertToDynamicTableProperties(
+            Map<String, String> confData,
+            String globalOptionKeyPrefix,
+            Pattern tableOptionKeyPattern,
+            int keyGroup) {
+        Map<String, String> globalOptions = new HashMap<>();
+        Map<String, String> tableOptions = new HashMap<>();
+
+        confData.keySet().stream()
+                .filter(k -> k.startsWith(globalOptionKeyPrefix))
+                .forEach(
+                        k -> {
+                            Matcher matcher = tableOptionKeyPattern.matcher(k);
+                            if (matcher.find()) {
+                                tableOptions.put(
+                                        matcher.group(keyGroup), convertToString(confData.get(k)));
+                            } else {
+                                globalOptions.put(
+                                        k.substring(globalOptionKeyPrefix.length()),
+                                        convertToString(confData.get(k)));
+                            }
+                        });
+
+        // table options should override global options for the same key
+        globalOptions.putAll(tableOptions);
+        return globalOptions;
     }
 
     static boolean containsPrefixMap(Map<String, String> confData, String key) {

@@ -33,7 +33,7 @@ public class AppendOnlyFileDataTableTest extends FileDataFilterTestBase {
         return new AppendOnlyFileStoreTable(
                 FileIOFinder.find(tablePath), tablePath, schemaManager.latest().get()) {
             @Override
-            protected SchemaManager schemaManager() {
+            public SchemaManager schemaManager() {
                 return schemaManager;
             }
         };

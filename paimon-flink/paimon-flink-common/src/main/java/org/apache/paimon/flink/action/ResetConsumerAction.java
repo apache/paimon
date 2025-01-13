@@ -32,12 +32,11 @@ public class ResetConsumerAction extends TableActionBase {
     private Long nextSnapshotId;
 
     protected ResetConsumerAction(
-            String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
             String consumerId) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.consumerId = consumerId;
     }
 
@@ -57,6 +56,7 @@ public class ResetConsumerAction extends TableActionBase {
         if (Objects.isNull(nextSnapshotId)) {
             consumerManager.deleteConsumer(consumerId);
         } else {
+            dataTable.snapshotManager().snapshot(nextSnapshotId);
             consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
         }
     }

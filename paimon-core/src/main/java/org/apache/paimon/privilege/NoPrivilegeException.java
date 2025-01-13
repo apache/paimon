@@ -23,6 +23,9 @@ import java.util.stream.Collectors;
 
 /** Thrown when tries to perform an operation but the current user does not have the privilege. */
 public class NoPrivilegeException extends RuntimeException {
+    private final String user;
+    private final String objectType;
+    private final String identifier;
 
     public NoPrivilegeException(
             String user, String objectType, String identifier, PrivilegeType... privilege) {
@@ -35,5 +38,20 @@ public class NoPrivilegeException extends RuntimeException {
                                 .collect(Collectors.joining(" or ")),
                         objectType,
                         identifier));
+        this.user = user;
+        this.objectType = objectType;
+        this.identifier = identifier;
+    }
+
+    String getUser() {
+        return user;
+    }
+
+    String getObjectType() {
+        return objectType;
+    }
+
+    String getIdentifier() {
+        return identifier;
     }
 }

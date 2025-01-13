@@ -27,7 +27,6 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.BlockingIterator;
 
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -60,7 +59,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                 tableEnvironmentBuilder()
                         .streamingMode()
                         .parallelism(1)
-                        .setConf(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false)
+                        .setString("execution.checkpointing.unaligned.enabled", "false")
                         .build();
         path = getTempDirPath();
         tEnv.executeSql(
@@ -117,7 +116,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                                 + "'table-default.opt1'='value1', "
                                 + "'table-default.opt2'='value2', "
                                 + "'table-default.opt3'='value3', "
-                                + "'fs.allow-hadoop-fallback'='false',"
                                 + "'lock.enabled'='false'"
                                 + ")",
                         path));
@@ -134,7 +132,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         assertThat(tableOptions).containsEntry("opt1", "value1");
         assertThat(tableOptions).containsEntry("opt2", "value2");
         assertThat(tableOptions).containsEntry("opt3", "value3");
-        assertThat(tableOptions).doesNotContainKey("fs.allow-hadoop-fallback");
         assertThat(tableOptions).doesNotContainKey("lock.enabled");
 
         // check table options override catalog's
@@ -147,7 +144,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         assertThat(tableOptions).containsEntry("opt1", "value1");
         assertThat(tableOptions).containsEntry("opt2", "value2");
         assertThat(tableOptions).containsEntry("opt3", "value4");
-        assertThat(tableOptions).doesNotContainKey("fs.allow-hadoop-fallback");
         assertThat(tableOptions).doesNotContainKey("lock.enabled");
     }
 

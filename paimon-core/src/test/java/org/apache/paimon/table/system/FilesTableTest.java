@@ -106,15 +106,15 @@ public class FilesTableTest extends TableTestBase {
         write(table, GenericRow.of(3, 1, 10, 1));
         assertThat(readPartBucketLevel(null))
                 .containsExactlyInAnyOrder(
-                        "[1, 10]-0-0", "[1, 10]-0-0", "[1, 10]-1-0", "[2, 20]-0-5");
+                        "{1, 10}-0-0", "{1, 10}-0-0", "{1, 10}-1-0", "{2, 20}-0-5");
 
         PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
-        assertThat(readPartBucketLevel(builder.equal(0, "[2, 20]")))
-                .containsExactlyInAnyOrder("[2, 20]-0-5");
+        assertThat(readPartBucketLevel(builder.equal(0, "{2, 20}")))
+                .containsExactlyInAnyOrder("{2, 20}-0-5");
         assertThat(readPartBucketLevel(builder.equal(1, 1)))
-                .containsExactlyInAnyOrder("[1, 10]-1-0");
+                .containsExactlyInAnyOrder("{1, 10}-1-0");
         assertThat(readPartBucketLevel(builder.equal(5, 5)))
-                .containsExactlyInAnyOrder("[2, 20]-0-5");
+                .containsExactlyInAnyOrder("{2, 20}-0-5");
     }
 
     private List<String> readPartBucketLevel(Predicate predicate) throws IOException {
@@ -159,8 +159,7 @@ public class FilesTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadFilesFromNotExistSnapshot() throws Exception {
-
+    public void testReadFilesFromNotExistSnapshot() {
         filesTable =
                 (FilesTable)
                         filesTable.copy(
@@ -189,10 +188,18 @@ public class FilesTableTest extends TableTestBase {
             String maxCol1 = String.valueOf(file.valueStats().maxValues().getInt(3));
             expectedRow.add(
                     GenericRow.of(
-                            BinaryString.fromString(
-                                    Arrays.toString(new String[] {partition1, partition2})),
+                            BinaryString.fromString("{" + partition1 + ", " + partition2 + "}"),
                             fileEntry.bucket(),
-                            BinaryString.fromString(file.fileName()),
+                            BinaryString.fromString(
+                                    table.location()
+                                            + "/pt1="
+                                            + partition1
+                                            + "/pt2="
+                                            + partition2
+                                            + "/bucket-"
+                                            + fileEntry.bucket()
+                                            + "/"
+                                            + file.fileName()),
                             BinaryString.fromString(file.fileFormat()),
                             file.schemaId(),
                             file.level(),
@@ -212,7 +219,9 @@ public class FilesTableTest extends TableTestBase {
                                             maxCol1, maxKey, partition1, partition2)),
                             file.minSequenceNumber(),
                             file.maxSequenceNumber(),
-                            file.creationTime()));
+                            file.creationTime(),
+                            BinaryString.fromString(
+                                    file.fileSource().map(Object::toString).orElse(null))));
         }
         return expectedRow;
     }

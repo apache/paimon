@@ -74,17 +74,13 @@ public class ConsumersTable implements ReadonlyTable {
     private final Path location;
     private final String branch;
 
-    public ConsumersTable(FileStoreTable dataTable) {
-        this(
-                dataTable.fileIO(),
-                dataTable.location(),
-                CoreOptions.branch(dataTable.schema().options()));
-    }
+    private final FileStoreTable dataTable;
 
-    public ConsumersTable(FileIO fileIO, Path location, String branchName) {
-        this.fileIO = fileIO;
-        this.location = location;
-        this.branch = branchName;
+    public ConsumersTable(FileStoreTable dataTable) {
+        this.fileIO = dataTable.fileIO();
+        this.location = dataTable.location();
+        this.branch = CoreOptions.branch(dataTable.schema().options());
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -114,7 +110,7 @@ public class ConsumersTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new ConsumersTable(fileIO, location, branch);
+        return new ConsumersTable(dataTable.copy(dynamicOptions));
     }
 
     private class ConsumersScan extends ReadOnceTableScan {
@@ -163,7 +159,7 @@ public class ConsumersTable implements ReadonlyTable {
     private class ConsumersRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         public ConsumersRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -175,8 +171,8 @@ public class ConsumersTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -194,10 +190,13 @@ public class ConsumersTable implements ReadonlyTable {
             Map<String, Long> consumers = new ConsumerManager(fileIO, location, branch).consumers();
             Iterator<InternalRow> rows =
                     Iterators.transform(consumers.entrySet().iterator(), this::toRow);
-            if (projection != null) {
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, ConsumersTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }

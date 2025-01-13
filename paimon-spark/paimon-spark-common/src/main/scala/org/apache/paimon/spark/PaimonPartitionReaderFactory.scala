@@ -18,10 +18,11 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.data
+import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.SparkUtils.createIOManager
+import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
@@ -45,13 +46,13 @@ case class PaimonPartitionReaderFactory(
     val dataFields = new JList(readBuilder.readType().getFields)
     dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
     val rowType = new RowType(dataFields)
-    new SparkInternalRow(rowType)
+    SparkInternalRow.create(rowType)
   }
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case paimonInputPartition: PaimonInputPartition =>
-        val readFunc: Split => RecordReader[data.InternalRow] =
+        val readFunc: Split => RecordReader[PaimonInternalRow] =
           (split: Split) => readBuilder.newRead().withIOManager(ioManager).createReader(split)
         PaimonPartitionReader(readFunc, paimonInputPartition, row, metadataColumns)
       case _ =>

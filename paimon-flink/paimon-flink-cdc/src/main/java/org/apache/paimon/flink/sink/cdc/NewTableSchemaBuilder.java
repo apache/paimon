@@ -24,7 +24,6 @@ import org.apache.paimon.schema.Schema;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -38,14 +37,16 @@ public class NewTableSchemaBuilder implements Serializable {
     private final boolean caseSensitive;
     private final List<String> partitionKeys;
     private final List<String> primaryKeys;
+    private final boolean requirePrimaryKeys;
     private final CdcMetadataConverter[] metadataConverters;
-    protected Map<String, List<String>> partitionKeyMultiple = new HashMap<>();
+    private final Map<String, List<String>> partitionKeyMultiple;
 
     public NewTableSchemaBuilder(
             Map<String, String> tableConfig,
             boolean caseSensitive,
             List<String> partitionKeys,
             List<String> primaryKeys,
+            boolean requirePrimaryKeys,
             Map<String, List<String>> partitionKeyMultiple,
             CdcMetadataConverter[] metadataConverters) {
         this.tableConfig = tableConfig;
@@ -53,6 +54,7 @@ public class NewTableSchemaBuilder implements Serializable {
         this.metadataConverters = metadataConverters;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
+        this.requirePrimaryKeys = requirePrimaryKeys;
         this.partitionKeyMultiple = partitionKeyMultiple;
     }
 
@@ -84,6 +86,6 @@ public class NewTableSchemaBuilder implements Serializable {
                         metadataConverters,
                         caseSensitive,
                         false,
-                        true));
+                        requirePrimaryKeys));
     }
 }

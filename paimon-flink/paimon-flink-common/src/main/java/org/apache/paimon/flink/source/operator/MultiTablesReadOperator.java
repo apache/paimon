@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -29,7 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.CompactBucketsTable;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Preconditions;
 
@@ -52,27 +53,26 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * The operator that reads the Tuple2<{@link Split}, String> received from the preceding {@link
- * CombinedAwareBatchSourceFunction} or {@link CombinedAwareStreamingSourceFunction}. Contrary to
- * the {@link CombinedCompactorSourceFunction} which has a parallelism of 1, this operator can have
- * DOP > 1.
+ * CombinedAwareBatchSource} or {@link CombinedAwareStreamingSource}. Contrary to the {@link
+ * CombinedCompactorSource} which has a parallelism of 1, this operator can have DOP > 1.
  */
 public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         implements OneInputStreamOperator<Tuple2<Split, String>, RowData> {
 
     private static final long serialVersionUID = 1L;
 
-    private final Catalog.Loader catalogLoader;
+    private final CatalogLoader catalogLoader;
     private final boolean isStreaming;
 
     private Duration partitionIdleTime = null;
 
-    public MultiTablesReadOperator(Catalog.Loader catalogLoader, boolean isStreaming) {
+    public MultiTablesReadOperator(CatalogLoader catalogLoader, boolean isStreaming) {
         this.catalogLoader = catalogLoader;
         this.isStreaming = isStreaming;
     }
 
     public MultiTablesReadOperator(
-            Catalog.Loader catalogLoader, boolean isStreaming, Duration partitionIdleTime) {
+            CatalogLoader catalogLoader, boolean isStreaming, Duration partitionIdleTime) {
         this.catalogLoader = catalogLoader;
         this.isStreaming = isStreaming;
         this.partitionIdleTime = partitionIdleTime;
@@ -80,7 +80,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
 
     private transient Catalog catalog;
     private transient IOManager ioManager;
-    private transient Map<Identifier, BucketsTable> tablesMap;
+    private transient Map<Identifier, CompactBucketsTable> tablesMap;
     private transient Map<Identifier, TableRead> readsMap;
     private transient StreamRecord<RowData> reuseRecord;
     private transient FlinkRowData reuseRow;
@@ -132,7 +132,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     }
 
     private TableRead getTableRead(Identifier tableId) {
-        BucketsTable table = tablesMap.get(tableId);
+        CompactBucketsTable table = tablesMap.get(tableId);
         if (table == null) {
             try {
                 Table newTable = catalog.getTable(tableId);
@@ -141,7 +141,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
                         "Only FileStoreTable supports compact action. The table type is '%s'.",
                         newTable.getClass().getName());
                 table =
-                        new BucketsTable(
+                        new CompactBucketsTable(
                                         (FileStoreTable) newTable,
                                         isStreaming,
                                         tableId.getDatabaseName())
@@ -156,7 +156,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         return readsMap.get(tableId);
     }
 
-    private Map<BinaryRow, Long> getPartitionInfo(BucketsTable table) {
+    private Map<BinaryRow, Long> getPartitionInfo(CompactBucketsTable table) {
         List<PartitionEntry> partitions = table.newSnapshotReader().partitionEntries();
 
         return partitions.stream()

@@ -31,6 +31,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.SerializableSupplier;
 
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -119,9 +120,19 @@ public class SortUtils {
                         .map(
                                 new RichMapFunction<RowData, Tuple2<KEY, RowData>>() {
 
-                                    @Override
+                                    /**
+                                     * Do not annotate with <code>@override</code> here to maintain
+                                     * compatibility with Flink 1.18-.
+                                     */
+                                    public void open(OpenContext openContext) throws Exception {
+                                        open(new Configuration());
+                                    }
+
+                                    /**
+                                     * Do not annotate with <code>@override</code> here to maintain
+                                     * compatibility with Flink 2.0+.
+                                     */
                                     public void open(Configuration parameters) throws Exception {
-                                        super.open(parameters);
                                         shuffleKeyAbstract.open();
                                     }
 
@@ -163,7 +174,8 @@ public class SortUtils {
                                     options.localSortMaxNumFileHandles(),
                                     options.spillCompressOptions(),
                                     sinkParallelism,
-                                    options.writeBufferSpillDiskSize()))
+                                    options.writeBufferSpillDiskSize(),
+                                    options.sequenceFieldSortOrderIsAscending()))
                     .setParallelism(sinkParallelism)
                     // remove the key column from every row
                     .map(
@@ -171,7 +183,18 @@ public class SortUtils {
 
                                 private transient KeyProjectedRow keyProjectedRow;
 
-                                @Override
+                                /**
+                                 * Do not annotate with <code>@override</code> here to maintain
+                                 * compatibility with Flink 1.18-.
+                                 */
+                                public void open(OpenContext openContext) {
+                                    open(new Configuration());
+                                }
+
+                                /**
+                                 * Do not annotate with <code>@override</code> here to maintain
+                                 * compatibility with Flink 2.0+.
+                                 */
                                 public void open(Configuration parameters) {
                                     keyProjectedRow = new KeyProjectedRow(valueProjectionMap);
                                 }

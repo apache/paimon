@@ -18,13 +18,13 @@
 
 package org.apache.paimon.flink.compact;
 
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.CompactBucketsTable;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 
@@ -32,7 +32,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -44,23 +43,16 @@ import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOpti
  */
 public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, String>> {
 
-    protected transient Map<Identifier, BucketsTable> tablesMap;
+    protected transient Map<Identifier, CompactBucketsTable> tablesMap;
     protected transient Map<Identifier, StreamTableScan> scansMap;
 
     public MultiAwareBucketTableScan(
-            Catalog.Loader catalogLoader,
+            CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
-            boolean isStreaming,
-            AtomicBoolean isRunning) {
-        super(
-                catalogLoader,
-                includingPattern,
-                excludingPattern,
-                databasePattern,
-                isStreaming,
-                isRunning);
+            boolean isStreaming) {
+        super(catalogLoader, includingPattern, excludingPattern, databasePattern, isStreaming);
         tablesMap = new HashMap<>();
         scansMap = new HashMap<>();
     }
@@ -87,8 +79,9 @@ public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, 
     @Override
     public void addScanTable(FileStoreTable fileStoreTable, Identifier identifier) {
         if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE) {
-            BucketsTable bucketsTable =
-                    new BucketsTable(fileStoreTable, isStreaming, identifier.getDatabaseName())
+            CompactBucketsTable bucketsTable =
+                    new CompactBucketsTable(
+                                    fileStoreTable, isStreaming, identifier.getDatabaseName())
                             .copy(compactOptions(isStreaming));
             tablesMap.put(identifier, bucketsTable);
             scansMap.put(identifier, bucketsTable.newReadBuilder().newStreamScan());

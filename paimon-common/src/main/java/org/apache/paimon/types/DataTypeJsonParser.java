@@ -26,8 +26,11 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Parser for creating instances of {@link org.apache.paimon.types.DataType} from a serialized
@@ -36,9 +39,20 @@ import java.util.stream.Stream;
 public final class DataTypeJsonParser {
 
     public static DataField parseDataField(JsonNode json) {
-        int id = json.get("id").asInt();
+        return parseDataField(json, null);
+    }
+
+    private static DataField parseDataField(JsonNode json, AtomicInteger fieldId) {
+        int id;
+        JsonNode idNode = json.get("id");
+        if (idNode != null) {
+            checkState(fieldId == null || fieldId.get() == -1, "Partial field id is not allowed.");
+            id = idNode.asInt();
+        } else {
+            id = fieldId.incrementAndGet();
+        }
         String name = json.get("name").asText();
-        DataType type = parseDataType(json.get("type"));
+        DataType type = parseDataType(json.get("type"), fieldId);
         JsonNode descriptionNode = json.get("description");
         String description = null;
         if (descriptionNode != null) {
@@ -48,26 +62,30 @@ public final class DataTypeJsonParser {
     }
 
     public static DataType parseDataType(JsonNode json) {
+        return parseDataType(json, new AtomicInteger(-1));
+    }
+
+    public static DataType parseDataType(JsonNode json, AtomicInteger fieldId) {
         if (json.isTextual()) {
             return parseAtomicTypeSQLString(json.asText());
         } else if (json.isObject()) {
             String typeString = json.get("type").asText();
             if (typeString.startsWith("ARRAY")) {
-                DataType element = parseDataType(json.get("element"));
+                DataType element = parseDataType(json.get("element"), fieldId);
                 return new ArrayType(!typeString.contains("NOT NULL"), element);
             } else if (typeString.startsWith("MULTISET")) {
-                DataType element = parseDataType(json.get("element"));
+                DataType element = parseDataType(json.get("element"), fieldId);
                 return new MultisetType(!typeString.contains("NOT NULL"), element);
             } else if (typeString.startsWith("MAP")) {
-                DataType key = parseDataType(json.get("key"));
-                DataType value = parseDataType(json.get("value"));
+                DataType key = parseDataType(json.get("key"), fieldId);
+                DataType value = parseDataType(json.get("value"), fieldId);
                 return new MapType(!typeString.contains("NOT NULL"), key, value);
             } else if (typeString.startsWith("ROW")) {
                 JsonNode fieldArray = json.get("fields");
                 Iterator<JsonNode> iterator = fieldArray.elements();
                 List<DataField> fields = new ArrayList<>(fieldArray.size());
                 while (iterator.hasNext()) {
-                    fields.add(parseDataField(iterator.next()));
+                    fields.add(parseDataField(iterator.next(), fieldId));
                 }
                 return new RowType(!typeString.contains("NOT NULL"), fields);
             }
@@ -301,6 +319,7 @@ public final class DataTypeJsonParser {
         NULL,
         RAW,
         LEGACY,
+        VARIANT,
         NOT
     }
 
@@ -515,6 +534,8 @@ public final class DataTypeJsonParser {
                     return parseTimestampType();
                 case TIMESTAMP_LTZ:
                     return parseTimestampLtzType();
+                case VARIANT:
+                    return new VariantType();
                 default:
                     throw parsingError("Unsupported type: " + token().value);
             }

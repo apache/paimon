@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.Table;
 
@@ -39,7 +39,7 @@ public class RichCdcSinkBuilder {
     private DataStream<RichCdcRecord> input = null;
     private Table table = null;
     private Identifier identifier = null;
-    private Catalog.Loader catalogLoader = null;
+    private CatalogLoader catalogLoader = null;
 
     @Nullable private Integer parallelism;
 
@@ -62,7 +62,7 @@ public class RichCdcSinkBuilder {
         return this;
     }
 
-    public RichCdcSinkBuilder catalogLoader(Catalog.Loader catalogLoader) {
+    public RichCdcSinkBuilder catalogLoader(CatalogLoader catalogLoader) {
         this.catalogLoader = catalogLoader;
         return this;
     }
@@ -114,7 +114,7 @@ public class RichCdcSinkBuilder {
 
     /** @deprecated Use {@link #catalogLoader}. */
     @Deprecated
-    public RichCdcSinkBuilder withCatalogLoader(Catalog.Loader catalogLoader) {
+    public RichCdcSinkBuilder withCatalogLoader(CatalogLoader catalogLoader) {
         this.catalogLoader = catalogLoader;
         return this;
     }

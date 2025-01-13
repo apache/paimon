@@ -43,6 +43,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.io.api.Binary;
@@ -172,6 +173,11 @@ public class ParquetFilters {
         }
 
         if (value instanceof Number) {
+            if (value instanceof Byte) {
+                return ((Byte) value).intValue();
+            } else if (value instanceof Short) {
+                return ((Short) value).intValue();
+            }
             return (Comparable<?>) value;
         } else if (value instanceof String) {
             return Binary.fromString((String) value);
@@ -273,6 +279,11 @@ public class ParquetFilters {
 
         @Override
         public Operators.Column<?> visit(LocalZonedTimestampType localZonedTimestampType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Operators.Column<?> visit(VariantType variantType) {
             throw new UnsupportedOperationException();
         }
 

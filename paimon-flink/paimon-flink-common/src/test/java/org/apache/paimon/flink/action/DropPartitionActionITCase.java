@@ -70,7 +70,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                             "partKey0=0")
                     .run();
         } else {
-            callProcedure(
+            executeSQL(
                     String.format(
                             "CALL sys.drop_partition('%s.%s', 'partKey0 = 0')",
                             database, tableName));
@@ -136,7 +136,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                             "partKey0=1,partKey1=0")
                     .run();
         } else {
-            callProcedure(
+            executeSQL(
                     String.format(
                             "CALL sys.drop_partition('%s.%s', 'partKey0=0,partKey1=1', 'partKey0=1,partKey1=0')",
                             database, tableName));

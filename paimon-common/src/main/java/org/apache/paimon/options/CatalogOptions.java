@@ -18,9 +18,7 @@
 
 package org.apache.paimon.options;
 
-import org.apache.paimon.options.description.Description;
-import org.apache.paimon.options.description.TextElement;
-import org.apache.paimon.table.TableType;
+import org.apache.paimon.table.CatalogTableType;
 
 import java.time.Duration;
 
@@ -48,10 +46,10 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Uri of metastore server.");
 
-    public static final ConfigOption<TableType> TABLE_TYPE =
+    public static final ConfigOption<CatalogTableType> TABLE_TYPE =
             ConfigOptions.key("table.type")
-                    .enumType(TableType.class)
-                    .defaultValue(TableType.MANAGED)
+                    .enumType(CatalogTableType.class)
+                    .defaultValue(CatalogTableType.MANAGED)
                     .withDescription("Type of table.");
 
     public static final ConfigOption<Boolean> LOCK_ENABLED =
@@ -78,13 +76,6 @@ public class CatalogOptions {
                     .defaultValue(Duration.ofMinutes(8))
                     .withDescription("The maximum time to wait for acquiring the lock.");
 
-    public static final ConfigOption<Boolean> FS_ALLOW_HADOOP_FALLBACK =
-            key("fs.allow-hadoop-fallback")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Allow to fallback to hadoop File IO when no file io found for the scheme.");
-
     public static final ConfigOption<Integer> CLIENT_POOL_SIZE =
             key("client-pool-size")
                     .intType()
@@ -96,14 +87,21 @@ public class CatalogOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "Controls whether the catalog will cache databases, tables and manifests.");
+                            "Controls whether the catalog will cache databases, tables, manifests and partitions.");
 
     public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
             key("cache.expiration-interval")
                     .durationType()
-                    .defaultValue(Duration.ofSeconds(60))
+                    .defaultValue(Duration.ofMinutes(10))
                     .withDescription(
                             "Controls the duration for which databases and tables in the catalog are cached.");
+
+    public static final ConfigOption<Long> CACHE_PARTITION_MAX_NUM =
+            key("cache.partition.max-num")
+                    .longType()
+                    .defaultValue(0L)
+                    .withDescription(
+                            "Controls the max number for which partitions in the catalog are cached.");
 
     public static final ConfigOption<MemorySize> CACHE_MANIFEST_SMALL_FILE_MEMORY =
             key("cache.manifest.small-file-memory")
@@ -123,37 +121,32 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Controls the maximum memory to cache manifest content.");
 
-    public static final ConfigOption<String> LINEAGE_META =
-            key("lineage-meta")
-                    .stringType()
-                    .noDefaultValue()
+    public static final ConfigOption<Integer> CACHE_SNAPSHOT_MAX_NUM_PER_TABLE =
+            key("cache.snapshot.max-num-per-table")
+                    .intType()
+                    .defaultValue(20)
                     .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "The lineage meta to store table and data lineage information.")
-                                    .linebreak()
-                                    .linebreak()
-                                    .text("Possible values:")
-                                    .linebreak()
-                                    .list(
-                                            TextElement.text(
-                                                    "\"jdbc\": Use standard jdbc to store table and data lineage information."))
-                                    .list(
-                                            TextElement.text(
-                                                    "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
-                                    .build());
+                            "Controls the max number for snapshots per table in the catalog are cached.");
 
-    public static final ConfigOption<Boolean> ALLOW_UPPER_CASE =
-            ConfigOptions.key("allow-upper-case")
+    public static final ConfigOption<Boolean> CASE_SENSITIVE =
+            ConfigOptions.key("case-sensitive")
                     .booleanType()
                     .noDefaultValue()
-                    .withDescription(
-                            "Indicates whether this catalog allow upper case, "
-                                    + "its default value depends on the implementation of the specific catalog.");
+                    .withFallbackKeys("allow-upper-case")
+                    .withDescription("Indicates whether this catalog is case-sensitive.");
 
     public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
             ConfigOptions.key("sync-all-properties")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Sync all table properties to hive metastore");
+
+    public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
+            ConfigOptions.key("format-table.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. "
+                                    + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
+                                    + " the metastore and need to be manually added as separate partition operations.");
 }

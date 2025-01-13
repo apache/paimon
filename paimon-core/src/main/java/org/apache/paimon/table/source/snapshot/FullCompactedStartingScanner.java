@@ -33,7 +33,7 @@ import javax.annotation.Nullable;
  * {@link StartingScanner} for the {@link StartupMode#COMPACTED_FULL} startup mode with
  * 'full-compaction.delta-commits'.
  */
-public class FullCompactedStartingScanner extends AbstractStartingScanner {
+public class FullCompactedStartingScanner extends ReadPlanStartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(FullCompactedStartingScanner.class);
 
@@ -62,13 +62,13 @@ public class FullCompactedStartingScanner extends AbstractStartingScanner {
     }
 
     @Override
-    public Result scan(SnapshotReader snapshotReader) {
+    public SnapshotReader configure(SnapshotReader snapshotReader) {
         Long startingSnapshotId = pick();
         if (startingSnapshotId == null) {
             startingSnapshotId = snapshotManager.latestSnapshotId();
             if (startingSnapshotId == null) {
                 LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
-                return new NoSnapshot();
+                return null;
             } else {
                 LOG.debug(
                         "No compact snapshot found, reading from the latest snapshot {}.",
@@ -76,8 +76,7 @@ public class FullCompactedStartingScanner extends AbstractStartingScanner {
             }
         }
 
-        return StartingScanner.fromPlan(
-                snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId).read());
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
     }
 
     public static boolean isFullCompactedIdentifier(long identifier, int deltaCommits) {

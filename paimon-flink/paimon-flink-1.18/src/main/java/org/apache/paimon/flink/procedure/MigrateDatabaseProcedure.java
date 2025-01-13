@@ -23,11 +23,15 @@ import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 /** Migrate procedure to migrate all hive tables in database to paimon table. */
 public class MigrateDatabaseProcedure extends ProcedureBase {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MigrateDatabaseProcedure.class);
 
     @Override
     public String identifier() {
@@ -51,13 +55,51 @@ public class MigrateDatabaseProcedure extends ProcedureBase {
                         connector,
                         catalog,
                         sourceDatabasePath,
+                        Runtime.getRuntime().availableProcessors(),
                         ParameterUtils.parseCommaSeparatedKeyValues(properties));
 
-        for (Migrator migrator : migrators) {
-            migrator.executeMigrate();
-            migrator.renameTable(false);
-        }
+        String retStr = handleMigrators(migrators);
+        return new String[] {retStr};
+    }
 
-        return new String[] {"Success"};
+    public String[] call(
+            ProcedureContext procedureContext,
+            String connector,
+            String sourceDatabasePath,
+            String properties,
+            Integer parallelism)
+            throws Exception {
+        Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
+        List<Migrator> migrators =
+                TableMigrationUtils.getImporters(
+                        connector,
+                        catalog,
+                        sourceDatabasePath,
+                        p,
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties));
+
+        String retStr = handleMigrators(migrators);
+        return new String[] {retStr};
+    }
+
+    public String handleMigrators(List<Migrator> migrators) {
+        int errorCount = 0;
+        int successCount = 0;
+
+        for (Migrator migrator : migrators) {
+            try {
+                migrator.executeMigrate();
+                migrator.renameTable(false);
+                successCount++;
+            } catch (Exception e) {
+                errorCount++;
+                LOG.error("Call migrate_database error:" + e.getMessage());
+            }
+        }
+        String retStr =
+                String.format(
+                        "migrate database is finished, success cnt: %s , failed cnt: %s",
+                        String.valueOf(successCount), String.valueOf(errorCount));
+        return retStr;
     }
 }

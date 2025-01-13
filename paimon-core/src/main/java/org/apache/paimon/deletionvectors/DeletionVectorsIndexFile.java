@@ -21,11 +21,11 @@ package org.apache.paimon.deletionvectors;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFile;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
 import java.io.DataInputStream;
@@ -63,9 +63,9 @@ public class DeletionVectorsIndexFile extends IndexFile {
      * @throws UncheckedIOException If an I/O error occurs while reading from the file.
      */
     public Map<String, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
-        LinkedHashMap<String, Pair<Integer, Integer>> deletionVectorRanges =
-                fileMeta.deletionVectorsRanges();
-        checkNotNull(deletionVectorRanges);
+        LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas =
+                fileMeta.deletionVectorMetas();
+        checkNotNull(deletionVectorMetas);
 
         String indexFileName = fileMeta.fileName();
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
@@ -73,18 +73,17 @@ public class DeletionVectorsIndexFile extends IndexFile {
         try (SeekableInputStream inputStream = fileIO.newInputStream(filePath)) {
             checkVersion(inputStream);
             DataInputStream dataInputStream = new DataInputStream(inputStream);
-            for (Map.Entry<String, Pair<Integer, Integer>> entry :
-                    deletionVectorRanges.entrySet()) {
+            for (DeletionVectorMeta deletionVectorMeta : deletionVectorMetas.values()) {
                 deletionVectors.put(
-                        entry.getKey(),
-                        readDeletionVector(dataInputStream, entry.getValue().getRight()));
+                        deletionVectorMeta.dataFileName(),
+                        readDeletionVector(dataInputStream, deletionVectorMeta.length()));
             }
         } catch (Exception e) {
             throw new RuntimeException(
                     "Unable to read deletion vectors from file: "
                             + filePath
-                            + ", deletionVectorRanges: "
-                            + deletionVectorRanges,
+                            + ", deletionVectorMetas: "
+                            + deletionVectorMetas,
                     e);
         }
         return deletionVectors;

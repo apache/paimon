@@ -38,6 +38,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.AfterEach;
@@ -214,6 +215,15 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
     }
 
     public JobClient runActionWithDefaultEnv(ActionBase action) throws Exception {
+        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
+        action.withStreamExecutionEnvironment(env).build();
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+        return client;
+    }
+
+    public JobClient runActionWithBatchEnv(ActionBase action) throws Exception {
+        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         action.withStreamExecutionEnvironment(env).build();
         JobClient client = env.executeAsync();
         waitJobRunning(client);

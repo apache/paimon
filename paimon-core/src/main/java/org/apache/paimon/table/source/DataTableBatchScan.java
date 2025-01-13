@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -49,7 +50,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         this.hasNext = true;
         this.defaultValueAssigner = defaultValueAssigner;
         if (pkTable && (options.deletionVectorsEnabled() || options.mergeEngine() == FIRST_ROW)) {
-            snapshotReader.withLevelFilter(level -> level > 0);
+            snapshotReader.withLevelFilter(level -> level > 0).enableValueFilter();
         }
     }
 
@@ -81,37 +82,38 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         }
     }
 
+    @Override
+    public List<PartitionEntry> listPartitionEntries() {
+        if (startingScanner == null) {
+            startingScanner = createStartingScanner(false);
+        }
+        return startingScanner.scanPartitions(snapshotReader);
+    }
+
     private StartingScanner.Result applyPushDownLimit(StartingScanner.Result result) {
         if (pushDownLimit != null && result instanceof ScannedResult) {
             long scannedRowCount = 0;
             SnapshotReader.Plan plan = ((ScannedResult) result).plan();
             List<DataSplit> splits = plan.dataSplits();
-            List<Split> limitedSplits = new ArrayList<>();
-            for (DataSplit dataSplit : splits) {
-                long splitRowCount = getRowCountForSplit(dataSplit);
-                limitedSplits.add(dataSplit);
-                scannedRowCount += splitRowCount;
-                if (scannedRowCount >= pushDownLimit) {
-                    break;
-                }
+            if (splits.isEmpty()) {
+                return result;
             }
 
-            SnapshotReader.Plan newPlan =
-                    new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
-            return new ScannedResult(newPlan);
-        } else {
-            return result;
+            List<Split> limitedSplits = new ArrayList<>();
+            for (DataSplit dataSplit : splits) {
+                if (dataSplit.rawConvertible()) {
+                    long partialMergedRowCount = dataSplit.partialMergedRowCount();
+                    limitedSplits.add(dataSplit);
+                    scannedRowCount += partialMergedRowCount;
+                    if (scannedRowCount >= pushDownLimit) {
+                        SnapshotReader.Plan newPlan =
+                                new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                        return new ScannedResult(newPlan);
+                    }
+                }
+            }
         }
-    }
-
-    /**
-     * 0 represents that we can't compute the row count of this split, 'cause this split needs to be
-     * merged.
-     */
-    private long getRowCountForSplit(DataSplit split) {
-        return split.convertToRawFiles()
-                .map(files -> files.stream().map(RawFile::rowCount).reduce(Long::sum).orElse(0L))
-                .orElse(0L);
+        return result;
     }
 
     @Override

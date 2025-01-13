@@ -20,6 +20,8 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 
+import javax.annotation.Nullable;
+
 /**
  * Interface that represents the client side information for a file independent of the file system.
  *
@@ -56,4 +58,24 @@ public interface FileStatus {
      *     milliseconds since the epoch (UTC January 1, 1970).
      */
     long getModificationTime();
+
+    /**
+     * Get the last access time of the file.
+     *
+     * @return A long value representing the time the file was last accessed, measured in
+     *     milliseconds since the epoch (UTC January 1, 1970).
+     */
+    default long getAccessTime() {
+        return 0;
+    }
+
+    /**
+     * Returns the owner of this file.
+     *
+     * @return the owner of this file
+     */
+    @Nullable
+    default String getOwner() {
+        return null;
+    }
 }

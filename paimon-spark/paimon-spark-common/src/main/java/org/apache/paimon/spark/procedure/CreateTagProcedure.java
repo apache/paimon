@@ -18,71 +18,26 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.utils.TimeUtils;
+import org.apache.paimon.table.Table;
 
-import org.apache.spark.sql.catalyst.InternalRow;
-import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.apache.spark.sql.types.DataTypes;
-import org.apache.spark.sql.types.Metadata;
-import org.apache.spark.sql.types.StructField;
-import org.apache.spark.sql.types.StructType;
 
 import java.time.Duration;
 
-import static org.apache.spark.sql.types.DataTypes.LongType;
-import static org.apache.spark.sql.types.DataTypes.StringType;
-
 /** A procedure to create a tag. */
-public class CreateTagProcedure extends BaseProcedure {
+public class CreateTagProcedure extends CreateOrReplaceTagBaseProcedure {
 
-    private static final ProcedureParameter[] PARAMETERS =
-            new ProcedureParameter[] {
-                ProcedureParameter.required("table", StringType),
-                ProcedureParameter.required("tag", StringType),
-                ProcedureParameter.optional("snapshot", LongType),
-                ProcedureParameter.optional("time_retained", StringType)
-            };
-
-    private static final StructType OUTPUT_TYPE =
-            new StructType(
-                    new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
-                    });
-
-    protected CreateTagProcedure(TableCatalog tableCatalog) {
+    private CreateTagProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
     }
 
     @Override
-    public ProcedureParameter[] parameters() {
-        return PARAMETERS;
-    }
-
-    @Override
-    public StructType outputType() {
-        return OUTPUT_TYPE;
-    }
-
-    @Override
-    public InternalRow[] call(InternalRow args) {
-        Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String tag = args.getString(1);
-        Long snapshot = args.isNullAt(2) ? null : args.getLong(2);
-        Duration timeRetained =
-                args.isNullAt(3) ? null : TimeUtils.parseDuration(args.getString(3));
-
-        return modifyPaimonTable(
-                tableIdent,
-                table -> {
-                    if (snapshot == null) {
-                        table.createTag(tag, timeRetained);
-                    } else {
-                        table.createTag(tag, snapshot, timeRetained);
-                    }
-                    InternalRow outputRow = newInternalRow(true);
-                    return new InternalRow[] {outputRow};
-                });
+    void createOrReplaceTag(Table table, String tagName, Long snapshotId, Duration timeRetained) {
+        if (snapshotId == null) {
+            table.createTag(tagName, timeRetained);
+        } else {
+            table.createTag(tagName, snapshotId, timeRetained);
+        }
     }
 
     public static ProcedureBuilder builder() {

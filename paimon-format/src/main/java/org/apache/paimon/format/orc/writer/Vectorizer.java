@@ -39,9 +39,9 @@ public abstract class Vectorizer<T> implements Serializable {
 
     private final TypeDescription schema;
 
-    public Vectorizer(final String schema) {
+    public Vectorizer(final TypeDescription schema) {
         checkNotNull(schema);
-        this.schema = TypeDescription.fromString(schema);
+        this.schema = schema;
     }
 
     /**

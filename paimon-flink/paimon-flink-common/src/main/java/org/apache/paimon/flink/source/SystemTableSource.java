@@ -19,9 +19,12 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
+import org.apache.paimon.flink.Projection;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -32,16 +35,9 @@ import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.source.LookupTableSource;
-import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
-import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.plan.stats.TableStats;
 
 import javax.annotation.Nullable;
-
-import java.util.Collections;
-import java.util.List;
 
 /** A {@link FlinkTableSource} for system table. */
 public class SystemTableSource extends FlinkTableSource {
@@ -85,13 +81,29 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
         Source<RowData, ?, ?> source;
-        ReadBuilder readBuilder =
-                table.newReadBuilder().withProjection(projectFields).withFilter(predicate);
+
+        NestedProjectedRowData rowData = null;
+        org.apache.paimon.types.RowType readType = null;
+        if (projectFields != null) {
+            Projection projection = Projection.of(projectFields);
+            rowData = projection.getOuterProjectRow(table.rowType());
+            readType = projection.project(table.rowType());
+        }
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (readType != null) {
+            readBuilder.withReadType(readType);
+        }
+        readBuilder.withFilter(predicate);
 
         if (isStreamingMode && table instanceof DataTable) {
-            source = new ContinuousFileStoreSource(readBuilder, table.options(), limit);
+            source =
+                    new ContinuousFileStoreSource(
+                            readBuilder, table.options(), limit, BucketMode.HASH_FIXED, rowData);
         } else {
-            source = new StaticFileStoreSource(readBuilder, limit, splitBatchSize, splitAssignMode);
+            source =
+                    new StaticFileStoreSource(
+                            readBuilder, limit, splitBatchSize, splitAssignMode, null, rowData);
         }
         return new PaimonDataStreamScanProvider(
                 source.getBoundedness() == Boundedness.BOUNDED,
@@ -125,36 +137,6 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public String asSummaryString() {
         return "Paimon-SystemTable-Source";
-    }
-
-    @Override
-    public void pushWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public LookupTableSource.LookupRuntimeProvider getLookupRuntimeProvider(
-            LookupTableSource.LookupContext context) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public TableStats reportStatistics() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public List<String> listAcceptedFilterFields() {
-        // system table doesn't support dynamic filtering
-        return Collections.emptyList();
-    }
-
-    @Override
-    public void applyDynamicFiltering(List<String> candidateFilterFields) {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Cannot apply dynamic filtering to Paimon system table '%s'.",
-                        table.name()));
     }
 
     @Override

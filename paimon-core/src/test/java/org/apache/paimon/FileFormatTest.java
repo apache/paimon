@@ -53,10 +53,9 @@ public class FileFormatTest {
     public void testWriteRead(@TempDir java.nio.file.Path tempDir) throws IOException {
         FileFormat avro = createFileFormat("snappy");
         RowType rowType = RowType.of(new IntType(), new IntType());
-
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
-        // write
 
+        // write
         List<InternalRow> expected = new ArrayList<>();
         expected.add(GenericRow.of(1, 11));
         expected.add(GenericRow.of(2, 22));

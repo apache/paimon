@@ -31,6 +31,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Objects;
@@ -350,18 +351,6 @@ public class Snapshot {
         return JsonSerdeUtil.toJson(this);
     }
 
-    public static Snapshot fromJson(String json) {
-        return JsonSerdeUtil.fromJson(json, Snapshot.class);
-    }
-
-    public static Snapshot fromPath(FileIO fileIO, Path path) {
-        try {
-            return Snapshot.fromJson(fileIO.readFileUtf8(path));
-        } catch (IOException e) {
-            throw new RuntimeException("Fails to read snapshot from path " + path, e);
-        }
-    }
-
     @Override
     public int hashCode() {
         return Objects.hash(
@@ -421,5 +410,37 @@ public class Snapshot {
 
         /** Collect statistics. */
         ANALYZE
+    }
+
+    // =================== Utils for reading =========================
+
+    public static Snapshot fromJson(String json) {
+        return JsonSerdeUtil.fromJson(json, Snapshot.class);
+    }
+
+    public static Snapshot fromPath(FileIO fileIO, Path path) {
+        try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            String errorMessage =
+                    String.format(
+                            "Snapshot file %s does not exist. "
+                                    + "It might have been expired by other jobs operating on this table. "
+                                    + "In this case, you can avoid concurrent modification issues by configuring "
+                                    + "write-only = true and use a dedicated compaction job, or configuring "
+                                    + "different expiration thresholds for different jobs.",
+                            path);
+            throw new RuntimeException(errorMessage, e);
+        }
+    }
+
+    public static Snapshot tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
+            return Snapshot.fromJson(fileIO.readFileUtf8(path));
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new RuntimeException("Fails to read snapshot from path " + path, e);
+        }
     }
 }

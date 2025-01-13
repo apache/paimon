@@ -48,7 +48,7 @@ public class SchemaMergingUtils {
         AtomicInteger highestFieldId = new AtomicInteger(currentTableSchema.highestFieldId());
         RowType newRowType =
                 mergeSchemas(currentType, targetType, highestFieldId, allowExplicitCast);
-        if (newRowType == currentType) {
+        if (newRowType.equals(currentType)) {
             // It happens if the `targetType` only changes `nullability` but we always respect the
             // current's.
             return currentTableSchema;

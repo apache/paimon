@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
@@ -48,7 +48,7 @@ public class CdcSinkBuilder<T> {
     private EventParser.Factory<T> parserFactory = null;
     private Table table = null;
     private Identifier identifier = null;
-    private Catalog.Loader catalogLoader = null;
+    private CatalogLoader catalogLoader = null;
 
     @Nullable private Integer parallelism;
 
@@ -77,7 +77,7 @@ public class CdcSinkBuilder<T> {
         return this;
     }
 
-    public CdcSinkBuilder<T> withCatalogLoader(Catalog.Loader catalogLoader) {
+    public CdcSinkBuilder<T> withCatalogLoader(CatalogLoader catalogLoader) {
         this.catalogLoader = catalogLoader;
         return this;
     }
@@ -139,6 +139,7 @@ public class CdcSinkBuilder<T> {
 
     private DataStreamSink<?> buildForUnawareBucket(DataStream<CdcRecord> parsed) {
         FileStoreTable dataTable = (FileStoreTable) table;
-        return new CdcUnawareBucketSink(dataTable, parallelism).sinkFrom(parsed);
+        // rebalance it to make sure schema change work to avoid infinite loop
+        return new CdcUnawareBucketSink(dataTable, parallelism).sinkFrom(parsed.rebalance());
     }
 }

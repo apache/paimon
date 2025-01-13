@@ -23,8 +23,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
-import javax.annotation.Nonnull;
-
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Arrays;
@@ -104,6 +102,9 @@ public abstract class DataType implements Serializable {
         return typeRoot.getFamilies().contains(family);
     }
 
+    /** The default size of a value of this data type, used internally for size estimation. */
+    public abstract int defaultSize();
+
     /**
      * Returns a deep copy of this type with possibly different nullability.
      *
@@ -121,15 +122,6 @@ public abstract class DataType implements Serializable {
         return copy(isNullable);
     }
 
-    /**
-     * Compare two data types without nullable.
-     *
-     * @param o the target data type
-     */
-    public boolean equalsIgnoreNullable(@Nonnull DataType o) {
-        return Objects.equals(this.copy(true), o.copy(true));
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -140,6 +132,34 @@ public abstract class DataType implements Serializable {
         }
         DataType that = (DataType) o;
         return isNullable == that.isNullable && typeRoot == that.typeRoot;
+    }
+
+    /**
+     * Compare two data types without nullable.
+     *
+     * @param o the target data type
+     */
+    public boolean equalsIgnoreNullable(DataType o) {
+        return Objects.equals(this.copy(true), o.copy(true));
+    }
+
+    /**
+     * Compare two data types without field id.
+     *
+     * @param o the target data type
+     */
+    public boolean equalsIgnoreFieldId(DataType o) {
+        return equals(o);
+    }
+
+    /**
+     * Determine whether the current type is the result of the target type after pruning (e.g.
+     * select some fields from a nested type) or just the same.
+     *
+     * @param o the target data type
+     */
+    public boolean isPrunedFrom(Object o) {
+        return equals(o);
     }
 
     @Override

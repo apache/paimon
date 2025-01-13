@@ -25,18 +25,18 @@ import org.apache.paimon.reader.RecordReader;
 
 import javax.annotation.Nullable;
 
-import java.util.Iterator;
+import java.io.IOException;
 
 /** A simple {@link RecordReader.RecordIterator} that returns the elements of an iterator. */
 public final class IteratorResultIterator extends RecyclableIterator<InternalRow>
         implements FileRecordIterator<InternalRow> {
 
-    private final Iterator<InternalRow> records;
+    private final IteratorWithException<InternalRow, IOException> records;
     private final Path filePath;
     private long nextFilePos;
 
     public IteratorResultIterator(
-            final Iterator<InternalRow> records,
+            final IteratorWithException<InternalRow, IOException> records,
             final @Nullable Runnable recycler,
             final Path filePath,
             long pos) {
@@ -48,7 +48,7 @@ public final class IteratorResultIterator extends RecyclableIterator<InternalRow
 
     @Nullable
     @Override
-    public InternalRow next() {
+    public InternalRow next() throws IOException {
         if (records.hasNext()) {
             nextFilePos++;
             return records.next();

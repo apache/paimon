@@ -45,11 +45,10 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 
-import org.apache.flink.streaming.api.graph.StreamConfig;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.streaming.api.operators.Output;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.streaming.runtime.tasks.StreamTask;
 
 import javax.annotation.Nullable;
 
@@ -76,9 +75,33 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
     }
 
     @Override
-    protected OneInputStreamOperator<ManifestEntry, Committable> createWriteOperator(
+    protected OneInputStreamOperatorFactory<ManifestEntry, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new FileIndexModificationOperator(table.coreOptions().toConfiguration(), table);
+        return new FileIndexModificationOperatorFactory(
+                table.coreOptions().toConfiguration(), table);
+    }
+
+    private static class FileIndexModificationOperatorFactory
+            extends PrepareCommitOperator.Factory<ManifestEntry, Committable> {
+        private final FileStoreTable table;
+
+        public FileIndexModificationOperatorFactory(Options options, FileStoreTable table) {
+            super(options);
+            this.table = table;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            return (T) new FileIndexModificationOperator(parameters, options, table);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return FileIndexModificationOperator.class;
+        }
     }
 
     /** File index modification operator to rewrite file index. */
@@ -87,23 +110,14 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileStoreTable table;
+        private final transient FileIndexProcessor fileIndexProcessor;
+        private final transient List<CommitMessage> messages;
 
-        private transient FileIndexProcessor fileIndexProcessor;
-        private transient List<CommitMessage> messages;
-
-        public FileIndexModificationOperator(Options options, FileStoreTable table) {
-            super(options);
-            this.table = table;
-        }
-
-        @Override
-        public void setup(
-                StreamTask<?, ?> containingTask,
-                StreamConfig config,
-                Output<StreamRecord<Committable>> output) {
-            super.setup(containingTask, config, output);
-
+        private FileIndexModificationOperator(
+                StreamOperatorParameters<Committable> parameters,
+                Options options,
+                FileStoreTable table) {
+            super(parameters, options);
             this.fileIndexProcessor = new FileIndexProcessor(table);
             this.messages = new ArrayList<>();
         }
@@ -184,16 +198,17 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
                 String indexFile = indexFiles.get(0);
                 try (FileIndexFormat.Reader indexReader =
                         FileIndexFormat.createReader(
-                                fileIO.newInputStream(dataFilePathFactory.toPath(indexFile)),
+                                fileIO.newInputStream(
+                                        dataFilePathFactory.toAlignedPath(indexFile, dataFileMeta)),
                                 schemaInfo.fileSchema)) {
                     maintainers = indexReader.readAll();
                 }
-                newIndexPath = createNewFileIndexFilePath(dataFilePathFactory.toPath(indexFile));
+                newIndexPath =
+                        createNewFileIndexFilePath(
+                                dataFilePathFactory.toAlignedPath(indexFile, dataFileMeta));
             } else {
                 maintainers = new HashMap<>();
-                newIndexPath =
-                        dataFileToFileIndexPath(
-                                dataFilePathFactory.toPath(dataFileMeta.fileName()));
+                newIndexPath = dataFileToFileIndexPath(dataFilePathFactory.toPath(dataFileMeta));
             }
 
             // remove unnecessary

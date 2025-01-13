@@ -83,6 +83,8 @@ public final class InternalSerializers {
                 return new InternalMapSerializer(mapType.getKeyType(), mapType.getValueType());
             case ROW:
                 return new InternalRowSerializer(getFieldTypes(type).toArray(new DataType[0]));
+            case VARIANT:
+                return VariantSerializer.INSTANCE;
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported type '" + type + "' to get internal serializer");

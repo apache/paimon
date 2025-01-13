@@ -26,12 +26,11 @@ public class DeleteTagAction extends TableActionBase {
     private final String tagNameStr;
 
     public DeleteTagAction(
-            String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
             String tagNameStr) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(databaseName, tableName, catalogConfig);
         this.tagNameStr = tagNameStr;
     }
 

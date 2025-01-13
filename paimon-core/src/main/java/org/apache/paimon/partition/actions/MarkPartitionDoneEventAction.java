@@ -19,9 +19,10 @@
 package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.table.PartitionHandler;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
@@ -29,23 +30,23 @@ import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFro
 /** A {@link PartitionMarkDoneAction} which add mark "PartitionEventType.LOAD_DONE". */
 public class MarkPartitionDoneEventAction implements PartitionMarkDoneAction {
 
-    private final MetastoreClient metastoreClient;
+    private final PartitionHandler partitionHandler;
 
-    public MarkPartitionDoneEventAction(MetastoreClient metastoreClient) {
-        this.metastoreClient = metastoreClient;
+    public MarkPartitionDoneEventAction(PartitionHandler partitionHandler) {
+        this.partitionHandler = partitionHandler;
     }
 
     @Override
     public void markDone(String partition) throws Exception {
         LinkedHashMap<String, String> partitionSpec =
                 extractPartitionSpecFromPath(new Path(partition));
-        metastoreClient.markDone(partitionSpec);
+        partitionHandler.markDonePartitions(Collections.singletonList(partitionSpec));
     }
 
     @Override
     public void close() throws IOException {
         try {
-            metastoreClient.close();
+            partitionHandler.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

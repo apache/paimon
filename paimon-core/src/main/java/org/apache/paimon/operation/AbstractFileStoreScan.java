@@ -18,17 +18,17 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
@@ -37,10 +37,8 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -50,42 +48,38 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
+import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
 
-    private final RowType partitionType;
+    private final ManifestsReader manifestsReader;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
-    private final ManifestList manifestList;
-    private final int numOfBuckets;
-    private final boolean checkNumOfBuckets;
-    private final Integer scanManifestParallelism;
+    private final Integer parallelism;
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
     private final TableSchema schema;
-    protected final ScanBucketFilter bucketKeyFilter;
 
-    private PartitionPredicate partitionFilter;
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
-    private List<ManifestFileMeta> specifiedManifests = null;
+    private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
     protected ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
     private Filter<ManifestEntry> manifestEntryFilter = null;
@@ -93,46 +87,46 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private ManifestCacheFilter manifestCacheFilter = null;
     private ScanMetrics scanMetrics = null;
+    private boolean dropStats;
 
     public AbstractFileStoreScan(
-            RowType partitionType,
-            ScanBucketFilter bucketKeyFilter,
+            ManifestsReader manifestsReader,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory,
-            int numOfBuckets,
-            boolean checkNumOfBuckets,
-            Integer scanManifestParallelism) {
-        this.partitionType = partitionType;
-        this.bucketKeyFilter = bucketKeyFilter;
+            @Nullable Integer parallelism) {
+        this.manifestsReader = manifestsReader;
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.manifestFileFactory = manifestFileFactory;
-        this.manifestList = manifestListFactory.create();
-        this.numOfBuckets = numOfBuckets;
-        this.checkNumOfBuckets = checkNumOfBuckets;
         this.tableSchemas = new ConcurrentHashMap<>();
-        this.scanManifestParallelism = scanManifestParallelism;
+        this.parallelism = parallelism;
+        this.dropStats = false;
     }
 
     @Override
     public FileStoreScan withPartitionFilter(Predicate predicate) {
-        this.partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
+        manifestsReader.withPartitionFilter(predicate);
         return this;
     }
 
     @Override
     public FileStoreScan withPartitionFilter(List<BinaryRow> partitions) {
-        this.partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);
+        manifestsReader.withPartitionFilter(partitions);
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withPartitionsFilter(List<Map<String, String>> partitions) {
+        manifestsReader.withPartitionsFilter(partitions);
         return this;
     }
 
     @Override
     public FileStoreScan withPartitionFilter(PartitionPredicate predicate) {
-        this.partitionFilter = predicate;
+        manifestsReader.withPartitionFilter(predicate);
         return this;
     }
 
@@ -145,6 +139,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withBucketFilter(Filter<Integer> bucketFilter) {
         this.bucketFilter = bucketFilter;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withTotalAwareBucketFilter(
+            BiFilter<Integer, Integer> totalAwareBucketFilter) {
+        this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
 
@@ -164,22 +165,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withSnapshot(long snapshotId) {
-        checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
         this.specifiedSnapshot = snapshotManager.snapshot(snapshotId);
         return this;
     }
 
     @Override
     public FileStoreScan withSnapshot(Snapshot snapshot) {
-        checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
         this.specifiedSnapshot = snapshot;
-        return this;
-    }
-
-    @Override
-    public FileStoreScan withManifestList(List<ManifestFileMeta> manifests) {
-        checkState(specifiedSnapshot == null, "Cannot set both snapshot and manifests.");
-        this.specifiedManifests = manifests;
         return this;
     }
 
@@ -192,6 +184,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withLevelFilter(Filter<Integer> levelFilter) {
         this.levelFilter = levelFilter;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan enableValueFilter() {
         return this;
     }
 
@@ -220,206 +217,186 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan dropStats() {
+        this.dropStats = true;
+        return this;
+    }
+
+    @Nullable
+    @Override
+    public Integer parallelism() {
+        return parallelism;
+    }
+
+    @Override
+    public ManifestsReader manifestsReader() {
+        return manifestsReader;
+    }
+
+    @Override
     public Plan plan() {
+        long started = System.nanoTime();
+        ManifestsReader.Result manifestsResult = readManifests();
+        Snapshot snapshot = manifestsResult.snapshot;
+        List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
-        Pair<Snapshot, List<ManifestEntry>> planResult = doPlan();
+        Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
+        List<ManifestEntry> files = new ArrayList<>();
+        while (iterator.hasNext()) {
+            files.add(iterator.next());
+        }
 
-        final Snapshot readSnapshot = planResult.getLeft();
-        final List<ManifestEntry> files = planResult.getRight();
+        if (wholeBucketFilterEnabled()) {
+            // We group files by bucket here, and filter them by the whole bucket filter.
+            // Why do this: because in primary key table, we can't just filter the value
+            // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
+            // but we can do this by filter the whole bucket files
+            files =
+                    files.stream()
+                            .collect(
+                                    Collectors.groupingBy(
+                                            // we use LinkedHashMap to avoid disorder
+                                            file -> Pair.of(file.partition(), file.bucket()),
+                                            LinkedHashMap::new,
+                                            Collectors.toList()))
+                            .values()
+                            .stream()
+                            .map(this::filterWholeBucketByStats)
+                            .flatMap(Collection::stream)
+                            .collect(Collectors.toList());
+        }
+
+        List<ManifestEntry> result = files;
+
+        long scanDuration = (System.nanoTime() - started) / 1_000_000;
+        if (scanMetrics != null) {
+            long allDataFiles =
+                    manifestsResult.allManifests.stream()
+                            .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
+                            .sum();
+            scanMetrics.reportScan(
+                    new ScanStats(
+                            scanDuration,
+                            manifests.size(),
+                            allDataFiles - result.size(),
+                            result.size()));
+        }
 
         return new Plan() {
             @Nullable
             @Override
             public Long watermark() {
-                return readSnapshot == null ? null : readSnapshot.watermark();
+                return snapshot == null ? null : snapshot.watermark();
             }
 
             @Nullable
             @Override
             public Snapshot snapshot() {
-                return readSnapshot;
+                return snapshot;
             }
 
             @Override
             public List<ManifestEntry> files() {
-                return files;
+                return result;
             }
         };
     }
 
     @Override
     public List<SimpleFileEntry> readSimpleEntries() {
-        List<ManifestFileMeta> manifests = readManifests().getRight();
-        Collection<SimpleFileEntry> mergedEntries =
-                readAndMergeFileEntries(manifests, this::readSimpleEntries, Filter.alwaysTrue());
-        return new ArrayList<>(mergedEntries);
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        Iterator<SimpleFileEntry> iterator =
+                scanMode == ScanMode.ALL
+                        ? readAndMergeFileEntries(manifests, SimpleFileEntry::from, false)
+                        : readAndNoMergeFileEntries(manifests, SimpleFileEntry::from, false);
+        List<SimpleFileEntry> result = new ArrayList<>();
+        while (iterator.hasNext()) {
+            result.add(iterator.next());
+        }
+        return result;
     }
 
     @Override
     public List<PartitionEntry> readPartitionEntries() {
-        List<ManifestFileMeta> manifests = readManifests().getRight();
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
-        // Can be executed in disorder
-        ThreadPoolExecutor executor = getExecutorService(scanManifestParallelism);
         Consumer<ManifestFileMeta> processor =
-                m ->
-                        PartitionEntry.merge(
-                                PartitionEntry.merge(readManifestFileMeta(m)), partitions);
-        randomlyOnlyExecute(executor, processor, manifests);
+                m -> PartitionEntry.merge(PartitionEntry.merge(readManifest(m)), partitions);
+        randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
     }
 
-    private Pair<Snapshot, List<ManifestEntry>> doPlan() {
-        long started = System.nanoTime();
-        Pair<Snapshot, List<ManifestFileMeta>> snapshotListPair = readManifests();
-        Snapshot snapshot = snapshotListPair.getLeft();
-        List<ManifestFileMeta> manifests = snapshotListPair.getRight();
-
-        long startDataFiles =
-                manifests.stream().mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles()).sum();
-
-        Collection<ManifestEntry> mergedEntries =
-                readAndMergeFileEntries(
-                        manifests, this::readManifestFileMeta, this::filterUnmergedManifestEntry);
-
-        List<ManifestEntry> files = new ArrayList<>();
-        long skippedByPartitionAndStats = startDataFiles - mergedEntries.size();
-        for (ManifestEntry file : mergedEntries) {
-            if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
-                String partInfo =
-                        partitionType.getFieldCount() > 0
-                                ? "partition "
-                                        + FileStorePathFactory.getPartitionComputer(
-                                                        partitionType,
-                                                        CoreOptions.PARTITION_DEFAULT_NAME
-                                                                .defaultValue())
-                                                .generatePartValues(file.partition())
-                                : "table";
-                throw new RuntimeException(
-                        String.format(
-                                "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
-                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                                partInfo, numOfBuckets, file.totalBuckets()));
-            }
-
-            // bucket filter should not be applied along with partition filter
-            // because the specifiedBucket is computed against the current
-            // numOfBuckets
-            // however entry.bucket() was computed against the old numOfBuckets
-            // and thus the filtered manifest entries might be empty
-            // which renders the bucket check invalid
-            if (filterMergedManifestEntry(file)) {
-                files.add(file);
-            }
-        }
-
-        long afterBucketFilter = files.size();
-        long skippedByBucketAndLevelFilter = mergedEntries.size() - files.size();
-        // We group files by bucket here, and filter them by the whole bucket filter.
-        // Why do this: because in primary key table, we can't just filter the value
-        // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
-        // but we can do this by filter the whole bucket files
-        files =
-                files.stream()
-                        .collect(
-                                Collectors.groupingBy(
-                                        // we use LinkedHashMap to avoid disorder
-                                        file -> Pair.of(file.partition(), file.bucket()),
-                                        LinkedHashMap::new,
-                                        Collectors.toList()))
-                        .values()
-                        .stream()
-                        .map(this::filterWholeBucketByStats)
-                        .flatMap(Collection::stream)
-                        .collect(Collectors.toList());
-
-        long skippedByWholeBucketFiles = afterBucketFilter - files.size();
-        long scanDuration = (System.nanoTime() - started) / 1_000_000;
-        checkState(
-                startDataFiles
-                                - skippedByPartitionAndStats
-                                - skippedByBucketAndLevelFilter
-                                - skippedByWholeBucketFiles
-                        == files.size());
-        if (scanMetrics != null) {
-            scanMetrics.reportScan(
-                    new ScanStats(
-                            scanDuration,
-                            manifests.size(),
-                            skippedByPartitionAndStats,
-                            skippedByBucketAndLevelFilter,
-                            skippedByWholeBucketFiles,
-                            files.size()));
-        }
-        return Pair.of(snapshot, files);
+    @Override
+    public List<BucketEntry> readBucketEntries() {
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        Map<Pair<BinaryRow, Integer>, BucketEntry> buckets = new ConcurrentHashMap<>();
+        Consumer<ManifestFileMeta> processor =
+                m -> BucketEntry.merge(BucketEntry.merge(readManifest(m)), buckets);
+        randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
+        return buckets.values().stream()
+                .filter(p -> p.fileCount() > 0)
+                .collect(Collectors.toList());
     }
 
-    public <T extends FileEntry> Collection<T> readAndMergeFileEntries(
+    @Override
+    public Iterator<ManifestEntry> readFileIterator() {
+        // useSequential: reduce memory and iterator can be stopping
+        return readManifestEntries(readManifests().filteredManifests, true);
+    }
+
+    private Iterator<ManifestEntry> readManifestEntries(
+            List<ManifestFileMeta> manifests, boolean useSequential) {
+        return scanMode == ScanMode.ALL
+                ? readAndMergeFileEntries(manifests, Function.identity(), useSequential)
+                : readAndNoMergeFileEntries(manifests, Function.identity(), useSequential);
+    }
+
+    private <T extends FileEntry> Iterator<T> readAndMergeFileEntries(
             List<ManifestFileMeta> manifests,
-            Function<ManifestFileMeta, List<T>> manifestReader,
-            @Nullable Filter<T> filterUnmergedEntry) {
-        // in memory filter, do it first
+            Function<List<ManifestEntry>, List<T>> converter,
+            boolean useSequential) {
+        Set<Identifier> deletedEntries =
+                FileEntry.readDeletedEntries(
+                        manifest -> readManifest(manifest, FileEntry.deletedFilter(), null),
+                        manifests,
+                        parallelism);
+
         manifests =
                 manifests.stream()
-                        .filter(this::filterManifestFileMeta)
+                        .filter(file -> file.numAddedFiles() > 0)
                         .collect(Collectors.toList());
+
+        Function<ManifestFileMeta, List<T>> processor =
+                manifest ->
+                        converter.apply(
+                                readManifest(
+                                        manifest,
+                                        FileEntry.addFilter(),
+                                        entry -> !deletedEntries.contains(entry.identifier())));
+        if (useSequential) {
+            return sequentialBatchedExecute(processor, manifests, parallelism).iterator();
+        } else {
+            return randomlyExecuteSequentialReturn(processor, manifests, parallelism);
+        }
+    }
+
+    private <T extends FileEntry> Iterator<T> readAndNoMergeFileEntries(
+            List<ManifestFileMeta> manifests,
+            Function<List<ManifestEntry>, List<T>> converter,
+            boolean useSequential) {
         Function<ManifestFileMeta, List<T>> reader =
-                file -> {
-                    List<T> entries = manifestReader.apply(file);
-                    if (filterUnmergedEntry != null) {
-                        entries =
-                                entries.stream()
-                                        .filter(filterUnmergedEntry::test)
-                                        .collect(Collectors.toList());
-                    }
-                    return entries;
-                };
-        return FileEntry.mergeEntries(
-                sequentialBatchedExecute(reader, manifests, scanManifestParallelism));
+                manifest -> converter.apply(readManifest(manifest));
+        if (useSequential) {
+            return sequentialBatchedExecute(reader, manifests, parallelism).iterator();
+        } else {
+            return randomlyExecuteSequentialReturn(reader, manifests, parallelism);
+        }
     }
 
-    private Pair<Snapshot, List<ManifestFileMeta>> readManifests() {
-        List<ManifestFileMeta> manifests = specifiedManifests;
-        Snapshot snapshot = null;
-        if (manifests == null) {
-            snapshot =
-                    specifiedSnapshot == null
-                            ? snapshotManager.latestSnapshot()
-                            : specifiedSnapshot;
-            if (snapshot == null) {
-                manifests = Collections.emptyList();
-            } else {
-                manifests = readManifests(snapshot);
-            }
-        }
-        return Pair.of(snapshot, manifests);
-    }
-
-    private List<ManifestFileMeta> readManifests(Snapshot snapshot) {
-        switch (scanMode) {
-            case ALL:
-                return manifestList.readDataManifests(snapshot);
-            case DELTA:
-                return manifestList.readDeltaManifests(snapshot);
-            case CHANGELOG:
-                if (snapshot.version() > Snapshot.TABLE_STORE_02_VERSION) {
-                    return manifestList.readChangelogManifests(snapshot);
-                }
-
-                // compatible with Paimon 0.2, we'll read extraFiles in DataFileMeta
-                // see comments on DataFileMeta#extraFiles
-                if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-                    return manifestList.readDeltaManifests(snapshot);
-                }
-                throw new IllegalStateException(
-                        String.format(
-                                "Incremental scan does not accept %s snapshot",
-                                snapshot.commitKind()));
-            default:
-                throw new UnsupportedOperationException("Unknown scan kind " + scanMode.name());
-        }
+    private ManifestsReader.Result readManifests() {
+        return manifestsReader.read(specifiedSnapshot, scanMode);
     }
 
     // ------------------------------------------------------------------------
@@ -434,67 +411,53 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     /** Note: Keep this thread-safe. */
-    private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
-        if (partitionFilter == null) {
-            return true;
-        }
-
-        SimpleStats stats = manifest.partitionStats();
-        return partitionFilter == null
-                || partitionFilter.test(
-                        manifest.numAddedFiles() + manifest.numDeletedFiles(),
-                        stats.minValues(),
-                        stats.maxValues(),
-                        stats.nullCounts());
-    }
-
-    /** Note: Keep this thread-safe. */
-    private boolean filterUnmergedManifestEntry(ManifestEntry entry) {
-        if (manifestEntryFilter != null && !manifestEntryFilter.test(entry)) {
-            return false;
-        }
-
-        return filterByStats(entry);
-    }
-
-    /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
 
-    /** Note: Keep this thread-safe. */
-    private boolean filterMergedManifestEntry(ManifestEntry entry) {
-        return (bucketFilter == null || bucketFilter.test(entry.bucket()))
-                && bucketKeyFilter.select(entry.bucket(), entry.totalBuckets())
-                && (levelFilter == null || levelFilter.test(entry.file().level()));
+    protected boolean wholeBucketFilterEnabled() {
+        return false;
+    }
+
+    protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
+        return entries;
     }
 
     /** Note: Keep this thread-safe. */
-    protected abstract List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries);
-
-    /** Note: Keep this thread-safe. */
-    private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
-        return manifestFileFactory
-                .create()
-                .read(
-                        manifest.fileName(),
-                        manifest.fileSize(),
-                        createCacheRowFilter(manifestCacheFilter, numOfBuckets),
-                        createEntryRowFilter(
-                                partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
+    @Override
+    public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
+        return readManifest(manifest, null, null);
     }
 
-    /** Note: Keep this thread-safe. */
-    private List<SimpleFileEntry> readSimpleEntries(ManifestFileMeta manifest) {
-        return manifestFileFactory
-                .createSimpleFileEntryReader()
-                .read(
-                        manifest.fileName(),
-                        manifest.fileSize(),
-                        // use filter for ManifestEntry
-                        // currently, projection is not pushed down to file format
-                        // see SimpleFileEntrySerializer
-                        createCacheRowFilter(manifestCacheFilter, numOfBuckets),
-                        createEntryRowFilter(
-                                partitionFilter, bucketFilter, fileNameFilter, numOfBuckets));
+    private List<ManifestEntry> readManifest(
+            ManifestFileMeta manifest,
+            @Nullable Filter<InternalRow> additionalFilter,
+            @Nullable Filter<ManifestEntry> additionalTFilter) {
+        List<ManifestEntry> entries =
+                manifestFileFactory
+                        .create()
+                        .withCacheMetrics(
+                                scanMetrics != null ? scanMetrics.getCacheMetrics() : null)
+                        .read(
+                                manifest.fileName(),
+                                manifest.fileSize(),
+                                createCacheRowFilter(),
+                                createEntryRowFilter().and(additionalFilter),
+                                entry ->
+                                        (additionalTFilter == null || additionalTFilter.test(entry))
+                                                && (manifestEntryFilter == null
+                                                        || manifestEntryFilter.test(entry))
+                                                && filterByStats(entry));
+        if (dropStats) {
+            List<ManifestEntry> copied = new ArrayList<>(entries.size());
+            for (ManifestEntry entry : entries) {
+                copied.add(dropStats(entry));
+            }
+            entries = copied;
+        }
+        return entries;
+    }
+
+    protected ManifestEntry dropStats(ManifestEntry entry) {
+        return entry.copyWithoutStats();
     }
 
     /**
@@ -503,8 +466,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
      *
      * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
      */
-    private static Filter<InternalRow> createCacheRowFilter(
-            @Nullable ManifestCacheFilter manifestCacheFilter, int numOfBuckets) {
+    private Filter<InternalRow> createCacheRowFilter() {
         if (manifestCacheFilter == null) {
             return Filter.alwaysTrue();
         }
@@ -512,15 +474,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Function<InternalRow, BinaryRow> partitionGetter =
                 ManifestEntrySerializer.partitionGetter();
         Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
-        Function<InternalRow, Integer> totalBucketGetter =
-                ManifestEntrySerializer.totalBucketGetter();
-        return row -> {
-            if (numOfBuckets != totalBucketGetter.apply(row)) {
-                return true;
-            }
-
-            return manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
-        };
+        return row -> manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
     }
 
     /**
@@ -528,33 +482,35 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
      *
      * <p>Implemented to {@link InternalRow} is for performance (No deserialization).
      */
-    private static Filter<InternalRow> createEntryRowFilter(
-            @Nullable PartitionPredicate partitionFilter,
-            @Nullable Filter<Integer> bucketFilter,
-            @Nullable Filter<String> fileNameFilter,
-            int numOfBuckets) {
+    private Filter<InternalRow> createEntryRowFilter() {
         Function<InternalRow, BinaryRow> partitionGetter =
                 ManifestEntrySerializer.partitionGetter();
         Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
         Function<InternalRow, Integer> totalBucketGetter =
                 ManifestEntrySerializer.totalBucketGetter();
         Function<InternalRow, String> fileNameGetter = ManifestEntrySerializer.fileNameGetter();
+        PartitionPredicate partitionFilter = manifestsReader.partitionFilter();
+        Function<InternalRow, Integer> levelGetter = ManifestEntrySerializer.levelGetter();
         return row -> {
             if ((partitionFilter != null && !partitionFilter.test(partitionGetter.apply(row)))) {
                 return false;
             }
 
-            if (bucketFilter != null
-                    && numOfBuckets == totalBucketGetter.apply(row)
-                    && !bucketFilter.test(bucketGetter.apply(row))) {
+            int bucket = bucketGetter.apply(row);
+            if (bucketFilter != null && !bucketFilter.test(bucket)) {
                 return false;
             }
 
-            if (fileNameFilter != null && !fileNameFilter.test((fileNameGetter.apply(row)))) {
+            if (totalAwareBucketFilter != null
+                    && !totalAwareBucketFilter.test(bucket, totalBucketGetter.apply(row))) {
                 return false;
             }
 
-            return true;
+            if (levelFilter != null && !levelFilter.test(levelGetter.apply(row))) {
+                return false;
+            }
+
+            return fileNameFilter == null || fileNameFilter.test((fileNameGetter.apply(row)));
         };
     }
 

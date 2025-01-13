@@ -20,7 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.TableType;
+import org.apache.paimon.table.CatalogTableType;
 
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 
@@ -36,7 +36,7 @@ public class FileSystemCatalogFactory implements CatalogFactory {
 
     @Override
     public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        if (!TableType.MANAGED.equals(context.options().get(TABLE_TYPE))) {
+        if (!CatalogTableType.MANAGED.equals(context.options().get(TABLE_TYPE))) {
             throw new IllegalArgumentException(
                     "Only managed table is supported in File system catalog.");
         }

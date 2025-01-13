@@ -78,7 +78,12 @@ public class DataFileMeta {
                             new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()),
                             new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)),
                             new DataField(14, "_EMBEDDED_FILE_INDEX", newBytesType(true)),
-                            new DataField(15, "_FILE_SOURCE", new TinyIntType(true))));
+                            new DataField(15, "_FILE_SOURCE", new TinyIntType(true)),
+                            new DataField(
+                                    16,
+                                    "_VALUE_STATS_COLS",
+                                    DataTypes.ARRAY(DataTypes.STRING().notNull())),
+                            new DataField(17, "_EXTERNAL_PATH", newStringType(true))));
 
     public static final BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     public static final BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
@@ -114,27 +119,10 @@ public class DataFileMeta {
 
     private final @Nullable FileSource fileSource;
 
-    public static DataFileMeta forAppend(
-            String fileName,
-            long fileSize,
-            long rowCount,
-            SimpleStats rowStats,
-            long minSequenceNumber,
-            long maxSequenceNumber,
-            long schemaId,
-            @Nullable FileSource fileSource) {
-        return forAppend(
-                fileName,
-                fileSize,
-                rowCount,
-                rowStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                Collections.emptyList(),
-                null,
-                fileSource);
-    }
+    private final @Nullable List<String> valueStatsCols;
+
+    /** external path of file, if it is null, it is in the default warehouse path. */
+    private final @Nullable String externalPath;
 
     public static DataFileMeta forAppend(
             String fileName,
@@ -146,7 +134,9 @@ public class DataFileMeta {
             long schemaId,
             List<String> extraFiles,
             @Nullable byte[] embeddedIndex,
-            @Nullable FileSource fileSource) {
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -163,7 +153,48 @@ public class DataFileMeta {
                 Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp(),
                 0L,
                 embeddedIndex,
-                fileSource);
+                fileSource,
+                valueStatsCols,
+                externalPath);
+    }
+
+    public DataFileMeta(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryRow minKey,
+            BinaryRow maxKey,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            int level,
+            List<String> extraFiles,
+            @Nullable Long deleteRowCount,
+            @Nullable byte[] embeddedIndex,
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath) {
+        this(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp(),
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath);
     }
 
     public DataFileMeta(
@@ -180,7 +211,8 @@ public class DataFileMeta {
             int level,
             @Nullable Long deleteRowCount,
             @Nullable byte[] embeddedIndex,
-            @Nullable FileSource fileSource) {
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols) {
         this(
                 fileName,
                 fileSize,
@@ -197,7 +229,9 @@ public class DataFileMeta {
                 Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp(),
                 deleteRowCount,
                 embeddedIndex,
-                fileSource);
+                fileSource,
+                valueStatsCols,
+                null);
     }
 
     public DataFileMeta(
@@ -216,7 +250,9 @@ public class DataFileMeta {
             Timestamp creationTime,
             @Nullable Long deleteRowCount,
             @Nullable byte[] embeddedIndex,
-            @Nullable FileSource fileSource) {
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -237,6 +273,8 @@ public class DataFileMeta {
 
         this.deleteRowCount = deleteRowCount;
         this.fileSource = fileSource;
+        this.valueStatsCols = valueStatsCols;
+        this.externalPath = externalPath;
     }
 
     public String fileName() {
@@ -330,8 +368,23 @@ public class DataFileMeta {
         return split[split.length - 1];
     }
 
+    public Optional<String> externalPath() {
+        return Optional.ofNullable(externalPath);
+    }
+
+    public Optional<String> externalPathDir() {
+        return Optional.ofNullable(externalPath)
+                .map(Path::new)
+                .map(p -> p.getParent().toUri().toString());
+    }
+
     public Optional<FileSource> fileSource() {
         return Optional.ofNullable(fileSource);
+    }
+
+    @Nullable
+    public List<String> valueStatsCols() {
+        return valueStatsCols;
     }
 
     public DataFileMeta upgrade(int newLevel) {
@@ -352,10 +405,13 @@ public class DataFileMeta {
                 creationTime,
                 deleteRowCount,
                 embeddedIndex,
-                fileSource);
+                fileSource,
+                valueStatsCols,
+                externalPath);
     }
 
     public DataFileMeta rename(String newFileName) {
+        String newExternalPath = externalPathDir().map(dir -> dir + "/" + newFileName).orElse(null);
         return new DataFileMeta(
                 newFileName,
                 fileSize,
@@ -372,13 +428,37 @@ public class DataFileMeta {
                 creationTime,
                 deleteRowCount,
                 embeddedIndex,
-                fileSource);
+                fileSource,
+                valueStatsCols,
+                newExternalPath);
+    }
+
+    public DataFileMeta copyWithoutStats() {
+        return new DataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                EMPTY_STATS,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                Collections.emptyList(),
+                externalPath);
     }
 
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
-        paths.add(pathFactory.toPath(fileName));
-        extraFiles.forEach(f -> paths.add(pathFactory.toPath(f)));
+        paths.add(pathFactory.toPath(this));
+        extraFiles.forEach(f -> paths.add(pathFactory.toAlignedPath(f, this)));
         return paths;
     }
 
@@ -399,7 +479,9 @@ public class DataFileMeta {
                 creationTime,
                 deleteRowCount,
                 embeddedIndex,
-                fileSource);
+                fileSource,
+                valueStatsCols,
+                externalPath);
     }
 
     public DataFileMeta copy(byte[] newEmbeddedIndex) {
@@ -419,7 +501,9 @@ public class DataFileMeta {
                 creationTime,
                 deleteRowCount,
                 newEmbeddedIndex,
-                fileSource);
+                fileSource,
+                valueStatsCols,
+                externalPath);
     }
 
     @Override
@@ -446,7 +530,9 @@ public class DataFileMeta {
                 && Objects.equals(extraFiles, that.extraFiles)
                 && Objects.equals(creationTime, that.creationTime)
                 && Objects.equals(deleteRowCount, that.deleteRowCount)
-                && Objects.equals(fileSource, that.fileSource);
+                && Objects.equals(fileSource, that.fileSource)
+                && Objects.equals(valueStatsCols, that.valueStatsCols)
+                && Objects.equals(externalPath, that.externalPath);
     }
 
     @Override
@@ -467,7 +553,9 @@ public class DataFileMeta {
                 extraFiles,
                 creationTime,
                 deleteRowCount,
-                fileSource);
+                fileSource,
+                valueStatsCols,
+                externalPath);
     }
 
     @Override
@@ -477,7 +565,7 @@ public class DataFileMeta {
                         + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
                         + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, "
-                        + "deleteRowCount: %d, fileSource: %s}",
+                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -493,7 +581,9 @@ public class DataFileMeta {
                 extraFiles,
                 creationTime,
                 deleteRowCount,
-                fileSource);
+                fileSource,
+                valueStatsCols,
+                externalPath);
     }
 
     public static long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {

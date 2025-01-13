@@ -19,8 +19,7 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.SparkCatalog
-import org.apache.paimon.spark.catalog.Catalogs
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
@@ -28,7 +27,7 @@ import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.analysis.TableFunctionRegistry.TableFunctionBuilder
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, ExpressionInfo}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan}
-import org.apache.spark.sql.connector.catalog.Identifier
+import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -37,15 +36,22 @@ import scala.collection.JavaConverters._
 object PaimonTableValuedFunctions {
 
   val INCREMENTAL_QUERY = "paimon_incremental_query"
+  val INCREMENTAL_BETWEEN_TIMESTAMP = "paimon_incremental_between_timestamp"
+  val INCREMENTAL_TO_AUTO_TAG = "paimon_incremental_to_auto_tag"
 
-  val supportedFnNames: Seq[String] = Seq(INCREMENTAL_QUERY)
+  val supportedFnNames: Seq[String] =
+    Seq(INCREMENTAL_QUERY, INCREMENTAL_BETWEEN_TIMESTAMP, INCREMENTAL_TO_AUTO_TAG)
 
-  type TableFunctionDescription = (FunctionIdentifier, ExpressionInfo, TableFunctionBuilder)
+  private type TableFunctionDescription = (FunctionIdentifier, ExpressionInfo, TableFunctionBuilder)
 
   def getTableValueFunctionInjection(fnName: String): TableFunctionDescription = {
     val (info, builder) = fnName match {
       case INCREMENTAL_QUERY =>
         FunctionRegistryBase.build[IncrementalQuery](fnName, since = None)
+      case INCREMENTAL_BETWEEN_TIMESTAMP =>
+        FunctionRegistryBase.build[IncrementalBetweenTimestamp](fnName, since = None)
+      case INCREMENTAL_TO_AUTO_TAG =>
+        FunctionRegistryBase.build[IncrementalToAutoTag](fnName, since = None)
       case _ =>
         throw new Exception(s"Function $fnName isn't a supported table valued function.")
     }
@@ -61,17 +67,22 @@ object PaimonTableValuedFunctions {
     val sessionState = spark.sessionState
     val catalogManager = sessionState.catalogManager
 
-    val sparkCatalog = new SparkCatalog()
-    val currentCatalog = catalogManager.currentCatalog.name()
-    sparkCatalog.initialize(
-      currentCatalog,
-      Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf))
+    val identifier = args.head.eval().toString
+    val (catalogName, dbName, tableName) = {
+      sessionState.sqlParser.parseMultipartIdentifier(identifier) match {
+        case Seq(table) =>
+          (catalogManager.currentCatalog.name(), catalogManager.currentNamespace.head, table)
+        case Seq(db, table) => (catalogManager.currentCatalog.name(), db, table)
+        case Seq(catalog, db, table) => (catalog, db, table)
+        case _ => throw new RuntimeException(s"Invalid table identifier: $identifier")
+      }
+    }
 
-    val tableId = sessionState.sqlParser.parseTableIdentifier(args.head.eval().toString)
-    val namespace = tableId.database.map(Array(_)).getOrElse(catalogManager.currentNamespace)
-    val ident = Identifier.of(namespace, tableId.table)
+    val sparkCatalog = catalogManager.catalog(catalogName).asInstanceOf[TableCatalog]
+    val ident: Identifier = Identifier.of(Array(dbName), tableName)
     val sparkTable = sparkCatalog.loadTable(ident)
     val options = tvf.parseArgs(args.tail)
+
     DataSourceV2Relation.create(
       sparkTable,
       Some(sparkCatalog),
@@ -95,20 +106,46 @@ abstract class PaimonTableValueFunction(val fnName: String) extends LeafNode {
   val args: Seq[Expression]
 
   def parseArgs(args: Seq[Expression]): Map[String, String]
-
 }
 
-/** Plan for the "paimon_incremental_query" function */
+/** Plan for the [[INCREMENTAL_QUERY]] function */
 case class IncrementalQuery(override val args: Seq[Expression])
-  extends PaimonTableValueFunction(PaimonTableValuedFunctions.INCREMENTAL_QUERY) {
+  extends PaimonTableValueFunction(INCREMENTAL_QUERY) {
 
   override def parseArgs(args: Seq[Expression]): Map[String, String] = {
     assert(
-      args.size >= 1 && args.size <= 2,
-      "paimon_incremental_query needs two parameters: startSnapshotId, and endSnapshotId.")
+      args.size == 2,
+      s"$INCREMENTAL_QUERY needs two parameters: startSnapshotId, and endSnapshotId.")
 
     val start = args.head.eval().toString
     val end = args.last.eval().toString
     Map(CoreOptions.INCREMENTAL_BETWEEN.key -> s"$start,$end")
+  }
+}
+
+/** Plan for the [[INCREMENTAL_BETWEEN_TIMESTAMP]] function */
+case class IncrementalBetweenTimestamp(override val args: Seq[Expression])
+  extends PaimonTableValueFunction(INCREMENTAL_BETWEEN_TIMESTAMP) {
+
+  override def parseArgs(args: Seq[Expression]): Map[String, String] = {
+    assert(
+      args.size == 2,
+      s"$INCREMENTAL_BETWEEN_TIMESTAMP needs two parameters: startTimestamp, and endTimestamp.")
+
+    val start = args.head.eval().toString
+    val end = args.last.eval().toString
+    Map(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key -> s"$start,$end")
+  }
+}
+
+/** Plan for the [[INCREMENTAL_TO_AUTO_TAG]] function */
+case class IncrementalToAutoTag(override val args: Seq[Expression])
+  extends PaimonTableValueFunction(INCREMENTAL_TO_AUTO_TAG) {
+
+  override def parseArgs(args: Seq[Expression]): Map[String, String] = {
+    assert(args.size == 1, s"$INCREMENTAL_TO_AUTO_TAG needs one parameter: endTagName.")
+
+    val endTagName = args.head.eval().toString
+    Map(CoreOptions.INCREMENTAL_TO_AUTO_TAG.key -> endTagName)
   }
 }

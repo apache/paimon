@@ -28,6 +28,7 @@ public class MigrateTableActionFactory implements ActionFactory {
 
     private static final String SOURCE_TYPE = "source_type";
     private static final String OPTIONS = "options";
+    private static final String PARALLELISM = "parallelism";
 
     @Override
     public String identifier() {
@@ -36,15 +37,15 @@ public class MigrateTableActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String warehouse = params.get(WAREHOUSE);
         String connector = params.get(SOURCE_TYPE);
         String sourceHiveTable = params.get(TABLE);
-        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        Map<String, String> catalogConfig = catalogConfigMap(params);
         String tableConf = params.get(OPTIONS);
+        Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(
-                        connector, warehouse, sourceHiveTable, catalogConfig, tableConf);
+                        connector, sourceHiveTable, catalogConfig, tableConf, parallelism);
         return Optional.of(migrateTableAction);
     }
 

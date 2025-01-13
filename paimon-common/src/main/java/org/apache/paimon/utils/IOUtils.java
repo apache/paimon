@@ -38,7 +38,7 @@ public final class IOUtils {
     private static final Logger LOG = LoggerFactory.getLogger(IOUtils.class);
 
     /** The block size for byte operations in byte. */
-    private static final int BLOCKSIZE = 4096;
+    public static final int BLOCKSIZE = 4096;
 
     // ------------------------------------------------------------------------
     //  Byte copy operations

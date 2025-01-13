@@ -244,7 +244,7 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
     }
 
     @Nullable
-    private String getFromSourceField(String key) {
+    protected String getFromSourceField(String key) {
         JsonNode node = root.get(FIELD_SOURCE);
         if (isNull(node)) {
             return null;

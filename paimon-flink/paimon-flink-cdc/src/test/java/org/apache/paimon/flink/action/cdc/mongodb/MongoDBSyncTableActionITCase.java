@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.catalog.FileSystemCatalogOptions;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -34,7 +34,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link MongoDBSyncTableAction}. */
 public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
@@ -380,7 +382,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .withComputedColumnArgs("_YEAR=year(_DATE)")
                         .build();
         runActionWithDefaultEnv(action);
@@ -397,5 +399,27 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                 getFileStoreTable(tableName),
                 rowType,
                 Collections.singletonList("_id"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testRuntimeExecutionModeCheckForCdcSync() {
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", database);
+        mongodbConfig.put("collection", "products");
+        mongodbConfig.put("field.name", "_id,name,description");
+        mongodbConfig.put("parser.path", "$._id,$.name,$.description");
+        mongodbConfig.put("schema.start.mode", "specified");
+
+        MongoDBSyncTableAction action =
+                syncTableActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+
+        assertThatThrownBy(() -> runActionWithBatchEnv(action))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "It's only support STREAMING mode for flink-cdc sync table action"));
     }
 }

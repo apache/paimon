@@ -48,7 +48,7 @@ public class KafkaDebeziumAvroDeserializationSchema
 
     public KafkaDebeziumAvroDeserializationSchema(Configuration cdcSourceConfig) {
         this.topic = KafkaActionUtils.findOneTopic(cdcSourceConfig);
-        this.schemaRegistryUrl = cdcSourceConfig.getString(SCHEMA_REGISTRY_URL);
+        this.schemaRegistryUrl = cdcSourceConfig.get(SCHEMA_REGISTRY_URL);
     }
 
     @Override

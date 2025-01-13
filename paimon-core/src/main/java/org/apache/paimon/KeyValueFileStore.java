@@ -28,11 +28,11 @@ import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.operation.BucketSelectConverter;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -50,6 +50,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -67,9 +68,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
-    private final Supplier<RecordEqualiser> valueEqualiserSupplier;
+    private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
-    private final String tableName;
 
     public KeyValueFileStore(
             FileIO fileIO,
@@ -85,7 +85,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
             CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schema, options, partitionType, catalogEnvironment);
+        super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
@@ -93,8 +93,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
-        this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
-        this.tableName = tableName;
+        List<String> logDedupIgnoreFields = options.changelogRowDeduplicateIgnoreFields();
+        this.logDedupEqualSupplier =
+                options.changelogRowDeduplicate()
+                        ? ValueEqualiserSupplier.fromIgnoreFields(valueType, logDedupIgnoreFields)
+                        : () -> null;
     }
 
     @Override
@@ -174,7 +177,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 keyComparatorSupplier,
                 () -> UserDefinedSeqComparator.create(valueType, options),
-                valueEqualiserSupplier,
+                logDedupEqualSupplier,
                 mfFactory,
                 pathFactory(),
                 format2PathFactory(),
@@ -190,53 +193,41 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private Map<String, FileStorePathFactory> format2PathFactory() {
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
         Set<String> formats = new HashSet<>(options.fileFormatPerLevel().values());
-        formats.add(options.fileFormat().getFormatIdentifier());
-        formats.forEach(
-                format ->
-                        pathFactoryMap.put(
-                                format,
-                                new FileStorePathFactory(
-                                        options.path(),
-                                        partitionType,
-                                        options.partitionDefaultName(),
-                                        format)));
+        formats.add(options.fileFormatString());
+        formats.forEach(format -> pathFactoryMap.put(format, pathFactory(format)));
         return pathFactoryMap;
     }
 
     private KeyValueFileStoreScan newScan(boolean forWrite) {
-        ScanBucketFilter bucketFilter =
-                new ScanBucketFilter(bucketKeyType) {
-                    @Override
-                    public void pushdown(Predicate keyFilter) {
-                        if (bucketMode() != BucketMode.HASH_FIXED) {
-                            return;
-                        }
-
-                        List<Predicate> bucketFilters =
-                                pickTransformFieldMapping(
-                                        splitAnd(keyFilter),
-                                        keyType.getFieldNames(),
-                                        bucketKeyType.getFieldNames());
-                        if (bucketFilters.size() > 0) {
-                            setBucketKeyFilter(and(bucketFilters));
-                        }
+        BucketSelectConverter bucketSelectConverter =
+                keyFilter -> {
+                    if (bucketMode() != BucketMode.HASH_FIXED) {
+                        return Optional.empty();
                     }
+
+                    List<Predicate> bucketFilters =
+                            pickTransformFieldMapping(
+                                    splitAnd(keyFilter),
+                                    keyType.getFieldNames(),
+                                    bucketKeyType.getFieldNames());
+                    if (bucketFilters.size() > 0) {
+                        return BucketSelectConverter.create(and(bucketFilters), bucketKeyType);
+                    }
+                    return Optional.empty();
                 };
         return new KeyValueFileStoreScan(
-                partitionType,
-                bucketFilter,
+                newManifestsReader(forWrite),
+                bucketSelectConverter,
                 snapshotManager(),
                 schemaManager,
                 schema,
                 keyValueFieldsExtractor,
                 manifestFileFactory(forWrite),
-                manifestListFactory(forWrite),
-                options.bucket(),
-                forWrite,
                 options.scanManifestParallelism(),
                 options.deletionVectorsEnabled(),
                 options.mergeEngine(),
-                options.changelogProducer());
+                options.changelogProducer(),
+                options.fileIndexReadEnabled() && options.deletionVectorsEnabled());
     }
 
     @Override

@@ -15,3 +15,4 @@
 
 org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory
 org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory
+org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory

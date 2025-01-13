@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -41,7 +43,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -50,9 +51,9 @@ import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -115,7 +116,6 @@ public class PartitionsTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
             return this;
         }
 
@@ -147,7 +147,7 @@ public class PartitionsTable implements ReadonlyTable {
 
         private final FileStoreTable fileStoreTable;
 
-        private int[][] projection;
+        private RowType readType;
 
         public PartitionsRead(FileStoreTable table) {
             this.fileStoreTable = table;
@@ -160,8 +160,8 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -176,33 +176,37 @@ public class PartitionsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            List<PartitionEntry> partitions = fileStoreTable.newSnapshotReader().partitionEntries();
+            List<PartitionEntry> partitions = fileStoreTable.newScan().listPartitionEntries();
 
-            RowDataToObjectArrayConverter converter =
-                    new RowDataToObjectArrayConverter(
-                            fileStoreTable.schema().logicalPartitionType());
+            @SuppressWarnings("unchecked")
+            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
+                    (CastExecutor<InternalRow, BinaryString>)
+                            CastExecutors.resolveToString(
+                                    fileStoreTable.schema().logicalPartitionType());
 
-            List<InternalRow> results = new ArrayList<>(partitions.size());
-            for (PartitionEntry entry : partitions) {
-                results.add(toRow(entry, converter));
-            }
+            // sorted by partition
+            Iterator<InternalRow> iterator =
+                    partitions.stream()
+                            .map(partitionEntry -> toRow(partitionEntry, partitionCastExecutor))
+                            .sorted(Comparator.comparing(row -> row.getString(0)))
+                            .iterator();
 
-            Iterator<InternalRow> iterator = results.iterator();
-            if (projection != null) {
+            if (readType != null) {
                 iterator =
                         Iterators.transform(
-                                iterator, row -> ProjectedRow.from(projection).replaceRow(row));
+                                iterator,
+                                row ->
+                                        ProjectedRow.from(readType, PartitionsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(iterator);
         }
 
-        private GenericRow toRow(
-                PartitionEntry entry, RowDataToObjectArrayConverter partitionConverter) {
-            BinaryString partitionId =
-                    BinaryString.fromString(
-                            Arrays.toString(partitionConverter.convert(entry.partition())));
+        private InternalRow toRow(
+                PartitionEntry entry,
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
             return GenericRow.of(
-                    partitionId,
+                    partitionCastExecutor.cast(entry.partition()),
                     entry.recordCount(),
                     entry.fileSizeInBytes(),
                     entry.fileCount(),

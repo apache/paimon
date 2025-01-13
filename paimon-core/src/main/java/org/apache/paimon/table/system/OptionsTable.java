@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -27,7 +26,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -44,7 +42,6 @@ import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -70,19 +67,13 @@ public class OptionsTable implements ReadonlyTable {
 
     private final FileIO fileIO;
     private final Path location;
-    private final String branch;
+
+    private final FileStoreTable dataTable;
 
     public OptionsTable(FileStoreTable dataTable) {
-        this(
-                dataTable.fileIO(),
-                dataTable.location(),
-                CoreOptions.branch(dataTable.schema().options()));
-    }
-
-    public OptionsTable(FileIO fileIO, Path location, String branchName) {
-        this.fileIO = fileIO;
-        this.location = location;
-        this.branch = branchName;
+        this.fileIO = dataTable.fileIO();
+        this.location = dataTable.location();
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -112,7 +103,7 @@ public class OptionsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new OptionsTable(fileIO, location, branch);
+        return new OptionsTable(dataTable.copy(dynamicOptions));
     }
 
     private class OptionsScan extends ReadOnceTableScan {
@@ -159,7 +150,7 @@ public class OptionsTable implements ReadonlyTable {
     private class OptionsRead implements InnerTableRead {
 
         private final FileIO fileIO;
-        private int[][] projection;
+        private RowType readType;
 
         public OptionsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -171,8 +162,8 @@ public class OptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public InnerTableRead withProjection(int[][] projection) {
-            this.projection = projection;
+        public InnerTableRead withReadType(RowType readType) {
+            this.readType = readType;
             return this;
         }
 
@@ -182,18 +173,27 @@ public class OptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof OptionsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Path location = ((OptionsSplit) split).location;
             Iterator<InternalRow> rows =
                     Iterators.transform(
-                            options(fileIO, location, branch).entrySet().iterator(), this::toRow);
-            if (projection != null) {
+                            dataTable
+                                    .schemaManager()
+                                    .latest()
+                                    .orElseThrow(() -> new RuntimeException("Table not exists."))
+                                    .options()
+                                    .entrySet()
+                                    .iterator(),
+                            this::toRow);
+            if (readType != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, OptionsTable.TABLE_TYPE)
+                                                .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }
@@ -203,12 +203,5 @@ public class OptionsTable implements ReadonlyTable {
                     BinaryString.fromString(option.getKey()),
                     BinaryString.fromString(option.getValue()));
         }
-    }
-
-    private static Map<String, String> options(FileIO fileIO, Path location, String branchName) {
-        return new SchemaManager(fileIO, location, branchName)
-                .latest()
-                .orElseThrow(() -> new RuntimeException("Table not exists."))
-                .options();
     }
 }

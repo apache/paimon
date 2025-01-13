@@ -21,6 +21,7 @@ package org.apache.paimon.data;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 
@@ -175,6 +176,23 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
             cursor += 8;
         }
+    }
+
+    @Override
+    public void writeVariant(int pos, Variant variant) {
+        byte[] value = variant.value();
+        byte[] metadata = variant.metadata();
+        int totalSize = 4 + value.length + metadata.length;
+        final int roundedSize = roundNumberOfBytesToNearestWord(totalSize);
+        ensureCapacity(roundedSize);
+        zeroOutPaddingBytes(totalSize);
+
+        segment.putInt(cursor, value.length);
+        segment.put(cursor + 4, value, 0, value.length);
+        segment.put(cursor + 4 + value.length, metadata, 0, metadata.length);
+
+        setOffsetAndSize(pos, cursor, totalSize);
+        cursor += roundedSize;
     }
 
     protected void zeroOutPaddingBytes(int numBytes) {

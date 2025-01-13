@@ -20,7 +20,6 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.table.FormatTable;
 
-import org.apache.flink.connector.file.table.FileSystemTableFactory;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
@@ -30,17 +29,16 @@ import org.apache.flink.table.factories.FactoryUtil;
 
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.apache.flink.connector.file.table.FileSystemConnectorOptions.PATH;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.factories.FactoryUtil.FORMAT;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
 /** A {@link CatalogTable} to represent format table. */
 public class FormatCatalogTable implements CatalogTable {
@@ -83,18 +81,17 @@ public class FormatCatalogTable implements CatalogTable {
     public Map<String, String> getOptions() {
         if (cachedOptions == null) {
             cachedOptions = new HashMap<>();
-            FileSystemTableFactory fileSystemFactory = new FileSystemTableFactory();
-            Set<String> validOptions = new HashSet<>();
-            fileSystemFactory.requiredOptions().forEach(o -> validOptions.add(o.key()));
-            fileSystemFactory.optionalOptions().forEach(o -> validOptions.add(o.key()));
             String format = table.format().name().toLowerCase();
-            table.options()
-                    .forEach(
-                            (k, v) -> {
-                                if (validOptions.contains(k) || k.startsWith(format + ".")) {
-                                    cachedOptions.put(k, v);
-                                }
-                            });
+            Map<String, String> options = table.options();
+            options.forEach(
+                    (k, v) -> {
+                        if (k.startsWith(format + ".")) {
+                            cachedOptions.put(k, v);
+                        }
+                    });
+            if (options.containsKey(FIELD_DELIMITER.key())) {
+                cachedOptions.put("csv.field-delimiter", options.get(FIELD_DELIMITER.key()));
+            }
             cachedOptions.put(CONNECTOR.key(), "filesystem");
             cachedOptions.put(PATH.key(), table.location());
             cachedOptions.put(FORMAT.key(), format);

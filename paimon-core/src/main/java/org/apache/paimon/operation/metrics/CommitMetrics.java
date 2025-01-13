@@ -76,6 +76,9 @@ public class CommitMetrics {
     @VisibleForTesting static final String LAST_PARTITIONS_WRITTEN = "lastPartitionsWritten";
     @VisibleForTesting static final String LAST_BUCKETS_WRITTEN = "lastBucketsWritten";
 
+    static final String LAST_COMPACTION_INPUT_FILE_SIZE = "lastCompactionInputFileSize";
+    static final String LAST_COMPACTION_OUTPUT_FILE_SIZE = "lastCompactionOutputFileSize";
+
     private void registerGenericCommitMetrics() {
         metricGroup.gauge(
                 LAST_COMMIT_DURATION, () -> latestCommit == null ? 0L : latestCommit.getDuration());
@@ -121,6 +124,12 @@ public class CommitMetrics {
         metricGroup.gauge(
                 LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
                 () -> latestCommit == null ? 0L : latestCommit.getChangelogRecordsCompacted());
+        metricGroup.gauge(
+                LAST_COMPACTION_INPUT_FILE_SIZE,
+                () -> latestCommit == null ? 0L : latestCommit.getCompactionInputFileSize());
+        metricGroup.gauge(
+                LAST_COMPACTION_OUTPUT_FILE_SIZE,
+                () -> latestCommit == null ? 0L : latestCommit.getCompactionOutputFileSize());
     }
 
     public void reportCommit(CommitStats commitStats) {

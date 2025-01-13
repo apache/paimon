@@ -68,7 +68,7 @@ import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
 import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkState;
-import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecute;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 
 /** An abstraction layer above {@link FileStoreCommit} to provide snapshot commit and expiration. */
 public class TableCommitImpl implements InnerTableCommit {
@@ -292,7 +292,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
         List<Path> nonExistFiles =
                 Lists.newArrayList(
-                        randomlyExecute(
+                        randomlyExecuteSequentialReturn(
                                 getExecutorService(null),
                                 f -> nonExists.test(f) ? singletonList(f) : emptyList(),
                                 files));

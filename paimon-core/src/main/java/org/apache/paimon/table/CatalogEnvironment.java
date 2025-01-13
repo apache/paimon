@@ -18,41 +18,37 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.lineage.LineageMetaFactory;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
-/**
- * Catalog environment in table which contains log factory, metastore client factory and lineage
- * meta.
- */
+/** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     @Nullable private final Identifier identifier;
+    @Nullable private final String uuid;
     private final Lock.Factory lockFactory;
-    @Nullable private final MetastoreClient.Factory metastoreClientFactory;
-    @Nullable private final LineageMetaFactory lineageMetaFactory;
+    @Nullable private final CatalogLoader catalogLoader;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
+            @Nullable String uuid,
             Lock.Factory lockFactory,
-            @Nullable MetastoreClient.Factory metastoreClientFactory,
-            @Nullable LineageMetaFactory lineageMetaFactory) {
+            @Nullable CatalogLoader catalogLoader) {
         this.identifier = identifier;
+        this.uuid = uuid;
         this.lockFactory = lockFactory;
-        this.metastoreClientFactory = metastoreClientFactory;
-        this.lineageMetaFactory = lineageMetaFactory;
+        this.catalogLoader = catalogLoader;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, Lock.emptyFactory(), null, null);
+        return new CatalogEnvironment(null, null, Lock.emptyFactory(), null);
     }
 
     @Nullable
@@ -60,17 +56,20 @@ public class CatalogEnvironment implements Serializable {
         return identifier;
     }
 
+    @Nullable
+    public String uuid() {
+        return uuid;
+    }
+
     public Lock.Factory lockFactory() {
         return lockFactory;
     }
 
     @Nullable
-    public MetastoreClient.Factory metastoreClientFactory() {
-        return metastoreClientFactory;
-    }
-
-    @Nullable
-    public LineageMetaFactory lineageMetaFactory() {
-        return lineageMetaFactory;
+    public PartitionHandler partitionHandler() {
+        if (catalogLoader == null) {
+            return null;
+        }
+        return PartitionHandler.create(catalogLoader.load(), identifier);
     }
 }

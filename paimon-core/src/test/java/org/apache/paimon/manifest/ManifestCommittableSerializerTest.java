@@ -83,7 +83,7 @@ public class ManifestCommittableSerializerTest {
 
         if (!committable.logOffsets().containsKey(bucket)) {
             int offset = ID.incrementAndGet();
-            committable.addLogOffset(bucket, offset);
+            committable.addLogOffset(bucket, offset, false);
             assertThat(committable.logOffsets().get(bucket)).isEqualTo(offset);
         }
     }
@@ -117,6 +117,7 @@ public class ManifestCommittableSerializerTest {
                 level,
                 0L,
                 null,
-                FileSource.APPEND);
+                FileSource.APPEND,
+                null);
     }
 }

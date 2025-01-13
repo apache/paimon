@@ -22,6 +22,7 @@ import org.apache.paimon.data.AbstractPagedInputView;
 import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.io.SeekableDataInputView;
 import org.apache.paimon.io.cache.CacheKey.PageIndexCacheKey;
+import org.apache.paimon.io.cache.CacheManager.SegmentContainer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.utils.MathUtils;
 
@@ -72,7 +73,7 @@ public class FileBasedRandomInputView extends AbstractPagedInputView
 
     private MemorySegment getCurrentPage() {
         SegmentContainer container = segments.get(currentSegmentIndex);
-        if (container == null || container.accessCount == REFRESH_COUNT) {
+        if (container == null || container.getAccessCount() == REFRESH_COUNT) {
             int pageIndex = currentSegmentIndex;
             MemorySegment segment =
                     cacheManager.getPage(
@@ -114,22 +115,5 @@ public class FileBasedRandomInputView extends AbstractPagedInputView
                                 CacheKey.forPageIndex(input.file(), input.pageSize(), page)));
 
         input.close();
-    }
-
-    private static class SegmentContainer {
-
-        private final MemorySegment segment;
-
-        private int accessCount;
-
-        private SegmentContainer(MemorySegment segment) {
-            this.segment = segment;
-            this.accessCount = 0;
-        }
-
-        private MemorySegment access() {
-            this.accessCount++;
-            return segment;
-        }
     }
 }

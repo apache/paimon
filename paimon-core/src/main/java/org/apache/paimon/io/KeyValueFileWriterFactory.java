@@ -21,8 +21,10 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
+import org.apache.paimon.KeyValueThinSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -30,6 +32,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.StatsCollectorFactories;
@@ -37,10 +41,13 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
@@ -52,22 +59,22 @@ public class KeyValueFileWriterFactory {
     private final WriteFormatContext formatContext;
     private final long suggestedFileSize;
     private final CoreOptions options;
+    private final FileIndexOptions fileIndexOptions;
 
     private KeyValueFileWriterFactory(
             FileIO fileIO,
             long schemaId,
-            RowType keyType,
-            RowType valueType,
             WriteFormatContext formatContext,
             long suggestedFileSize,
             CoreOptions options) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
-        this.keyType = keyType;
-        this.valueType = valueType;
+        this.keyType = formatContext.keyType;
+        this.valueType = formatContext.valueType;
         this.formatContext = formatContext;
         this.suggestedFileSize = suggestedFileSize;
         this.options = options;
+        this.fileIndexOptions = options.indexColumnsOptions();
     }
 
     public RowType keyType() {
@@ -86,48 +93,69 @@ public class KeyValueFileWriterFactory {
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
         return new RollingFileWriter<>(
-                () ->
-                        createDataFileWriter(
-                                formatContext.pathFactory(level).newPath(), level, fileSource),
+                () -> {
+                    DataFilePathFactory pathFactory = formatContext.pathFactory(level);
+                    return createDataFileWriter(
+                            pathFactory.newPath(), level, fileSource, pathFactory.isExternalPath());
+                },
                 suggestedFileSize);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
         return new RollingFileWriter<>(
-                () ->
-                        createDataFileWriter(
-                                formatContext.pathFactory(level).newChangelogPath(),
-                                level,
-                                FileSource.APPEND),
+                () -> {
+                    DataFilePathFactory pathFactory = formatContext.pathFactory(level);
+                    return createDataFileWriter(
+                            pathFactory.newChangelogPath(),
+                            level,
+                            FileSource.APPEND,
+                            pathFactory.isExternalPath());
+                },
                 suggestedFileSize);
     }
 
     private KeyValueDataFileWriter createDataFileWriter(
-            Path path, int level, FileSource fileSource) {
-        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
-        return new KeyValueDataFileWriter(
-                fileIO,
-                formatContext.writerFactory(level),
-                path,
-                kvSerializer::toRow,
-                keyType,
-                valueType,
-                formatContext.extractor(level),
-                schemaId,
-                level,
-                formatContext.compression(level),
-                options,
-                fileSource);
+            Path path, int level, FileSource fileSource, boolean isExternalPath) {
+        return formatContext.thinModeEnabled()
+                ? new KeyValueThinDataFileWriterImpl(
+                        fileIO,
+                        formatContext.writerFactory(level),
+                        path,
+                        new KeyValueThinSerializer(keyType, valueType)::toRow,
+                        keyType,
+                        valueType,
+                        formatContext.extractor(level),
+                        schemaId,
+                        level,
+                        formatContext.compression(level),
+                        options,
+                        fileSource,
+                        fileIndexOptions,
+                        isExternalPath)
+                : new KeyValueDataFileWriterImpl(
+                        fileIO,
+                        formatContext.writerFactory(level),
+                        path,
+                        new KeyValueSerializer(keyType, valueType)::toRow,
+                        keyType,
+                        valueType,
+                        formatContext.extractor(level),
+                        schemaId,
+                        level,
+                        formatContext.compression(level),
+                        options,
+                        fileSource,
+                        fileIndexOptions,
+                        isExternalPath);
     }
 
-    public void deleteFile(String filename, int level) {
-        fileIO.deleteQuietly(formatContext.pathFactory(level).toPath(filename));
+    public void deleteFile(DataFileMeta file) {
+        fileIO.deleteQuietly(formatContext.pathFactory(file.level()).toPath(file));
     }
 
-    public void copyFile(String sourceFileName, String targetFileName, int level)
-            throws IOException {
-        Path sourcePath = formatContext.pathFactory(level).toPath(sourceFileName);
-        Path targetPath = formatContext.pathFactory(level).toPath(targetFileName);
+    public void copyFile(DataFileMeta sourceFile, DataFileMeta targetFile) throws IOException {
+        Path sourcePath = formatContext.pathFactory(sourceFile.level()).toPath(sourceFile);
+        Path targetPath = formatContext.pathFactory(targetFile.level()).toPath(targetFile);
         fileIO.copyFile(sourcePath, targetPath, true);
     }
 
@@ -135,8 +163,8 @@ public class KeyValueFileWriterFactory {
         return fileIO;
     }
 
-    public Path newChangelogPath(int level) {
-        return formatContext.pathFactory(level).newChangelogPath();
+    public String newChangelogFileName(int level) {
+        return formatContext.pathFactory(level).newChangelogFileName();
     }
 
     public static Builder builder(
@@ -187,17 +215,17 @@ public class KeyValueFileWriterFactory {
 
         public KeyValueFileWriterFactory build(
                 BinaryRow partition, int bucket, CoreOptions options) {
-            RowType fileRowType = KeyValue.schema(keyType, valueType);
             WriteFormatContext context =
                     new WriteFormatContext(
                             partition,
                             bucket,
-                            fileRowType,
+                            keyType,
+                            valueType,
                             fileFormat,
                             format2PathFactory,
                             options);
             return new KeyValueFileWriterFactory(
-                    fileIO, schemaId, keyType, valueType, context, suggestedFileSize, options);
+                    fileIO, schemaId, context, suggestedFileSize, options);
         }
     }
 
@@ -210,13 +238,24 @@ public class KeyValueFileWriterFactory {
         private final Map<String, DataFilePathFactory> format2PathFactory;
         private final Map<String, FormatWriterFactory> format2WriterFactory;
 
+        private final RowType keyType;
+        private final RowType valueType;
+        private final boolean thinModeEnabled;
+
         private WriteFormatContext(
                 BinaryRow partition,
                 int bucket,
-                RowType rowType,
+                RowType keyType,
+                RowType valueType,
                 FileFormat defaultFormat,
                 Map<String, FileStorePathFactory> parentFactories,
                 CoreOptions options) {
+            this.keyType = keyType;
+            this.valueType = valueType;
+            this.thinModeEnabled =
+                    options.dataFileThinMode() && supportsThinMode(keyType, valueType);
+            RowType writeRowType =
+                    KeyValue.schema(thinModeEnabled ? RowType.of() : keyType, valueType);
             Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
             this.level2Format =
                     level ->
@@ -232,13 +271,17 @@ public class KeyValueFileWriterFactory {
             this.format2PathFactory = new HashMap<>();
             this.format2WriterFactory = new HashMap<>();
             SimpleColStatsCollector.Factory[] statsCollectorFactories =
-                    StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
+                    StatsCollectorFactories.createStatsFactories(
+                            options,
+                            writeRowType.getFieldNames(),
+                            thinModeEnabled ? keyType.getFieldNames() : Collections.emptyList());
             for (String format : parentFactories.keySet()) {
                 format2PathFactory.put(
                         format,
                         parentFactories.get(format).createDataFilePathFactory(partition, bucket));
 
-                FileFormat fileFormat = FileFormat.getFileFormat(options.toConfiguration(), format);
+                FileFormat fileFormat =
+                        FileFormat.fromIdentifier(format, options.toConfiguration());
                 // In avro format, minValue, maxValue, and nullCount are not counted, set
                 // StatsExtractor is Optional.empty() and will use SimpleStatsExtractor to collect
                 // stats
@@ -247,9 +290,28 @@ public class KeyValueFileWriterFactory {
                         format.equals("avro")
                                 ? Optional.empty()
                                 : fileFormat.createStatsExtractor(
-                                        rowType, statsCollectorFactories));
-                format2WriterFactory.put(format, fileFormat.createWriterFactory(rowType));
+                                        writeRowType, statsCollectorFactories));
+                format2WriterFactory.put(format, fileFormat.createWriterFactory(writeRowType));
             }
+        }
+
+        private boolean supportsThinMode(RowType keyType, RowType valueType) {
+            Set<Integer> keyFieldIds =
+                    valueType.getFields().stream().map(DataField::id).collect(Collectors.toSet());
+
+            for (DataField field : keyType.getFields()) {
+                if (!SpecialFields.isKeyField(field.name())) {
+                    return false;
+                }
+                if (!keyFieldIds.contains(field.id() - SpecialFields.KEY_FIELD_ID_START)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private boolean thinModeEnabled() {
+            return thinModeEnabled;
         }
 
         @Nullable

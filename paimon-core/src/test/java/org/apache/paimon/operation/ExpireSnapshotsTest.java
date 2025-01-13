@@ -29,6 +29,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -42,7 +43,9 @@ import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -56,6 +59,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -147,7 +151,8 @@ public class ExpireSnapshotsTest {
                     snapshot,
                     "tag" + id,
                     store.options().tagDefaultTimeRetained(),
-                    Collections.emptyList());
+                    Collections.emptyList(),
+                    false);
         }
 
         // randomly expire snapshots
@@ -209,12 +214,16 @@ public class ExpireSnapshotsTest {
                         Timestamp.now(),
                         0L,
                         null,
-                        FileSource.APPEND);
+                        FileSource.APPEND,
+                        null,
+                        null);
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 
         // expire
-        expire.snapshotDeletion().cleanUnusedDataFile(Arrays.asList(add, delete));
+        expire.snapshotDeletion()
+                .cleanUnusedDataFile(
+                        Arrays.asList(ExpireFileEntry.from(add), ExpireFileEntry.from(delete)));
 
         // check
         assertThat(fileIO.exists(myDataFile)).isFalse();
@@ -290,6 +299,50 @@ public class ExpireSnapshotsTest {
         }
 
         store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireEmptySnapshot() throws Exception {
+        Random random = new Random();
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(100, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+
+        List<Thread> s = new ArrayList<>();
+        s.add(
+                new Thread(
+                        () -> {
+                            final ExpireSnapshotsImpl expire =
+                                    (ExpireSnapshotsImpl) store.newExpire(1, Integer.MAX_VALUE, 1);
+                            expire.expireUntil(89, latestSnapshotId);
+                        }));
+        for (int i = 0; i < 10; i++) {
+            final ExpireSnapshotsImpl expire =
+                    (ExpireSnapshotsImpl) store.newExpire(1, Integer.MAX_VALUE, 1);
+            s.add(
+                    new Thread(
+                            () -> {
+                                int start = random.nextInt(latestSnapshotId - 10);
+                                int end = start + random.nextInt(10);
+                                expire.expireUntil(start, end);
+                            }));
+        }
+
+        Assertions.assertThatCode(
+                        () -> {
+                            s.forEach(Thread::start);
+                            s.forEach(
+                                    tt -> {
+                                        try {
+                                            tt.join();
+                                        } catch (InterruptedException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    });
+                        })
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -404,7 +457,7 @@ public class ExpireSnapshotsTest {
         store.assertCleaned();
     }
 
-    @Test
+    @RepeatedTest(5)
     public void testChangelogOutLivedSnapshot() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();

@@ -68,13 +68,48 @@ public class RoaringBitmap32 {
         return roaringBitmap.getLongCardinality();
     }
 
+    public int first() {
+        return roaringBitmap.first();
+    }
+
+    public int last() {
+        return roaringBitmap.last();
+    }
+
+    public long nextValue(int fromValue) {
+        return roaringBitmap.nextValue(fromValue);
+    }
+
+    public long previousValue(int fromValue) {
+        return roaringBitmap.previousValue(fromValue);
+    }
+
+    public boolean intersects(long minimum, long supremum) {
+        return roaringBitmap.intersects(minimum, supremum);
+    }
+
+    public RoaringBitmap32 clone() {
+        return new RoaringBitmap32(roaringBitmap.clone());
+    }
+
     public void serialize(DataOutput out) throws IOException {
         roaringBitmap.runOptimize();
         roaringBitmap.serialize(out);
     }
 
+    public byte[] serialize() {
+        roaringBitmap.runOptimize();
+        ByteBuffer buffer = ByteBuffer.allocate(roaringBitmap.serializedSizeInBytes());
+        roaringBitmap.serialize(buffer);
+        return buffer.array();
+    }
+
     public void deserialize(DataInput in) throws IOException {
-        roaringBitmap.deserialize(in);
+        roaringBitmap.deserialize(in, null);
+    }
+
+    public void deserialize(ByteBuffer buffer) throws IOException {
+        roaringBitmap.deserialize(buffer);
     }
 
     @Override
@@ -91,17 +126,6 @@ public class RoaringBitmap32 {
 
     public void clear() {
         roaringBitmap.clear();
-    }
-
-    public byte[] serialize() {
-        roaringBitmap.runOptimize();
-        ByteBuffer buffer = ByteBuffer.allocate(roaringBitmap.serializedSizeInBytes());
-        roaringBitmap.serialize(buffer);
-        return buffer.array();
-    }
-
-    public void deserialize(byte[] rbmBytes) throws IOException {
-        roaringBitmap.deserialize(ByteBuffer.wrap(rbmBytes));
     }
 
     public void flip(final long rangeStart, final long rangeEnd) {
@@ -148,5 +172,9 @@ public class RoaringBitmap32 {
                                 return iterator.next().roaringBitmap;
                             }
                         }));
+    }
+
+    public static RoaringBitmap32 andNot(final RoaringBitmap32 x1, final RoaringBitmap32 x2) {
+        return new RoaringBitmap32(RoaringBitmap.andNot(x1.roaringBitmap, x2.roaringBitmap));
     }
 }

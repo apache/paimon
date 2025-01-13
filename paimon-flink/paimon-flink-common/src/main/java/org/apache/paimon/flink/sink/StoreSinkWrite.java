@@ -84,6 +84,10 @@ public interface StoreSinkWrite {
     @FunctionalInterface
     interface Provider extends Serializable {
 
+        /**
+         * TODO: The argument list has become too complicated. Build {@link TableWriteImpl} directly
+         * in caller and simplify the argument list.
+         */
         StoreSinkWrite provide(
                 FileStoreTable table,
                 String commitUser,
@@ -97,6 +101,10 @@ public interface StoreSinkWrite {
     @FunctionalInterface
     interface WithWriteBufferProvider extends Serializable {
 
+        /**
+         * TODO: The argument list has become too complicated. Build {@link TableWriteImpl} directly
+         * in caller and simplify the argument list.
+         */
         StoreSinkWrite provide(
                 FileStoreTable table,
                 String commitUser,

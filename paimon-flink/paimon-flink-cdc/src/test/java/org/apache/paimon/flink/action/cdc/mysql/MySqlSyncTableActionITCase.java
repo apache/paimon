@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -31,7 +30,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.BeforeAll;
@@ -1285,8 +1285,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "default_checkpoint");
         mySqlConfig.put("table-name", "t");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRestartStrategy(RestartStrategies.noRestart());
+        // Using `none` to avoid compatibility issues with Flink 1.18-.
+        Configuration configuration = new Configuration();
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "none");
+        StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(configuration);
 
         MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
         action.withStreamExecutionEnvironment(env);
@@ -1323,7 +1326,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 syncTableActionBuilder(mySqlConfig)
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .withComputedColumnArgs("SUBSTRING=substring(UPPERCASE_STRING,2)")
                         .build();
         runActionWithDefaultEnv(action);
@@ -1359,7 +1362,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 syncTableActionBuilder(mySqlConfig)
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .withPrimaryKeys("ID1", "PART")
                         .withPartitionKeys("PART")
                         .build();
@@ -1475,6 +1478,60 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             },
                             new String[] {"k", "v1", "v2"});
             expected = Arrays.asList("+I[1, one, 1]", "+I[2, two, NULL]");
+            waitForResult(expected, table, rowType, primaryKeys);
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testUnknowMysqlScanStartupMode() {
+        String scanStartupMode = "abc";
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "schema_evolution_multiple");
+        mySqlConfig.put("scan.startup.mode", scanStartupMode);
+
+        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Unknown scan.startup.mode='"
+                                        + scanStartupMode
+                                        + "'. Valid scan.startup.mode for MySQL CDC are [initial, earliest-offset, latest-offset, specific-offset, timestamp, snapshot]"));
+    }
+
+    @Test
+    @Timeout(1000)
+    public void testRuntimeExecutionModeCheckForCdcSync() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "check_cdc_sync_runtime_execution_mode");
+        mySqlConfig.put("table-name", "t");
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
+
+        assertThatThrownBy(() -> runActionWithBatchEnv(action))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "It's only support STREAMING mode for flink-cdc sync table action"));
+
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE check_cdc_sync_runtime_execution_mode");
+            statement.executeUpdate("INSERT INTO t VALUES (1, 'one'), (2, 'two')");
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new String[] {"k", "v1"});
+            List<String> primaryKeys = Collections.singletonList("k");
+            List<String> expected = Arrays.asList("+I[1, one]", "+I[2, two]");
             waitForResult(expected, table, rowType, primaryKeys);
         }
     }

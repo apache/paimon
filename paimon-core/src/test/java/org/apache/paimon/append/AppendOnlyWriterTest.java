@@ -66,7 +66,6 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -125,7 +124,7 @@ public class AppendOnlyWriterTest {
         DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
         assertThat(meta).isNotNull();
 
-        Path path = pathFactory.toPath(meta.fileName());
+        Path path = pathFactory.toPath(meta);
         assertThat(LocalFileIO.create().exists(path)).isTrue();
 
         assertThat(meta.rowCount()).isEqualTo(1L);
@@ -137,7 +136,7 @@ public class AppendOnlyWriterTest {
                 new SimpleColStats[] {
                     initStats(1, 1, 0), initStats("AAA", "AAA", 0), initStats(PART, PART, 0)
                 };
-        assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
+        assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinaryAllMode(expected));
 
         assertThat(meta.minSequenceNumber()).isEqualTo(0);
         assertThat(meta.maxSequenceNumber()).isEqualTo(0);
@@ -186,7 +185,7 @@ public class AppendOnlyWriterTest {
             assertThat(inc.newFilesIncrement().newFiles().size()).isEqualTo(1);
             DataFileMeta meta = inc.newFilesIncrement().newFiles().get(0);
 
-            Path path = pathFactory.toPath(meta.fileName());
+            Path path = pathFactory.toPath(meta);
             assertThat(LocalFileIO.create().exists(path)).isTrue();
 
             assertThat(meta.rowCount()).isEqualTo(100L);
@@ -200,7 +199,7 @@ public class AppendOnlyWriterTest {
                         initStats(String.format("%03d", start), String.format("%03d", end - 1), 0),
                         initStats(PART, PART, 0)
                     };
-            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
+            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinaryAllMode(expected));
 
             assertThat(meta.minSequenceNumber()).isEqualTo(start);
             assertThat(meta.maxSequenceNumber()).isEqualTo(end - 1);
@@ -227,7 +226,7 @@ public class AppendOnlyWriterTest {
 
         int id = 0;
         for (DataFileMeta meta : firstInc.newFilesIncrement().newFiles()) {
-            Path path = pathFactory.toPath(meta.fileName());
+            Path path = pathFactory.toPath(meta);
             assertThat(LocalFileIO.create().exists(path)).isTrue();
 
             assertThat(meta.rowCount()).isEqualTo(1000L);
@@ -243,7 +242,7 @@ public class AppendOnlyWriterTest {
                         initStats(String.format("%03d", min), String.format("%03d", max), 0),
                         initStats(PART, PART, 0)
                     };
-            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinary(expected));
+            assertThat(meta.valueStats()).isEqualTo(STATS_SERIALIZER.toBinaryAllMode(expected));
 
             assertThat(meta.minSequenceNumber()).isEqualTo(min);
             assertThat(meta.maxSequenceNumber()).isEqualTo(max);
@@ -520,7 +519,12 @@ public class AppendOnlyWriterTest {
     private DataFilePathFactory createPathFactory() {
         return new DataFilePathFactory(
                 new Path(tempDir + "/dt=" + PART + "/bucket-0"),
-                CoreOptions.FILE_FORMAT.defaultValue().toString());
+                CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                null);
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
@@ -631,7 +635,8 @@ public class AppendOnlyWriterTest {
                                 options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
-                        true);
+                        true,
+                        false);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
@@ -641,13 +646,13 @@ public class AppendOnlyWriterTest {
         int size = toCompact.size();
         long minSeq = toCompact.get(0).minSequenceNumber();
         long maxSeq = toCompact.get(size - 1).maxSequenceNumber();
-        String fileName = "compact-" + UUID.randomUUID();
-        LocalFileIO.create().newOutputStream(pathFactory.toPath(fileName), false).close();
+        Path path = pathFactory.newPath("compact-");
+        LocalFileIO.create().newOutputStream(path, false).close();
         return DataFileMeta.forAppend(
-                fileName,
+                path.getName(),
                 toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),
                 toCompact.stream().mapToLong(DataFileMeta::rowCount).sum(),
-                STATS_SERIALIZER.toBinary(
+                STATS_SERIALIZER.toBinaryAllMode(
                         new SimpleColStats[] {
                             initStats(
                                     toCompact.get(0).valueStats().minValues().getInt(0),
@@ -672,6 +677,10 @@ public class AppendOnlyWriterTest {
                 minSeq,
                 maxSeq,
                 toCompact.get(0).schemaId(),
-                FileSource.APPEND);
+                Collections.emptyList(),
+                null,
+                FileSource.APPEND,
+                null,
+                null);
     }
 }

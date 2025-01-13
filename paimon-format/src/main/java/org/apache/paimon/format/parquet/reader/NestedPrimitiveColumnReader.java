@@ -44,6 +44,7 @@ import org.apache.parquet.column.page.DataPage;
 import org.apache.parquet.column.page.DataPageV1;
 import org.apache.parquet.column.page.DataPageV2;
 import org.apache.parquet.column.page.DictionaryPage;
+import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.column.values.rle.RunLengthBitPackingHybridDecoder;
@@ -64,6 +65,7 @@ import static org.apache.parquet.column.ValuesType.VALUES;
 
 /** Reader to read nested primitive column. */
 public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnVector> {
+
     private static final Logger LOG = LoggerFactory.getLogger(NestedPrimitiveColumnReader.class);
 
     private final IntArrayList repetitionLevelList = new IntArrayList(0);
@@ -73,23 +75,12 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
     private final ColumnDescriptor descriptor;
     private final Type type;
     private final DataType dataType;
-    private final boolean readRowField;
-    private final boolean readMapKey;
     /** The dictionary, if this column has dictionary encoding. */
     private final ParquetDataColumnReader dictionary;
     /** Maximum definition level for this column. */
     private final int maxDefLevel;
 
-    private final boolean isUtcTimestamp;
-
-    /** Total number of values read. */
-    private long valuesRead;
-
-    /**
-     * value that indicates the end of the current page. That is, if valuesRead ==
-     * endOfPageValueCount, we are at the end of the page.
-     */
-    private long endOfPageValueCount;
+    private boolean isUtcTimestamp;
 
     /** If true, the current page is dictionary encoded. */
     private boolean isCurrentPageDictionaryEncoded;
@@ -103,35 +94,36 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
     private IntIterator definitionLevelColumn;
     private ParquetDataColumnReader dataColumn;
 
-    /** Total values in the current page. */
-    private int pageValueCount;
+    /**
+     * Helper struct to track intermediate states while reading Parquet pages in the column chunk.
+     */
+    protected final ParquetReadState readState;
 
     // flag to indicate if there is no data in parquet data page
     private boolean eof = false;
 
     private boolean isFirstRow = true;
 
-    private final LastValueContainer lastValue = new LastValueContainer();
+    private Object lastValue;
 
     public NestedPrimitiveColumnReader(
             ColumnDescriptor descriptor,
-            PageReader pageReader,
+            PageReadStore pageReadStore,
             boolean isUtcTimestamp,
             Type parquetType,
-            DataType dataType,
-            boolean readRowField,
-            boolean readMapKey)
+            DataType dataType)
             throws IOException {
         this.descriptor = descriptor;
         this.type = parquetType;
-        this.pageReader = pageReader;
+        this.pageReader = pageReadStore.getPageReader(descriptor);
         this.maxDefLevel = descriptor.getMaxDefinitionLevel();
         this.isUtcTimestamp = isUtcTimestamp;
         this.dataType = dataType;
-        this.readRowField = readRowField;
-        this.readMapKey = readMapKey;
 
         DictionaryPage dictionaryPage = pageReader.readDictionaryPage();
+
+        this.readState = new ParquetReadState(pageReadStore.getRowIndexes().orElse(null));
+
         if (dictionaryPage != null) {
             try {
                 this.dictionary =
@@ -166,23 +158,54 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             isFirstRow = false;
         }
 
-        // index to set value.
-        int index = 0;
-        int valueIndex = 0;
         List<Object> valueList = new ArrayList<>();
 
+        int valueIndex = collectDataFromParquetPage(readNumber, valueList);
+
+        return fillColumnVector(valueIndex, valueList);
+    }
+
+    private int collectDataFromParquetPage(int total, List<Object> valueList) throws IOException {
+        int valueIndex = 0;
         // repeated type need two loops to read data.
-        while (!eof && index < readNumber) {
+
+        readState.resetForNewBatch(total);
+
+        while (!eof && readState.rowsToReadInBatch > 0) {
+
+            if (readState.isFinished()) { // finished to read
+                eof = true;
+                break;
+            }
+
+            long pageRowId = readState.rowId;
+            long rangeStart = readState.currentRangeStart();
+            long rangeEnd = readState.currentRangeEnd();
+
+            if (pageRowId > rangeEnd) {
+                readState.nextRange();
+                continue;
+            }
+
+            boolean needFilterSkip = pageRowId < rangeStart;
+
             do {
-                if (!lastValue.shouldSkip) {
-                    valueList.add(lastValue.value);
+                if (!needFilterSkip) {
+                    valueList.add(lastValue);
                     valueIndex++;
                 }
             } while (readValue() && (repetitionLevel != 0));
-            index++;
+
+            if (pageRowId == readState.rowId) {
+                readState.rowId = readState.rowId + 1;
+            }
+
+            if (!needFilterSkip) {
+                readState.rowsToReadInBatch = readState.rowsToReadInBatch - 1;
+            }
         }
 
-        return fillColumnVector(valueIndex, valueList);
+        return valueIndex;
     }
 
     public LevelDelegation getLevelDelegation() {
@@ -195,27 +218,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         return new LevelDelegation(repetition, definition);
     }
 
-    /**
-     * An ARRAY[ARRAY[INT]] Example: {[[0, null], [1], [], null], [], null} => [5, 4, 5, 3, 2, 1, 0]
-     *
-     * <ul>
-     *   <li>definitionLevel == maxDefLevel => not null value
-     *   <li>definitionLevel == maxDefLevel - 1 => null value
-     *   <li>definitionLevel == maxDefLevel - 2 => empty set, skip
-     *   <li>definitionLevel == maxDefLevel - 3 => null set, skip
-     *   <li>definitionLevel == maxDefLevel - 4 => empty outer set, skip
-     *   <li>definitionLevel == maxDefLevel - 5 => null outer set, skip
-     *   <li>... skip
-     * </ul>
-     *
-     * <p>When (definitionLevel <= maxDefLevel - 2) we skip the value because children ColumnVector
-     * for OrcArrayColumnVector don't contain empty and null set value. Stay consistent here.
-     *
-     * <p>For MAP, the value vector is the same as ARRAY. But the key vector isn't nullable, so just
-     * read value when definitionLevel == maxDefLevel.
-     *
-     * <p>For ROW, RowColumnVector still get null value when definitionLevel == maxDefLevel - 2.
-     */
     private boolean readValue() throws IOException {
         int left = readPageIfNeed();
         if (left > 0) {
@@ -225,24 +227,12 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             if (definitionLevel == maxDefLevel) {
                 if (isCurrentPageDictionaryEncoded) {
                     int dictionaryId = dataColumn.readValueDictionaryId();
-                    lastValue.setValue(dictionaryDecodeValue(dataType, dictionaryId));
+                    lastValue = dictionaryDecodeValue(dataType, dictionaryId);
                 } else {
-                    lastValue.setValue(readPrimitiveTypedRow(dataType));
+                    lastValue = readPrimitiveTypedRow(dataType);
                 }
             } else {
-                if (readMapKey) {
-                    lastValue.skip();
-                } else {
-                    if (definitionLevel == maxDefLevel - 1) {
-                        // null value inner set
-                        lastValue.setValue(null);
-                    } else if (definitionLevel == maxDefLevel - 2 && readRowField) {
-                        lastValue.setValue(null);
-                    } else {
-                        // current set is empty or null
-                        lastValue.skip();
-                    }
-                }
+                lastValue = null;
             }
             return true;
         } else {
@@ -255,20 +245,24 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         // get the values of repetition and definitionLevel
         repetitionLevel = repetitionLevelColumn.nextInt();
         definitionLevel = definitionLevelColumn.nextInt();
-        valuesRead++;
+        readState.valuesToReadInPage = readState.valuesToReadInPage - 1;
         repetitionLevelList.add(repetitionLevel);
         definitionLevelList.add(definitionLevel);
     }
 
     private int readPageIfNeed() throws IOException {
         // Compute the number of values we want to read in this page.
-        int leftInPage = (int) (endOfPageValueCount - valuesRead);
-        if (leftInPage == 0) {
-            // no data left in current page, load data from new page
-            readPage();
-            leftInPage = (int) (endOfPageValueCount - valuesRead);
+        if (readState.valuesToReadInPage == 0) {
+            int pageValueCount = readPage();
+            //  return value count in current page
+            if (pageValueCount < 0) {
+                // we've read all the pages; this could happen when we're reading a repeated list
+                // and we
+                // don't know where the list will end until we've seen all the pages.
+                return -1;
+            }
         }
-        return leftInPage;
+        return readState.valuesToReadInPage;
     }
 
     private Object readPrimitiveTypedRow(DataType category) {
@@ -495,7 +489,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                                 phiv.vector[i] = ((List<Integer>) valueList).get(i);
                             }
                         }
-                        return new ParquetDecimalVector(phiv);
+                        return new ParquetDecimalVector(phiv, total);
                     case INT64:
                         HeapLongVector phlv = new HeapLongVector(total);
                         for (int i = 0; i < valueList.size(); i++) {
@@ -505,10 +499,10 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                                 phlv.vector[i] = ((List<Long>) valueList).get(i);
                             }
                         }
-                        return new ParquetDecimalVector(phlv);
+                        return new ParquetDecimalVector(phlv, total);
                     default:
                         HeapBytesVector phbv = getHeapBytesVector(total, valueList);
-                        return new ParquetDecimalVector(phbv);
+                        return new ParquetDecimalVector(phbv, total);
                 }
             default:
                 throw new RuntimeException("Unsupported type in the list: " + type);
@@ -528,33 +522,36 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         return phbv;
     }
 
-    protected void readPage() {
+    protected int readPage() {
         DataPage page = pageReader.readPage();
 
         if (page == null) {
-            return;
+            return -1;
         }
 
-        page.accept(
-                new DataPage.Visitor<Void>() {
-                    @Override
-                    public Void visit(DataPageV1 dataPageV1) {
-                        readPageV1(dataPageV1);
-                        return null;
-                    }
+        long pageFirstRowIndex = page.getFirstRowIndex().orElse(0L);
 
-                    @Override
-                    public Void visit(DataPageV2 dataPageV2) {
-                        readPageV2(dataPageV2);
-                        return null;
-                    }
-                });
+        int pageValueCount =
+                page.accept(
+                        new DataPage.Visitor<Integer>() {
+                            @Override
+                            public Integer visit(DataPageV1 dataPageV1) {
+                                return readPageV1(dataPageV1);
+                            }
+
+                            @Override
+                            public Integer visit(DataPageV2 dataPageV2) {
+                                return readPageV2(dataPageV2);
+                            }
+                        });
+        readState.resetForNewPage(pageValueCount, pageFirstRowIndex);
+        return pageValueCount;
     }
 
     private void initDataReader(Encoding dataEncoding, ByteBufferInputStream in, int valueCount)
             throws IOException {
-        this.pageValueCount = valueCount;
-        this.endOfPageValueCount = valuesRead + pageValueCount;
+        //        this.pageValueCount = valueCount;
+        //        this.endOfPageValueCount = valuesRead + pageValueCount;
         if (dataEncoding.usesDictionary()) {
             this.dataColumn = null;
             if (dictionary == null) {
@@ -577,13 +574,14 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         }
 
         try {
-            dataColumn.initFromPage(pageValueCount, in);
+            dataColumn.initFromPage(valueCount, in);
         } catch (IOException e) {
             throw new IOException(String.format("Could not read page in col %s.", descriptor), e);
         }
     }
 
-    private void readPageV1(DataPageV1 page) {
+    private int readPageV1(DataPageV1 page) {
+        int pageValueCount = page.getValueCount();
         ValuesReader rlReader = page.getRlEncoding().getValuesReader(descriptor, REPETITION_LEVEL);
         ValuesReader dlReader = page.getDlEncoding().getValuesReader(descriptor, DEFINITION_LEVEL);
         this.repetitionLevelColumn = new ValuesReaderIntIterator(rlReader);
@@ -597,15 +595,16 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             LOG.debug("Reading definition levels at {}.", in.position());
             dlReader.initFromPage(pageValueCount, in);
             LOG.debug("Reading data at {}.", in.position());
-            initDataReader(page.getValueEncoding(), in, page.getValueCount());
+            initDataReader(page.getValueEncoding(), in, pageValueCount);
+            return pageValueCount;
         } catch (IOException e) {
             throw new ParquetDecodingException(
                     String.format("Could not read page %s in col %s.", page, descriptor), e);
         }
     }
 
-    private void readPageV2(DataPageV2 page) {
-        this.pageValueCount = page.getValueCount();
+    private int readPageV2(DataPageV2 page) {
+        int pageValueCount = page.getValueCount();
         this.repetitionLevelColumn =
                 newRLEIterator(descriptor.getMaxRepetitionLevel(), page.getRepetitionLevels());
         this.definitionLevelColumn =
@@ -615,8 +614,8 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                     "Page data size {} bytes and {} records.",
                     page.getData().size(),
                     pageValueCount);
-            initDataReader(
-                    page.getDataEncoding(), page.getData().toInputStream(), page.getValueCount());
+            initDataReader(page.getDataEncoding(), page.getData().toInputStream(), pageValueCount);
+            return pageValueCount;
         } catch (IOException e) {
             throw new ParquetDecodingException(
                     String.format("Could not read page %s in col %s.", page, descriptor), e);
@@ -680,20 +679,6 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
         @Override
         public int nextInt() {
             return 0;
-        }
-    }
-
-    private static class LastValueContainer {
-        protected boolean shouldSkip;
-        protected Object value;
-
-        protected void setValue(Object value) {
-            this.value = value;
-            this.shouldSkip = false;
-        }
-
-        protected void skip() {
-            this.shouldSkip = true;
         }
     }
 }

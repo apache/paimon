@@ -18,8 +18,13 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /** The abstract class for StartingScanner. */
 public abstract class AbstractStartingScanner implements StartingScanner {
@@ -43,5 +48,14 @@ public abstract class AbstractStartingScanner implements StartingScanner {
         } else {
             return new StartingContext(startingSnapshotId, startingScanMode() == ScanMode.ALL);
         }
+    }
+
+    @Override
+    public List<PartitionEntry> scanPartitions(SnapshotReader snapshotReader) {
+        Result result = scan(snapshotReader);
+        if (result instanceof ScannedResult) {
+            return new ArrayList<>(PartitionEntry.mergeSplits(((ScannedResult) result).splits()));
+        }
+        return Collections.emptyList();
     }
 }

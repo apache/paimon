@@ -18,8 +18,6 @@
 
 package org.apache.paimon.iceberg.metadata;
 
-import org.apache.paimon.types.DataField;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -55,7 +53,7 @@ public class IcebergPartitionField {
     @JsonProperty(FIELD_FIELD_ID)
     private final int fieldId;
 
-    public IcebergPartitionField(DataField dataField, int fieldId) {
+    public IcebergPartitionField(IcebergDataField dataField, int fieldId) {
         this(
                 dataField.name(),
                 // currently Paimon's partition value does not have any transformation

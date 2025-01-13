@@ -154,6 +154,54 @@ public class HiveTableSchemaTest {
     }
 
     @Test
+    public void testSubsetColumnNameAndType() throws Exception {
+        createSchema();
+        Properties properties = new Properties();
+        List<String> columns = Arrays.asList("a", "b");
+        properties.setProperty("columns", String.join(",", columns));
+        properties.setProperty(
+                "columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.intTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.getDecimalTypeInfo(6, 3).getTypeName())));
+        properties.setProperty("columns.comments", "\0\0");
+        properties.setProperty("location", tempDir.toString());
+        List<String> fields = HiveSchema.extract(null, properties).fieldNames();
+        assertThat(fields).isEqualTo(columns);
+    }
+
+    @Test
+    public void testSupersetColumnNameAndType() throws Exception {
+        createSchema();
+        Properties properties = new Properties();
+        properties.setProperty("columns", "a,b,c,d");
+        properties.setProperty(
+                "columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.intTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.decimalTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.getDecimalTypeInfo(6, 3).getTypeName())));
+        properties.setProperty("columns.comments", "\0\0");
+        properties.setProperty("location", tempDir.toString());
+        String expected =
+                "Hive DDL is a superset of paimon schema! "
+                        + "It is recommended not to write any column definition "
+                        + "as Paimon external table can read schema from the specified location.\n"
+                        + "There are 4 fields in Hive DDL: a, b, c, d\n"
+                        + "There are 3 fields in Paimon schema: a, b, c\n";
+        assertThatThrownBy(() -> HiveSchema.extract(null, properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(expected);
+    }
+
+    @Test
     public void testTooFewColumns() throws Exception {
         createSchema();
 
@@ -162,16 +210,7 @@ public class HiveTableSchemaTest {
         properties.setProperty("columns.types", TypeInfoFactory.intTypeInfo.getTypeName());
         properties.setProperty("location", tempDir.toString());
         properties.setProperty("columns.comments", "");
-
-        String expected =
-                "Hive DDL and paimon schema mismatched! "
-                        + "It is recommended not to write any column definition "
-                        + "as Paimon external table can read schema from the specified location.\n"
-                        + "There are 1 fields in Hive DDL: a\n"
-                        + "There are 3 fields in Paimon schema: a, b, c";
-        assertThatExceptionOfType(IllegalArgumentException.class)
-                .isThrownBy(() -> HiveSchema.extract(null, properties))
-                .withMessageContaining(expected);
+        assertThat(HiveSchema.extract(null, properties)).isInstanceOf(HiveSchema.class);
     }
 
     @Test
@@ -194,7 +233,7 @@ public class HiveTableSchemaTest {
         properties.setProperty("location", tempDir.toString());
 
         String expected =
-                "Hive DDL and paimon schema mismatched! "
+                "Hive DDL is a superset of paimon schema! "
                         + "It is recommended not to write any column definition "
                         + "as Paimon external table can read schema from the specified location.\n"
                         + "There are 5 fields in Hive DDL: a, b, c, d, e\n"

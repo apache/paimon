@@ -20,6 +20,7 @@ package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 
@@ -41,6 +42,8 @@ public class CommitStats {
     private final long tableFilesAppended;
     private final long tableFilesDeleted;
     private final long changelogFilesAppended;
+    private final long compactionInputFileSize;
+    private final long compactionOutputFileSize;
     private final long changelogFilesCompacted;
     private final long changelogRecordsCompacted;
 
@@ -61,15 +64,28 @@ public class CommitStats {
             int generatedSnapshots,
             int attempts) {
         List<ManifestEntry> addedTableFiles = new ArrayList<>(appendTableFiles);
-        addedTableFiles.addAll(
+        List<ManifestEntry> compactAfterFiles =
                 compactTableFiles.stream()
                         .filter(f -> FileKind.ADD.equals(f.kind()))
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList());
+        addedTableFiles.addAll(compactAfterFiles);
         List<ManifestEntry> deletedTableFiles =
                 compactTableFiles.stream()
                         .filter(f -> FileKind.DELETE.equals(f.kind()))
                         .collect(Collectors.toList());
 
+        this.compactionInputFileSize =
+                deletedTableFiles.stream()
+                        .map(ManifestEntry::file)
+                        .map(DataFileMeta::fileSize)
+                        .reduce(Long::sum)
+                        .orElse(0L);
+        this.compactionOutputFileSize =
+                compactAfterFiles.stream()
+                        .map(ManifestEntry::file)
+                        .map(DataFileMeta::fileSize)
+                        .reduce(Long::sum)
+                        .orElse(0L);
         this.tableFilesAdded = addedTableFiles.size();
         this.tableFilesAppended = appendTableFiles.size();
         this.tableFilesDeleted = deletedTableFiles.size();
@@ -202,5 +218,13 @@ public class CommitStats {
     @VisibleForTesting
     protected int getAttempts() {
         return attempts;
+    }
+
+    public long getCompactionInputFileSize() {
+        return compactionInputFileSize;
+    }
+
+    public long getCompactionOutputFileSize() {
+        return compactionOutputFileSize;
     }
 }

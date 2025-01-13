@@ -29,8 +29,10 @@ import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
@@ -63,6 +65,7 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
+
         return create(fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty());
     }
 
@@ -93,20 +96,24 @@ public class FileStoreTableFactory {
         if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
             Options branchOptions = new Options(dynamicOptions.toMap());
             branchOptions.set(CoreOptions.BRANCH, fallbackBranch);
+            Optional<TableSchema> schema =
+                    new SchemaManager(fileIO, tablePath, fallbackBranch).latest();
+            checkArgument(
+                    schema.isPresent(),
+                    "Cannot set '%s' = '%s' because the branch '%s' isn't existed.",
+                    CoreOptions.SCAN_FALLBACK_BRANCH.key(),
+                    fallbackBranch,
+                    fallbackBranch);
             FileStoreTable fallbackTable =
                     createWithoutFallbackBranch(
-                            fileIO,
-                            tablePath,
-                            new SchemaManager(fileIO, tablePath, fallbackBranch).latest().get(),
-                            branchOptions,
-                            catalogEnvironment);
+                            fileIO, tablePath, schema.get(), branchOptions, catalogEnvironment);
             table = new FallbackReadFileStoreTable(table, fallbackTable);
         }
 
         return table;
     }
 
-    private static FileStoreTable createWithoutFallbackBranch(
+    public static FileStoreTable createWithoutFallbackBranch(
             FileIO fileIO,
             Path tablePath,
             TableSchema tableSchema,

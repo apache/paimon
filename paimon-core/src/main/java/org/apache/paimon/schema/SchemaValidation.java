@@ -28,11 +28,15 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.StringUtils;
 
@@ -44,6 +48,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -57,6 +62,7 @@ import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
@@ -68,8 +74,8 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
-import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
-import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
+import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
@@ -176,11 +182,35 @@ public class SchemaValidation {
             }
         }
 
+        String recordLevelTimeField = options.recordLevelTimeField();
+        if (recordLevelTimeField != null) {
+            Optional<DataField> field =
+                    schema.fields().stream()
+                            .filter(dataField -> dataField.name().equals(recordLevelTimeField))
+                            .findFirst();
+            if (!field.isPresent()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Can not find time field %s for record level expire.",
+                                recordLevelTimeField));
+            }
+            DataType dataType = field.get().type();
+            if (!(dataType instanceof IntType
+                    || dataType instanceof BigIntType
+                    || dataType instanceof TimestampType
+                    || dataType instanceof LocalZonedTimestampType)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is %s.",
+                                dataType));
+            }
+        }
+
         if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
             if (options.changelogProducer() != ChangelogProducer.LOOKUP
                     && options.changelogProducer() != ChangelogProducer.NONE) {
                 throw new IllegalArgumentException(
-                        "Only support 'none' and 'lookup' changelog-producer on FIRST_MERGE merge engine");
+                        "Only support 'none' and 'lookup' changelog-producer on FIRST_ROW merge engine");
             }
         }
 
@@ -243,7 +273,8 @@ public class SchemaValidation {
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
-                            INCREMENTAL_BETWEEN),
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG),
                     Arrays.asList(SCAN_TIMESTAMP_MILLIS, SCAN_TIMESTAMP));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
             checkExactOneOptionExistInMode(
@@ -259,14 +290,16 @@ public class SchemaValidation {
                             SCAN_TIMESTAMP,
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
-                            INCREMENTAL_BETWEEN),
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG),
                     Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TAG_NAME));
         } else if (options.startupMode() == CoreOptions.StartupMode.INCREMENTAL) {
             checkExactOneOptionExistInMode(
                     options,
                     options.startupMode(),
                     INCREMENTAL_BETWEEN,
-                    INCREMENTAL_BETWEEN_TIMESTAMP);
+                    INCREMENTAL_BETWEEN_TIMESTAMP,
+                    INCREMENTAL_TO_AUTO_TAG);
             checkOptionsConflict(
                     options,
                     Arrays.asList(
@@ -275,7 +308,10 @@ public class SchemaValidation {
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TIMESTAMP,
                             SCAN_TAG_NAME),
-                    Arrays.asList(INCREMENTAL_BETWEEN, INCREMENTAL_BETWEEN_TIMESTAMP));
+                    Arrays.asList(
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_BETWEEN_TIMESTAMP,
+                            INCREMENTAL_TO_AUTO_TAG));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
             checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionsConflict(
@@ -286,7 +322,8 @@ public class SchemaValidation {
                             SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
-                            INCREMENTAL_BETWEEN),
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG),
                     Collections.singletonList(SCAN_SNAPSHOT_ID));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_FILE_CREATION_TIME) {
             checkOptionExistInMode(
@@ -300,7 +337,8 @@ public class SchemaValidation {
                             SCAN_TIMESTAMP_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
-                            INCREMENTAL_BETWEEN),
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG),
                     Collections.singletonList(SCAN_FILE_CREATION_TIME_MILLIS));
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
@@ -312,6 +350,7 @@ public class SchemaValidation {
             checkOptionNotExistInMode(
                     options, INCREMENTAL_BETWEEN_TIMESTAMP, options.startupMode());
             checkOptionNotExistInMode(options, INCREMENTAL_BETWEEN, options.startupMode());
+            checkOptionNotExistInMode(options, INCREMENTAL_TO_AUTO_TAG, options.startupMode());
         }
     }
 
@@ -515,7 +554,7 @@ public class SchemaValidation {
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
         List<String> sequenceField = options.sequenceField();
-        if (sequenceField.size() > 0) {
+        if (!sequenceField.isEmpty()) {
             Map<String, Integer> fieldCount =
                     sequenceField.stream()
                             .collect(Collectors.toMap(field -> field, field -> 1, Integer::sum));
@@ -540,7 +579,7 @@ public class SchemaValidation {
 
             if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
                 throw new IllegalArgumentException(
-                        "Do not support use sequence field on FIRST_MERGE merge engine.");
+                        "Do not support use sequence field on FIRST_ROW merge engine.");
             }
 
             if (schema.crossPartitionUpdate()) {
@@ -596,12 +635,12 @@ public class SchemaValidation {
                                                                         == MAP
                                                                 || dataField.type().getTypeRoot()
                                                                         == ROW))
-                                .map(dataField -> dataField.name())
+                                .map(DataField::name)
                                 .collect(Collectors.toList());
-                if (nestedFields.size() > 0) {
+                if (!nestedFields.isEmpty()) {
                     throw new RuntimeException(
                             "nested type can not in bucket-key, in your table these key are "
-                                    + nestedFields.toString());
+                                    + nestedFields);
                 }
             }
         }

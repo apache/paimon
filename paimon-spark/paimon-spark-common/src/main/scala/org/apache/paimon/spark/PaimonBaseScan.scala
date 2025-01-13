@@ -20,14 +20,12 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.{stats, CoreOptions}
 import org.apache.paimon.annotation.VisibleForTesting
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.metric.SparkMetricRegistry
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
-import org.apache.paimon.table.source.{InnerTableScan, ReadBuilder, Split}
-import org.apache.paimon.types.RowType
+import org.apache.paimon.table.source.{InnerTableScan, Split}
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
@@ -48,21 +46,8 @@ abstract class PaimonBaseScan(
   extends Scan
   with SupportsReportStatistics
   with ScanHelper
+  with ColumnPruningAndPushDown
   with StatisticsHelper {
-
-  val tableRowType: RowType = table.rowType
-
-  private lazy val tableSchema = SparkTypeUtils.fromPaimonRowType(tableRowType)
-
-  private val (tableFields, metadataFields) = {
-    val nameToField = tableSchema.map(field => (field.name, field)).toMap
-    val _tableFields = requiredSchema.flatMap(field => nameToField.get(field.name))
-    val _metadataFields =
-      requiredSchema
-        .filterNot(field => tableSchema.fieldNames.contains(field.name))
-        .filter(field => PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(field.name))
-    (_tableFields, _metadataFields)
-  }
 
   protected var runtimeFilters: Array[Filter] = Array.empty
 
@@ -75,22 +60,9 @@ abstract class PaimonBaseScan(
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   lazy val requiredStatsSchema: StructType = {
-    val fieldNames = tableFields.map(_.name) ++ reservedFilters.flatMap(_.references)
+    val fieldNames =
+      readTableRowType.getFields.asScala.map(_.name) ++ reservedFilters.flatMap(_.references)
     StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
-  }
-
-  lazy val readBuilder: ReadBuilder = {
-    val _readBuilder = table.newReadBuilder()
-
-    val projection = tableFields.map(field => tableSchema.fieldNames.indexOf(field.name)).toArray
-    _readBuilder.withProjection(projection)
-    if (filters.nonEmpty) {
-      val pushedPredicate = PredicateBuilder.and(filters: _*)
-      _readBuilder.withFilter(pushedPredicate)
-    }
-    pushDownLimit.foreach(_readBuilder.withLimit)
-
-    _readBuilder
   }
 
   @VisibleForTesting
@@ -112,12 +84,7 @@ abstract class PaimonBaseScan(
     inputPartitions
   }
 
-  override def readSchema(): StructType = {
-    StructType(tableFields ++ metadataFields)
-  }
-
   override def toBatch: Batch = {
-    val metadataColumns = metadataFields.map(field => PaimonMetadataColumn.get(field.name))
     PaimonBatch(lazyInputPartitions, readBuilder, metadataColumns)
   }
 

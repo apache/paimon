@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
@@ -40,7 +41,12 @@ public class MigrateFileProcedure extends ProcedureBase {
             String sourceTablePath,
             String targetPaimonTablePath)
             throws Exception {
-        call(procedureContext, connector, sourceTablePath, targetPaimonTablePath, true);
+        migrateHandle(
+                connector,
+                sourceTablePath,
+                targetPaimonTablePath,
+                true,
+                Runtime.getRuntime().availableProcessors());
         return new String[] {"Success"};
     }
 
@@ -51,7 +57,25 @@ public class MigrateFileProcedure extends ProcedureBase {
             String targetPaimonTablePath,
             boolean deleteOrigin)
             throws Exception {
-        migrateHandle(connector, sourceTablePath, targetPaimonTablePath, deleteOrigin);
+        migrateHandle(
+                connector,
+                sourceTablePath,
+                targetPaimonTablePath,
+                deleteOrigin,
+                Runtime.getRuntime().availableProcessors());
+        return new String[] {"Success"};
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String connector,
+            String sourceTablePath,
+            String targetPaimonTablePath,
+            boolean deleteOrigin,
+            Integer parallelism)
+            throws Exception {
+        Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
+        migrateHandle(connector, sourceTablePath, targetPaimonTablePath, deleteOrigin, p);
         return new String[] {"Success"};
     }
 
@@ -59,12 +83,15 @@ public class MigrateFileProcedure extends ProcedureBase {
             String connector,
             String sourceTablePath,
             String targetPaimonTablePath,
-            boolean deleteOrigin)
+            boolean deleteOrigin,
+            Integer parallelism)
             throws Exception {
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
-        if (!(catalog.tableExists(targetTableId))) {
+        try {
+            catalog.getTable(targetTableId);
+        } catch (Catalog.TableNotExistException e) {
             throw new IllegalArgumentException(
                     "Target paimon table does not exist: " + targetPaimonTablePath);
         }
@@ -77,6 +104,7 @@ public class MigrateFileProcedure extends ProcedureBase {
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
+                        parallelism,
                         Collections.emptyMap());
         importer.deleteOriginTable(deleteOrigin);
         importer.executeMigrate();

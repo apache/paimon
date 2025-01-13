@@ -23,8 +23,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
@@ -60,7 +60,7 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
     }
 
     @Override
-    public void cleanUnusedDataFiles(Changelog changelog, Predicate<ManifestEntry> skipper) {
+    public void cleanUnusedDataFiles(Changelog changelog, Predicate<ExpireFileEntry> skipper) {
         if (changelog.changelogManifestList() != null) {
             deleteAddedDataFiles(changelog.changelogManifestList());
         }
@@ -109,7 +109,7 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
 
             // index manifests
             String indexManifest = skippingSnapshot.indexManifest();
-            if (indexManifest != null) {
+            if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
                 skippingSet.add(indexManifest);
                 indexFileHandler.readManifest(indexManifest).stream()
                         .map(IndexManifestEntry::indexFile)

@@ -27,7 +27,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.CompactBucketsTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -85,18 +85,19 @@ public class CompactorSourceBuilder {
         return this;
     }
 
-    private Source<RowData, ?, ?> buildSource(BucketsTable bucketsTable) {
+    private Source<RowData, ?, ?> buildSource(CompactBucketsTable compactBucketsTable) {
 
         if (isContinuous) {
-            bucketsTable = bucketsTable.copy(streamingCompactOptions());
+            compactBucketsTable = compactBucketsTable.copy(streamingCompactOptions());
             return new ContinuousFileStoreSource(
-                    bucketsTable.newReadBuilder().withFilter(partitionPredicate),
-                    bucketsTable.options(),
+                    compactBucketsTable.newReadBuilder().withFilter(partitionPredicate),
+                    compactBucketsTable.options(),
                     null);
         } else {
-            bucketsTable = bucketsTable.copy(batchCompactOptions());
-            ReadBuilder readBuilder = bucketsTable.newReadBuilder().withFilter(partitionPredicate);
-            Options options = bucketsTable.coreOptions().toConfiguration();
+            compactBucketsTable = compactBucketsTable.copy(batchCompactOptions());
+            ReadBuilder readBuilder =
+                    compactBucketsTable.newReadBuilder().withFilter(partitionPredicate);
+            Options options = compactBucketsTable.coreOptions().toConfiguration();
             return new StaticFileStoreSource(
                     readBuilder,
                     null,
@@ -110,11 +111,11 @@ public class CompactorSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
-        BucketsTable bucketsTable = new BucketsTable(table, isContinuous);
-        RowType produceType = bucketsTable.rowType();
+        CompactBucketsTable compactBucketsTable = new CompactBucketsTable(table, isContinuous);
+        RowType produceType = compactBucketsTable.rowType();
         DataStreamSource<RowData> dataStream =
                 env.fromSource(
-                        buildSource(bucketsTable),
+                        buildSource(compactBucketsTable),
                         WatermarkStrategy.noWatermarks(),
                         tableIdentifier + "-compact-source",
                         InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)));
@@ -122,7 +123,7 @@ public class CompactorSourceBuilder {
             Preconditions.checkArgument(
                     partitionIdleTime == null, "Streaming mode does not support partitionIdleTime");
         } else if (partitionIdleTime != null) {
-            Map<BinaryRow, Long> partitionInfo = getPartitionInfo(bucketsTable);
+            Map<BinaryRow, Long> partitionInfo = getPartitionInfo(compactBucketsTable);
             long historyMilli =
                     LocalDateTime.now()
                             .minus(partitionIdleTime)
@@ -175,7 +176,7 @@ public class CompactorSourceBuilder {
         return this;
     }
 
-    private Map<BinaryRow, Long> getPartitionInfo(BucketsTable table) {
+    private Map<BinaryRow, Long> getPartitionInfo(CompactBucketsTable table) {
         List<PartitionEntry> partitions = table.newSnapshotReader().partitionEntries();
 
         return partitions.stream()
