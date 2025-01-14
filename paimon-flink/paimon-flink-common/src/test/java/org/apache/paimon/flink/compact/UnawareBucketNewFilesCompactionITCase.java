@@ -118,7 +118,8 @@ public class UnawareBucketNewFilesCompactionITCase extends AbstractTestBase {
         assertThat(actual.keySet()).hasSameElementsAs(values);
         assertThat(actual.values()).allMatch(i -> i == 3);
 
-        tEnv.executeSql("CALL sys.expire_snapshots(`table` => 'default.T', retain_max => 1)")
+        tEnv.executeSql(
+                        "CALL sys.expire_snapshots(`table` => 'default.T', retain_max => 1, retain_min => 1)")
                 .await();
         assertThat(fileIO.listStatus(new Path(warehouse, "default.db/T/pt=0/bucket-0"))).hasSize(1);
         assertThat(fileIO.listStatus(new Path(warehouse, "default.db/T/pt=1/bucket-0"))).hasSize(1);
