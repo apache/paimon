@@ -69,11 +69,6 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
     }
 
     public void expireTags() throws Exception {
-        bEnv.executeSql(
-                "CREATE TABLE T (id STRING, name STRING,"
-                        + " PRIMARY KEY (id) NOT ENFORCED)"
-                        + " WITH ('bucket'='1', 'write-only'='true')");
-
         FileStoreTable table = getFileStoreTable("T");
 
         // generate 5 snapshots
