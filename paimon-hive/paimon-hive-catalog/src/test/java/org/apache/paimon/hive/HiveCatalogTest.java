@@ -305,8 +305,6 @@ public class HiveCatalogTest extends CatalogTestBase {
             Thread thread1 =
                     new Thread(
                             () -> {
-                                System.out.println(
-                                        "First thread started at " + System.currentTimeMillis());
                                 try {
                                     tables1.addAll(catalog.listTables(databaseName));
                                 } catch (Catalog.DatabaseNotExistException e) {
@@ -316,8 +314,6 @@ public class HiveCatalogTest extends CatalogTestBase {
             Thread thread2 =
                     new Thread(
                             () -> {
-                                System.out.println(
-                                        "Second thread started at " + System.currentTimeMillis());
                                 try {
                                     tables2.addAll(catalog.listTables(databaseName));
                                 } catch (Catalog.DatabaseNotExistException e) {

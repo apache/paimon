@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -59,6 +60,11 @@ public abstract class DelegateCatalog implements Catalog {
     @Override
     public FileIO fileIO() {
         return wrapped.fileIO();
+    }
+
+    @Override
+    public FileIO fileIO(Path path) {
+        return wrapped.fileIO(path);
     }
 
     @Override
