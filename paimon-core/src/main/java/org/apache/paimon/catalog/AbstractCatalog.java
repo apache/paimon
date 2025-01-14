@@ -367,8 +367,9 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        return CatalogUtils.loadTable(
-                this, identifier, this::loadTableMetadata, Lock.emptyFactory());
+        Lock.Factory lockFactory =
+                Lock.factory(lockFactory().orElse(null), lockContext().orElse(null), identifier);
+        return CatalogUtils.loadTable(this, identifier, this::loadTableMetadata, lockFactory);
     }
 
     /**
