@@ -21,11 +21,13 @@ package org.apache.paimon.open.api;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.DropPartitionRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -36,7 +38,6 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -391,9 +392,7 @@ public class RESTCatalogController {
             summary = "Create partition",
             tags = {"partition"})
     @ApiResponses({
-        @ApiResponse(
-                responseCode = "200",
-                content = {@Content(schema = @Schema(implementation = PartitionResponse.class))}),
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -403,18 +402,14 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
-    public PartitionResponse createPartition(
+    public void createPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody CreatePartitionRequest request) {
-        Map<String, String> spec = new HashMap<>();
-        spec.put("f1", "1");
-        return new PartitionResponse(new Partition(spec, 0, 0, 0, 4));
-    }
+            @RequestBody CreatePartitionsRequest request) {}
 
     @Operation(
-            summary = "Drop partition",
+            summary = "Drop partitions",
             tags = {"partition"})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
@@ -426,10 +421,50 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @DeleteMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
-    public void dropPartition(
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/drop")
+    public void dropPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody DropPartitionRequest request) {}
+            @RequestBody DropPartitionsRequest request) {}
+
+    @Operation(
+            summary = "Alter partitions",
+            tags = {"partition"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/alter")
+    public void alterPartitions(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody AlterPartitionsRequest request) {}
+
+    @Operation(
+            summary = "MarkDone partitions",
+            tags = {"partition"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/mark")
+    public void markDonePartitions(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody MarkDonePartitionsRequest request) {}
 }

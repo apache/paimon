@@ -29,6 +29,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -40,6 +41,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -89,7 +91,10 @@ class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
         Identifier identifier = Identifier.create("test_db", "test_table");
-        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        createTable(
+                identifier,
+                ImmutableMap.of(METASTORE_PARTITIONED_TABLE.key(), "" + true),
+                Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);
         assertEquals(0, result.size());
     }
@@ -102,6 +107,16 @@ class RESTCatalogTest extends CatalogTestBase {
         assertEquals(0, result.size());
     }
 
+    @Override
+    protected boolean supportsFormatTable() {
+        return true;
+    }
+
+    @Override
+    protected boolean supportPartitions() {
+        return true;
+    }
+
     private void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {
@@ -109,7 +124,7 @@ class RESTCatalogTest extends CatalogTestBase {
         catalog.createTable(
                 identifier,
                 new Schema(
-                        Lists.newArrayList(new DataField(0, "col1", DataTypes.STRING())),
+                        Lists.newArrayList(new DataField(0, "col1", DataTypes.INT())),
                         partitionKeys,
                         Collections.emptyList(),
                         options,

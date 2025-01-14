@@ -446,8 +446,8 @@ paths:
     post:
       tags:
         - partition
-      summary: Create partition
-      operationId: createPartition
+      summary: Create partitions
+      operationId: createPartitions
       parameters:
         - name: prefix
           in: path
@@ -468,14 +468,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreatePartitionRequest'
+              $ref: '#/components/schemas/CreatePartitionsRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PartitionResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -484,11 +480,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-    delete:
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
+    post:
       tags:
         - partition
-      summary: Drop partition
-      operationId: dropPartition
+      summary: Drop partitions
+      operationId: dropPartitions
       parameters:
         - name: prefix
           in: path
@@ -509,7 +506,83 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DropPartitionRequest'
+              $ref: '#/components/schemas/DropPartitionsRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/alter:
+    post:
+      tags:
+        - partition
+      summary: Alter partitions
+      operationId: alterPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterPartitionsRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/mark:
+    post:
+      tags:
+        - partition
+      summary: MarkDone partitions
+      operationId: markDonePartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkDonePartitionsRequest'
       responses:
         "200":
           description: Success, no content
@@ -532,18 +605,34 @@ components:
           type: object
           additionalProperties:
             type: string
-    CreatePartitionRequest:
+    CreatePartitionsRequest:
       type: object
       properties:
-        identifier:
-          $ref: '#/components/schemas/Identifier'
-        spec:
-          type: object
-    DropPartitionRequest:
+        specs:
+          type: array
+          items:
+            type: object
+    DropPartitionsRequest:
       type: object
       properties:
-        spec:
-          type: object
+        specs:
+          type: array
+          items:
+            type: object
+    AlterTableRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SchemaChange'
+    MarkDonePartitionsRequest:
+      type: object
+      properties:
+        specs:
+          type: array
+          items:
+            type: object
     CreateDatabaseResponse:
       type: object
       properties:
@@ -673,13 +762,8 @@ components:
           format: int64
         schema:
           $ref: '#/components/schemas/Schema'
-    AlterTableRequest:
-      type: object
-      properties:
-        changes:
-          type: array
-          items:
-            $ref: '#/components/schemas/SchemaChange'
+        uuid:
+          type: string
     SchemaChange:
       anyOf:
         - $ref: '#/components/schemas/SetOption'
@@ -827,6 +911,13 @@ components:
           type: object
           additionalProperties:
             type: string
+    AlterPartitionsRequest:
+      type: object
+      properties:
+        partitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partition'
     AlterDatabaseResponse:
       type: object
       properties:
@@ -885,11 +976,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
-    PartitionResponse:
-      type: object
-      properties:
-        partition:
-          $ref: '#/components/schemas/Partition'
     Partition:
       type: object
       properties:

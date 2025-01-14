@@ -16,32 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
-
-import org.apache.paimon.partition.Partition;
-import org.apache.paimon.rest.RESTResponse;
+package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Partition for rest api. */
+import java.util.List;
+import java.util.Map;
+
+/** Request for marking done partition. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class PartitionResponse implements RESTResponse {
-
-    public static final String FIELD_PARTITION = "partition";
-
-    @JsonProperty(FIELD_PARTITION)
-    private final Partition partition;
+public class MarkDonePartitionsRequest extends BasePartitionsRequest {
 
     @JsonCreator
-    public PartitionResponse(@JsonProperty(FIELD_PARTITION) Partition partition) {
-        this.partition = partition;
-    }
-
-    @JsonGetter(FIELD_PARTITION)
-    public Partition getPartition() {
-        return partition;
+    public MarkDonePartitionsRequest(
+            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
+        super(partitionSpecs);
     }
 }

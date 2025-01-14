@@ -25,25 +25,26 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
 import java.util.Map;
 
-/** Request for deleting partition. */
+/** Request for partitions action. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class DropPartitionRequest implements RESTRequest {
+public abstract class BasePartitionsRequest implements RESTRequest {
 
-    private static final String FIELD_PARTITION_SPEC = "spec";
+    protected static final String FIELD_PARTITION_SPECS = "specs";
 
-    @JsonProperty(FIELD_PARTITION_SPEC)
-    private final Map<String, String> partitionSpec;
+    @JsonProperty(FIELD_PARTITION_SPECS)
+    private final List<Map<String, String>> partitionSpecs;
 
     @JsonCreator
-    public DropPartitionRequest(
-            @JsonProperty(FIELD_PARTITION_SPEC) Map<String, String> partitionSpec) {
-        this.partitionSpec = partitionSpec;
+    public BasePartitionsRequest(
+            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
+        this.partitionSpecs = partitionSpecs;
     }
 
-    @JsonGetter(FIELD_PARTITION_SPEC)
-    public Map<String, String> getPartitionSpec() {
-        return partitionSpec;
+    @JsonGetter(FIELD_PARTITION_SPECS)
+    public List<Map<String, String>> getPartitionSpecs() {
+        return partitionSpecs;
     }
 }
