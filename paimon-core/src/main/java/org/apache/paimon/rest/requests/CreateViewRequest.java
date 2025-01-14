@@ -20,7 +20,7 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTRequest;
-import org.apache.paimon.rest.ViewSchema;
+import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;

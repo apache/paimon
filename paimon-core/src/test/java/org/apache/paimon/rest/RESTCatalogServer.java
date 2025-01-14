@@ -51,6 +51,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
+import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 

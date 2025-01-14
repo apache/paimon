@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.view;
 
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -55,6 +55,8 @@ public class ViewSchema {
     @JsonProperty(FIELD_FIELDS)
     private final List<DataField> fields;
 
+    private final RowType rowType;
+
     @JsonCreator
     public ViewSchema(
             @JsonProperty(FIELD_FIELDS) List<DataField> fields,
@@ -65,10 +67,20 @@ public class ViewSchema {
         this.options = options;
         this.comment = comment;
         this.query = query;
+        this.rowType = new RowType(fields);
+    }
+
+    public ViewSchema(
+            String query, @Nullable String comment, Map<String, String> options, RowType rowType) {
+        this.query = query;
+        this.comment = comment;
+        this.options = options;
+        this.rowType = rowType;
+        this.fields = rowType.getFields();
     }
 
     public RowType rowType() {
-        return new RowType(fields);
+        return rowType;
     }
 
     @JsonGetter(FIELD_QUERY)

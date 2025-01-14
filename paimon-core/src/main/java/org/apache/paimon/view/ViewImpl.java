@@ -35,10 +35,7 @@ import java.util.Optional;
 public class ViewImpl implements View {
 
     private final Identifier identifier;
-    private final RowType rowType;
-    private final String query;
-    @Nullable private final String comment;
-    private final Map<String, String> options;
+    private final ViewSchema viewSchema;
 
     public ViewImpl(
             Identifier identifier,
@@ -47,10 +44,7 @@ public class ViewImpl implements View {
             @Nullable String comment,
             Map<String, String> options) {
         this.identifier = identifier;
-        this.rowType = rowType;
-        this.query = query;
-        this.comment = comment;
-        this.options = options;
+        this.viewSchema = new ViewSchema(query, comment, options, rowType);
     }
 
     @Override
@@ -65,29 +59,29 @@ public class ViewImpl implements View {
 
     @Override
     public RowType rowType() {
-        return rowType;
+        return this.viewSchema.rowType();
     }
 
     @Override
     public String query() {
-        return query;
+        return this.viewSchema.query();
     }
 
     @Override
     public Optional<String> comment() {
-        return Optional.ofNullable(comment);
+        return Optional.ofNullable(this.viewSchema.comment());
     }
 
     @Override
     public Map<String, String> options() {
-        return options;
+        return this.viewSchema.options();
     }
 
     @Override
     public View copy(Map<String, String> dynamicOptions) {
-        Map<String, String> newOptions = new HashMap<>(options);
+        Map<String, String> newOptions = new HashMap<>(options());
         newOptions.putAll(dynamicOptions);
-        return new ViewImpl(identifier, rowType, query, comment, newOptions);
+        return new ViewImpl(identifier, rowType(), query(), this.viewSchema.comment(), newOptions);
     }
 
     @Override
@@ -100,14 +94,11 @@ public class ViewImpl implements View {
         }
         ViewImpl view = (ViewImpl) o;
         return Objects.equals(identifier, view.identifier)
-                && Objects.equals(rowType, view.rowType)
-                && Objects.equals(query, view.query)
-                && Objects.equals(comment, view.comment)
-                && Objects.equals(options, view.options);
+                && Objects.equals(viewSchema, view.viewSchema);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(identifier, rowType, query, comment, options);
+        return Objects.hash(identifier, viewSchema);
     }
 }

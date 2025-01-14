@@ -20,7 +20,6 @@ package org.apache.paimon.open.api;
 
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.ResourcePaths;
-import org.apache.paimon.rest.ViewSchema;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -44,6 +43,7 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
