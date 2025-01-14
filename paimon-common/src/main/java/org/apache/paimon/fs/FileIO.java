@@ -134,6 +134,15 @@ public interface FileIO extends Serializable {
     }
 
     /**
+     * Tests whether {@link #listFilesPaged} is supported.
+     *
+     * @return whether {@link #listFilesPaged} is supported
+     */
+    default boolean supportsListFilesPaged() {
+        return false;
+    }
+
+    /**
      * List the statuses of the files in the given path in non-overlapping pages, if the path is a
      * directory.
      *
