@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
-import org.apache.paimon.format.avro.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -54,9 +53,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.avro.file.DataFileReader;
-import org.apache.avro.file.FileReader;
-import org.apache.avro.file.SeekableInput;
+import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.slf4j.Logger;
@@ -335,23 +332,14 @@ public class IcebergMigrator implements Migrator {
     }
 
     public long getSchemaIdFromIcebergManifestFile(Path manifestPath) {
-        try {
-            // read raw iceberg manifest file with avro format to get the schema
-            SeekableInput in =
-                    new SeekableInputStreamWrapper(
-                            paimonFileIO.newInputStream(manifestPath),
-                            paimonFileIO.getFileSize(manifestPath));
-            FileReader<GenericRecord> dataFileReader =
-                    DataFileReader.openReader(in, new GenericDatumReader<>());
-            String schema = ((DataFileReader) dataFileReader).getMetaString("schema");
-            dataFileReader.close();
+
+        try (DataFileStream<GenericRecord> dataFileStream =
+                new DataFileStream<>(
+                        paimonFileIO.newInputStream(manifestPath), new GenericDatumReader<>())) {
+            String schema = dataFileStream.getMetaString("schema");
             return JsonSerdeUtil.fromJson(schema, IcebergSchema.class).schemaId();
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Can not get schema id in iceberg manifest file, file path is %s",
-                            manifestPath.toString()),
-                    e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
