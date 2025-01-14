@@ -49,7 +49,7 @@ case class SparkRemoveUnexistingFiles(
 
     val numPartitionFields = table.schema().partitionKeys().size()
     val pathAndMessage = spark.sparkContext
-      .parallelize(binaryPartitions.asScala.map(partition => partition.toBytes), realParallelism)
+      .parallelize(binaryPartitions.asScala.map(partition => partition.toBytes).toSeq, realParallelism)
       .mapPartitions {
         iter =>
           {
