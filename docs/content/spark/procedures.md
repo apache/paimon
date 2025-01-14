@@ -257,6 +257,24 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>remove_unexisting_files</td>
+      <td>
+        Procedure to remove unexisting data files from manifest entries. See <a href="https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/RemoveUnexistingFilesAction.html">Java docs</a> for detailed use cases. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
+            <li>dryRun (optional): only check what files will be removed, but not really remove them. Default is false.</li>
+            <li>parallelism (optional): number of parallelisms to check files in the manifests.</li>
+         <br>
+         Note that user is on his own risk using this procedure, which may cause data loss when used outside from the use cases listed in Java docs.
+      </td>
+      <td>
+        -- remove unexisting data files in the table `mydb.myt`
+        CALL sys.remove_unexisting_files(table => 'mydb.myt')
+        <br>
+        -- only check what files will be removed, but not really remove them (dry run)
+        CALL sys.remove_unexisting_files(table => 'mydb.myt', dry_run = true)
+      </td>
+   </tr>
+    <tr>
       <td>repair</td>
       <td>
          Synchronize information from the file system to Metastore. Argument:
