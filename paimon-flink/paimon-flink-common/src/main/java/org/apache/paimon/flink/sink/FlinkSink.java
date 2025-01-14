@@ -248,7 +248,7 @@ public abstract class FlinkSink<T> implements Serializable {
                                     "Changelog Compact Coordinator",
                                     new EitherTypeInfo<>(
                                             new CommittableTypeInfo(), new ChangelogTaskTypeInfo()),
-                                    new ChangelogCompactCoordinateOperator(table))
+                                    new ChangelogCompactCoordinateOperator(table.coreOptions()))
                             .forceNonParallel()
                             .transform(
                                     "Changelog Compact Worker",

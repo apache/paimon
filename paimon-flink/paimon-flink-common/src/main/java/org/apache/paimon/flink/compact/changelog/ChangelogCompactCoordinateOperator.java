@@ -18,12 +18,13 @@
 
 package org.apache.paimon.flink.compact.changelog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -35,6 +36,7 @@ import org.apache.flink.types.Either;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -49,13 +51,14 @@ public class ChangelogCompactCoordinateOperator
         extends AbstractStreamOperator<Either<Committable, ChangelogCompactTask>>
         implements OneInputStreamOperator<Committable, Either<Committable, ChangelogCompactTask>>,
                 BoundedOneInput {
-    private final FileStoreTable table;
+
+    private final CoreOptions options;
 
     private transient long checkpointId;
     private transient Map<BinaryRow, PartitionChangelog> partitionChangelogs;
 
-    public ChangelogCompactCoordinateOperator(FileStoreTable table) {
-        this.table = table;
+    public ChangelogCompactCoordinateOperator(CoreOptions options) {
+        this.options = options;
     }
 
     @Override
@@ -63,7 +66,7 @@ public class ChangelogCompactCoordinateOperator
         super.open();
 
         checkpointId = Long.MIN_VALUE;
-        partitionChangelogs = new HashMap<>();
+        partitionChangelogs = new LinkedHashMap<>();
     }
 
     public void processElement(StreamRecord<Committable> record) {
@@ -81,10 +84,26 @@ public class ChangelogCompactCoordinateOperator
             return;
         }
 
+        // Changelog files are not stored in an LSM tree,
+        // so we can regard them as files without primary keys.
+        long targetFileSize = options.targetFileSize(false);
+        long compactionFileSize =
+                Math.min(
+                        options.compactionFileSize(false),
+                        options.toConfiguration()
+                                .get(FlinkConnectorOptions.CHANGELOG_PRECOMMIT_COMPACT_BUFFER_SIZE)
+                                .getBytes());
+
         BinaryRow partition = message.partition();
         Integer bucket = message.bucket();
-        long targetFileSize = table.coreOptions().targetFileSize(false);
+        List<DataFileMeta> skippedNewChangelogs = new ArrayList<>();
+        List<DataFileMeta> skippedCompactChangelogs = new ArrayList<>();
+
         for (DataFileMeta meta : message.newFilesIncrement().changelogFiles()) {
+            if (meta.fileSize() >= compactionFileSize) {
+                skippedNewChangelogs.add(meta);
+                continue;
+            }
             partitionChangelogs
                     .computeIfAbsent(partition, k -> new PartitionChangelog())
                     .addNewChangelogFile(bucket, meta);
@@ -94,6 +113,10 @@ public class ChangelogCompactCoordinateOperator
             }
         }
         for (DataFileMeta meta : message.compactIncrement().changelogFiles()) {
+            if (meta.fileSize() >= compactionFileSize) {
+                skippedCompactChangelogs.add(meta);
+                continue;
+            }
             partitionChangelogs
                     .computeIfAbsent(partition, k -> new PartitionChangelog())
                     .addCompactChangelogFile(bucket, meta);
@@ -111,11 +134,11 @@ public class ChangelogCompactCoordinateOperator
                         new DataIncrement(
                                 message.newFilesIncrement().newFiles(),
                                 message.newFilesIncrement().deletedFiles(),
-                                Collections.emptyList()),
+                                skippedNewChangelogs),
                         new CompactIncrement(
                                 message.compactIncrement().compactBefore(),
                                 message.compactIncrement().compactAfter(),
-                                Collections.emptyList()),
+                                skippedCompactChangelogs),
                         message.indexIncrement());
         Committable newCommittable =
                 new Committable(committable.checkpointId(), Committable.Kind.FILE, newMessage);
@@ -132,15 +155,59 @@ public class ChangelogCompactCoordinateOperator
 
     private void emitPartitionChangelogCompactTask(BinaryRow partition) {
         PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
-        output.collect(
-                new StreamRecord<>(
-                        Either.Right(
-                                new ChangelogCompactTask(
-                                        checkpointId,
-                                        partition,
-                                        table.coreOptions().bucket(),
-                                        partitionChangelog.newFileChangelogFiles,
-                                        partitionChangelog.compactChangelogFiles))));
+        int numNewChangelogFiles =
+                partitionChangelog.newFileChangelogFiles.values().stream()
+                        .mapToInt(List::size)
+                        .sum();
+        int numCompactChangelogFiles =
+                partitionChangelog.compactChangelogFiles.values().stream()
+                        .mapToInt(List::size)
+                        .sum();
+        if (numNewChangelogFiles + numCompactChangelogFiles == 1) {
+            // there is only one changelog file in this partition, so we don't wrap it as a
+            // compaction task
+            CommitMessageImpl message;
+            if (numNewChangelogFiles == 1) {
+                Map.Entry<Integer, List<DataFileMeta>> entry =
+                        partitionChangelog.newFileChangelogFiles.entrySet().iterator().next();
+                message =
+                        new CommitMessageImpl(
+                                partition,
+                                entry.getKey(),
+                                options.bucket(),
+                                new DataIncrement(
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        entry.getValue()),
+                                CompactIncrement.emptyIncrement());
+            } else {
+                Map.Entry<Integer, List<DataFileMeta>> entry =
+                        partitionChangelog.compactChangelogFiles.entrySet().iterator().next();
+                message =
+                        new CommitMessageImpl(
+                                partition,
+                                entry.getKey(),
+                                options.bucket(),
+                                DataIncrement.emptyIncrement(),
+                                new CompactIncrement(
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        entry.getValue()));
+            }
+            Committable newCommittable =
+                    new Committable(checkpointId, Committable.Kind.FILE, message);
+            output.collect(new StreamRecord<>(Either.Left(newCommittable)));
+        } else {
+            output.collect(
+                    new StreamRecord<>(
+                            Either.Right(
+                                    new ChangelogCompactTask(
+                                            checkpointId,
+                                            partition,
+                                            options.bucket(),
+                                            partitionChangelog.newFileChangelogFiles,
+                                            partitionChangelog.compactChangelogFiles))));
+        }
         partitionChangelogs.remove(partition);
     }
 

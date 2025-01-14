@@ -679,7 +679,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + "WITH ("
                         + "    'bucket' = '10',\n"
                         + "    'changelog-producer' = 'lookup',\n"
-                        + "    'changelog.precommit-compact' = 'true',\n"
+                        + "    'precommit-compact' = 'true',\n"
                         + "    'snapshot.num-retained.min' = '3',\n"
                         + "    'snapshot.num-retained.max' = '3'\n"
                         + ")");
@@ -773,7 +773,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + "WITH ("
                         + "    'bucket' = '10',\n"
                         + "    'changelog-producer' = 'lookup',\n"
-                        + "    'changelog.precommit-compact' = 'true'\n"
+                        + "    'precommit-compact' = 'true'\n"
                         + ")");
 
         Path inputPath = new Path(path, "input");
@@ -1014,7 +1014,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 + "'changelog-producer' = 'lookup', "
                                 + "'lookup-wait' = '%s', "
                                 + "'deletion-vectors.enabled' = '%s', "
-                                + "'changelog.precommit-compact' = '%s'",
+                                + "'precommit-compact' = '%s'",
                         random.nextBoolean() ? "4mb" : "8mb",
                         random.nextBoolean(),
                         enableDeletionVectors,
