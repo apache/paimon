@@ -16,22 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.rest.requests;
 
-import java.io.Closeable;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
+import java.util.List;
 import java.util.Map;
 
-/** Interface for a basic HTTP Client for interfacing with the REST catalog. */
-public interface RESTClient extends Closeable {
+/** Request for dropping partition. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class DropPartitionsRequest extends BasePartitionsRequest {
 
-    <T extends RESTResponse> T get(String path, Class<T> responseType, Map<String, String> headers);
-
-    <T extends RESTResponse> T post(String path, RESTRequest body, Map<String, String> headers);
-
-    <T extends RESTResponse> T post(
-            String path, RESTRequest body, Class<T> responseType, Map<String, String> headers);
-
-    <T extends RESTResponse> T delete(String path, Map<String, String> headers);
-
-    <T extends RESTResponse> T delete(String path, RESTRequest body, Map<String, String> headers);
+    @JsonCreator
+    public DropPartitionsRequest(
+            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
+        super(partitionSpecs);
+    }
 }

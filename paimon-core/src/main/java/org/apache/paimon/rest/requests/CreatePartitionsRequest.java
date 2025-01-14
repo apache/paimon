@@ -18,44 +18,20 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.rest.RESTRequest;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
 import java.util.Map;
 
 /** Request for creating partition. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class CreatePartitionRequest implements RESTRequest {
-
-    private static final String FIELD_IDENTIFIER = "identifier";
-    private static final String FIELD_PARTITION_SPEC = "spec";
-
-    @JsonProperty(FIELD_IDENTIFIER)
-    private final Identifier identifier;
-
-    @JsonProperty(FIELD_PARTITION_SPEC)
-    private final Map<String, String> partitionSpec;
+public class CreatePartitionsRequest extends BasePartitionsRequest {
 
     @JsonCreator
-    public CreatePartitionRequest(
-            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
-            @JsonProperty(FIELD_PARTITION_SPEC) Map<String, String> partitionSpec) {
-        this.identifier = identifier;
-        this.partitionSpec = partitionSpec;
-    }
-
-    @JsonGetter(FIELD_IDENTIFIER)
-    public Identifier getIdentifier() {
-        return identifier;
-    }
-
-    @JsonGetter(FIELD_PARTITION_SPEC)
-    public Map<String, String> getPartitionSpec() {
-        return partitionSpec;
+    public CreatePartitionsRequest(
+            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
+        super(partitionSpecs);
     }
 }

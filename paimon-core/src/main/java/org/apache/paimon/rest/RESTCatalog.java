@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -29,6 +28,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -40,9 +40,13 @@ import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -61,6 +65,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -79,9 +84,12 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.catalog.CatalogUtils.buildFormatTableByTableSchema;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.getTableType;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
@@ -390,32 +398,89 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        Table table = getTable(identifier);
+        if (isMetaStorePartitionedTable(table)) {
+            try {
+                CreatePartitionsRequest request = new CreatePartitionsRequest(partitions);
+                client.post(
+                        resourcePaths.partitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        headers());
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            }
+        }
     }
 
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        Table table = getTable(identifier);
+        if (isMetaStorePartitionedTable(table)) {
+            try {
+                DropPartitionsRequest request = new DropPartitionsRequest(partitions);
+                client.post(
+                        resourcePaths.dropPartitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        headers());
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            }
+        } else {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            try (FileStoreCommit commit =
+                    fileStoreTable
+                            .store()
+                            .newCommit(
+                                    createCommitUser(
+                                            fileStoreTable.coreOptions().toConfiguration()))) {
+                commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+            }
+        }
     }
 
     @Override
     public void alterPartitions(Identifier identifier, List<Partition> partitions)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        Table table = getTable(identifier);
+        if (isMetaStorePartitionedTable(table)) {
+            try {
+                AlterPartitionsRequest request = new AlterPartitionsRequest(partitions);
+                client.post(
+                        resourcePaths.alterPartitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        headers());
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            }
+        }
     }
 
     @Override
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        throw new UnsupportedOperationException();
+        Table table = getTable(identifier);
+        if (isMetaStorePartitionedTable(table)) {
+            try {
+                MarkDonePartitionsRequest request = new MarkDonePartitionsRequest(partitions);
+                client.post(
+                        resourcePaths.markDonePartitions(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        headers());
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            }
+        }
     }
 
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         Table table = getTable(identifier);
-        Options options = Options.fromMap(table.options());
-        if (!options.get(METASTORE_PARTITIONED_TABLE)) {
+        if (!isMetaStorePartitionedTable(table)) {
             return listPartitionsFromFileSystem(table);
         }
 
@@ -471,7 +536,16 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
-
+        TableType tableType = getTableType(response.getSchema().options());
+        if (tableType == TableType.FORMAT_TABLE) {
+            Schema schema = response.getSchema();
+            return buildFormatTableByTableSchema(
+                    identifier,
+                    schema.options(),
+                    schema.rowType(),
+                    schema.partitionKeys(),
+                    schema.comment());
+        }
         TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
         FileStoreTable table =
                 FileStoreTableFactory.create(
@@ -483,9 +557,8 @@ public class RESTCatalog implements Catalog {
                                 response.getId(),
                                 Lock.emptyFactory(),
                                 catalogLoader()));
-        CoreOptions options = table.coreOptions();
-        if (options.type() == TableType.OBJECT_TABLE) {
-            String objectLocation = options.objectLocation();
+        if (tableType == TableType.OBJECT_TABLE) {
+            String objectLocation = table.coreOptions().objectLocation();
             checkNotNull(objectLocation, "Object location should not be null for object table.");
             table =
                     ObjectTable.builder()
@@ -495,6 +568,11 @@ public class RESTCatalog implements Catalog {
                             .build();
         }
         return table;
+    }
+
+    private boolean isMetaStorePartitionedTable(Table table) {
+        Options options = Options.fromMap(table.options());
+        return Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE));
     }
 
     private Map<String, String> headers() {

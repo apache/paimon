@@ -71,6 +71,7 @@ import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.UnknownTableException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
@@ -492,6 +493,8 @@ public class HiveCatalog extends AbstractCatalog {
                     });
         } catch (NoSuchObjectException e) {
             // do nothing if the partition not exists
+        } catch (UnknownTableException e) {
+            throw new TableNotExistException(identifier);
         } catch (TException | InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -513,15 +516,30 @@ public class HiveCatalog extends AbstractCatalog {
                                                 Short.MAX_VALUE));
                 return partitions.stream()
                         .map(
-                                part ->
-                                        new org.apache.paimon.partition.Partition(
-                                                Collections.singletonMap(
-                                                        tagToPartitionField,
-                                                        part.getValues().get(0)),
-                                                1L,
-                                                1L,
-                                                1L,
-                                                System.currentTimeMillis()))
+                                part -> {
+                                    Map<String, String> parameters = part.getParameters();
+                                    long recordCount =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(NUM_ROWS_PROP, "1"));
+                                    long fileSizeInBytes =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(TOTAL_SIZE_PROP, "1"));
+                                    long fileCount =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(NUM_FILES_PROP, "1"));
+                                    long lastFileCreationTime =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(
+                                                            LAST_UPDATE_TIME_PROP,
+                                                            System.currentTimeMillis() + ""));
+                                    return new org.apache.paimon.partition.Partition(
+                                            Collections.singletonMap(
+                                                    tagToPartitionField, part.getValues().get(0)),
+                                            recordCount,
+                                            fileSizeInBytes,
+                                            fileCount,
+                                            lastFileCreationTime);
+                                })
                         .collect(Collectors.toList());
             } catch (Exception e) {
                 throw new RuntimeException(e);
