@@ -30,7 +30,20 @@ You can streaming write to the Append table in a very flexible way through Flink
 Flink, using it like a queue. The only difference is that its latency is in minutes. Its advantages are very low cost
 and the ability to push down filters and projection.
 
-## Automatic small file merging
+## Pre small files merging
+
+Pre means that this compact occurs before committing files to the snapshot.
+
+If Flink's checkpoint interval is short (for example, 30 seconds), each snapshot may produce lots of small changelog
+files. Too many files may put a burden on the distributed storage cluster.
+
+In order to compact small changelog files into large ones, you can set the table option `precommit-compact = true`.
+Default value of this option is false, if true, it will add a compact coordinator and worker operator after the writer
+operator, which copies changelog files into large ones.
+
+## Post small files merging
+
+Post means that this compact occurs after committing files to the snapshot.
 
 In streaming writing job, without bucket definition, there is no compaction in writer, instead, will use
 `Compact Coordinator` to scan the small files and pass compaction task to `Compact Worker`. In streaming mode, if you
