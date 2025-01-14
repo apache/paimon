@@ -303,14 +303,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             this.sequenceGroupPartialDelete = new HashSet<>();
 
             List<String> fieldNames = rowType.getFieldNames();
-            List<String> sequenceFields = new ArrayList<>();
             this.fieldSeqComparators = new HashMap<>();
             Map<String, Integer> sequenceGroupMap = new HashMap<>();
+            List<String> allSequenceFields = new ArrayList<>();
             for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
                 String k = entry.getKey();
                 String v = entry.getValue();
                 if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
-                    sequenceFields.addAll(
+                    List<String> sequenceFields =
                             Arrays.stream(
                                             k.substring(
                                                             FIELDS_PREFIX.length() + 1,
@@ -319,7 +319,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                                                     - 1)
                                                     .split(FIELDS_SEPARATOR))
                                     .map(fieldName -> validateFieldName(fieldName, fieldNames))
-                                    .collect(Collectors.toList()));
+                                    .collect(Collectors.toList());
+                    allSequenceFields.addAll(sequenceFields);
 
                     Supplier<FieldsComparator> userDefinedSeqComparator =
                             () -> UserDefinedSeqComparator.create(rowType, sequenceFields, true);
@@ -350,7 +351,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
             this.fieldAggregators =
                     createFieldAggregators(
-                            rowType, primaryKeys, sequenceFields, new CoreOptions(options));
+                            rowType, primaryKeys, allSequenceFields, new CoreOptions(options));
             if (!fieldAggregators.isEmpty() && fieldSeqComparators.isEmpty()) {
                 throw new IllegalArgumentException(
                         "Must use sequence group for aggregation functions.");
@@ -519,7 +520,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         private Map<Integer, Supplier<FieldAggregator>> createFieldAggregators(
                 RowType rowType,
                 List<String> primaryKeys,
-                List<String> sequenceFields,
+                List<String> allSequenceFields,
                 CoreOptions options) {
 
             List<String> fieldNames = rowType.getFieldNames();
@@ -545,7 +546,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                             isPrimaryKey,
                                             options,
                                             fieldName));
-                } else if (defaultAggFunc != null && !sequenceFields.contains(fieldName)) {
+                } else if (defaultAggFunc != null && !allSequenceFields.contains(fieldName)) {
                     // no agg for sequence fields
                     fieldAggregators.put(
                             i,
