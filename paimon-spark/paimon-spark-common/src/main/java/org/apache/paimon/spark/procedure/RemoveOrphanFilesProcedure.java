@@ -23,7 +23,6 @@ import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
-import org.apache.paimon.spark.orphan.SparkOrphanFilesClean;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.spark.sql.catalyst.InternalRow;
