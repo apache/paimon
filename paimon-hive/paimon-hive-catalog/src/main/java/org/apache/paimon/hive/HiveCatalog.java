@@ -698,12 +698,15 @@ public class HiveCatalog extends AbstractCatalog {
                     .orElseThrow(() -> new TableNotExistException(identifier));
         }
 
-        try {
-            Schema schema = tryToFormatSchema(table);
-            return TableSchema.create(0, schema);
-        } catch (UnsupportedOperationException e) {
-            throw new TableNotExistException(identifier);
+        if (!formatTableDisabled()) {
+            try {
+                Schema schema = tryToFormatSchema(table);
+                return TableSchema.create(0, schema);
+            } catch (UnsupportedOperationException ignored) {
+            }
         }
+
+        throw new TableNotExistException(identifier);
     }
 
     @Override
