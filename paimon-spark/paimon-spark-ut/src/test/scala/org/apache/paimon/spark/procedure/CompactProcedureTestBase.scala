@@ -780,6 +780,36 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: sort compact then delete") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, pt STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+
+    spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p1')")
+    spark.sql(s"INSERT INTO T VALUES (3, 'c', 'p1'), (4, '44', 'p1')")
+    spark.sql(s"INSERT INTO T VALUES (5, '55', 'p1'), (6, '66', 'p1')")
+
+    spark.sql(
+      "CALL sys.compact(table => 'T', partitions => 'pt=\"p1\"', order_strategy => 'order', order_by => 'id')")
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
+
+    // delete
+    spark.sql(s"DELETE FROM T WHERE value = 55")
+    val size = spark.sql(s"SELECT * FROM `T` ").collectAsList().size()
+    Assertions.assertThat(size).isEqualTo(5)
+
+    checkAnswer(
+      spark.sql(s"SELECT * FROM T ORDER BY id"),
+      Row(1, "a", "p1") :: Row(2, "b", "p1") :: Row(3, "c", "p1") :: Row(4, "44", "p1") :: Row(
+        6,
+        "66",
+        "p1") :: Nil)
+  }
+
   def lastSnapshotCommand(table: FileStoreTable): CommitKind = {
     table.snapshotManager().latestSnapshot().commitKind()
   }

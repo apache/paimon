@@ -31,7 +31,7 @@ import org.apache.paimon.utils.InternalRowPartitionComputer
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
-import org.apache.spark.sql.catalyst.expressions.{And, Expression, Not}
+import org.apache.spark.sql.catalyst.expressions.{And, EqualNullSafe, Expression, Literal, Not}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -147,7 +147,8 @@ case class DeleteFromPaimonTableCommand(
         createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
 
       // Step4: build a dataframe that contains the unchanged data, and write out them.
-      val toRewriteScanRelation = Filter(Not(condition), newRelation)
+      val toRewriteScanRelation =
+        Filter(Not(EqualNullSafe(condition, Literal.TrueLiteral)), newRelation)
       val data = createDataset(sparkSession, toRewriteScanRelation)
 
       // only write new files, should have no compaction
