@@ -164,12 +164,10 @@ public class CatalogUtils {
      * <ul>
      *   <li>1. Global System table: contains the statistical information of all the tables exists.
      *   <li>2. Format table: refers to a directory that contains multiple files of the same format.
-     *   <li>3. Data table: Normal {@link FileStoreTable}, primary key table or non-primary-key
-     *       table.
-     *   <li>4. Object table: provides metadata indexes for unstructured data objects in this
-     *       directory
-     *   <li>5. System table: wraps the Data table or the Object table, such as the snapshots
-     *       created.
+     *   <li>3. Data table: Normal {@link FileStoreTable}, primary key table or append table.
+     *   <li>4. Object table: provides metadata indexes for unstructured data in the location.
+     *   <li>5. System table: wraps Data table or Object table, such as the snapshots created.
+     * </ul>
      */
     public static Table loadTable(
             Catalog catalog,
