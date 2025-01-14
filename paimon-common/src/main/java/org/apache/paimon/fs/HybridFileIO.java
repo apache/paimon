@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class HybridFileIO implements FileIO {
     private static final long serialVersionUID = 1L;
 
-    protected Options options;
+    private Options options;
 
     private Map<String, FileIO> fileIOMap;
     private volatile FileIO fallbackFileIO;
@@ -110,11 +110,11 @@ public class HybridFileIO implements FileIO {
                 if (!fileIOMap.containsKey(scheme)) {
                     CatalogContext catalogContext = CatalogContext.create(options);
                     FileIO fileIO = FileIO.get(path, catalogContext);
-                    fileIOMap.put(path.toUri().getScheme(), fileIO);
+                    fileIOMap.put(scheme, fileIO);
                 }
             }
         }
-        return fileIOMap.get(path.toUri().getScheme());
+        return fileIOMap.get(scheme);
     }
 
     private <T> T wrap(Func<T> func) throws IOException {

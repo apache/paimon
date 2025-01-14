@@ -74,11 +74,10 @@ public class HybridFileIOTest {
 
     @Test
     public void testFileIOConcurrentAccessInitializesFallbackFileIO() throws Exception {
-        Path path = new Path("file:///path/to/file");
-
+        Path fileSchemePath = new Path("file:///path/to/file");
         ExecutorService executorService = Executors.newFixedThreadPool(2);
-        Future<FileIO> future1 = executorService.submit(() -> hybridFileIO.fileIO(path));
-        Future<FileIO> future2 = executorService.submit(() -> hybridFileIO.fileIO(path));
+        Future<FileIO> future1 = executorService.submit(() -> hybridFileIO.fileIO(fileSchemePath));
+        Future<FileIO> future2 = executorService.submit(() -> hybridFileIO.fileIO(fileSchemePath));
 
         FileIO result1 = future1.get();
         FileIO result2 = future2.get();
@@ -87,6 +86,30 @@ public class HybridFileIOTest {
         assertNotNull(result2);
         assertEquals(result1, result2);
         assertInstanceOf(LocalFileIO.class, result1);
+
+        Path noSchemePath = new Path("/path/to/file");
+        future1 = executorService.submit(() -> hybridFileIO.fileIO(noSchemePath));
+        future2 = executorService.submit(() -> hybridFileIO.fileIO(noSchemePath));
+
+        result1 = future1.get();
+        result2 = future2.get();
+
+        assertNotNull(result1);
+        assertNotNull(result2);
+        assertEquals(result1, result2);
+        assertInstanceOf(LocalFileIO.class, result1);
+
+        Path hdfsSchemePath = new Path("hdfs:///path/to/file");
+        future1 = executorService.submit(() -> hybridFileIO.fileIO(hdfsSchemePath));
+        future2 = executorService.submit(() -> hybridFileIO.fileIO(hdfsSchemePath));
+
+        result1 = future1.get();
+        result2 = future2.get();
+
+        assertNotNull(result1);
+        assertNotNull(result2);
+        assertEquals(result1, result2);
+        assertInstanceOf(HadoopFileIO.class, result1);
     }
 
     @Test
