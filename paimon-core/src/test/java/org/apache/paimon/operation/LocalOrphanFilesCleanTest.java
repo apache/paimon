@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Changelog;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
@@ -89,14 +90,14 @@ public class LocalOrphanFilesCleanTest {
     private static final Random RANDOM = new Random(System.currentTimeMillis());
 
     @TempDir private java.nio.file.Path tempDir;
-    private Path tablePath;
+    private static Path tablePath;
     private FileIO fileIO;
     private RowType rowType;
     private FileStoreTable table;
     private TableWriteImpl<?> write;
     private TableCommitImpl commit;
     private Path manifestDir;
-
+    @TempDir private java.nio.file.Path tmpExternalPath;
     private long incrementalIdentifier;
     private List<Path> manuallyAddedFiles;
 
@@ -128,7 +129,28 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
+    public void testNormallyRemovingWithExternalPath() throws Throwable {
+        // recreate the table with another option
+        this.write.close();
+        this.commit.close();
+        Options options = new Options();
+        String externalPaths = "file://" + tmpExternalPath;
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, externalPaths);
+        options.set(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY, ExternalPathStrategy.ROUND_ROBIN);
+        this.table = createFileStoreTable(rowType, options);
+        String commitUser = UUID.randomUUID().toString();
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        normallyRemoving(new Path(tmpExternalPath.toString()));
+    }
+
+    @Test
     public void testNormallyRemoving() throws Throwable {
+        normallyRemoving(tablePath);
+    }
+
+    public void normallyRemoving(Path dataPath) throws Throwable {
         int commitTimes = 30;
         List<List<TestPojo>> committedData = new ArrayList<>();
         Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
@@ -151,7 +173,7 @@ public class LocalOrphanFilesCleanTest {
         table.createBranch("branch1", allTags.get(0));
 
         // generate non used files
-        int shouldBeDeleted = generateUnUsedFile();
+        int shouldBeDeleted = generateUnUsedFile(dataPath);
         assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
 
         // randomly expire snapshots
@@ -330,15 +352,34 @@ public class LocalOrphanFilesCleanTest {
     @ParameterizedTest(name = "changelog-producer = {0}")
     public void testCleanOrphanFilesWithChangelogDecoupled(String changelogProducer)
             throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);
+        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
+        options.set(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
+        cleanOrphanFilesWithChangelogDecoupled(tablePath, options);
+    }
+
+    @ValueSource(strings = {"none", "input"})
+    @ParameterizedTest(name = "changelog-producer = {0}")
+    public void testCleanOrphanFilesWithChangelogDecoupledWithExternalPath(String changelogProducer)
+            throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);
+        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
+        options.set(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
+        String externalPaths = "file://" + tmpExternalPath;
+        options.set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, externalPaths);
+        options.set(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY, ExternalPathStrategy.ROUND_ROBIN);
+        cleanOrphanFilesWithChangelogDecoupled(new Path(tmpExternalPath.toString()), options);
+    }
+
+    public void cleanOrphanFilesWithChangelogDecoupled(Path dataPath, Options options)
+            throws Exception {
         // recreate the table with another option
         this.write.close();
         this.commit.close();
         int commitTimes = 30;
-        Options options = new Options();
-        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
-        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);
-        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
-        options.setString(CoreOptions.CHANGELOG_PRODUCER.key(), changelogProducer);
         FileStoreTable table = createFileStoreTable(rowType, options);
         String commitUser = UUID.randomUUID().toString();
         this.table = table;
@@ -356,7 +397,7 @@ public class LocalOrphanFilesCleanTest {
         table.createBranch("branch1");
 
         // generate non used files
-        int shouldBeDeleted = generateUnUsedFile();
+        int shouldBeDeleted = generateUnUsedFile(dataPath);
         assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
@@ -440,7 +481,7 @@ public class LocalOrphanFilesCleanTest {
         }
     }
 
-    private int generateUnUsedFile() throws Exception {
+    private int generateUnUsedFile(Path dataPath) throws Exception {
         int shouldBeDeleted = 0;
         int fileNum = RANDOM.nextInt(10);
         fileNum = fileNum == 0 ? 1 : fileNum;
@@ -458,7 +499,7 @@ public class LocalOrphanFilesCleanTest {
         shouldBeDeleted += fileNum;
 
         // data files
-        shouldBeDeleted += randomlyAddNonUsedDataFiles();
+        shouldBeDeleted += randomlyAddNonUsedDataFiles(dataPath);
 
         // manifests
         addNonUsedFiles(
@@ -544,9 +585,9 @@ public class LocalOrphanFilesCleanTest {
         }
     }
 
-    private int randomlyAddNonUsedDataFiles() throws IOException {
+    private int randomlyAddNonUsedDataFiles(Path dataPath) throws IOException {
         int addedFiles = 0;
-        List<Path> part1 = listSubDirs(tablePath, p -> p.getName().contains("="));
+        List<Path> part1 = listSubDirs(dataPath, p -> p.getName().contains("="));
         List<Path> part2 = new ArrayList<>();
         List<Path> buckets = new ArrayList<>();
         for (Path path : part1) {
