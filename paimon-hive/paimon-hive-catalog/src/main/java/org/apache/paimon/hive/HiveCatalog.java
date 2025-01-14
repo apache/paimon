@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -40,10 +41,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -51,7 +50,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
@@ -115,7 +113,7 @@ import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
-import static org.apache.paimon.hive.HiveTableUtils.convertToFormatTable;
+import static org.apache.paimon.hive.HiveTableUtils.tryToFormatSchema;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
@@ -354,7 +352,7 @@ public class HiveCatalog extends AbstractCatalog {
                 Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
         Table hmsTable = getHmsTable(tableIdentifier);
         Path location = getTableLocation(tableIdentifier, hmsTable);
-        TableSchema schema = getDataTableSchema(tableIdentifier, hmsTable);
+        TableSchema schema = loadTableSchema(tableIdentifier, hmsTable);
 
         if (!metastorePartitioned(schema)) {
             return;
@@ -395,7 +393,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        TableSchema schema = getDataTableSchema(identifier);
+        TableSchema schema = this.loadTableSchema(identifier);
         CoreOptions options = CoreOptions.fromMap(schema.options());
         boolean tagToPart = options.tagToPartitionField() != null;
         if (metastorePartitioned(schema)) {
@@ -429,7 +427,7 @@ public class HiveCatalog extends AbstractCatalog {
     public void alterPartitions(
             Identifier identifier, List<org.apache.paimon.partition.Partition> partitions)
             throws TableNotExistException {
-        TableSchema tableSchema = getDataTableSchema(identifier);
+        TableSchema tableSchema = this.loadTableSchema(identifier);
         if (!tableSchema.partitionKeys().isEmpty()
                 && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
             for (org.apache.paimon.partition.Partition partition : partitions) {
@@ -674,32 +672,41 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
-        return getDataTableMeta(identifier, getHmsTable(identifier));
+    protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+        return loadTableMetadata(identifier, getHmsTable(identifier));
     }
 
-    private TableMeta getDataTableMeta(Identifier identifier, Table table)
+    private TableMetadata loadTableMetadata(Identifier identifier, Table table)
             throws TableNotExistException {
-        return new TableMeta(
-                getDataTableSchema(identifier, table),
+        return new TableMetadata(
+                loadTableSchema(identifier, table),
                 identifier.getFullName() + "." + table.getCreateTime());
     }
 
     @Override
-    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+    public TableSchema loadTableSchema(Identifier identifier) throws TableNotExistException {
         Table table = getHmsTable(identifier);
-        return getDataTableSchema(identifier, table);
+        return loadTableSchema(identifier, table);
     }
 
-    private TableSchema getDataTableSchema(Identifier identifier, Table table)
+    private TableSchema loadTableSchema(Identifier identifier, Table table)
             throws TableNotExistException {
-        if (!isPaimonTable(table)) {
-            throw new TableNotExistException(identifier);
+        if (isPaimonTable(table)) {
+            return tableSchemaInFileSystem(
+                            getTableLocation(identifier, table),
+                            identifier.getBranchNameOrDefault())
+                    .orElseThrow(() -> new TableNotExistException(identifier));
         }
 
-        return tableSchemaInFileSystem(
-                        getTableLocation(identifier, table), identifier.getBranchNameOrDefault())
-                .orElseThrow(() -> new TableNotExistException(identifier));
+        if (!formatTableDisabled()) {
+            try {
+                Schema schema = tryToFormatSchema(table);
+                return TableSchema.create(0, schema);
+            } catch (UnsupportedOperationException ignored) {
+            }
+        }
+
+        throw new TableNotExistException(identifier);
     }
 
     @Override
@@ -833,39 +840,6 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         renameHiveTable(fromView, toView);
-    }
-
-    @Override
-    public org.apache.paimon.table.Table getDataOrFormatTable(Identifier identifier)
-            throws TableNotExistException {
-        Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        Table table = getHmsTable(identifier);
-        try {
-            TableMeta tableMeta = getDataTableMeta(identifier, table);
-            return FileStoreTableFactory.create(
-                    fileIO,
-                    getTableLocation(identifier, table),
-                    tableMeta.schema(),
-                    new CatalogEnvironment(
-                            identifier,
-                            tableMeta.uuid(),
-                            Lock.factory(
-                                    lockFactory().orElse(null),
-                                    lockContext().orElse(null),
-                                    identifier),
-                            catalogLoader()));
-        } catch (TableNotExistException ignore) {
-        }
-
-        if (formatTableDisabled()) {
-            throw new TableNotExistException(identifier);
-        }
-
-        try {
-            return convertToFormatTable(table);
-        } catch (UnsupportedOperationException e) {
-            throw new TableNotExistException(identifier);
-        }
     }
 
     @Override
@@ -1278,7 +1252,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private boolean isFormatTable(Table table) {
         try {
-            convertToFormatTable(table);
+            tryToFormatSchema(table);
             return true;
         } catch (UnsupportedOperationException e) {
             return false;

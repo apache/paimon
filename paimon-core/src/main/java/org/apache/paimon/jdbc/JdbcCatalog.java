@@ -357,15 +357,14 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+    protected TableSchema loadTableSchema(Identifier identifier) throws TableNotExistException {
         assertMainBranch(identifier);
         if (!JdbcUtils.tableExists(
                 connections, catalogKey, identifier.getDatabaseName(), identifier.getTableName())) {
             throw new TableNotExistException(identifier);
         }
         Path tableLocation = getTableLocation(identifier);
-        return new SchemaManager(fileIO, tableLocation)
-                .latest()
+        return tableSchemaInFileSystem(tableLocation, identifier.getBranchNameOrDefault())
                 .orElseThrow(
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
     }
