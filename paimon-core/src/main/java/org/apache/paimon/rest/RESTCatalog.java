@@ -399,8 +399,7 @@ public class RESTCatalog implements Catalog {
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         Table table = getTable(identifier);
-        Options options = Options.fromMap(table.options());
-        if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
+        if (tableSupportPartitioned(table)) {
             try {
                 CreatePartitionsRequest request = new CreatePartitionsRequest(partitions);
                 client.post(
@@ -411,8 +410,6 @@ public class RESTCatalog implements Catalog {
             } catch (NoSuchResourceException e) {
                 throw new TableNotExistException(identifier);
             }
-        } else {
-            throw new UnsupportedOperationException();
         }
     }
 
@@ -420,8 +417,7 @@ public class RESTCatalog implements Catalog {
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         Table table = getTable(identifier);
-        Options options = Options.fromMap(table.options());
-        if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
+        if (tableSupportPartitioned(table)) {
             try {
                 DropPartitionsRequest request = new DropPartitionsRequest(partitions);
                 client.post(
@@ -449,8 +445,7 @@ public class RESTCatalog implements Catalog {
     public void alterPartitions(Identifier identifier, List<Partition> partitions)
             throws TableNotExistException {
         Table table = getTable(identifier);
-        Options options = Options.fromMap(table.options());
-        if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
+        if (tableSupportPartitioned(table)) {
             try {
                 AlterPartitionsRequest request = new AlterPartitionsRequest(partitions);
                 client.post(
@@ -468,8 +463,7 @@ public class RESTCatalog implements Catalog {
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         Table table = getTable(identifier);
-        Options options = Options.fromMap(table.options());
-        if (Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE))) {
+        if (tableSupportPartitioned(table)) {
             try {
                 MarkDonePartitionsRequest request = new MarkDonePartitionsRequest(partitions);
                 client.post(
@@ -481,14 +475,12 @@ public class RESTCatalog implements Catalog {
                 throw new TableNotExistException(identifier);
             }
         }
-        throw new UnsupportedOperationException();
     }
 
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         Table table = getTable(identifier);
-        Options options = Options.fromMap(table.options());
-        if (!options.get(METASTORE_PARTITIONED_TABLE)) {
+        if (!tableSupportPartitioned(table)) {
             return listPartitionsFromFileSystem(table);
         }
 
@@ -576,6 +568,11 @@ public class RESTCatalog implements Catalog {
                             .build();
         }
         return table;
+    }
+
+    private boolean tableSupportPartitioned(Table table) {
+        Options options = Options.fromMap(table.options());
+        return Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE));
     }
 
     private Map<String, String> headers() {

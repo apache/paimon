@@ -386,7 +386,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    // here just data table, hive override this method.
+    // hive override this method.
     protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
         Preconditions.checkArgument(identifier.getSystemTableName() == null);
         TableMeta tableMeta = getDataTableMeta(identifier);

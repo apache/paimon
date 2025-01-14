@@ -35,6 +35,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -61,6 +62,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -1058,6 +1060,13 @@ public abstract class CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         Collections.singletonMap("dt", "20250102"),
                         Collections.singletonMap("dt", "20250101"));
+
+        assertDoesNotThrow(
+                () ->
+                        catalog.markDonePartitions(
+                                identifier,
+                                ImmutableList.of(Collections.singletonMap("dt", "20250102"))));
+
         catalog.dropPartitions(
                 identifier,
                 Arrays.asList(

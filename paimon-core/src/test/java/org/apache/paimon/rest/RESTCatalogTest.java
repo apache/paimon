@@ -37,7 +37,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -106,36 +105,6 @@ class RESTCatalogTest extends CatalogTestBase {
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);
         assertEquals(0, result.size());
-    }
-
-    @Test
-    void testCreatePartitionsWhenMetastorePartitionedIsFalse() throws Exception {
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        createTable(
-                identifier,
-                ImmutableMap.of(METASTORE_PARTITIONED_TABLE.key(), "" + false),
-                Lists.newArrayList("col1"));
-        assertThatThrownBy(
-                        () ->
-                                catalog.createPartitions(
-                                        identifier,
-                                        Arrays.asList(Collections.singletonMap("col1", "1"))))
-                .isInstanceOf(UnsupportedOperationException.class);
-    }
-
-    @Test
-    void testMarkDonePartitionsWhenMetastorePartitionedIsFalse() throws Exception {
-        Identifier identifier = Identifier.create("test_db", "test_table");
-        createTable(
-                identifier,
-                ImmutableMap.of(METASTORE_PARTITIONED_TABLE.key(), "" + false),
-                Lists.newArrayList("col1"));
-        assertThatThrownBy(
-                        () ->
-                                catalog.markDonePartitions(
-                                        identifier,
-                                        Arrays.asList(Collections.singletonMap("col1", "1"))))
-                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     @Override

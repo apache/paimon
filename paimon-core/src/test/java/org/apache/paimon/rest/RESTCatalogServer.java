@@ -33,7 +33,6 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
-import org.apache.paimon.rest.responses.AlterPartitionsResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -42,7 +41,6 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -55,7 +53,6 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
 import java.util.List;
@@ -152,11 +149,7 @@ public class RESTCatalogServer {
                                             DropPartitionsRequest.class);
                             catalog.dropPartitions(
                                     identifier, dropPartitionsRequest.getPartitionSpecs());
-                            response =
-                                    new PartitionsResponse(
-                                            dropPartitionsRequest.getPartitionSpecs(),
-                                            ImmutableList.of());
-                            return mockResponse(response, 200);
+                            return new MockResponse().setResponseCode(200);
                         } else if (isAlterPartitions) {
                             String tableName = resources[2];
                             Identifier identifier = Identifier.create(databaseName, tableName);
@@ -166,11 +159,7 @@ public class RESTCatalogServer {
                                             AlterPartitionsRequest.class);
                             catalog.alterPartitions(
                                     identifier, alterPartitionsRequest.getPartitions());
-                            response =
-                                    new AlterPartitionsResponse(
-                                            alterPartitionsRequest.getPartitions(),
-                                            ImmutableList.of());
-                            return mockResponse(response, 200);
+                            return new MockResponse().setResponseCode(200);
                         } else if (isMarkDonePartitions) {
                             String tableName = resources[2];
                             Identifier identifier = Identifier.create(databaseName, tableName);
@@ -180,11 +169,7 @@ public class RESTCatalogServer {
                                             MarkDonePartitionsRequest.class);
                             catalog.markDonePartitions(
                                     identifier, markDonePartitionsRequest.getPartitionSpecs());
-                            response =
-                                    new PartitionsResponse(
-                                            markDonePartitionsRequest.getPartitionSpecs(),
-                                            ImmutableList.of());
-                            return mockResponse(response, 200);
+                            return new MockResponse().setResponseCode(200);
                         } else if (isPartitions) {
                             String tableName = resources[2];
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
@@ -386,9 +371,7 @@ public class RESTCatalogServer {
                         OBJECT_MAPPER.readValue(
                                 request.getBody().readUtf8(), CreatePartitionsRequest.class);
                 catalog.createPartitions(identifier, requestBody.getPartitionSpecs());
-                response =
-                        new PartitionsResponse(requestBody.getPartitionSpecs(), ImmutableList.of());
-                return mockResponse(response, 200);
+                return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
         }
