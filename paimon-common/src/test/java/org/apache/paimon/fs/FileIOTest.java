@@ -21,7 +21,6 @@ package org.apache.paimon.fs;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -166,59 +165,6 @@ public class FileIOTest {
                             .toArray(FileStatus[]::new);
             assertThat(statuses[0].getPath()).isEqualTo(fileA);
             assertThat(statuses[1].getPath()).isEqualTo(fileBC);
-        }
-    }
-
-    @Test
-    public void testListFilesPaged() throws Exception {
-        FileIO fileIO = new LocalFileIO();
-        // 10 files starting with "a"
-        for (int i = 0; i < 10; i++) {
-            Path p = new Path(tempDir.resolve(String.format("a-%02d", i)).toUri());
-            fileIO.writeFile(p, p.toString(), false);
-        }
-        // 10 files starting with "b"
-        for (int i = 0; i < 10; i++) {
-            Path p = new Path(tempDir.resolve(String.format("b-%02d", i)).toUri());
-            fileIO.writeFile(p, p.toString(), false);
-        }
-        // 10 files under directory "c"
-        fileIO.mkdirs(new Path(tempDir.resolve("c").toUri()));
-        for (int i = 0; i < 10; i++) {
-            Path p = new Path(tempDir.resolve(String.format("c/c-%02d", i)).toUri());
-            fileIO.writeFile(p, p.toString(), false);
-        }
-
-        {
-            // first 5 files should be "a-00" to "a-04"
-            Pair<FileStatus[], String> page =
-                    fileIO.listFilesPaged(new Path(tempDir.toUri()), true, 5, null);
-            assertThat(page.getLeft().length).isEqualTo(5);
-            assertThat(page.getLeft()[0].getPath().getName()).isEqualTo("a-00");
-            assertThat(page.getLeft()[4].getPath().getName()).isEqualTo("a-04");
-            assertThat(page.getRight()).isNotNull();
-            // the next 10 files should be "a-05" to "b-04"
-            page = fileIO.listFilesPaged(new Path(tempDir.toUri()), true, 10, page.getRight());
-            assertThat(page.getLeft().length).isEqualTo(10);
-            assertThat(page.getLeft()[0].getPath().getName()).isEqualTo("a-05");
-            assertThat(page.getLeft()[9].getPath().getName()).isEqualTo("b-04");
-            assertThat(page.getRight()).isNotNull();
-            // next 10 files should recurse to "c/c-04"
-            page = fileIO.listFilesPaged(new Path(tempDir.toUri()), true, 10, page.getRight());
-            assertThat(page.getLeft().length).isEqualTo(10);
-            assertThat(page.getLeft()[9].getPath().getParent().getName()).isEqualTo("c");
-            assertThat(page.getLeft()[9].getPath().getName()).isEqualTo("c-04");
-            assertThat(page.getRight()).isNotNull();
-        }
-
-        {
-            // list all files non-recursively should return "a-00" through "b-09" and no more
-            Pair<FileStatus[], String> page =
-                    fileIO.listFilesPaged(new Path(tempDir.toUri()), false, 9999, null);
-            assertThat(page.getLeft().length).isEqualTo(20);
-            assertThat(page.getLeft()[0].getPath().getName()).isEqualTo("a-00");
-            assertThat(page.getLeft()[19].getPath().getName()).isEqualTo("b-09");
-            assertThat(page.getRight()).isNull();
         }
     }
 

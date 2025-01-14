@@ -41,7 +41,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -151,25 +150,7 @@ public interface FileIO extends Serializable {
     default Pair<FileStatus[], String> listFilesPaged(
             Path path, boolean recursive, long pageSize, @Nullable String continuationToken)
             throws IOException {
-        FileStatus[] all = listFiles(path, recursive);
-        FileStatus[] paged =
-                Arrays.stream(all)
-                        .sorted(Comparator.comparing(FileStatus::getPath))
-                        .filter(
-                                f ->
-                                        continuationToken == null
-                                                || f.getPath()
-                                                                .toUri()
-                                                                .toString()
-                                                                .compareTo(continuationToken)
-                                                        > 0)
-                        .limit(pageSize)
-                        .toArray(FileStatus[]::new);
-        String nextToken =
-                paged.length < pageSize
-                        ? null
-                        : paged[paged.length - 1].getPath().toUri().toString();
-        return Pair.of(paged, nextToken);
+        throw new UnsupportedOperationException();
     }
 
     /**
