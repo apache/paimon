@@ -26,7 +26,6 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.clone.CloneFilesUtil;
-import org.apache.paimon.flink.clone.FileType;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
@@ -48,7 +47,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -130,8 +128,7 @@ public class CloneActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest(name = "invoker = {0}")
-    @ValueSource(strings = {"action"})
-    // @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     public void testCloneTableWithSourceTableExternalPath(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareDataWithExternalPath(sourceWarehouse);
@@ -664,10 +661,8 @@ public class CloneActionITCase extends ActionITCaseBase {
         Path tableLocation = sourceTable.location();
 
         // 1. check the schema files
-        Map<FileType, List<Path>> schemaFilesMap =
-                CloneFilesUtil.getSchemaUsedFilesForSnapshot(targetTable, snapshotId);
         List<Path> targetTableSchemaFiles =
-                schemaFilesMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
+                CloneFilesUtil.getSchemaUsedFilesForSnapshot(targetTable, snapshotId);
         List<Pair<Path, Path>> filesPathInfoList =
                 targetTableSchemaFiles.stream()
                         .map(
@@ -685,12 +680,8 @@ public class CloneActionITCase extends ActionITCaseBase {
         }
 
         // 2. check the manifest files
-        Map<FileType, List<Path>> manifestFilesMap =
-                CloneFilesUtil.getManifestUsedFilesForSnapshot(targetTable, snapshotId);
         List<Path> targetTableManifestFiles =
-                manifestFilesMap.values().stream()
-                        .flatMap(List::stream)
-                        .collect(Collectors.toList());
+                CloneFilesUtil.getManifestUsedFilesForSnapshot(targetTable, snapshotId);
         filesPathInfoList =
                 targetTableManifestFiles.stream()
                         .map(
@@ -714,10 +705,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         }
 
         // 3. check the data files
-        Map<FileType, List<Pair<Path, Path>>> dataFilesMap =
-                CloneFilesUtil.getDataUsedFilesForSnapshot(targetTable, snapshotId);
-        filesPathInfoList =
-                dataFilesMap.values().stream().flatMap(List::stream).collect(Collectors.toList());
+        filesPathInfoList = CloneFilesUtil.getDataUsedFilesForSnapshot(targetTable, snapshotId);
         isExternalPath =
                 sourceTable.options().containsKey(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
         String externalPaths = null;

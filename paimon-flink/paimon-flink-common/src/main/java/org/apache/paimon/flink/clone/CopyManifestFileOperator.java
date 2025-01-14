@@ -169,7 +169,7 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
                                 manifestEntry.partition(),
                                 manifestEntry.bucket(),
                                 manifestEntry.totalBuckets(),
-                                manifestEntry.file().copy((String) null));
+                                manifestEntry.file().newExternalPath(null));
                 targetManifestEntries.add(newManifestEntry);
             }
             ManifestEntryWriter manifestEntryWriter =
@@ -209,7 +209,6 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
                                     null,
                                     identifierAndSnapshotId.f0,
                                     identifierAndSnapshotId.f1,
-                                    null,
                                     identifierAndSnapshotId.f2)));
         }
     }

@@ -26,7 +26,6 @@ public class CloneFileInfo {
     @Nullable private final String filePathExcludeTableRoot;
     private final String sourceIdentifier;
     private final String targetIdentifier;
-    @Nullable private final FileType fileType;
     private final long snapshotId;
 
     public CloneFileInfo(
@@ -34,13 +33,11 @@ public class CloneFileInfo {
             @Nullable String filePathExcludeTableRoot,
             String sourceIdentifier,
             String targetIdentifier,
-            @Nullable FileType fileType,
             long snapshotId) {
         this.sourceFilePath = sourceFilePath;
         this.filePathExcludeTableRoot = filePathExcludeTableRoot;
         this.sourceIdentifier = sourceIdentifier;
         this.targetIdentifier = targetIdentifier;
-        this.fileType = fileType;
         this.snapshotId = snapshotId;
     }
 
@@ -62,11 +59,6 @@ public class CloneFileInfo {
         return targetIdentifier;
     }
 
-    @Nullable
-    public FileType getFileType() {
-        return fileType;
-    }
-
     public long getSnapshotId() {
         return snapshotId;
     }
@@ -75,12 +67,11 @@ public class CloneFileInfo {
     public String toString() {
         return String.format(
                 "{ sourceFilePath: %s, filePathExcludeTableRoot: %s, sourceIdentifier: %s, targetIdentifier: %s, "
-                        + "fileType: %s, snapshotId: %d}",
+                        + "snapshotId: %d}",
                 sourceFilePath,
                 filePathExcludeTableRoot,
                 sourceIdentifier,
                 targetIdentifier,
-                fileType,
                 snapshotId);
     }
 }

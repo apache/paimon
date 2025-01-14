@@ -40,9 +40,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -62,27 +60,25 @@ public class CloneFilesUtil {
      * @return A map where the key is the FileType and the value is a list of file paths.
      * @throws FileNotFoundException If the snapshot file is not found.
      */
-    public static Map<FileType, List<Path>> getSchemaUsedFilesForSnapshot(
-            FileStoreTable table, long snapshotId) throws IOException {
+    public static List<Path> getSchemaUsedFilesForSnapshot(FileStoreTable table, long snapshotId)
+            throws IOException {
         FileStore<?> store = table.store();
         SnapshotManager snapshotManager = store.snapshotManager();
         Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         IndexFileHandler indexFileHandler = store.newIndexFileHandler();
-        Map<FileType, List<Path>> filesMap = new HashMap<>();
+        List<Path> fileList = new ArrayList<>();
         if (snapshot != null) {
             FileStorePathFactory pathFactory = store.pathFactory();
             // 1. add the Snapshot file
-            filesMap.computeIfAbsent(FileType.SNAPSHOT_FILE, k -> new ArrayList<>())
-                    .add(snapshotManager.snapshotPath(snapshotId));
+            fileList.add(snapshotManager.snapshotPath(snapshotId));
             // 2. add the ManifestList files
-            addManifestList(filesMap, snapshot, pathFactory);
+            addManifestList(fileList, snapshot, pathFactory);
 
             // 3. try to read index files
             String indexManifest = snapshot.indexManifest();
             if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-                filesMap.computeIfAbsent(FileType.INDEX_FILE, k -> new ArrayList<>())
-                        .add(pathFactory.indexManifestFileFactory().toPath(indexManifest));
+                fileList.add(pathFactory.indexManifestFileFactory().toPath(indexManifest));
 
                 List<IndexManifestEntry> indexManifestEntries =
                         retryReadingFiles(
@@ -91,29 +87,22 @@ public class CloneFilesUtil {
                     indexManifestEntries.stream()
                             .map(IndexManifestEntry::indexFile)
                             .map(indexFileHandler::filePath)
-                            .forEach(
-                                    filePath ->
-                                            filesMap.computeIfAbsent(
-                                                            FileType.INDEX_FILE,
-                                                            k -> new ArrayList<>())
-                                                    .add(filePath));
+                            .forEach(fileList::add);
                 }
             }
 
             // 4. add statistic file
             if (snapshot.statistics() != null) {
-                filesMap.computeIfAbsent(FileType.STATISTICS_FILE, k -> new ArrayList<>())
-                        .add(pathFactory.statsFileFactory().toPath(snapshot.statistics()));
+                fileList.add(pathFactory.statsFileFactory().toPath(snapshot.statistics()));
             }
         }
 
         // 5. add the Schema files
         for (long id : schemaManager.listAllIds()) {
-            filesMap.computeIfAbsent(FileType.SCHEMA_FILE, k -> new ArrayList<>())
-                    .add(schemaManager.toSchemaPath(id));
+            fileList.add(schemaManager.toSchemaPath(id));
         }
 
-        return filesMap;
+        return fileList;
     }
 
     /**
@@ -126,12 +115,12 @@ public class CloneFilesUtil {
      *     is the data file's absolute path and data file's relative path.
      * @throws FileNotFoundException If the snapshot file is not found.
      */
-    public static Map<FileType, List<Pair<Path, Path>>> getDataUsedFilesForSnapshot(
+    public static List<Pair<Path, Path>> getDataUsedFilesForSnapshot(
             FileStoreTable table, long snapshotId) throws FileNotFoundException {
         FileStore<?> store = table.store();
         SnapshotManager snapshotManager = store.snapshotManager();
         Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
-        Map<FileType, List<Pair<Path, Path>>> filesMap = new HashMap<>();
+        List<Pair<Path, Path>> fileList = new ArrayList<>();
         if (snapshot != null) {
             // try to read data files
             List<Pair<Path, Path>> dataFiles = new ArrayList<>();
@@ -158,9 +147,9 @@ public class CloneFilesUtil {
             // deleted. Older files however, are from previous partitions and should not be changed
             // very often.
             Collections.reverse(dataFiles);
-            filesMap.computeIfAbsent(FileType.DATA_FILE, k -> new ArrayList<>()).addAll(dataFiles);
+            fileList.addAll(dataFiles);
         }
-        return filesMap;
+        return fileList;
     }
 
     /**
@@ -172,43 +161,37 @@ public class CloneFilesUtil {
      * @return A map where the key is the FileType and the value is a list of file paths.
      * @throws FileNotFoundException If the snapshot file is not found.
      */
-    public static Map<FileType, List<Path>> getManifestUsedFilesForSnapshot(
-            FileStoreTable table, long snapshotId) throws IOException {
+    public static List<Path> getManifestUsedFilesForSnapshot(FileStoreTable table, long snapshotId)
+            throws IOException {
         FileStore<?> store = table.store();
         SnapshotManager snapshotManager = store.snapshotManager();
         Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
         ManifestList manifestList = store.manifestListFactory().create();
-        Map<FileType, List<Path>> filesMap = new HashMap<>();
+        List<Path> fileList = new ArrayList<>();
         // try to read manifests
         List<ManifestFileMeta> manifestFileMetas =
                 retryReadingFiles(() -> readAllManifestsWithIOException(snapshot, manifestList));
         if (manifestFileMetas == null) {
-            return filesMap;
+            return fileList;
         }
         List<String> manifestFileName =
                 manifestFileMetas.stream()
                         .map(ManifestFileMeta::fileName)
                         .collect(Collectors.toList());
-        filesMap.computeIfAbsent(FileType.MANIFEST_FILE, k -> new ArrayList<>())
-                .addAll(
-                        manifestFileName.stream()
-                                .map(store.pathFactory()::toManifestFilePath)
-                                .collect(Collectors.toList()));
-        return filesMap;
+        fileList.addAll(
+                manifestFileName.stream()
+                        .map(store.pathFactory()::toManifestFilePath)
+                        .collect(Collectors.toList()));
+        return fileList;
     }
 
     private static void addManifestList(
-            Map<FileType, List<Path>> filesMap,
-            Snapshot snapshot,
-            FileStorePathFactory pathFactory) {
-        filesMap.computeIfAbsent(FileType.MANIFEST_LIST_FILE, k -> new ArrayList<>())
-                .add(pathFactory.toManifestListPath(snapshot.baseManifestList()));
-        filesMap.get(FileType.MANIFEST_LIST_FILE)
-                .add(pathFactory.toManifestListPath(snapshot.deltaManifestList()));
+            List<Path> fileList, Snapshot snapshot, FileStorePathFactory pathFactory) {
+        fileList.add(pathFactory.toManifestListPath(snapshot.baseManifestList()));
+        fileList.add(pathFactory.toManifestListPath(snapshot.deltaManifestList()));
         String changelogManifestList = snapshot.changelogManifestList();
         if (changelogManifestList != null) {
-            filesMap.computeIfAbsent(FileType.CHANGELOG_MANIFEST_LIST_FILE, k -> new ArrayList<>())
-                    .add(pathFactory.toManifestListPath(changelogManifestList));
+            fileList.add(pathFactory.toManifestListPath(changelogManifestList));
         }
     }
 
@@ -251,45 +234,39 @@ public class CloneFilesUtil {
     }
 
     public static List<CloneFileInfo> toCloneFileInfos(
-            Map<FileType, List<Path>> filesMap,
+            List<Path> fileList,
             Path sourceTableRoot,
             String sourceIdentifier,
             String targetIdentifier,
             long snapshotId) {
         List<CloneFileInfo> result = new ArrayList<>();
-        for (Map.Entry<FileType, List<Path>> entry : filesMap.entrySet()) {
-            for (Path file : entry.getValue()) {
-                Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
-                result.add(
-                        new CloneFileInfo(
-                                file.toUri().toString(),
-                                relativePath.toString(),
-                                sourceIdentifier,
-                                targetIdentifier,
-                                entry.getKey(),
-                                snapshotId));
-            }
+        for (Path file : fileList) {
+            Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
+            result.add(
+                    new CloneFileInfo(
+                            file.toUri().toString(),
+                            relativePath.toString(),
+                            sourceIdentifier,
+                            targetIdentifier,
+                            snapshotId));
         }
         return result;
     }
 
     public static List<CloneFileInfo> toCloneFileInfos(
-            Map<FileType, List<Pair<Path, Path>>> filesMap,
+            List<Pair<Path, Path>> fileList,
             String sourceIdentifier,
             String targetIdentifier,
             long snapshotId) {
         List<CloneFileInfo> result = new ArrayList<>();
-        for (Map.Entry<FileType, List<Pair<Path, Path>>> entry : filesMap.entrySet()) {
-            for (Pair<Path, Path> file : entry.getValue()) {
-                result.add(
-                        new CloneFileInfo(
-                                file.getLeft().toUri().toString(),
-                                file.getRight().toString(),
-                                sourceIdentifier,
-                                targetIdentifier,
-                                entry.getKey(),
-                                snapshotId));
-            }
+        for (Pair<Path, Path> file : fileList) {
+            result.add(
+                    new CloneFileInfo(
+                            file.getLeft().toUri().toString(),
+                            file.getRight().toString(),
+                            sourceIdentifier,
+                            targetIdentifier,
+                            snapshotId));
         }
         return result;
     }

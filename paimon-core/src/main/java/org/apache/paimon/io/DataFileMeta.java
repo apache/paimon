@@ -484,7 +484,7 @@ public class DataFileMeta {
                 externalPath);
     }
 
-    public DataFileMeta copy(String newExternalPath) {
+    public DataFileMeta newExternalPath(String newExternalPath) {
         return new DataFileMeta(
                 fileName,
                 fileSize,

@@ -150,7 +150,6 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
                                     null,
                                     identifierAndSnapshotId.f0,
                                     identifierAndSnapshotId.f1,
-                                    null,
                                     identifierAndSnapshotId.f2)));
         }
     }
