@@ -41,6 +41,7 @@ import java.util.stream.Collectors;
 
 /** A catalog for testing RESTCatalog. */
 public class TestRESTCatalog extends FileSystemCatalog {
+
     public Map<String, TableSchema> tableFullName2Schema = new HashMap<String, TableSchema>();
     public Map<String, List<Partition>> tableFullName2Partitions =
             new HashMap<String, List<Partition>>();

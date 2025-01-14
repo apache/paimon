@@ -31,6 +31,7 @@ import java.util.List;
 /** Request for altering partitions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AlterPartitionsRequest implements RESTRequest {
+
     public static final String FIELD_PARTITIONS = "partitions";
 
     @JsonProperty(FIELD_PARTITIONS)
