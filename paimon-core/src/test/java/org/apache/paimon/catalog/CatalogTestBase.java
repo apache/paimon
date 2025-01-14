@@ -35,7 +35,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -1037,6 +1036,10 @@ public abstract class CatalogTestBase {
             return;
         }
         String databaseName = "testPartitionTable";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102"));
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
         Identifier identifier = Identifier.create(databaseName, "table");
@@ -1051,28 +1054,33 @@ public abstract class CatalogTestBase {
                         .build(),
                 true);
 
-        catalog.createPartitions(
-                identifier,
-                Arrays.asList(
-                        Collections.singletonMap("dt", "20250101"),
-                        Collections.singletonMap("dt", "20250102")));
+        catalog.createPartitions(identifier, partitionSpecs);
         assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
-                .containsExactlyInAnyOrder(
-                        Collections.singletonMap("dt", "20250102"),
-                        Collections.singletonMap("dt", "20250101"));
+                .containsExactlyInAnyOrder(partitionSpecs.get(0), partitionSpecs.get(1));
 
-        assertDoesNotThrow(
-                () ->
-                        catalog.markDonePartitions(
-                                identifier,
-                                ImmutableList.of(Collections.singletonMap("dt", "20250102"))));
+        assertDoesNotThrow(() -> catalog.markDonePartitions(identifier, partitionSpecs));
 
-        catalog.dropPartitions(
-                identifier,
-                Arrays.asList(
-                        Collections.singletonMap("dt", "20250102"),
-                        Collections.singletonMap("dt", "20250101")));
+        catalog.dropPartitions(identifier, partitionSpecs);
         assertThat(catalog.listPartitions(identifier)).isEmpty();
+
+        // Test when table does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.createPartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        partitionSpecs));
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listPartitions(
+                                        Identifier.create(databaseName, "non_existing_table")));
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.markDonePartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        partitionSpecs));
     }
 
     @Test
@@ -1108,6 +1116,14 @@ public abstract class CatalogTestBase {
         catalog.alterPartitions(alterIdentifier, Arrays.asList(partition));
         Partition partitionFromServer = catalog.listPartitions(alterIdentifier).get(0);
         checkPartition(partition, partitionFromServer);
+
+        // Test when table does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.alterPartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        Arrays.asList(partition)));
     }
 
     protected boolean supportsAlterDatabase() {

@@ -71,6 +71,7 @@ import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.UnknownTableException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
@@ -492,6 +493,8 @@ public class HiveCatalog extends AbstractCatalog {
                     });
         } catch (NoSuchObjectException e) {
             // do nothing if the partition not exists
+        } catch (UnknownTableException e) {
+            throw new TableNotExistException(identifier);
         } catch (TException | InterruptedException e) {
             throw new RuntimeException(e);
         }

@@ -69,6 +69,7 @@ public class TestRESTCatalog extends FileSystemCatalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
+        getTable(identifier);
         tableFullName2Partitions.put(
                 identifier.getFullName(),
                 partitions.stream()
@@ -79,6 +80,7 @@ public class TestRESTCatalog extends FileSystemCatalog {
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
+        getTable(identifier);
         List<Partition> existPartitions = tableFullName2Partitions.get(identifier.getFullName());
         partitions.forEach(
                 partition -> {
@@ -100,6 +102,7 @@ public class TestRESTCatalog extends FileSystemCatalog {
     @Override
     public void alterPartitions(Identifier identifier, List<Partition> partitions)
             throws TableNotExistException {
+        getTable(identifier);
         List<Partition> existPartitions = tableFullName2Partitions.get(identifier.getFullName());
         partitions.forEach(
                 partition -> {
@@ -122,6 +125,7 @@ public class TestRESTCatalog extends FileSystemCatalog {
 
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
+        getTable(identifier);
         return tableFullName2Partitions.get(identifier.getFullName());
     }
 
