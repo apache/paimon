@@ -25,7 +25,7 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
-import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RenameRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -172,10 +172,9 @@ public class RESTObjectMapperTest {
 
     @Test
     public void renameTableRequestParseTest() throws Exception {
-        RenameTableRequest request = MockRESTMessage.renameRequest("t2");
+        RenameRequest request = MockRESTMessage.renameRequest("t2");
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        RenameTableRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, RenameTableRequest.class);
+        RenameRequest parseData = OBJECT_MAPPER.readValue(requestStr, RenameRequest.class);
         assertEquals(request.getNewIdentifier(), parseData.getNewIdentifier());
     }
 

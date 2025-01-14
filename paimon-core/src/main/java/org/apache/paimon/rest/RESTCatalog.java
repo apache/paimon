@@ -45,9 +45,10 @@ import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
-import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RenameRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -58,6 +59,7 @@ import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -329,7 +331,7 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
         try {
-            RenameTableRequest request = new RenameTableRequest(toTable);
+            RenameRequest request = new RenameRequest(toTable);
             client.post(
                     resourcePaths.renameTable(
                             fromTable.getDatabaseName(), fromTable.getTableName()),
@@ -531,23 +533,71 @@ public class RESTCatalog implements Catalog {
     @Override
     public void dropView(Identifier identifier, boolean ignoreIfNotExists)
             throws ViewNotExistException {
-        throw new UnsupportedOperationException();
+        try {
+            client.delete(
+                    resourcePaths.view(identifier.getDatabaseName(), identifier.getTableName()),
+                    headers());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new ViewNotExistException(identifier);
+            }
+        }
     }
 
     @Override
     public void createView(Identifier identifier, View view, boolean ignoreIfExists)
             throws ViewAlreadyExistException, DatabaseNotExistException {
-        throw new UnsupportedOperationException();
+        try {
+            ViewSchema schema =
+                    new ViewSchema(
+                            view.rowType().getFields(),
+                            view.options(),
+                            view.comment().orElse(null),
+                            view.query());
+            CreateViewRequest request = new CreateViewRequest(identifier, schema);
+            client.post(
+                    resourcePaths.views(identifier.getDatabaseName()),
+                    request,
+                    GetViewResponse.class,
+                    headers());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName());
+        } catch (AlreadyExistsException e) {
+            if (!ignoreIfExists) {
+                throw new ViewAlreadyExistException(identifier);
+            }
+        }
     }
 
     @Override
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
-        throw new UnsupportedOperationException();
+        try {
+            ListViewsResponse response =
+                    client.get(
+                            resourcePaths.views(databaseName), ListViewsResponse.class, headers());
+            return response.getViews();
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
     }
 
     @Override
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
+        try {
+            RenameRequest request = new RenameRequest(toView);
+            client.post(
+                    resourcePaths.renameView(fromView.getDatabaseName(), fromView.getTableName()),
+                    request,
+                    GetViewResponse.class,
+                    headers());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new ViewNotExistException(fromView);
+            }
+        } catch (AlreadyExistsException e) {
+            throw new ViewAlreadyExistException(toView);
+        }
         throw new UnsupportedOperationException();
     }
 

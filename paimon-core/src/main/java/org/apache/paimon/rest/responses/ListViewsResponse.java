@@ -19,52 +19,30 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
-import org.apache.paimon.rest.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Response for getting view. */
+import java.util.List;
+
+/** Response for listing tables. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetViewResponse implements RESTResponse {
+public class ListViewsResponse implements RESTResponse {
 
-    private static final String FIELD_ID = "id";
-    private static final String FIELD_NAME = "name";
-    private static final String FIELD_SCHEMA = "schema";
+    private static final String FIELD_VIEWS = "views";
 
-    @JsonProperty(FIELD_ID)
-    private final String id;
-
-    @JsonProperty(FIELD_NAME)
-    private final String name;
-
-    @JsonProperty(FIELD_SCHEMA)
-    private final ViewSchema schema;
+    @JsonProperty(FIELD_VIEWS)
+    private final List<String> views;
 
     @JsonCreator
-    public GetViewResponse(
-            @JsonProperty(FIELD_ID) String id,
-            @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_SCHEMA) ViewSchema schema) {
-        this.id = id;
-        this.name = name;
-        this.schema = schema;
+    public ListViewsResponse(@JsonProperty(FIELD_VIEWS) List<String> views) {
+        this.views = views;
     }
 
-    @JsonGetter(FIELD_ID)
-    public String getId() {
-        return this.id;
-    }
-
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return this.name;
-    }
-
-    @JsonGetter(FIELD_SCHEMA)
-    public ViewSchema getSchema() {
-        return this.schema;
+    @JsonGetter(FIELD_VIEWS)
+    public List<String> getViews() {
+        return this.views;
     }
 }

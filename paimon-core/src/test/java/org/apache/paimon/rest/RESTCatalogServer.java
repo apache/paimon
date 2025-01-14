@@ -32,7 +32,7 @@ import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
-import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RenameRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -259,8 +259,8 @@ public class RESTCatalogServer {
     private static MockResponse renameTableApiHandler(
             Catalog catalog, RecordedRequest request, String databaseName, String tableName)
             throws Exception {
-        RenameTableRequest requestBody =
-                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+        RenameRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameRequest.class);
         catalog.renameTable(
                 Identifier.create(databaseName, tableName), requestBody.getNewIdentifier(), false);
         GetTableResponse response =

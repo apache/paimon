@@ -26,9 +26,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Request for renaming table. */
+/** Request for renaming. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class RenameTableRequest implements RESTRequest {
+public class RenameRequest implements RESTRequest {
 
     private static final String FIELD_NEW_IDENTIFIER_NAME = "newIdentifier";
 
@@ -36,7 +36,7 @@ public class RenameTableRequest implements RESTRequest {
     private final Identifier newIdentifier;
 
     @JsonCreator
-    public RenameTableRequest(@JsonProperty(FIELD_NEW_IDENTIFIER_NAME) Identifier newIdentifier) {
+    public RenameRequest(@JsonProperty(FIELD_NEW_IDENTIFIER_NAME) Identifier newIdentifier) {
         this.newIdentifier = newIdentifier;
     }
 

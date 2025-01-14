@@ -16,9 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.rest.RESTRequest;
 import org.apache.paimon.rest.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -26,45 +27,34 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Response for getting view. */
+/** Request for creating view. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetViewResponse implements RESTResponse {
+public class CreateViewRequest implements RESTRequest {
 
-    private static final String FIELD_ID = "id";
-    private static final String FIELD_NAME = "name";
+    private static final String FIELD_IDENTIFIER = "identifier";
     private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_ID)
-    private final String id;
-
-    @JsonProperty(FIELD_NAME)
-    private final String name;
+    @JsonProperty(FIELD_IDENTIFIER)
+    private final Identifier identifier;
 
     @JsonProperty(FIELD_SCHEMA)
     private final ViewSchema schema;
 
     @JsonCreator
-    public GetViewResponse(
-            @JsonProperty(FIELD_ID) String id,
-            @JsonProperty(FIELD_NAME) String name,
+    public CreateViewRequest(
+            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
             @JsonProperty(FIELD_SCHEMA) ViewSchema schema) {
-        this.id = id;
-        this.name = name;
         this.schema = schema;
+        this.identifier = identifier;
     }
 
-    @JsonGetter(FIELD_ID)
-    public String getId() {
-        return this.id;
-    }
-
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return this.name;
+    @JsonGetter(FIELD_IDENTIFIER)
+    public Identifier getIdentifier() {
+        return identifier;
     }
 
     @JsonGetter(FIELD_SCHEMA)
     public ViewSchema getSchema() {
-        return this.schema;
+        return schema;
     }
 }
