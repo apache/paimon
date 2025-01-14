@@ -37,29 +37,39 @@ public class ProcedureUtils {
             String expirationTime,
             Integer maxExpires,
             String options) {
-        Map<String, String> dynamicOptions = new HashMap<>();
+
+        HashMap<String, String> dynamicOptions = new HashMap<>();
         if (!StringUtils.isNullOrWhitespaceOnly(options)) {
             dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
         }
-        if (!StringUtils.isNullOrWhitespaceOnly(expireStrategy)) {
-            dynamicOptions.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
-        }
-        if (!StringUtils.isNullOrWhitespaceOnly(timestampFormatter)) {
-            dynamicOptions.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
-        }
-        if (!StringUtils.isNullOrWhitespaceOnly(timestampPattern)) {
-            dynamicOptions.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
-        }
-        if (!StringUtils.isNullOrWhitespaceOnly(expirationTime)) {
-            dynamicOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
-        }
-        if (maxExpires != null) {
-            dynamicOptions.put(
-                    CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), String.valueOf(maxExpires));
-        }
-        // partition check interval is 0
-        dynamicOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0");
+        setTableOptions(
+                dynamicOptions, CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
+        setTableOptions(
+                dynamicOptions,
+                CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(),
+                timestampFormatter);
+        setTableOptions(
+                dynamicOptions, CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+        setTableOptions(
+                dynamicOptions, CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
+        setTableOptions(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), maxExpires);
+        setTableOptions(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0");
+
         return dynamicOptions;
+    }
+
+    private static void setTableOptions(
+            HashMap<String, String> dynamicOptions, String key, String value) {
+        if (!StringUtils.isNullOrWhitespaceOnly(value)) {
+            dynamicOptions.put(key, value);
+        }
+    }
+
+    private static void setTableOptions(
+            HashMap<String, String> dynamicOptions, String key, Integer value) {
+        if (value != null) {
+            dynamicOptions.put(key, String.valueOf(value));
+        }
     }
 
     public static ExpireConfig.Builder fillInSnapshotOptions(
