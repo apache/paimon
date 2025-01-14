@@ -54,6 +54,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -68,6 +69,8 @@ import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -503,6 +506,49 @@ public class RESTCatalog implements Catalog {
         }
 
         return response.getPartitions();
+    }
+
+    @Override
+    public View getView(Identifier identifier) throws ViewNotExistException {
+        try {
+            GetViewResponse response =
+                    client.get(
+                            resourcePaths.view(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            GetViewResponse.class,
+                            headers());
+            return new ViewImpl(
+                    identifier,
+                    response.getSchema().rowType(),
+                    response.getSchema().query(),
+                    response.getSchema().comment(),
+                    response.getSchema().options());
+        } catch (NoSuchResourceException e) {
+            throw new ViewNotExistException(identifier);
+        }
+    }
+
+    @Override
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        throw new UnsupportedOperationException();
     }
 
     @Override

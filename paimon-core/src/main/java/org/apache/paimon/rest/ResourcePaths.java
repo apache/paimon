@@ -84,4 +84,8 @@ public class ResourcePaths {
         return SLASH.join(
                 V1, prefix, DATABASES, databaseName, TABLES, tableName, "partitions", "mark");
     }
+
+    public String view(String databaseName, String viewName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, "views", viewName);
+    }
 }

@@ -21,6 +21,8 @@ package org.apache.paimon.view;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import javax.annotation.Nullable;
 
 import java.util.HashMap;
@@ -29,6 +31,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /** Implementation of {@link View}. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ViewImpl implements View {
 
     private final Identifier identifier;
