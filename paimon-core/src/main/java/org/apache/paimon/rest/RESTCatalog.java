@@ -598,7 +598,6 @@ public class RESTCatalog implements Catalog {
         } catch (AlreadyExistsException e) {
             throw new ViewAlreadyExistException(toView);
         }
-        throw new UnsupportedOperationException();
     }
 
     @Override

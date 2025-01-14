@@ -24,6 +24,7 @@ import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -32,9 +33,11 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
@@ -240,5 +243,32 @@ public class RESTObjectMapperTest {
         AlterPartitionsRequest parseData =
                 OBJECT_MAPPER.readValue(requestStr, AlterPartitionsRequest.class);
         assertEquals(request.getPartitions(), parseData.getPartitions());
+    }
+
+    @Test
+    public void createViewRequestParseTest() throws Exception {
+        CreateViewRequest request = MockRESTMessage.createViewRequest("t1");
+        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
+        CreateViewRequest parseData = OBJECT_MAPPER.readValue(requestStr, CreateViewRequest.class);
+        assertEquals(request.getIdentifier(), parseData.getIdentifier());
+        assertEquals(request.getSchema(), parseData.getSchema());
+    }
+
+    @Test
+    public void getViewResponseParseTest() throws Exception {
+        GetViewResponse response = MockRESTMessage.getViewResponse();
+        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        GetViewResponse parseData = OBJECT_MAPPER.readValue(responseStr, GetViewResponse.class);
+        assertEquals(response.getId(), parseData.getId());
+        assertEquals(response.getName(), parseData.getName());
+        assertEquals(response.getSchema(), parseData.getSchema());
+    }
+
+    @Test
+    public void listViewsResponseParseTest() throws Exception {
+        ListViewsResponse response = MockRESTMessage.listViewsResponse();
+        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        ListViewsResponse parseData = OBJECT_MAPPER.readValue(responseStr, ListViewsResponse.class);
+        assertEquals(response.getViews(), parseData.getViews());
     }
 }

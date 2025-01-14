@@ -31,6 +31,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.view.View;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -45,6 +46,7 @@ public class TestRESTCatalog extends FileSystemCatalog {
     public Map<String, TableSchema> tableFullName2Schema = new HashMap<String, TableSchema>();
     public Map<String, List<Partition>> tableFullName2Partitions =
             new HashMap<String, List<Partition>>();
+    public final Map<String, View> viewFullName2View = new HashMap<String, View>();
 
     public TestRESTCatalog(FileIO fileIO, Path warehouse, Options options) {
         super(fileIO, warehouse, options);
@@ -127,6 +129,61 @@ public class TestRESTCatalog extends FileSystemCatalog {
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         getTable(identifier);
         return tableFullName2Partitions.get(identifier.getFullName());
+    }
+
+    @Override
+    public View getView(Identifier identifier) throws ViewNotExistException {
+        if (viewFullName2View.containsKey(identifier.getFullName())) {
+            return viewFullName2View.get(identifier.getFullName());
+        }
+        throw new ViewNotExistException(identifier);
+    }
+
+    @Override
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        if (viewFullName2View.containsKey(identifier.getFullName())) {
+            viewFullName2View.remove(identifier.getFullName());
+        }
+        if (!ignoreIfNotExists) {
+            throw new ViewNotExistException(identifier);
+        }
+    }
+
+    @Override
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        getDatabase(identifier.getDatabaseName());
+        if (viewFullName2View.containsKey(identifier.getFullName()) && !ignoreIfExists) {
+            throw new ViewAlreadyExistException(identifier);
+        }
+        viewFullName2View.put(identifier.getFullName(), view);
+    }
+
+    @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        getDatabase(databaseName);
+        return viewFullName2View.keySet().stream()
+                .map(v -> Identifier.fromString(v))
+                .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
+                .map(identifier -> identifier.getTableName())
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        if (!viewFullName2View.containsKey(fromView.getFullName()) && !ignoreIfNotExists) {
+            throw new ViewNotExistException(fromView);
+        }
+        if (viewFullName2View.containsKey(toView.getFullName())) {
+            throw new ViewAlreadyExistException(toView);
+        }
+        if (viewFullName2View.containsKey(fromView.getFullName())) {
+            View view = viewFullName2View.get(fromView.getFullName());
+            viewFullName2View.remove(fromView.getFullName());
+            viewFullName2View.put(toView.getFullName(), view);
+        }
     }
 
     @Override

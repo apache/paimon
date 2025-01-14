@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ViewSchema {
@@ -88,5 +89,20 @@ public class ViewSchema {
     @JsonGetter(FIELD_FIELDS)
     public List<DataField> fields() {
         return fields;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) return false;
+        ViewSchema that = (ViewSchema) o;
+        return Objects.equals(query, that.query)
+                && Objects.equals(comment, that.comment)
+                && Objects.equals(options, that.options)
+                && Objects.equals(fields, that.fields);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(query, comment, options, fields);
     }
 }
