@@ -289,7 +289,11 @@ public class RESTCatalogServer {
                 (FileStoreTable) catalog.getTable(Identifier.create(databaseName, tableName));
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.emptyFactory().create());
-        boolean success = commit.commit(requestBody.getSnapshot(), requestBody.getBranch());
+        String branchName = requestBody.getIdentifier().getBranchName();
+        if (branchName == null) {
+            branchName = "main";
+        }
+        boolean success = commit.commit(requestBody.getSnapshot(), branchName);
         CommitTableResponse response = new CommitTableResponse(success);
         return mockResponse(response, 200);
     }

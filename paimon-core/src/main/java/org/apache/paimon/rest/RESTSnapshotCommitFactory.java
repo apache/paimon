@@ -23,8 +23,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 /** Factory to create {@link SnapshotCommit} for REST Catalog. */
 public class RESTSnapshotCommitFactory implements SnapshotCommit.Factory {
 
@@ -41,8 +39,11 @@ public class RESTSnapshotCommitFactory implements SnapshotCommit.Factory {
         RESTCatalog catalog = loader.load();
         return new SnapshotCommit() {
             @Override
-            public boolean commit(Snapshot snapshot, @Nullable String branch) {
-                return catalog.commitSnapshot(identifier, snapshot, branch);
+            public boolean commit(Snapshot snapshot, String branch) {
+                Identifier newIdentifier =
+                        new Identifier(
+                                identifier.getDatabaseName(), identifier.getTableName(), branch);
+                return catalog.commitSnapshot(newIdentifier, snapshot);
             }
 
             @Override

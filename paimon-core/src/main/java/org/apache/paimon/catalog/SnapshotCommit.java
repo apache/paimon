@@ -21,14 +21,12 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 import java.io.Serializable;
 
 /** Interface to commit snapshot atomically. */
 public interface SnapshotCommit extends AutoCloseable {
 
-    boolean commit(Snapshot snapshot, @Nullable String branch) throws Exception;
+    boolean commit(Snapshot snapshot, String branch) throws Exception;
 
     /** Factory to create {@link SnapshotCommit}. */
     interface Factory extends Serializable {

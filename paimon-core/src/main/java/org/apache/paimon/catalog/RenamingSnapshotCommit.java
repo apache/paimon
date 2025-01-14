@@ -30,8 +30,6 @@ import javax.annotation.Nullable;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
-
 /**
  * A {@link SnapshotCommit} using file renaming to commit.
  *
@@ -51,9 +49,9 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
     }
 
     @Override
-    public boolean commit(Snapshot snapshot, @Nullable String branch) throws Exception {
+    public boolean commit(Snapshot snapshot, String branch) throws Exception {
         Path newSnapshotPath =
-                branch == null || branch.equals(DEFAULT_MAIN_BRANCH)
+                snapshotManager.branch().equals(branch)
                         ? snapshotManager.snapshotPath(snapshot.id())
                         : snapshotManager.copyWithBranch(branch).snapshotPath(snapshot.id());
 

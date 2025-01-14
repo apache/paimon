@@ -71,8 +71,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -288,9 +286,8 @@ public class RESTCatalog implements Catalog {
                 new RESTSnapshotCommitFactory(catalogLoader()));
     }
 
-    public boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, @Nullable String branch) {
-        CommitTableRequest request = new CommitTableRequest(identifier, snapshot, branch);
+    public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {
+        CommitTableRequest request = new CommitTableRequest(identifier, snapshot);
         CommitTableResponse response =
                 client.post(
                         resourcePaths.commitTable(

@@ -955,8 +955,6 @@ components:
           $ref: '#/components/schemas/Identifier'
         snapshot:
           $ref: '#/components/schemas/Snapshot'
-        branch:
-          type: string
     Snapshot:
       type: object
       properties:
