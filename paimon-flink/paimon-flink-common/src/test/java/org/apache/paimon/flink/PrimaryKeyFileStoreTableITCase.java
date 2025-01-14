@@ -42,6 +42,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -63,6 +65,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     private static final int TIMEOUT = 180;
+    private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeyFileStoreTableITCase.class);
 
     // ------------------------------------------------------------------------
     //  Test Utilities
@@ -1031,6 +1034,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         try (CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T"))) {
             while (it.hasNext()) {
                 Row row = it.next();
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Changelog get {}", row);
+                }
                 checker.addChangelog(row);
                 if (((long) row.getField(2)) >= LIMIT) {
                     endCnt++;
