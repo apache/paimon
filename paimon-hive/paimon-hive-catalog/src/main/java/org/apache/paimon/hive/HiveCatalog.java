@@ -92,6 +92,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -107,8 +108,6 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
-import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
-import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
@@ -935,7 +934,14 @@ public class HiveCatalog extends AbstractCatalog {
         boolean externalTable = pair.getRight();
         TableSchema tableSchema;
         try {
-            tableSchema = schemaManager(identifier, location).createTable(schema, externalTable);
+            tableSchema =
+                    runWithLock(
+                            identifier,
+                            () ->
+                                    schemaManager(identifier, location)
+                                            .createTable(schema, externalTable));
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
@@ -1068,9 +1074,19 @@ public class HiveCatalog extends AbstractCatalog {
             throw new UnsupportedOperationException("Only data table support alter table.");
         }
 
-        final SchemaManager schemaManager = schemaManager(identifier, getTableLocation(identifier));
-        // first commit changes to underlying files
-        TableSchema schema = schemaManager.commitChanges(changes);
+        SchemaManager schemaManager = schemaManager(identifier, getTableLocation(identifier));
+        TableSchema schema;
+        try {
+            // first commit changes to underlying files
+            schema = runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+        } catch (TableNotExistException
+                | ColumnAlreadyExistException
+                | ColumnNotExistException
+                | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to alter table " + identifier.getFullName(), e);
+        }
 
         // currently only changes to main branch affects metastore
         if (!DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault())) {
@@ -1474,18 +1490,20 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier, Path location) {
-        return new SchemaManager(fileIO, location, identifier.getBranchNameOrDefault())
-                .withLock(lock(identifier));
+        return new SchemaManager(fileIO, location, identifier.getBranchNameOrDefault());
     }
 
-    private Lock lock(Identifier identifier) {
+    public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
         if (!lockEnabled()) {
-            return new Lock.EmptyLock();
+            return callable.call();
         }
 
         HiveCatalogLock lock =
-                new HiveCatalogLock(clients, checkMaxSleep(hiveConf), acquireTimeout(hiveConf));
-        return Lock.fromCatalog(lock, identifier);
+                new HiveCatalogLock(
+                        clients,
+                        HiveCatalogLock.checkMaxSleep(hiveConf),
+                        HiveCatalogLock.acquireTimeout(hiveConf));
+        return Lock.fromCatalog(lock, identifier).runWithLock(callable);
     }
 
     public static HiveConf createHiveConf(

@@ -406,6 +406,54 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/commit:
+    post:
+      tags:
+        - table
+      summary: Commit table
+      operationId: commitTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitTableRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitTableResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}/partitions:
     get:
       tags:
@@ -900,6 +948,27 @@ components:
       properties:
         newIdentifier:
           $ref: '#/components/schemas/Identifier'
+    CommitTableRequest:
+      type: object
+      properties:
+        identifier:
+          $ref: '#/components/schemas/Identifier'
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+        branch:
+          type: string
+    Snapshot:
+      type: object
+      properties:
+        version:
+          type: integer
+        id:
+          type: integer
+    CommitTableResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
     AlterDatabaseRequest:
       type: object
       properties:

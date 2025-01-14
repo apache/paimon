@@ -23,7 +23,6 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.SchemaManager;
@@ -173,7 +172,7 @@ public class CatalogUtils {
             Catalog catalog,
             Identifier identifier,
             TableMetadata.Loader metadataLoader,
-            Lock.Factory lockFactory)
+            SnapshotCommit.Factory commitFactory)
             throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
@@ -188,7 +187,7 @@ public class CatalogUtils {
 
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
-                        identifier, metadata.uuid(), lockFactory, catalog.catalogLoader());
+                        identifier, metadata.uuid(), catalog.catalogLoader(), commitFactory);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(catalog.fileIO(), path, schema, catalogEnv);

@@ -133,7 +133,7 @@ public class PartitionExpireTest {
                 };
 
         CatalogEnvironment env =
-                new CatalogEnvironment(null, null, Lock.emptyFactory(), null) {
+                new CatalogEnvironment(null, null, null, null) {
 
                     @Override
                     public PartitionHandler partitionHandler() {
