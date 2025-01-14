@@ -22,13 +22,11 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.BufferedReader;
@@ -41,12 +39,15 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -110,56 +111,53 @@ public interface FileIO extends Serializable {
      * List the statuses of the files in the given path if the path is a directory.
      *
      * @param path given path
-     * @param recursive if set to <code>true</code> will recursively list files in sub-directories,
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
      *     otherwise only files in the current directory will be listed
      * @return the statuses of the files in the given path
      */
     default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
-        List<FileStatus> statuses = new ArrayList<>();
-        FileStatus[] outer = listStatus(path);
-        if (outer != null) {
-            for (FileStatus f : outer) {
+        List<FileStatus> files = new ArrayList<>();
+        Iterator<FileStatus> iter = listFilesIterative(path, recursive);
+        iter.forEachRemaining(files::add);
+        return files.toArray(new FileStatus[0]);
+    }
+
+    /**
+     * List the statuses of the files iteratively in the given path if the path is a directory.
+     *
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
+     *     otherwise only files in the current directory will be listed
+     * @return an {@link Iterator} over the statuses of the files in the given path
+     */
+    default Iterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        Queue<FileStatus> files = new LinkedList<>();
+        for (Queue<Path> toUnpack = new LinkedList<>(Collections.singletonList(path));
+                !toUnpack.isEmpty(); ) {
+            FileStatus[] statuses = listStatus(toUnpack.remove());
+            for (FileStatus f : statuses) {
                 if (!f.isDir()) {
-                    statuses.add(f);
+                    files.add(f);
                     continue;
                 }
                 if (!recursive) {
                     continue;
                 }
-                FileStatus[] inner = listFiles(f.getPath(), true);
-                statuses.addAll(Arrays.asList(inner));
+                toUnpack.add(f.getPath());
             }
         }
-        return statuses.toArray(new FileStatus[0]);
-    }
+        return new Iterator<FileStatus>() {
+            @Override
+            public boolean hasNext() {
+                return !files.isEmpty();
+            }
 
-    /**
-     * Tests whether {@link #listFilesPaged} is supported.
-     *
-     * @return whether {@link #listFilesPaged} is supported
-     */
-    default boolean supportsListFilesPaged() {
-        return false;
-    }
-
-    /**
-     * List the statuses of the files in the given path in non-overlapping pages, if the path is a
-     * directory.
-     *
-     * @param path given path
-     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
-     *     otherwise only files in the current directory will be listed
-     * @param pageSize maximum size of the page
-     * @param continuationToken If supplied will list files after this token, otherwise list from
-     *     the beginning. You may acquire this token from the return of this method.
-     * @return A page of statuses of the files in the given path and the continuation token of this
-     *     page. The continuation token will be <code>null</code> if the returned page is the last
-     *     page.
-     */
-    default Pair<FileStatus[], String> listFilesPaged(
-            Path path, boolean recursive, long pageSize, @Nullable String continuationToken)
-            throws IOException {
-        throw new UnsupportedOperationException();
+            @Override
+            public FileStatus next() {
+                return files.remove();
+            }
+        };
     }
 
     /**
