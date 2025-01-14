@@ -315,11 +315,7 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateAutoCreateClose(schema.options());
             CreateTableRequest request = new CreateTableRequest(identifier, schema);
-            client.post(
-                    resourcePaths.tables(identifier.getDatabaseName()),
-                    request,
-                    GetTableResponse.class,
-                    headers());
+            client.post(resourcePaths.tables(identifier.getDatabaseName()), request, headers());
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -348,7 +344,6 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.renameTable(
                             fromTable.getDatabaseName(), fromTable.getTableName()),
                     request,
-                    GetTableResponse.class,
                     headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -371,7 +366,6 @@ public class RESTCatalog implements Catalog {
             client.post(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    GetTableResponse.class,
                     headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -567,11 +561,7 @@ public class RESTCatalog implements Catalog {
                             view.comment().orElse(null),
                             view.query());
             CreateViewRequest request = new CreateViewRequest(identifier, schema);
-            client.post(
-                    resourcePaths.views(identifier.getDatabaseName()),
-                    request,
-                    GetViewResponse.class,
-                    headers());
+            client.post(resourcePaths.views(identifier.getDatabaseName()), request, headers());
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         } catch (AlreadyExistsException e) {

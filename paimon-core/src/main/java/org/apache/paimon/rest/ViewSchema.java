@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+/** Schema for view. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ViewSchema {
     private static final String FIELD_FIELDS = "fields";
@@ -93,7 +94,9 @@ public class ViewSchema {
 
     @Override
     public boolean equals(Object o) {
-        if (o == null || getClass() != o.getClass()) return false;
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
         ViewSchema that = (ViewSchema) o;
         return Objects.equals(query, that.query)
                 && Objects.equals(comment, that.comment)

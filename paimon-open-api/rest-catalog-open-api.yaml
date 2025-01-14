@@ -240,11 +240,7 @@ paths:
               $ref: '#/components/schemas/CreateTableRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetTableResponse'
+          description: Success, no content
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}:
@@ -312,11 +308,7 @@ paths:
               $ref: '#/components/schemas/AlterTableRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetTableResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -384,14 +376,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RenameTableRequest'
+              $ref: '#/components/schemas/RenameRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetTableResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -594,6 +582,177 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/{prefix}/databases/{database}/views:
+    get:
+      tags:
+        - view
+      summary: List views
+      operationId: listViews
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListViewsResponse'
+        "500":
+          description: Internal Server Error
+    post:
+      tags:
+        - view
+      summary: Create view
+      operationId: createView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateViewRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/views/{view}:
+    get:
+      tags:
+        - view
+      summary: Get view
+      operationId: getView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: view
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetViewResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    delete:
+      tags:
+        - view
+      summary: Drop view
+      operationId: dropView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: view
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/views/{view}/rename:
+    post:
+      tags:
+        - table
+      summary: Rename view
+      operationId: renameView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: view
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
 components:
   schemas:
     CreateDatabaseRequest:
@@ -661,6 +820,13 @@ components:
           $ref: '#/components/schemas/Identifier'
         schema:
           $ref: '#/components/schemas/Schema'
+    CreateViewRequest:
+      type: object
+      properties:
+        identifier:
+          $ref: '#/components/schemas/Identifier'
+        schema:
+          $ref: '#/components/schemas/ViewSchema'
     DataField:
       type: object
       properties:
@@ -895,7 +1061,7 @@ components:
           type: string
         type:
           type: string
-    RenameTableRequest:
+    RenameRequest:
       type: object
       properties:
         newIdentifier:
@@ -976,6 +1142,37 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
+    GetViewResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        schema:
+          $ref: '#/components/schemas/ViewSchema'
+    ListViewsResponse:
+      type: object
+      properties:
+        views:
+          type: array
+          items:
+            type: string
+    ViewSchema:
+      type: object
+      properties:
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        comment:
+          type: string
+        query:
+          type: string
     Partition:
       type: object
       properties:
