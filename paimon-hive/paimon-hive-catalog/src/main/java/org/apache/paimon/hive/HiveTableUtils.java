@@ -18,8 +18,8 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FormatTable.Format;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -31,24 +31,25 @@ import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TYPE;
+import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.hive.HiveCatalog.isView;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
 
 class HiveTableUtils {
 
-    public static FormatTable convertToFormatTable(Table hiveTable) {
+    public static Schema tryToFormatSchema(Table hiveTable) {
         if (isView(hiveTable)) {
             throw new UnsupportedOperationException("Hive view is not supported.");
         }
 
-        Identifier identifier = new Identifier(hiveTable.getDbName(), hiveTable.getTableName());
-        Map<String, String> options = new HashMap<>(hiveTable.getParameters());
+        Options options = Options.fromMap(hiveTable.getParameters());
         List<String> partitionKeys = getFieldNames(hiveTable.getPartitionKeys());
         RowType rowType = createRowType(hiveTable);
         String comment = options.remove(COMMENT_PROP);
@@ -65,20 +66,19 @@ class HiveTableUtils {
         } else if (inputFormat.contains("Text")) {
             format = Format.CSV;
             // hive default field delimiter is '\u0001'
-            options.put(
-                    FIELD_DELIMITER.key(),
-                    serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
+            options.set(
+                    FIELD_DELIMITER, serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
         } else {
             throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
         }
 
-        return FormatTable.builder()
-                .identifier(identifier)
-                .rowType(rowType)
-                .partitionKeys(partitionKeys)
-                .location(location)
-                .format(format)
-                .options(options)
+        Schema.Builder builder = Schema.newBuilder();
+        rowType.getFields().forEach(f -> builder.column(f.name(), f.type(), f.description()));
+        options.set(PATH, location);
+        options.set(TYPE, FORMAT_TABLE);
+        options.set(FILE_FORMAT, format.name().toLowerCase());
+        return builder.partitionKeys(partitionKeys)
+                .options(options.toMap())
                 .comment(comment)
                 .build();
     }

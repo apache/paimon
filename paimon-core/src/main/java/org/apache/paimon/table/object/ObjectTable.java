@@ -34,6 +34,7 @@ import java.util.HashSet;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * A object table refers to a directory that contains multiple objects (files), Object table
@@ -122,6 +123,7 @@ public interface ObjectTable extends FileStoreTable {
         }
 
         public ObjectTable build() {
+            checkNotNull(objectLocation, "Object location should not be null for object table.");
             return new ObjectTableImpl(underlyingTable, objectFileIO, objectLocation);
         }
     }

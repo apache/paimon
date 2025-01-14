@@ -18,12 +18,13 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -166,7 +167,8 @@ public class TestRESTCatalog extends FileSystemCatalog {
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         if (tableFullName2Schema.containsKey(identifier.getFullName())) {
             TableSchema schema = tableFullName2Schema.get(identifier.getFullName());
-            if (CatalogUtils.getTableType(schema.options()) == TableType.FORMAT_TABLE) {
+            Options options = Options.fromMap(schema.options());
+            if (options.get(CoreOptions.TYPE) == TableType.FORMAT_TABLE) {
                 throw new UnsupportedOperationException("Only data table support alter table.");
             }
         } else {
@@ -189,12 +191,12 @@ public class TestRESTCatalog extends FileSystemCatalog {
     }
 
     @Override
-    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
+    protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         if (tableFullName2Schema.containsKey(identifier.getFullName())) {
             TableSchema tableSchema = tableFullName2Schema.get(identifier.getFullName());
-            return new TableMeta(tableSchema, "uuid");
+            return new TableMetadata(tableSchema, "uuid");
         }
-        return super.getDataTableMeta(identifier);
+        return super.loadTableMetadata(identifier);
     }
 
     private Partition spec2Partition(Map<String, String> spec) {
