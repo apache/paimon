@@ -52,9 +52,11 @@ public class ProcedureUtils {
                 dynamicOptions, CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
         setTableOptions(
                 dynamicOptions, CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
-        setTableOptions(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), maxExpires);
         setTableOptions(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0");
-
+        if (maxExpires != null) {
+            dynamicOptions.put(
+                    CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), String.valueOf(maxExpires));
+        }
         return dynamicOptions;
     }
 
@@ -62,13 +64,6 @@ public class ProcedureUtils {
             HashMap<String, String> dynamicOptions, String key, String value) {
         if (!StringUtils.isNullOrWhitespaceOnly(value)) {
             dynamicOptions.put(key, value);
-        }
-    }
-
-    private static void setTableOptions(
-            HashMap<String, String> dynamicOptions, String key, Integer value) {
-        if (value != null) {
-            dynamicOptions.put(key, String.valueOf(value));
         }
     }
 
