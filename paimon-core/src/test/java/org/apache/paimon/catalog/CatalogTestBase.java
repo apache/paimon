@@ -409,7 +409,7 @@ public abstract class CatalogTestBase {
                                 catalog.getTable(
                                         Identifier.create(
                                                 "test_db", "non_existing_table$snapshots")))
-                .withMessage("Table test_db.non_existing_table does not exist.");
+                .withMessage("Table test_db.non_existing_table$snapshots does not exist.");
 
         // Get system table throws TableNotExistException when system table type does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -417,7 +417,7 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.getTable(
                                         Identifier.create("test_db", "non_existing_table$schema1")))
-                .withMessage("Table test_db.non_existing_table does not exist.");
+                .withMessage("Table test_db.non_existing_table$schema1 does not exist.");
 
         // Get data table throws TableNotExistException when table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)

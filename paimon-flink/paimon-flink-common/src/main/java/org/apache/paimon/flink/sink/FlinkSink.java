@@ -57,9 +57,9 @@ import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
+import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_CPU;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMORY;
@@ -239,7 +239,7 @@ public abstract class FlinkSink<T> implements Serializable {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
 
-        if (options.get(CHANGELOG_PRECOMMIT_COMPACT)) {
+        if (options.get(PRECOMMIT_COMPACT)) {
             written =
                     written.transform(
                                     "Changelog Compact Coordinator",

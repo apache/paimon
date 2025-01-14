@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
@@ -26,6 +25,7 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -63,11 +63,8 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -88,20 +85,16 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
-import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.createCommitUser;
-import static org.apache.paimon.catalog.CatalogUtils.buildFormatTableByTableSchema;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
-import static org.apache.paimon.catalog.CatalogUtils.getTableType;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
@@ -173,6 +166,11 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public FileIO fileIO() {
+        return fileIO;
+    }
+
+    @Override
+    public FileIO fileIO(Path path) {
         return fileIO;
     }
 
@@ -286,13 +284,28 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
-            return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), this);
-        } else if (identifier.isSystemTable()) {
-            return getSystemTable(identifier);
-        } else {
-            return getDataOrFormatTable(identifier);
+        // TODO add lock from server
+        return CatalogUtils.loadTable(
+                this, identifier, this::loadTableMetadata, Lock.emptyFactory());
+    }
+
+    private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+        GetTableResponse response;
+        try {
+            response =
+                    client.get(
+                            resourcePaths.table(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            GetTableResponse.class,
+                            headers());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
         }
+
+        TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
+        return new TableMetadata(schema, response.getId());
     }
 
     @Override
@@ -615,56 +628,6 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    private Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
-        Preconditions.checkArgument(identifier.getSystemTableName() == null);
-
-        GetTableResponse response;
-        try {
-            response =
-                    client.get(
-                            resourcePaths.table(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
-                            GetTableResponse.class,
-                            headers());
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
-        TableType tableType = getTableType(response.getSchema().options());
-        if (tableType == TableType.FORMAT_TABLE) {
-            Schema schema = response.getSchema();
-            return buildFormatTableByTableSchema(
-                    identifier,
-                    schema.options(),
-                    schema.rowType(),
-                    schema.partitionKeys(),
-                    schema.comment());
-        }
-        TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                        fileIO(),
-                        new Path(schema.options().get(PATH.key())),
-                        schema,
-                        new CatalogEnvironment(
-                                identifier,
-                                response.getId(),
-                                Lock.emptyFactory(),
-                                catalogLoader()));
-        if (tableType == TableType.OBJECT_TABLE) {
-            String objectLocation = table.coreOptions().objectLocation();
-            checkNotNull(objectLocation, "Object location should not be null for object table.");
-            table =
-                    ObjectTable.builder()
-                            .underlyingTable(table)
-                            .objectLocation(objectLocation)
-                            .objectFileIO(this.fileIO())
-                            .build();
-        }
-        return table;
-    }
-
     private boolean isMetaStorePartitionedTable(Table table) {
         Options options = Options.fromMap(table.options());
         return Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE));
@@ -672,17 +635,6 @@ public class RESTCatalog implements Catalog {
 
     private Map<String, String> headers() {
         return catalogAuth.getHeaders();
-    }
-
-    private Table getSystemTable(Identifier identifier) throws TableNotExistException {
-        Table originTable =
-                getDataOrFormatTable(
-                        new Identifier(
-                                identifier.getDatabaseName(),
-                                identifier.getTableName(),
-                                identifier.getBranchName(),
-                                null));
-        return CatalogUtils.createSystemTable(identifier, originTable);
     }
 
     private ScheduledExecutorService tokenRefreshExecutor() {
