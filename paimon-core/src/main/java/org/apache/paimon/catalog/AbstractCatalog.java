@@ -24,7 +24,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
@@ -367,9 +366,10 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        Lock.Factory lockFactory =
-                Lock.factory(lockFactory().orElse(null), lockContext().orElse(null), identifier);
-        return CatalogUtils.loadTable(this, identifier, this::loadTableMetadata, lockFactory);
+        SnapshotCommit.Factory commitFactory =
+                new RenamingSnapshotCommit.Factory(
+                        lockFactory().orElse(null), lockContext().orElse(null));
+        return CatalogUtils.loadTable(this, identifier, this::loadTableMetadata, commitFactory);
     }
 
     /**

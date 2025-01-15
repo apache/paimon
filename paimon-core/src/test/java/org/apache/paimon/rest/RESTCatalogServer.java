@@ -22,11 +22,14 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
+import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
@@ -34,6 +37,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -126,6 +130,7 @@ public class RESTCatalogServer {
                         boolean isViews = resources.length == 2 && "views".equals(resources[1]);
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
                         boolean isTableRename =
+
                                 resources.length == 3
                                         && "tables".equals(resources[1])
                                         && "rename".equals(resources[2]);
@@ -141,6 +146,8 @@ public class RESTCatalogServer {
                                 resources.length == 3
                                         && "tables".equals(resources[1])
                                         && !"rename".equals(resources[2]);
+                        boolean isTableCommit =
+                                resources.length == 4 && "commit".equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
@@ -196,6 +203,9 @@ public class RESTCatalogServer {
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTableRename) {
                             return renameTableApiHandler(catalog, request);
+                        } else if (isTableCommit) {
+                            return commitTableApiHandler(
+                                    catalog, request, databaseName, resources[2]);
                         } else if (isTable) {
                             String tableName = resources[2];
                             return tableApiHandler(catalog, request, databaseName, tableName);
@@ -298,6 +308,24 @@ public class RESTCatalogServer {
                 }
             }
         };
+    }
+
+    private static MockResponse commitTableApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName, String tableName)
+            throws Exception {
+        CommitTableRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(Identifier.create(databaseName, tableName));
+        RenamingSnapshotCommit commit =
+                new RenamingSnapshotCommit(table.snapshotManager(), Lock.emptyFactory().create());
+        String branchName = requestBody.getIdentifier().getBranchName();
+        if (branchName == null) {
+            branchName = "main";
+        }
+        boolean success = commit.commit(requestBody.getSnapshot(), branchName);
+        CommitTableResponse response = new CommitTableResponse(success);
+        return mockResponse(response, 200);
     }
 
     private static MockResponse databasesApiHandler(Catalog catalog, RecordedRequest request)
