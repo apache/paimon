@@ -16,44 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.rest.RESTRequest;
+import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Request for renaming. */
+import java.util.List;
+
+/** Response for listing tables. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class RenameTableRequest implements RESTRequest {
+public class ListViewsResponse implements RESTResponse {
 
-    private static final String FIELD_SOURCE = "source";
-    private static final String FIELD_DESTINATION = "destination";
+    private static final String FIELD_VIEWS = "views";
 
-    @JsonProperty(FIELD_SOURCE)
-    private final Identifier source;
-
-    @JsonProperty(FIELD_DESTINATION)
-    private final Identifier destination;
+    @JsonProperty(FIELD_VIEWS)
+    private final List<String> views;
 
     @JsonCreator
-    public RenameTableRequest(
-            @JsonProperty(FIELD_SOURCE) Identifier source,
-            @JsonProperty(FIELD_DESTINATION) Identifier destination) {
-        this.source = source;
-        this.destination = destination;
+    public ListViewsResponse(@JsonProperty(FIELD_VIEWS) List<String> views) {
+        this.views = views;
     }
 
-    @JsonGetter(FIELD_DESTINATION)
-    public Identifier getDestination() {
-        return destination;
-    }
-
-    @JsonGetter(FIELD_SOURCE)
-    public Identifier getSource() {
-        return source;
+    @JsonGetter(FIELD_VIEWS)
+    public List<String> getViews() {
+        return this.views;
     }
 }

@@ -117,6 +117,11 @@ class RESTCatalogTest extends CatalogTestBase {
         return true;
     }
 
+    @Override
+    protected boolean supportsView() {
+        return true;
+    }
+
     private void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {

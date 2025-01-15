@@ -20,40 +20,41 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTRequest;
+import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Request for renaming. */
+/** Request for creating view. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class RenameTableRequest implements RESTRequest {
+public class CreateViewRequest implements RESTRequest {
 
-    private static final String FIELD_SOURCE = "source";
-    private static final String FIELD_DESTINATION = "destination";
+    private static final String FIELD_IDENTIFIER = "identifier";
+    private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_SOURCE)
-    private final Identifier source;
+    @JsonProperty(FIELD_IDENTIFIER)
+    private final Identifier identifier;
 
-    @JsonProperty(FIELD_DESTINATION)
-    private final Identifier destination;
+    @JsonProperty(FIELD_SCHEMA)
+    private final ViewSchema schema;
 
     @JsonCreator
-    public RenameTableRequest(
-            @JsonProperty(FIELD_SOURCE) Identifier source,
-            @JsonProperty(FIELD_DESTINATION) Identifier destination) {
-        this.source = source;
-        this.destination = destination;
+    public CreateViewRequest(
+            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
+            @JsonProperty(FIELD_SCHEMA) ViewSchema schema) {
+        this.schema = schema;
+        this.identifier = identifier;
     }
 
-    @JsonGetter(FIELD_DESTINATION)
-    public Identifier getDestination() {
-        return destination;
+    @JsonGetter(FIELD_IDENTIFIER)
+    public Identifier getIdentifier() {
+        return identifier;
     }
 
-    @JsonGetter(FIELD_SOURCE)
-    public Identifier getSource() {
-        return source;
+    @JsonGetter(FIELD_SCHEMA)
+    public ViewSchema getSchema() {
+        return schema;
     }
 }

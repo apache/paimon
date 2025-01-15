@@ -45,6 +45,7 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -55,16 +56,22 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewImpl;
+import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -290,8 +297,7 @@ public class RESTCatalog implements Catalog {
         CommitTableRequest request = new CommitTableRequest(identifier, snapshot);
         CommitTableResponse response =
                 client.post(
-                        resourcePaths.commitTable(
-                                identifier.getDatabaseName(), identifier.getTableName()),
+                        resourcePaths.commitTable(identifier.getDatabaseName()),
                         request,
                         CommitTableResponse.class,
                         headers());
@@ -325,11 +331,7 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateAutoCreateClose(schema.options());
             CreateTableRequest request = new CreateTableRequest(identifier, schema);
-            client.post(
-                    resourcePaths.tables(identifier.getDatabaseName()),
-                    request,
-                    GetTableResponse.class,
-                    headers());
+            client.post(resourcePaths.tables(identifier.getDatabaseName()), request, headers());
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -353,13 +355,8 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
         try {
-            RenameTableRequest request = new RenameTableRequest(toTable);
-            client.post(
-                    resourcePaths.renameTable(
-                            fromTable.getDatabaseName(), fromTable.getTableName()),
-                    request,
-                    GetTableResponse.class,
-                    headers());
+            RenameTableRequest request = new RenameTableRequest(fromTable, toTable);
+            client.post(resourcePaths.renameTable(fromTable.getDatabaseName()), request, headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
@@ -381,7 +378,6 @@ public class RESTCatalog implements Catalog {
             client.post(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    GetTableResponse.class,
                     headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -530,6 +526,88 @@ public class RESTCatalog implements Catalog {
         }
 
         return response.getPartitions();
+    }
+
+    @Override
+    public View getView(Identifier identifier) throws ViewNotExistException {
+        try {
+            GetViewResponse response =
+                    client.get(
+                            resourcePaths.view(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            GetViewResponse.class,
+                            headers());
+            return new ViewImpl(
+                    identifier,
+                    response.getSchema().rowType(),
+                    response.getSchema().query(),
+                    response.getSchema().comment(),
+                    response.getSchema().options());
+        } catch (NoSuchResourceException e) {
+            throw new ViewNotExistException(identifier);
+        }
+    }
+
+    @Override
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        try {
+            client.delete(
+                    resourcePaths.view(identifier.getDatabaseName(), identifier.getTableName()),
+                    headers());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new ViewNotExistException(identifier);
+            }
+        }
+    }
+
+    @Override
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        try {
+            ViewSchema schema =
+                    new ViewSchema(
+                            new RowType(view.rowType().getFields()),
+                            view.options(),
+                            view.comment().orElse(null),
+                            view.query());
+            CreateViewRequest request = new CreateViewRequest(identifier, schema);
+            client.post(resourcePaths.views(identifier.getDatabaseName()), request, headers());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName());
+        } catch (AlreadyExistsException e) {
+            if (!ignoreIfExists) {
+                throw new ViewAlreadyExistException(identifier);
+            }
+        }
+    }
+
+    @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        try {
+            ListViewsResponse response =
+                    client.get(
+                            resourcePaths.views(databaseName), ListViewsResponse.class, headers());
+            return response.getViews();
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
+    public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        try {
+            RenameTableRequest request = new RenameTableRequest(fromView, toView);
+            client.post(resourcePaths.renameView(fromView.getDatabaseName()), request, headers());
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new ViewNotExistException(fromView);
+            }
+        } catch (AlreadyExistsException e) {
+            throw new ViewAlreadyExistException(toView);
+        }
     }
 
     @Override
