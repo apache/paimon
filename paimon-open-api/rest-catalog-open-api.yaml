@@ -389,7 +389,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/commit:
+  /v1/{prefix}/databases/{database}/tables/commit:
     post:
       tags:
         - table
@@ -402,11 +402,6 @@ paths:
           schema:
             type: string
         - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
           in: path
           required: true
           schema:
@@ -1120,8 +1115,52 @@ components:
       properties:
         version:
           type: integer
+          format: int32
+          nullable: true
         id:
           type: integer
+          format: int64
+        schemaId:
+          type: integer
+          format: int64
+        baseManifestList:
+          type: string
+        deltaManifestList:
+          type: string
+        changelogManifestList:
+          type: string
+          nullable: true
+        indexManifest:
+          type: string
+        commitUser:
+          type: string
+        commitIdentifier:
+          type: string
+        commitKind:
+          type: string
+          enum: ["APPEND", "COMPACT", "OVERWRITE", "ANALYZE"]
+        timeMillis:
+          type: integer
+          format: int64
+        logOffsets:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        totalRecordCount:
+          type: integer
+          format: int64
+        deltaRecordCount:
+          type: integer
+          format: int64
+        changelogRecordCount:
+          type: integer
+          format: int64
+        watermark:
+          type: integer
+          format: int64
+        statistics:
+          type: string
     CommitTableResponse:
       type: object
       properties:

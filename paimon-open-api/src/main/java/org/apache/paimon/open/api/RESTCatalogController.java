@@ -347,11 +347,10 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/commit")
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/commit")
     public CommitTableResponse commitTable(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable String table,
             @RequestBody CommitTableRequest request) {
         return new CommitTableResponse(true);
     }

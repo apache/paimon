@@ -297,8 +297,7 @@ public class RESTCatalog implements Catalog {
         CommitTableRequest request = new CommitTableRequest(identifier, snapshot);
         CommitTableResponse response =
                 client.post(
-                        resourcePaths.commitTable(
-                                identifier.getDatabaseName(), identifier.getTableName()),
+                        resourcePaths.commitTable(identifier.getDatabaseName()),
                         request,
                         CommitTableResponse.class,
                         headers());

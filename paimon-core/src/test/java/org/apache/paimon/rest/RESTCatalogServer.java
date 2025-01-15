@@ -109,7 +109,6 @@ public class RESTCatalogServer {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
                 String token = request.getHeaders().get("Authorization");
-                System.out.println(request.getPath());
                 RESTResponse response;
                 try {
                     if (!("Bearer " + authToken).equals(token)) {
@@ -130,7 +129,6 @@ public class RESTCatalogServer {
                         boolean isViews = resources.length == 2 && "views".equals(resources[1]);
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
                         boolean isTableRename =
-
                                 resources.length == 3
                                         && "tables".equals(resources[1])
                                         && "rename".equals(resources[2]);
@@ -145,9 +143,12 @@ public class RESTCatalogServer {
                         boolean isTable =
                                 resources.length == 3
                                         && "tables".equals(resources[1])
-                                        && !"rename".equals(resources[2]);
+                                        && !"rename".equals(resources[2])
+                                        && !"commit".equals(resources[2]);
                         boolean isTableCommit =
-                                resources.length == 4 && "commit".equals(resources[3]);
+                                resources.length == 3
+                                        && "tables".equals(resources[1])
+                                        && "commit".equals(resources[2]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
@@ -214,7 +215,6 @@ public class RESTCatalogServer {
                         } else if (isViews) {
                             return viewsApiHandler(catalog, request, databaseName);
                         } else if (isViewRename) {
-                            System.out.println("View rename");
                             return renameViewApiHandler(catalog, request);
                         } else if (isView) {
                             String viewName = resources[2];
