@@ -62,12 +62,12 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName);
     }
 
-    public String renameTable(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "rename");
+    public String renameTable(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, "rename");
     }
 
-    public String commitTable(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "commit");
+    public String commitTable(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, "commit");
     }
 
     public String partitions(String databaseName, String tableName) {
@@ -87,5 +87,17 @@ public class ResourcePaths {
     public String markDonePartitions(String databaseName, String tableName) {
         return SLASH.join(
                 V1, prefix, DATABASES, databaseName, TABLES, tableName, "partitions", "mark");
+    }
+
+    public String views(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, "views");
+    }
+
+    public String view(String databaseName, String viewName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, "views", viewName);
+    }
+
+    public String renameView(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, "views", "rename");
     }
 }

@@ -970,7 +970,6 @@ public abstract class CatalogTestBase {
                 .isInstanceOf(Catalog.ViewNotExistException.class);
         catalog.renameView(identifier, newIdentifier, false);
 
-        catalog.dropView(newIdentifier, false);
         catalog.dropView(newIdentifier, true);
         assertThatThrownBy(() -> catalog.dropView(newIdentifier, false))
                 .isInstanceOf(Catalog.ViewNotExistException.class);

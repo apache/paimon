@@ -33,6 +33,7 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -42,14 +43,19 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewImpl;
+import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
@@ -120,12 +126,29 @@ public class RESTCatalogServer {
                                         .substring((DATABASE_URI + "/").length())
                                         .split("/");
                         String databaseName = resources[0];
+                        boolean isViews = resources.length == 2 && "views".equals(resources[1]);
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
-                        boolean isTable = resources.length == 3 && "tables".equals(resources[1]);
                         boolean isTableRename =
-                                resources.length == 4 && "rename".equals(resources[3]);
+                                resources.length == 3
+                                        && "tables".equals(resources[1])
+                                        && "rename".equals(resources[2]);
+                        boolean isViewRename =
+                                resources.length == 3
+                                        && "views".equals(resources[1])
+                                        && "rename".equals(resources[2]);
+                        boolean isView =
+                                resources.length == 3
+                                        && "views".equals(resources[1])
+                                        && !"rename".equals(resources[2]);
+                        boolean isTable =
+                                resources.length == 3
+                                        && "tables".equals(resources[1])
+                                        && !"rename".equals(resources[2])
+                                        && !"commit".equals(resources[2]);
                         boolean isTableCommit =
-                                resources.length == 4 && "commit".equals(resources[3]);
+                                resources.length == 3
+                                        && "tables".equals(resources[1])
+                                        && "commit".equals(resources[2]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
@@ -180,8 +203,7 @@ public class RESTCatalogServer {
                             String tableName = resources[2];
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTableRename) {
-                            return renameTableApiHandler(
-                                    catalog, request, databaseName, resources[2]);
+                            return renameTableApiHandler(catalog, request);
                         } else if (isTableCommit) {
                             return commitTableApiHandler(
                                     catalog, request, databaseName, resources[2]);
@@ -190,6 +212,13 @@ public class RESTCatalogServer {
                             return tableApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTables) {
                             return tablesApiHandler(catalog, request, databaseName);
+                        } else if (isViews) {
+                            return viewsApiHandler(catalog, request, databaseName);
+                        } else if (isViewRename) {
+                            return renameViewApiHandler(catalog, request);
+                        } else if (isView) {
+                            String viewName = resources[2];
+                            return viewApiHandler(catalog, request, databaseName, viewName);
                         } else {
                             return databaseApiHandler(catalog, request, databaseName);
                         }
@@ -243,6 +272,22 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
+                } catch (Catalog.ViewNotExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.VIEW,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.ViewAlreadyExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.VIEW,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    409);
+                    return mockResponse(response, 409);
                 } catch (IllegalArgumentException e) {
                     response = new ErrorResponse(null, null, e.getMessage(), 400);
                     return mockResponse(response, 400);
@@ -263,21 +308,6 @@ public class RESTCatalogServer {
                 }
             }
         };
-    }
-
-    private static MockResponse renameTableApiHandler(
-            Catalog catalog, RecordedRequest request, String databaseName, String tableName)
-            throws Exception {
-        RenameTableRequest requestBody =
-                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
-        catalog.renameTable(
-                Identifier.create(databaseName, tableName), requestBody.getNewIdentifier(), false);
-        GetTableResponse response =
-                getTable(
-                        catalog,
-                        requestBody.getNewIdentifier().getDatabaseName(),
-                        requestBody.getNewIdentifier().getTableName());
-        return mockResponse(response, 200);
     }
 
     private static MockResponse commitTableApiHandler(
@@ -342,7 +372,6 @@ public class RESTCatalogServer {
         RESTResponse response;
         switch (request.getMethod()) {
             case "GET":
-                catalog.listTables(databaseName);
                 response = new ListTablesResponse(catalog.listTables(databaseName));
                 return mockResponse(response, 200);
             case "POST":
@@ -350,10 +379,7 @@ public class RESTCatalogServer {
                         OBJECT_MAPPER.readValue(
                                 request.getBody().readUtf8(), CreateTableRequest.class);
                 catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
-                response =
-                        new GetTableResponse(
-                                UUID.randomUUID().toString(), "", 1L, requestBody.getSchema());
-                return mockResponse(response, 200);
+                return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
         }
@@ -373,14 +399,21 @@ public class RESTCatalogServer {
                         OBJECT_MAPPER.readValue(
                                 request.getBody().readUtf8(), AlterTableRequest.class);
                 catalog.alterTable(identifier, requestBody.getChanges(), false);
-                response = getTable(catalog, databaseName, tableName);
-                return mockResponse(response, 200);
+                return new MockResponse().setResponseCode(200);
             case "DELETE":
                 catalog.dropTable(identifier, false);
                 return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
         }
+    }
+
+    private static MockResponse renameTableApiHandler(Catalog catalog, RecordedRequest request)
+            throws Exception {
+        RenameTableRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+        catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
+        return new MockResponse().setResponseCode(200);
     }
 
     private static MockResponse partitionsApiHandler(
@@ -402,6 +435,63 @@ public class RESTCatalogServer {
             default:
                 return new MockResponse().setResponseCode(404);
         }
+    }
+
+    private static MockResponse viewsApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName) throws Exception {
+        RESTResponse response;
+        switch (request.getMethod()) {
+            case "GET":
+                response = new ListViewsResponse(catalog.listViews(databaseName));
+                return mockResponse(response, 200);
+            case "POST":
+                CreateViewRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), CreateViewRequest.class);
+                ViewImpl view =
+                        new ViewImpl(
+                                requestBody.getIdentifier(),
+                                requestBody.getSchema().rowType(),
+                                requestBody.getSchema().query(),
+                                requestBody.getSchema().comment(),
+                                requestBody.getSchema().options());
+                catalog.createView(requestBody.getIdentifier(), view, false);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private static MockResponse viewApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName, String viewName)
+            throws Exception {
+        RESTResponse response;
+        Identifier identifier = Identifier.create(databaseName, viewName);
+        switch (request.getMethod()) {
+            case "GET":
+                View view = catalog.getView(identifier);
+                ViewSchema schema =
+                        new ViewSchema(
+                                view.rowType(),
+                                view.options(),
+                                view.comment().orElse(null),
+                                view.query());
+                response = new GetViewResponse("id", identifier.getTableName(), schema);
+                return mockResponse(response, 200);
+            case "DELETE":
+                catalog.dropView(identifier, false);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private static MockResponse renameViewApiHandler(Catalog catalog, RecordedRequest request)
+            throws Exception {
+        RenameTableRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+        catalog.renameView(requestBody.getSource(), requestBody.getDestination(), false);
+        return new MockResponse().setResponseCode(200);
     }
 
     private static GetTableResponse getTable(Catalog catalog, String databaseName, String tableName)
