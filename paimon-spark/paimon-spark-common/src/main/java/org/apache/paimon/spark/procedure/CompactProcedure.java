@@ -47,6 +47,7 @@ import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TimeUtils;
@@ -196,11 +197,10 @@ public class CompactProcedure extends BaseProcedure {
                                 table.partitionKeys());
                     }
 
-                    Map<String, String> dynamicOptions = new HashMap<>();
-                    dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
-                    if (!StringUtils.isNullOrWhitespaceOnly(options)) {
-                        dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
-                    }
+                    HashMap<String, String> dynamicOptions = new HashMap<>();
+                    ProcedureUtils.putIfNotEmpty(
+                            dynamicOptions, CoreOptions.WRITE_ONLY.key(), "false");
+                    ProcedureUtils.putAllOptions(dynamicOptions, options);
                     table = table.copy(dynamicOptions);
                     InternalRow internalRow =
                             newInternalRow(

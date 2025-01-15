@@ -20,8 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.ParameterUtils;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -32,7 +31,6 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.HashMap;
-import java.util.Map;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -78,10 +76,8 @@ public class CompactManifestProcedure extends BaseProcedure {
         String options = args.isNullAt(1) ? null : args.getString(1);
 
         FileStoreTable table = (FileStoreTable) loadSparkTable(tableIdent).getTable();
-        Map<String, String> dynamicOptions = new HashMap<>();
-        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
-            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
-        }
+        HashMap<String, String> dynamicOptions = new HashMap<>();
+        ProcedureUtils.putAllOptions(dynamicOptions, options);
         table = table.copy(dynamicOptions);
 
         try (FileStoreCommit commit =

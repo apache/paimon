@@ -24,9 +24,7 @@ import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -34,7 +32,6 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.HashMap;
-import java.util.Map;
 
 /** A procedure to expire snapshots. */
 public class ExpireSnapshotsProcedure extends ProcedureBase {
@@ -75,10 +72,9 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
             String options)
             throws Catalog.TableNotExistException {
         Table table = table(tableId);
-        Map<String, String> dynamicOptions = new HashMap<>();
-        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
-            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
-        }
+        HashMap<String, String> dynamicOptions = new HashMap<>();
+        ProcedureUtils.putAllOptions(dynamicOptions, options);
+
         table = table.copy(dynamicOptions);
         ExpireSnapshots expireSnapshots = table.newExpireSnapshots();
 
