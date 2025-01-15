@@ -885,7 +885,9 @@ components:
           pattern: ^ROW.*
           example: ROW
         fields:
-          $ref: '#/components/schemas/DataField'
+          type: array
+          items:
+           $ref: '#/components/schemas/DataField'
     Identifier:
       type: object
       properties:
@@ -1161,10 +1163,8 @@ components:
     ViewSchema:
       type: object
       properties:
-        fields:
-          type: array
-          items:
-            $ref: '#/components/schemas/DataField'
+        rowType:
+          $ref: '#/components/schemas/RowType'
         options:
           type: object
           additionalProperties:
