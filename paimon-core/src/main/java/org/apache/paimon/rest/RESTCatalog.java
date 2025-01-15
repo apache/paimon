@@ -18,9 +18,9 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
@@ -29,7 +29,6 @@ import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -42,6 +41,7 @@ import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
+import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
@@ -49,6 +49,7 @@ import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -154,7 +155,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public CatalogLoader catalogLoader() {
+    public RESTCatalogLoader catalogLoader() {
         return new RESTCatalogLoader(options, fileIO);
     }
 
@@ -278,9 +279,23 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        // TODO add lock from server
         return CatalogUtils.loadTable(
-                this, identifier, this::loadTableMetadata, Lock.emptyFactory());
+                this,
+                identifier,
+                this::loadTableMetadata,
+                new RESTSnapshotCommitFactory(catalogLoader()));
+    }
+
+    public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {
+        CommitTableRequest request = new CommitTableRequest(identifier, snapshot);
+        CommitTableResponse response =
+                client.post(
+                        resourcePaths.commitTable(
+                                identifier.getDatabaseName(), identifier.getTableName()),
+                        request,
+                        CommitTableResponse.class,
+                        headers());
+        return response.isSuccess();
     }
 
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
