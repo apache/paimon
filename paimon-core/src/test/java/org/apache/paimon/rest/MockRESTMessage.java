@@ -253,7 +253,10 @@ public class MockRESTMessage {
                         new DataField(0, "f0", new IntType()),
                         new DataField(1, "f1", new IntType()));
         return new ViewSchema(
-                fields, Collections.singletonMap("pt", "1"), "comment", "select * from t1");
+                new RowType(fields),
+                Collections.singletonMap("pt", "1"),
+                "comment",
+                "select * from t1");
     }
 
     private static Partition partition() {

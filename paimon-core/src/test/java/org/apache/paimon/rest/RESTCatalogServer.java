@@ -440,7 +440,7 @@ public class RESTCatalogServer {
                 View view = catalog.getView(identifier);
                 ViewSchema schema =
                         new ViewSchema(
-                                view.rowType().getFields(),
+                                view.rowType(),
                                 view.options(),
                                 view.comment().orElse(null),
                                 view.query());
@@ -465,10 +465,7 @@ public class RESTCatalogServer {
         View view = catalog.getView(identifier);
         ViewSchema schema =
                 new ViewSchema(
-                        view.rowType().getFields(),
-                        view.options(),
-                        view.comment().orElse(null),
-                        view.query());
+                        view.rowType(), view.options(), view.comment().orElse(null), view.query());
         GetViewResponse response = new GetViewResponse("id", identifier.getTableName(), schema);
         return mockResponse(response, 200);
     }

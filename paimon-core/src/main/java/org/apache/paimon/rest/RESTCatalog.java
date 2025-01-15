@@ -66,6 +66,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
@@ -557,7 +558,7 @@ public class RESTCatalog implements Catalog {
         try {
             ViewSchema schema =
                     new ViewSchema(
-                            view.rowType().getFields(),
+                            new RowType(view.rowType().getFields()),
                             view.options(),
                             view.comment().orElse(null),
                             view.query());

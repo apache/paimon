@@ -18,7 +18,6 @@
 
 package org.apache.paimon.view;
 
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -29,14 +28,13 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /** Schema for view. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ViewSchema {
-    private static final String FIELD_FIELDS = "fields";
+    private static final String FIELD_FIELDS = "rowType";
     private static final String FIELD_OPTIONS = "options";
     private static final String FIELD_COMMENT = "comment";
     private static final String FIELD_QUERY = "query";
@@ -53,21 +51,18 @@ public class ViewSchema {
     private final Map<String, String> options;
 
     @JsonProperty(FIELD_FIELDS)
-    private final List<DataField> fields;
-
     private final RowType rowType;
 
     @JsonCreator
     public ViewSchema(
-            @JsonProperty(FIELD_FIELDS) List<DataField> fields,
+            @JsonProperty(FIELD_FIELDS) RowType rowType,
             @JsonProperty(FIELD_OPTIONS) Map<String, String> options,
             @Nullable @JsonProperty(FIELD_COMMENT) String comment,
             @JsonProperty(FIELD_QUERY) String query) {
-        this.fields = fields;
         this.options = options;
         this.comment = comment;
         this.query = query;
-        this.rowType = new RowType(fields);
+        this.rowType = rowType;
     }
 
     public ViewSchema(
@@ -76,9 +71,9 @@ public class ViewSchema {
         this.comment = comment;
         this.options = options;
         this.rowType = rowType;
-        this.fields = rowType.getFields();
     }
 
+    @JsonGetter(FIELD_FIELDS)
     public RowType rowType() {
         return rowType;
     }
@@ -99,11 +94,6 @@ public class ViewSchema {
         return options;
     }
 
-    @JsonGetter(FIELD_FIELDS)
-    public List<DataField> fields() {
-        return fields;
-    }
-
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) {
@@ -113,11 +103,11 @@ public class ViewSchema {
         return Objects.equals(query, that.query)
                 && Objects.equals(comment, that.comment)
                 && Objects.equals(options, that.options)
-                && Objects.equals(fields, that.fields);
+                && Objects.equals(rowType, that.rowType);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(query, comment, options, fields);
+        return Objects.hash(query, comment, options, rowType);
     }
 }
