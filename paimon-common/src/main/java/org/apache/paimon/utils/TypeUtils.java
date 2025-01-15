@@ -222,11 +222,16 @@ public class TypeUtils {
                                                         entry.getKey(), keyType, isCdcValue);
                                         Object value = null;
                                         if (!entry.getValue().isNull()) {
-                                            value =
+                                            if (entry.getValue().isTextual()) {
+                                                value = entry.getValue().asText();
+                                            }
+                                            else {
+                                                value =
                                                     castFromStringInternal(
                                                             entry.getValue().toString(),
                                                             valueType,
                                                             isCdcValue);
+                                            }
                                         }
                                         resultMap.put(key, value);
                                     });
