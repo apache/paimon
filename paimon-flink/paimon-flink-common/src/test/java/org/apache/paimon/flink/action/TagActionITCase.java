@@ -266,8 +266,7 @@ public class TagActionITCase extends ActionITCaseBase {
         switch (invoker) {
             case "procedure_indexed":
                 executeSQL(
-                        String.format(
-                                "CALL sys.create_tag('%s.%s', 'A', 1)", database, tableName));
+                        String.format("CALL sys.create_tag('%s.%s', 'A', 1)", database, tableName));
                 break;
             case "procedure_named":
                 executeSQL(
@@ -284,8 +283,7 @@ public class TagActionITCase extends ActionITCaseBase {
         switch (invoker) {
             case "procedure_indexed":
                 executeSQL(
-                        String.format(
-                                "CALL sys.create_tag('%s.%s', 'B', 2)", database, tableName));
+                        String.format("CALL sys.create_tag('%s.%s', 'B', 2)", database, tableName));
                 break;
             case "procedure_named":
                 executeSQL(
@@ -304,8 +302,7 @@ public class TagActionITCase extends ActionITCaseBase {
         switch (invoker) {
             case "procedure_indexed":
                 executeSQL(
-                        String.format(
-                                "CALL sys.create_tag('%s.%s', 'C', 3)", database, tableName));
+                        String.format("CALL sys.create_tag('%s.%s', 'C', 3)", database, tableName));
                 break;
             case "procedure_named":
                 executeSQL(
