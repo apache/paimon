@@ -29,7 +29,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
-import org.apache.paimon.rest.requests.RenameRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -324,12 +324,11 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/rename")
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/rename")
     public void renameTable(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable String table,
-            @RequestBody RenameRequest request) {}
+            @RequestBody RenameTableRequest request) {}
 
     @Operation(
             summary = "List partitions",
@@ -510,6 +509,25 @@ public class RESTCatalogController {
     }
 
     @Operation(
+            summary = "Rename view",
+            tags = {"view"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/views/rename")
+    public void renameView(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @RequestBody RenameTableRequest request) {}
+
+    @Operation(
             summary = "Drop view",
             tags = {"view"})
     @ApiResponses({
@@ -527,24 +545,4 @@ public class RESTCatalogController {
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String view) {}
-
-    @Operation(
-            summary = "Rename view",
-            tags = {"view"})
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Success, no content"),
-        @ApiResponse(
-                responseCode = "404",
-                description = "Resource not found",
-                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
-        @ApiResponse(
-                responseCode = "500",
-                content = {@Content(schema = @Schema())})
-    })
-    @PostMapping("/v1/{prefix}/databases/{database}/views/{view}/rename")
-    public void renameView(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @PathVariable String view,
-            @RequestBody RenameRequest request) {}
 }

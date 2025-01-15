@@ -28,20 +28,32 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 /** Request for renaming. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class RenameRequest implements RESTRequest {
+public class RenameTableRequest implements RESTRequest {
 
-    private static final String FIELD_NEW_IDENTIFIER_NAME = "newIdentifier";
+    private static final String FIELD_SOURCE = "source";
+    private static final String FIELD_DESTINATION = "destination";
 
-    @JsonProperty(FIELD_NEW_IDENTIFIER_NAME)
-    private final Identifier newIdentifier;
+    @JsonProperty(FIELD_SOURCE)
+    private final Identifier source;
+
+    @JsonProperty(FIELD_DESTINATION)
+    private final Identifier destination;
 
     @JsonCreator
-    public RenameRequest(@JsonProperty(FIELD_NEW_IDENTIFIER_NAME) Identifier newIdentifier) {
-        this.newIdentifier = newIdentifier;
+    public RenameTableRequest(
+            @JsonProperty(FIELD_SOURCE) Identifier source,
+            @JsonProperty(FIELD_DESTINATION) Identifier destination) {
+        this.source = source;
+        this.destination = destination;
     }
 
-    @JsonGetter(FIELD_NEW_IDENTIFIER_NAME)
-    public Identifier getNewIdentifier() {
-        return newIdentifier;
+    @JsonGetter(FIELD_DESTINATION)
+    public Identifier getDestination() {
+        return destination;
+    }
+
+    @JsonGetter(FIELD_SOURCE)
+    public Identifier getSource() {
+        return source;
     }
 }

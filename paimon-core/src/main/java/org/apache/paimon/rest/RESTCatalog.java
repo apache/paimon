@@ -48,7 +48,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
-import org.apache.paimon.rest.requests.RenameRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -341,12 +341,8 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
         try {
-            RenameRequest request = new RenameRequest(toTable);
-            client.post(
-                    resourcePaths.renameTable(
-                            fromTable.getDatabaseName(), fromTable.getTableName()),
-                    request,
-                    headers());
+            RenameTableRequest request = new RenameTableRequest(fromTable, toTable);
+            client.post(resourcePaths.renameTable(fromTable.getDatabaseName()), request, headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
@@ -589,12 +585,8 @@ public class RESTCatalog implements Catalog {
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         try {
-            RenameRequest request = new RenameRequest(toView);
-            client.post(
-                    resourcePaths.renameView(fromView.getDatabaseName(), fromView.getTableName()),
-                    request,
-                    GetViewResponse.class,
-                    headers());
+            RenameTableRequest request = new RenameTableRequest(fromView, toView);
+            client.post(resourcePaths.renameView(fromView.getDatabaseName()), request, headers());
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new ViewNotExistException(fromView);

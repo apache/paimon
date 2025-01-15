@@ -33,7 +33,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
-import org.apache.paimon.rest.requests.RenameRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -105,6 +105,7 @@ public class RESTCatalogServer {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
                 String token = request.getHeaders().get("Authorization");
+                System.out.println(request.getPath());
                 RESTResponse response;
                 try {
                     if (!("Bearer " + authToken).equals(token)) {
@@ -123,17 +124,23 @@ public class RESTCatalogServer {
                                         .split("/");
                         String databaseName = resources[0];
                         boolean isViews = resources.length == 2 && "views".equals(resources[1]);
-                        boolean isView = resources.length == 3 && "views".equals(resources[1]);
-                        boolean isViewRename =
-                                resources.length == 4
-                                        && "views".equals(resources[1])
-                                        && "rename".equals(resources[3]);
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
-                        boolean isTable = resources.length == 3 && "tables".equals(resources[1]);
                         boolean isTableRename =
-                                resources.length == 4
+                                resources.length == 3
                                         && "tables".equals(resources[1])
-                                        && "rename".equals(resources[3]);
+                                        && "rename".equals(resources[2]);
+                        boolean isViewRename =
+                                resources.length == 3
+                                        && "views".equals(resources[1])
+                                        && "rename".equals(resources[2]);
+                        boolean isView =
+                                resources.length == 3
+                                        && "views".equals(resources[1])
+                                        && !"rename".equals(resources[2]);
+                        boolean isTable =
+                                resources.length == 3
+                                        && "tables".equals(resources[1])
+                                        && !"rename".equals(resources[2]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
@@ -188,8 +195,7 @@ public class RESTCatalogServer {
                             String tableName = resources[2];
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTableRename) {
-                            return renameTableApiHandler(
-                                    catalog, request, databaseName, resources[2]);
+                            return renameTableApiHandler(catalog, request);
                         } else if (isTable) {
                             String tableName = resources[2];
                             return tableApiHandler(catalog, request, databaseName, tableName);
@@ -197,12 +203,12 @@ public class RESTCatalogServer {
                             return tablesApiHandler(catalog, request, databaseName);
                         } else if (isViews) {
                             return viewsApiHandler(catalog, request, databaseName);
+                        } else if (isViewRename) {
+                            System.out.println("View rename");
+                            return renameViewApiHandler(catalog, request);
                         } else if (isView) {
                             String viewName = resources[2];
                             return viewApiHandler(catalog, request, databaseName, viewName);
-                        } else if (isViewRename) {
-                            String viewName = resources[2];
-                            return renameViewApiHandler(catalog, request, databaseName, viewName);
                         } else {
                             return databaseApiHandler(catalog, request, databaseName);
                         }
@@ -374,13 +380,11 @@ public class RESTCatalogServer {
         }
     }
 
-    private static MockResponse renameTableApiHandler(
-            Catalog catalog, RecordedRequest request, String databaseName, String tableName)
+    private static MockResponse renameTableApiHandler(Catalog catalog, RecordedRequest request)
             throws Exception {
-        RenameRequest requestBody =
-                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameRequest.class);
-        catalog.renameTable(
-                Identifier.create(databaseName, tableName), requestBody.getNewIdentifier(), false);
+        RenameTableRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+        catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
         return new MockResponse().setResponseCode(200);
     }
 
@@ -454,20 +458,12 @@ public class RESTCatalogServer {
         }
     }
 
-    private static MockResponse renameViewApiHandler(
-            Catalog catalog, RecordedRequest request, String databaseName, String viewName)
+    private static MockResponse renameViewApiHandler(Catalog catalog, RecordedRequest request)
             throws Exception {
-        RenameRequest requestBody =
-                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameRequest.class);
-        catalog.renameView(
-                Identifier.create(databaseName, viewName), requestBody.getNewIdentifier(), false);
-        Identifier identifier = requestBody.getNewIdentifier();
-        View view = catalog.getView(identifier);
-        ViewSchema schema =
-                new ViewSchema(
-                        view.rowType(), view.options(), view.comment().orElse(null), view.query());
-        GetViewResponse response = new GetViewResponse("id", identifier.getTableName(), schema);
-        return mockResponse(response, 200);
+        RenameTableRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+        catalog.renameView(requestBody.getSource(), requestBody.getDestination(), false);
+        return new MockResponse().setResponseCode(200);
     }
 
     private static GetTableResponse getTable(Catalog catalog, String databaseName, String tableName)

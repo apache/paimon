@@ -350,7 +350,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/rename:
+  /v1/{prefix}/databases/{database}/tables/rename:
     post:
       tags:
         - table
@@ -367,16 +367,11 @@ paths:
           required: true
           schema:
             type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RenameRequest'
+              $ref: '#/components/schemas/RenameTableRequest'
       responses:
         "200":
           description: Success, no content
@@ -709,10 +704,10 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/views/{view}/rename:
+  /v1/{prefix}/databases/{database}/views/rename:
     post:
       tags:
-        - table
+        - view
       summary: Rename view
       operationId: renameView
       parameters:
@@ -726,16 +721,11 @@ paths:
           required: true
           schema:
             type: string
-        - name: view
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RenameRequest'
+              $ref: '#/components/schemas/RenameTableRequest'
       responses:
         "200":
           description: Success, no content
@@ -1063,10 +1053,12 @@ components:
           type: string
         type:
           type: string
-    RenameRequest:
+    RenameTableRequest:
       type: object
       properties:
-        newIdentifier:
+        source:
+          $ref: '#/components/schemas/Identifier'
+        destination:
           $ref: '#/components/schemas/Identifier'
     AlterDatabaseRequest:
       type: object

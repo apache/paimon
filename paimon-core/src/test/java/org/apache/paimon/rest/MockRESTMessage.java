@@ -28,7 +28,7 @@ import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
-import org.apache.paimon.rest.requests.RenameRequest;
+import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -128,9 +128,10 @@ public class MockRESTMessage {
         return new CreateTableRequest(identifier, schema);
     }
 
-    public static RenameRequest renameRequest(String toTableName) {
-        Identifier newIdentifier = Identifier.create(databaseName(), toTableName);
-        return new RenameRequest(newIdentifier);
+    public static RenameTableRequest renameRequest(String sourceTable, String toTableName) {
+        Identifier source = Identifier.create(databaseName(), sourceTable);
+        Identifier destination = Identifier.create(databaseName(), toTableName);
+        return new RenameTableRequest(source, destination);
     }
 
     public static AlterTableRequest alterTableRequest() {
