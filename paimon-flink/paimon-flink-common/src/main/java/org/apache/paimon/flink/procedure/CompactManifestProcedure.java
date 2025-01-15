@@ -23,8 +23,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.ParameterUtils;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -32,7 +31,6 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.HashMap;
-import java.util.Map;
 
 /** Compact manifest file to reduce deleted manifest entries. */
 public class CompactManifestProcedure extends ProcedureBase {
@@ -53,11 +51,11 @@ public class CompactManifestProcedure extends ProcedureBase {
             throws Exception {
 
         FileStoreTable table = (FileStoreTable) table(tableId);
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER);
-        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
-            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
-        }
+        HashMap<String, String> dynamicOptions = new HashMap<>();
+        ProcedureUtils.putIfNotEmpty(
+                dynamicOptions, CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER);
+        ProcedureUtils.putAllOptions(dynamicOptions, options);
+
         table = table.copy(dynamicOptions);
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {

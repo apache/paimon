@@ -22,9 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -34,7 +32,6 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.HashMap;
-import java.util.Map;
 
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -85,10 +82,8 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    Map<String, String> dynamicOptions = new HashMap<>();
-                    if (!StringUtils.isNullOrWhitespaceOnly(options)) {
-                        dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
-                    }
+                    HashMap<String, String> dynamicOptions = new HashMap<>();
+                    ProcedureUtils.putAllOptions(dynamicOptions, options);
                     table = table.copy(dynamicOptions);
                     ExpireSnapshots expireSnapshots = table.newExpireSnapshots();
 

@@ -39,28 +39,31 @@ public class ProcedureUtils {
             String options) {
 
         HashMap<String, String> dynamicOptions = new HashMap<>();
-        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
-            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
-        }
-        setTableOptions(
+        putAllOptions(dynamicOptions, options);
+        putIfNotEmpty(
                 dynamicOptions, CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
-        setTableOptions(
+        putIfNotEmpty(
                 dynamicOptions,
                 CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(),
                 timestampFormatter);
-        setTableOptions(
+        putIfNotEmpty(
                 dynamicOptions, CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
-        setTableOptions(
-                dynamicOptions, CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
-        setTableOptions(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0");
-        if (maxExpires != null) {
-            dynamicOptions.put(
-                    CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(), String.valueOf(maxExpires));
-        }
+        putIfNotEmpty(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
+        putIfNotEmpty(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0");
+        putIfNotEmpty(
+                dynamicOptions,
+                CoreOptions.PARTITION_EXPIRATION_MAX_NUM.key(),
+                maxExpires == null ? null : String.valueOf(maxExpires));
         return dynamicOptions;
     }
 
-    private static void setTableOptions(
+    public static void putAllOptions(HashMap<String, String> dynamicOptions, String options) {
+        if (!StringUtils.isNullOrWhitespaceOnly(options)) {
+            dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
+        }
+    }
+
+    public static void putIfNotEmpty(
             HashMap<String, String> dynamicOptions, String key, String value) {
         if (!StringUtils.isNullOrWhitespaceOnly(value)) {
             dynamicOptions.put(key, value);
@@ -76,10 +79,12 @@ public class ProcedureUtils {
 
         ExpireConfig.Builder builder = ExpireConfig.builder();
         builder.snapshotRetainMax(
-                Optional.ofNullable(retainMax).orElse(tableOptions.snapshotNumRetainMax()));
-        builder.snapshotRetainMin(
-                Optional.ofNullable(retainMin).orElse(tableOptions.snapshotNumRetainMin()));
-        builder.snapshotTimeRetain(tableOptions.snapshotTimeRetain());
+                        Optional.ofNullable(retainMax).orElse(tableOptions.snapshotNumRetainMax()))
+                .snapshotRetainMin(
+                        Optional.ofNullable(retainMin).orElse(tableOptions.snapshotNumRetainMin()))
+                .snapshotMaxDeletes(
+                        Optional.ofNullable(maxDeletes).orElse(tableOptions.snapshotExpireLimit()))
+                .snapshotTimeRetain(tableOptions.snapshotTimeRetain());
         if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
             long olderThanMills =
                     DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())
@@ -87,8 +92,6 @@ public class ProcedureUtils {
             builder.snapshotTimeRetain(
                     Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
         }
-        builder.snapshotMaxDeletes(
-                Optional.ofNullable(maxDeletes).orElse(tableOptions.snapshotExpireLimit()));
         return builder;
     }
 }
