@@ -16,27 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest;
+package org.apache.paimon.catalog;
 
-import org.apache.paimon.catalog.CatalogLoader;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.utils.SnapshotManager;
 
-/** Loader to create {@link RESTCatalog}. */
-public class RESTCatalogLoader implements CatalogLoader {
+import java.io.Serializable;
 
-    private static final long serialVersionUID = 1L;
+/** Interface to commit snapshot atomically. */
+public interface SnapshotCommit extends AutoCloseable {
 
-    private final Options options;
-    private final FileIO fileIO;
+    boolean commit(Snapshot snapshot, String branch) throws Exception;
 
-    public RESTCatalogLoader(Options options, FileIO fileIO) {
-        this.options = options;
-        this.fileIO = fileIO;
-    }
-
-    @Override
-    public RESTCatalog load() {
-        return new RESTCatalog(options, fileIO);
+    /** Factory to create {@link SnapshotCommit}. */
+    interface Factory extends Serializable {
+        SnapshotCommit create(Identifier identifier, SnapshotManager snapshotManager);
     }
 }
