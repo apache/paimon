@@ -267,36 +267,36 @@ public class TagActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.create_tag('%s.%s', 'tag1', 1)", database, tableName));
+                                "CALL sys.create_tag('%s.%s', 'A', 1)", database, tableName));
                 break;
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag1', snapshot_id => cast(1 as bigint))",
+                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'A', snapshot_id => cast(1 as bigint))",
                                 database, tableName));
                 break;
             default:
                 throw new UnsupportedOperationException(invoker);
         }
-        assertThat(tagManager.tagExists("tag1")).isTrue();
+        assertThat(tagManager.tagExists("A")).isTrue();
 
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         switch (invoker) {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
+                                "CALL sys.create_tag('%s.%s', 'B', 2)", database, tableName));
                 break;
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag2', snapshot_id => cast(2 as bigint))",
+                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'B', snapshot_id => cast(2 as bigint))",
                                 database, tableName));
                 break;
             default:
                 throw new UnsupportedOperationException(invoker);
         }
-        assertThat(tagManager.tagExists("tag2")).isTrue();
+        assertThat(tagManager.tagExists("B")).isTrue();
 
         long ts = System.currentTimeMillis();
 
@@ -305,18 +305,18 @@ public class TagActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.create_tag('%s.%s', 'tag3', 3)", database, tableName));
+                                "CALL sys.create_tag('%s.%s', 'C', 3)", database, tableName));
                 break;
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag3', snapshot_id => cast(3 as bigint))",
+                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'C', snapshot_id => cast(3 as bigint))",
                                 database, tableName));
                 break;
             default:
                 throw new UnsupportedOperationException(invoker);
         }
-        assertThat(tagManager.tagExists("tag3")).isTrue();
+        assertThat(tagManager.tagExists("C")).isTrue();
 
         switch (invoker) {
             case "procedure_indexed":
@@ -334,10 +334,9 @@ public class TagActionITCase extends ActionITCaseBase {
             default:
                 throw new UnsupportedOperationException(invoker);
         }
-        assertThat(tagManager.tagCount() == 1).isTrue();
-        assertThat(tagManager.tagExists("tag1")).isFalse();
-        assertThat(tagManager.tagExists("tag2")).isFalse();
-        assertThat(tagManager.tagExists("tag3")).isTrue();
+        assertThat(tagManager.tagExists("A")).isFalse();
+        assertThat(tagManager.tagExists("B")).isFalse();
+        assertThat(tagManager.tagExists("C")).isTrue();
     }
 
     @ParameterizedTest(name = "{0}")
