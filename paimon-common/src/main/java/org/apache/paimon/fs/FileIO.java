@@ -117,8 +117,11 @@ public interface FileIO extends Serializable {
      */
     default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
         List<FileStatus> files = new ArrayList<>();
-        Iterator<FileStatus> iter = listFilesIterative(path, recursive);
-        iter.forEachRemaining(files::add);
+        try (FileStatusIterator iter = listFilesIterative(path, recursive)) {
+            while (iter.hasNext()) {
+                files.add(iter.next());
+            }
+        }
         return files.toArray(new FileStatus[0]);
     }
 
@@ -128,35 +131,47 @@ public interface FileIO extends Serializable {
      * @param path given path
      * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
      *     otherwise only files in the current directory will be listed
-     * @return an {@link Iterator} over the statuses of the files in the given path
+     * @return an {@link FileStatusIterator} over the statuses of the files in the given path
      */
-    default Iterator<FileStatus> listFilesIterative(Path path, boolean recursive)
-            throws IOException {
-        Queue<FileStatus> files = new LinkedList<>();
-        for (Queue<Path> toUnpack = new LinkedList<>(Collections.singletonList(path));
-                !toUnpack.isEmpty(); ) {
-            FileStatus[] statuses = listStatus(toUnpack.remove());
-            for (FileStatus f : statuses) {
-                if (!f.isDir()) {
-                    files.add(f);
-                    continue;
-                }
-                if (!recursive) {
-                    continue;
-                }
-                toUnpack.add(f.getPath());
-            }
-        }
-        return new Iterator<FileStatus>() {
+    default FileStatusIterator listFilesIterative(Path path, boolean recursive) throws IOException {
+        return new FileStatusIterator() {
+            private Queue<FileStatus> files = new LinkedList<>();
+            private Queue<Path> subdirStack = new LinkedList<>(Collections.singletonList(path));
+
             @Override
-            public boolean hasNext() {
+            public boolean hasNext() throws IOException {
+                maybeUnpackSubdir();
                 return !files.isEmpty();
             }
 
             @Override
-            public FileStatus next() {
+            public FileStatus next() throws IOException {
+                maybeUnpackSubdir();
                 return files.remove();
             }
+
+            private void maybeUnpackSubdir() throws IOException {
+                if (!files.isEmpty()) {
+                    return;
+                }
+                if (subdirStack.isEmpty()) {
+                    return;
+                }
+                FileStatus[] statuses = listStatus(subdirStack.remove());
+                for (FileStatus f : statuses) {
+                    if (!f.isDir()) {
+                        files.add(f);
+                        continue;
+                    }
+                    if (!recursive) {
+                        continue;
+                    }
+                    subdirStack.add(f.getPath());
+                }
+            }
+
+            @Override
+            public void close() throws IOException {}
         };
     }
 
