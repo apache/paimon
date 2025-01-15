@@ -236,6 +236,109 @@ public class LocalOrphanFilesCleanTest {
         }
     }
 
+    @Test
+    public void testNormallyRemovingMixedWithExternalPath() throws Throwable {
+        int commitTimes = 30;
+        List<List<TestPojo>> committedData = new ArrayList<>();
+        Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
+
+        SnapshotManager snapshotManager = table.snapshotManager();
+        // 1. write data to the warehouse path
+        writeData(snapshotManager, committedData, snapshotData, new HashMap<>(), commitTimes);
+
+        // 2. write data to the external path
+        this.write.close();
+        this.commit.close();
+        String externalPaths = "file://" + tmpExternalPath;
+        table.options().put(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), externalPaths);
+        table.options().put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin");
+        table = table.copy(table.options());
+
+        String commitUser = UUID.randomUUID().toString();
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        snapshotManager = table.snapshotManager();
+        writeData(snapshotManager, committedData, snapshotData, new HashMap<>(), commitTimes);
+
+        // randomly create tags
+        List<String> allTags = new ArrayList<>();
+        int snapshotCount = (int) snapshotManager.snapshotCount();
+        for (int i = 1; i <= snapshotCount; i++) {
+            if (RANDOM.nextBoolean()) {
+                String tagName = "tag" + i;
+                table.createTag(tagName, i);
+                allTags.add(tagName);
+            }
+        }
+
+        // create branch1 by tag
+        table.createBranch("branch1", allTags.get(0));
+
+        // generate non used files
+        int shouldBeDeleted = generateUnUsedFile(tablePath);
+        shouldBeDeleted += generateUnUsedFile(new Path(tmpExternalPath.toString()));
+        assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
+
+        // randomly expire snapshots
+        int expired = RANDOM.nextInt(snapshotCount / 2);
+        expired = expired == 0 ? 1 : expired;
+        Options expireOptions = new Options();
+        expireOptions.set(CoreOptions.SNAPSHOT_EXPIRE_LIMIT, snapshotCount);
+        expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, snapshotCount - expired);
+        expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, snapshotCount - expired);
+        table.copy(expireOptions.toMap()).newCommit("").expireSnapshots();
+
+        // randomly delete tags
+        List<String> deleteTags = Collections.emptyList();
+        deleteTags = randomlyPick(allTags);
+        for (String tagName : deleteTags) {
+            table.deleteTag(tagName);
+        }
+
+        // first check, nothing will be deleted because the default olderThan interval is 1 day
+        LocalOrphanFilesClean orphanFilesClean = new LocalOrphanFilesClean(table);
+        assertThat(orphanFilesClean.clean().getDeletedFilesPath().size()).isEqualTo(0);
+
+        // second check
+        orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
+        try {
+            validate(deleted, snapshotData, new HashMap<>());
+        } catch (Throwable t) {
+            String tableOptions = "Table options:\n" + table.options();
+
+            String committed = "Committed data:";
+            for (int i = 0; i < committedData.size(); i++) {
+                String insertValues =
+                        committedData.get(i).stream()
+                                .map(TestPojo::toInsertValueString)
+                                .collect(Collectors.joining(","));
+                committed = String.format("%s\n%d:{%s}", committed, i, insertValues);
+            }
+
+            String snapshot = "Snapshot expired: " + expired;
+
+            String tag =
+                    String.format(
+                            "Tags: created{%s}; deleted{%s}",
+                            String.join(",", allTags), String.join(",", deleteTags));
+
+            String addedFile =
+                    "Manually added file:\n"
+                            + manuallyAddedFiles.stream()
+                                    .map(Path::toString)
+                                    .collect(Collectors.joining("\n"));
+
+            throw new Exception(
+                    String.format(
+                            "%s\n%s\n%s\n%s\n%s",
+                            tableOptions, committed, snapshot, tag, addedFile),
+                    t);
+        }
+    }
+
     private void validate(
             List<Path> deleteFiles,
             Map<Long, List<TestPojo>> snapshotData,
@@ -449,11 +552,17 @@ public class LocalOrphanFilesCleanTest {
             int commitTimes)
             throws Exception {
         // first snapshot
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
         List<TestPojo> data = generateData();
         commit(data);
         committedData.add(data);
-        recordSnapshotData(data, snapshotData, snapshotManager);
-        recordChangelogData(new ArrayList<>(), data, changelogData, snapshotManager);
+        List<TestPojo> current = new ArrayList<>();
+        if (latestSnapshotId != null) {
+            current.addAll(snapshotData.get(latestSnapshotId));
+        }
+        current.addAll(data);
+        recordSnapshotData(current, snapshotData, snapshotManager);
+        recordChangelogData(new ArrayList<>(), current, changelogData, snapshotManager);
 
         // randomly generate data
         for (int i = 1; i <= commitTimes; i++) {
@@ -470,7 +579,7 @@ public class LocalOrphanFilesCleanTest {
                 recordSnapshotData(previous, snapshotData, snapshotManager);
                 recordChangelogData(toBeUpdated, updateAfter, changelogData, snapshotManager);
             } else {
-                List<TestPojo> current = generateData();
+                current = generateData();
                 commit(current);
                 committedData.add(current);
 
