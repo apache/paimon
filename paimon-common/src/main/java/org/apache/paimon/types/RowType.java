@@ -53,6 +53,7 @@ import java.util.stream.IntStream;
 public final class RowType extends DataType {
 
     private static final long serialVersionUID = 1L;
+
     private static final String FIELD_FIELDS = "fields";
 
     public static final String FORMAT = "ROW<%s>";
