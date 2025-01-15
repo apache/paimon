@@ -28,6 +28,27 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
 
   import testImplicits._
 
+  test("Paimon Procedure: create and delete tag1") {
+    // define a change-log table and test `forEachBatch` api
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, b STRING)
+                 |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                 |""".stripMargin)
+    spark.sql("insert into T select 1, 'a'")
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'A')")
+    spark.sql("insert into T select 2, 'b'");
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'B')")
+    val ts = System.currentTimeMillis()
+    spark.sql("insert into T select 3, 'c'")
+    spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 'C')")
+    spark.sql(
+      s"CALL paimon.sys.delete_tags_timestamp(table => 'test.T', order_than_timestamp => $ts)")
+
+    val table = loadTable("T")
+    assert(table.tagManager().tagCount() == 1)
+    assert(table.tagManager().allTagNames().get(0).equals("C"))
+  }
+
   test("Paimon Procedure: create and delete tag") {
     failAfter(streamingTimeout) {
       withTempDir {

@@ -230,6 +230,23 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>delete_tags_timestamp</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.delete_tags_timestamp(`table` => 'identifier', order_than_timestamp => 1736932554000) <br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.delete_tags_timestamp('identifier', timestamp)
+      </td>
+      <td>
+         To delete a tag. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>order_than_timestamp: would delete tags which create time older than the timestamp.</li>
+      </td>
+      <td>
+         CALL sys.order_than_timestamp(`table` => 'default.T', order_than_timestamp => 1736932554000)
+      </td>
+   </tr>
+   <tr>
       <td>replace_tag</td>
       <td>
          -- Use named argument<br/>

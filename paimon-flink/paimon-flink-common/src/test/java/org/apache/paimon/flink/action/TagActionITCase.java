@@ -241,6 +241,106 @@ public class TagActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"procedure_indexed", "procedure_named"})
+    public void testDeleteTagsByTimestamp(String invoker) throws Exception {
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        switch (invoker) {
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.create_tag('%s.%s', 'tag1', 1)", database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag1', snapshot_id => cast(1 as bigint))",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+        assertThat(tagManager.tagExists("tag1")).isTrue();
+
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        switch (invoker) {
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag2', snapshot_id => cast(2 as bigint))",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+        assertThat(tagManager.tagExists("tag2")).isTrue();
+
+        long ts = System.currentTimeMillis();
+
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+        switch (invoker) {
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.create_tag('%s.%s', 'tag3', 3)", database, tableName));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.create_tag(`table` => '%s.%s', tag => 'tag3', snapshot_id => cast(3 as bigint))",
+                                database, tableName));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+        assertThat(tagManager.tagExists("tag3")).isTrue();
+
+        switch (invoker) {
+            case "procedure_indexed":
+                executeSQL(
+                        String.format(
+                                "CALL sys.delete_tags_timestamp('%s.%s', %s)",
+                                database, tableName, ts));
+                break;
+            case "procedure_named":
+                executeSQL(
+                        String.format(
+                                "CALL sys.delete_tags_timestamp(`table` => '%s.%s', order_than_timestamp => cast(%s as bigint))",
+                                database, tableName, ts));
+                break;
+            default:
+                throw new UnsupportedOperationException(invoker);
+        }
+        assertThat(tagManager.tagCount() == 1).isTrue();
+        assertThat(tagManager.tagExists("tag1")).isFalse();
+        assertThat(tagManager.tagExists("tag2")).isFalse();
+        assertThat(tagManager.tagExists("tag3")).isTrue();
+    }
+
+    @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     public void testRenameTag(String invoker) throws Exception {
         init(warehouse);

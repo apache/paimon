@@ -53,6 +53,7 @@ org.apache.paimon.flink.procedure.CreateTagProcedure
 org.apache.paimon.flink.procedure.CreateTagFromTimestampProcedure
 org.apache.paimon.flink.procedure.CreateTagFromWatermarkProcedure
 org.apache.paimon.flink.procedure.DeleteTagProcedure
+org.apache.paimon.flink.procedure.DeleteTagsByTimestampProcedure
 org.apache.paimon.flink.procedure.ExpireTagsProcedure
 org.apache.paimon.flink.procedure.ReplaceTagProcedure
 org.apache.paimon.flink.procedure.CreateBranchProcedure

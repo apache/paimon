@@ -146,6 +146,15 @@ This section introduce all available spark procedures about paimon.
       <td>CALL sys.delete_tag(table => 'default.T', tag => 'my_tag')</td>
     </tr>
     <tr>
+      <td>delete_tags_timestamp</td>
+      <td>
+         To delete a tag which create time order than a specified timestamp. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>order_than_timestamp: would delete tags which create time older than the timestamp.</li>
+      </td>
+      <td>CALL sys.delete_tags_timestamp(table => 'default.T', order_than_timestamp => 1736932554000)</td>
+    </tr>
+    <tr>
       <td>expire_tags</td>
       <td>
          To expire tags by time. Arguments:

@@ -25,6 +25,7 @@ import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
+import org.apache.paimon.spark.procedure.DeleteTagsByTimestampProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
@@ -82,6 +83,7 @@ public class SparkProcedures {
         procedureBuilders.put("rename_tag", RenameTagProcedure::builder);
         procedureBuilders.put(
                 "create_tag_from_timestamp", CreateTagFromTimestampProcedure::builder);
+        procedureBuilders.put("delete_tags_timestamp", DeleteTagsByTimestampProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
         procedureBuilders.put("expire_tags", ExpireTagsProcedure::builder);
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
