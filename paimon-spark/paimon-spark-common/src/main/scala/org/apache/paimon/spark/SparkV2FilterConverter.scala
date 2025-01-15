@@ -20,9 +20,11 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.types.{DataTypeRoot, DecimalType, RowType}
 import org.apache.paimon.types.DataTypeRoot._
 
+import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.connector.expressions.{Literal, NamedReference}
 import org.apache.spark.sql.connector.expressions.filter.{And, Not, Or, Predicate => SparkPredicate}
 
@@ -34,6 +36,15 @@ case class SparkV2FilterConverter(rowType: RowType) {
   import org.apache.paimon.spark.SparkV2FilterConverter._
 
   val builder = new PredicateBuilder(rowType)
+
+  def convert(sparkPredicate: SparkPredicate, ignoreFailure: Boolean): Option[Predicate] = {
+    try {
+      Some(convert(sparkPredicate))
+    } catch {
+      case _ if ignoreFailure => None
+      case e: Exception => throw e
+    }
+  }
 
   def convert(sparkPredicate: SparkPredicate): Predicate = {
     sparkPredicate.name() match {
@@ -147,6 +158,67 @@ case class SparkV2FilterConverter(rowType: RowType) {
     }
   }
 
+  private def fieldIndex(fieldName: String): Int = {
+    val index = rowType.getFieldIndex(fieldName)
+    // TODO: support nested field
+    if (index == -1) {
+      throw new UnsupportedOperationException(s"Nested field '$fieldName' is unsupported.")
+    }
+    index
+  }
+
+  private def convertLiteral(index: Int, value: Any): AnyRef = {
+    if (value == null) {
+      return null
+    }
+
+    val dataType = rowType.getTypeAt(index)
+    dataType.getTypeRoot match {
+      case BOOLEAN | BIGINT | DOUBLE | TINYINT | SMALLINT | INTEGER | FLOAT | DATE =>
+        value.asInstanceOf[AnyRef]
+      case DataTypeRoot.VARCHAR =>
+        BinaryString.fromString(value.toString)
+      case DataTypeRoot.DECIMAL =>
+        val decimalType = dataType.asInstanceOf[DecimalType]
+        val precision = decimalType.getPrecision
+        val scale = decimalType.getScale
+        Decimal.fromBigDecimal(
+          value.asInstanceOf[org.apache.spark.sql.types.Decimal].toJavaBigDecimal,
+          precision,
+          scale)
+      case DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE =>
+        Timestamp.fromMicros(value.asInstanceOf[Long])
+      case DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE =>
+        if (treatPaimonTimestampTypeAsSparkTimestampType()) {
+          Timestamp.fromSQLTimestamp(DateTimeUtils.toJavaTimestamp(value.asInstanceOf[Long]))
+        } else {
+          Timestamp.fromMicros(value.asInstanceOf[Long])
+        }
+      case _ =>
+        throw new UnsupportedOperationException(
+          s"Convert value: $value to datatype: $dataType is unsupported.")
+    }
+  }
+}
+
+object SparkV2FilterConverter {
+
+  private val EQUAL_TO = "="
+  private val EQUAL_NULL_SAFE = "<=>"
+  private val GREATER_THAN = ">"
+  private val GREATER_THAN_OR_EQUAL = ">="
+  private val LESS_THAN = "<"
+  private val LESS_THAN_OR_EQUAL = "<="
+  private val IN = "IN"
+  private val IS_NULL = "IS_NULL"
+  private val IS_NOT_NULL = "IS_NOT_NULL"
+  private val AND = "AND"
+  private val OR = "OR"
+  private val NOT = "NOT"
+  private val STRING_START_WITH = "STARTS_WITH"
+  private val STRING_END_WITH = "ENDS_WITH"
+  private val STRING_CONTAINS = "CONTAINS"
+
   private object UnaryPredicate {
     def unapply(sparkPredicate: SparkPredicate): Option[String] = {
       sparkPredicate.children() match {
@@ -177,60 +249,17 @@ case class SparkV2FilterConverter(rowType: RowType) {
     }
   }
 
-  private def fieldIndex(fieldName: String): Int = {
-    val index = rowType.getFieldIndex(fieldName)
-    // TODO: support nested field
-    if (index == -1) {
-      throw new UnsupportedOperationException(s"Nested field '$fieldName' is unsupported.")
-    }
-    index
-  }
-
-  private def convertLiteral(index: Int, value: Any): AnyRef = {
-    if (value == null) {
-      return null
-    }
-
-    val dataType = rowType.getTypeAt(index)
-    dataType.getTypeRoot match {
-      case BOOLEAN | BIGINT | DOUBLE | TINYINT | SMALLINT | INTEGER | FLOAT | DATE =>
-        value.asInstanceOf[AnyRef]
-      case DataTypeRoot.VARCHAR =>
-        BinaryString.fromString(value.toString)
-      case DataTypeRoot.DECIMAL =>
-        val decimalType = dataType.asInstanceOf[DecimalType]
-        val precision = decimalType.getPrecision
-        val scale = decimalType.getScale
-        Decimal.fromBigDecimal(
-          value.asInstanceOf[org.apache.spark.sql.types.Decimal].toJavaBigDecimal,
-          precision,
-          scale)
-      case DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE | DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE =>
-        Timestamp.fromMicros(value.asInstanceOf[Long])
-      case _ =>
-        throw new UnsupportedOperationException(
-          s"Convert value: $value to datatype: $dataType is unsupported.")
-    }
-  }
-
   private def toFieldName(ref: NamedReference): String = ref.fieldNames().mkString(".")
-}
 
-object SparkV2FilterConverter {
-
-  private val EQUAL_TO = "="
-  private val EQUAL_NULL_SAFE = "<=>"
-  private val GREATER_THAN = ">"
-  private val GREATER_THAN_OR_EQUAL = ">="
-  private val LESS_THAN = "<"
-  private val LESS_THAN_OR_EQUAL = "<="
-  private val IN = "IN"
-  private val IS_NULL = "IS_NULL"
-  private val IS_NOT_NULL = "IS_NOT_NULL"
-  private val AND = "AND"
-  private val OR = "OR"
-  private val NOT = "NOT"
-  private val STRING_START_WITH = "STARTS_WITH"
-  private val STRING_END_WITH = "ENDS_WITH"
-  private val STRING_CONTAINS = "CONTAINS"
+  def isSupportedRuntimeFilter(
+      sparkPredicate: SparkPredicate,
+      partitionKeys: Seq[String]): Boolean = {
+    sparkPredicate.name() match {
+      case IN =>
+        MultiPredicate.unapply(sparkPredicate) match {
+          case Some((fieldName, _)) => partitionKeys.contains(fieldName)
+        }
+      case _ => false
+    }
+  }
 }

@@ -29,7 +29,7 @@ import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownLimit}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.junit.jupiter.api.Assertions
 
-class PaimonPushDownTest extends PaimonSparkTestBase {
+abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
@@ -101,6 +101,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
   }
 
   test("Paimon pushDown: limit for append-only tables") {
+    assume(gteqSpark3_3)
     spark.sql(s"""
                  |CREATE TABLE T (a INT, b STRING, c STRING)
                  |PARTITIONED BY (c)
@@ -128,6 +129,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
   }
 
   test("Paimon pushDown: limit for primary key table") {
+    assume(gteqSpark3_3)
     spark.sql(s"""
                  |CREATE TABLE T (a INT, b STRING, c STRING)
                  |TBLPROPERTIES ('primary-key'='a')
@@ -202,6 +204,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
   }
 
   test("Paimon pushDown: limit for table with deletion vector") {
+    assume(gteqSpark3_3)
     Seq(true, false).foreach(
       deletionVectorsEnabled => {
         Seq(true, false).foreach(
@@ -279,14 +282,14 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     SparkTable(loadTable(tableName)).newScanBuilder(CaseInsensitiveStringMap.empty())
   }
 
-  private def checkFilterExists(sql: String): Boolean = {
+  def checkFilterExists(sql: String): Boolean = {
     spark.sql(sql).queryExecution.optimizedPlan.exists {
       case Filter(_: Expression, _) => true
       case _ => false
     }
   }
 
-  private def checkEqualToFilterExists(sql: String, name: String, value: Literal): Boolean = {
+  def checkEqualToFilterExists(sql: String, name: String, value: Literal): Boolean = {
     spark.sql(sql).queryExecution.optimizedPlan.exists {
       case Filter(c: Expression, _) =>
         c.exists {
