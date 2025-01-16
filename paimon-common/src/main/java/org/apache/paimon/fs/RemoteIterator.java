@@ -21,24 +21,24 @@ package org.apache.paimon.fs;
 import java.io.Closeable;
 import java.io.IOException;
 
-/** An iterator for lazily listing {@link FileStatus}. */
-public interface FileStatusIterator extends Closeable {
+/** An iterator for lazily listing remote entries. */
+public interface RemoteIterator<E> extends Closeable {
 
     /**
-     * Checks if there are more statuses to be iterated.
+     * Checks if there are more entries to be iterated.
      *
      * @return whether there are more elements to be iterated
-     * @throws IOException - if failed to list statuses lazily
+     * @throws IOException - if failed to list entries lazily
      */
     boolean hasNext() throws IOException;
 
     /**
-     * Gets the next status to be iterated.
+     * Gets the next entry to be iterated.
      *
-     * @return the next status
-     * @throws IOException - if failed to list statuses lazily
+     * @return the next entry
+     * @throws IOException - if failed to list entries lazily
      */
-    FileStatus next() throws IOException;
+    E next() throws IOException;
 
     /**
      * Closes the iterator and its associated resources.

@@ -117,7 +117,7 @@ public interface FileIO extends Serializable {
      */
     default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
         List<FileStatus> files = new ArrayList<>();
-        try (FileStatusIterator iter = listFilesIterative(path, recursive)) {
+        try (RemoteIterator<FileStatus> iter = listFilesIterative(path, recursive)) {
             while (iter.hasNext()) {
                 files.add(iter.next());
             }
@@ -131,10 +131,11 @@ public interface FileIO extends Serializable {
      * @param path given path
      * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
      *     otherwise only files in the current directory will be listed
-     * @return an {@link FileStatusIterator} over the statuses of the files in the given path
+     * @return an {@link RemoteIterator} over {@link FileStatus} of the files in the given path
      */
-    default FileStatusIterator listFilesIterative(Path path, boolean recursive) throws IOException {
-        return new FileStatusIterator() {
+    default RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        return new RemoteIterator<FileStatus>() {
             private Queue<FileStatus> files = new LinkedList<>();
             private Queue<Path> subdirStack = new LinkedList<>(Collections.singletonList(path));
 
