@@ -69,6 +69,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * </ul>
  */
 public class ExponentialHttpRetryInterceptor implements Interceptor {
+
     private final int maxRetries;
     private final Set<Class<? extends IOException>> nonRetriableExceptions;
     private final Set<Integer> retrievableCodes;

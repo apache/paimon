@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ExponentialHttpRetryInterceptor}. */
 class ExponentialHttpRetryInterceptorTest {
+
     private final int maxRetries = 5;
     private final ExponentialHttpRetryInterceptor interceptor =
             new ExponentialHttpRetryInterceptor(maxRetries);
