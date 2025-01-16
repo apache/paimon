@@ -87,18 +87,19 @@ public class CdcActionCommonUtils {
         for (DataField field : sourceTableFields) {
             int idx = paimonSchema.fieldNames().indexOf(field.name());
             if (idx < 0) {
-                LOG.info("Cannot find field '{}' in Paimon table.", field.name());
-                return false;
-            }
-            DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
-                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
-                LOG.info(
+               LOG.info("Cannot find field '{}' in Paimon table.", field.name());
+                    return false;
+            } else {
+                DataType type = paimonSchema.fields().get(idx).type();
+                UpdatedDataFieldsProcessFunction.ConvertAction action = UpdatedDataFieldsProcessFunction.canConvert(field.type(), type);
+                if (action != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
+                    LOG.info(
                         "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
                         field.name(),
                         field.type(),
                         type);
-                return false;
+                    return false;
+                }
             }
         }
         return true;
