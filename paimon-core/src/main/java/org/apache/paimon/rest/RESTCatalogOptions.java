@@ -40,20 +40,13 @@ public class RESTCatalogOptions {
                     .withDescription("REST Catalog http client connect timeout.");
 
     public static final ConfigOption<Integer> MAX_CONNECTIONS =
-            ConfigOptions.key("rest.client..max-connections")
+            ConfigOptions.key("rest.client.max-connections")
                     .intType()
                     .defaultValue(100)
                     .withDescription("REST Catalog http client's max connections.");
 
-    // need less than max connections default 100
-    public static final ConfigOption<Integer> MAX_CONNECTIONS_PER_ROUTE =
-            ConfigOptions.key("connections-per-route")
-                    .intType()
-                    .defaultValue(100)
-                    .withDescription("REST Catalog http client's max connections per route.");
-
     public static final ConfigOption<Integer> MAX_RETIES =
-            ConfigOptions.key("rest.client..max-retries")
+            ConfigOptions.key("rest.client.max-retries")
                     .intType()
                     .defaultValue(5)
                     .withDescription("REST Catalog http client's max retry times.");

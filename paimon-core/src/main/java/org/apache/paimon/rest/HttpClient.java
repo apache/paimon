@@ -200,7 +200,8 @@ public class HttpClient implements RESTClient {
                         CONNECTION_KEEP_ALIVE_DURATION_IN_MS,
                         TimeUnit.MILLISECONDS);
         Dispatcher dispatcher = new Dispatcher(executorService);
-        dispatcher.setMaxRequestsPerHost(httpClientOptions.maxConnectionsPerRoute());
+        // set max requests per host use max connections
+        dispatcher.setMaxRequestsPerHost(httpClientOptions.maxConnections());
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
                         .dispatcher(dispatcher)
