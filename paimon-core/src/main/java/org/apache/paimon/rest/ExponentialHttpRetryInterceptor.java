@@ -36,8 +36,9 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Defines an exponential HTTP request retry interceptor. The following retrievable IOException
- * status codes are defined:
+ * Defines exponential HTTP request retry interceptor.
+ *
+ * <p>The following retrievable IOException
  *
  * <ul>
  *   <li>InterruptedIOException
@@ -47,7 +48,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li>SSLException
  * </ul>
  *
- * The following retrievable HTTP status codes are defined:
+ * <p>The following retrievable HTTP status codes are defined:
  *
  * <ul>
  *   <li>TOO_MANY_REQUESTS (429)
@@ -56,7 +57,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li>GATEWAY_TIMEOUT (504)
  * </ul>
  *
- * The following retrievable HTTP method which is idempotent are defined:
+ * <p>The following retrievable HTTP method which is idempotent are defined:
  *
  * <ul>
  *   <li>GET
