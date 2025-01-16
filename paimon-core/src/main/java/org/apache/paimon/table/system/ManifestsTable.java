@@ -20,6 +20,8 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -64,7 +66,7 @@ public class ManifestsTable implements ReadonlyTable {
 
     private static final Logger LOG = LoggerFactory.getLogger(ManifestsTable.class);
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     public static final String MANIFESTS = "manifests";
 
@@ -75,7 +77,15 @@ public class ManifestsTable implements ReadonlyTable {
                             new DataField(1, "file_size", new BigIntType(false)),
                             new DataField(2, "num_added_files", new BigIntType(false)),
                             new DataField(3, "num_deleted_files", new BigIntType(false)),
-                            new DataField(4, "schema_id", new BigIntType(false))));
+                            new DataField(4, "schema_id", new BigIntType(false)),
+                            new DataField(
+                                    5,
+                                    "min_partition_stats",
+                                    SerializationUtils.newStringType(true)),
+                            new DataField(
+                                    6,
+                                    "max_partition_stats",
+                                    SerializationUtils.newStringType(true))));
 
     private final FileStoreTable dataTable;
 
@@ -176,8 +186,16 @@ public class ManifestsTable implements ReadonlyTable {
             }
             List<ManifestFileMeta> manifestFileMetas = allManifests(dataTable);
 
+            @SuppressWarnings("unchecked")
+            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
+                    (CastExecutor<InternalRow, BinaryString>)
+                            CastExecutors.resolveToString(
+                                    dataTable.schema().logicalPartitionType());
+
             Iterator<InternalRow> rows =
-                    Iterators.transform(manifestFileMetas.iterator(), this::toRow);
+                    Iterators.transform(
+                            manifestFileMetas.iterator(),
+                            meta -> toRow(meta, partitionCastExecutor));
             if (readType != null) {
                 rows =
                         Iterators.transform(
@@ -189,13 +207,17 @@ public class ManifestsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(ManifestFileMeta manifestFileMeta) {
+        private InternalRow toRow(
+                ManifestFileMeta manifestFileMeta,
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
             return GenericRow.of(
                     BinaryString.fromString(manifestFileMeta.fileName()),
                     manifestFileMeta.fileSize(),
                     manifestFileMeta.numAddedFiles(),
                     manifestFileMeta.numDeletedFiles(),
-                    manifestFileMeta.schemaId());
+                    manifestFileMeta.schemaId(),
+                    partitionCastExecutor.cast(manifestFileMeta.partitionStats().minValues()),
+                    partitionCastExecutor.cast(manifestFileMeta.partitionStats().maxValues()));
         }
     }
 
