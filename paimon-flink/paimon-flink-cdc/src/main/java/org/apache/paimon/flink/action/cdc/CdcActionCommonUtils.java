@@ -88,7 +88,7 @@ public class CdcActionCommonUtils {
             int idx = paimonSchema.fieldNames().indexOf(field.name());
             if (idx < 0) {
                LOG.info("Cannot find field '{}' in Paimon table.", field.name());
-                    return false;
+               return false;
             } else {
                 DataType type = paimonSchema.fields().get(idx).type();
                 UpdatedDataFieldsProcessFunction.ConvertAction action = UpdatedDataFieldsProcessFunction.canConvert(field.type(), type);
