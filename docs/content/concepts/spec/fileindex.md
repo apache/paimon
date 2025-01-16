@@ -98,9 +98,67 @@ This class use (64-bits) long hash. Store the num hash function (one integer) an
 
 Define `'file-index.bitmap.columns'`.
 
+Bitmap file index format (V2):
+
+<pre>
+
+Bitmap file index format (V2)
++-------------------------------------------------+-----------------
+｜ version (1 byte) = 2                           ｜
++-------------------------------------------------+
+｜ row count (4 bytes int)                        ｜
++-------------------------------------------------+
+｜ non-null value bitmap number (4 bytes int)     ｜
++-------------------------------------------------+
+｜ has null value (1 byte)                        ｜
++-------------------------------------------------+
+｜ null value offset (4 bytes if has null value)  ｜       HEAD
++-------------------------------------------------+
+｜ secondary dictionary size (4 bytes int)        ｜
++-------------------------------------------------+
+｜ value 1 | offset 1                             ｜
++-------------------------------------------------+
+｜ value 2 | offset 2                             ｜
++-------------------------------------------------+
+｜ ...                                            ｜
++-------------------------------------------------+
+｜ bitmap body offset (4 bytes int)               ｜
++-------------------------------------------------+-----------------
+｜ serialized secondary dictionary 1              ｜
++-------------------------------------------------+
+｜ serialized secondary dictionary 2              ｜    SECONDARY
++-------------------------------------------------+
+｜ ...                                            ｜
++-------------------------------------------------+-----------------
+｜ serialized bitmap 1                            ｜
++-------------------------------------------------+
+｜ serialized bitmap 2                            ｜
++-------------------------------------------------+       BODY
+｜ serialized bitmap 3                            ｜
++-------------------------------------------------+
+｜ ...                                            ｜
++-------------------------------------------------+-----------------
+
+partial bitmap dictionary format:
++-------------------------------------------------+
+｜ entry number (4 bytes int)                     ｜
++-------------------------------------------------+
+｜ value 1 | offset 1                             ｜
++-------------------------------------------------+
+｜ value 2 | offset 2                             ｜
++-------------------------------------------------+
+｜ ...                                            ｜
++-------------------------------------------------+
+
+value x:                       var bytes for any data type (as bitmap identifier)
+offset:                        4 bytes int (when it is negative, it represents that there is only one value
+  
+</pre>
+
 Bitmap file index format (V1):
 
 <pre>
+
 Bitmap file index format (V1)
 +-------------------------------------------------+-----------------
 ｜ version (1 byte)                               ｜
@@ -136,6 +194,96 @@ offset:                        4 bytes int (when it is negative, it represents t
 </pre>
 
 Integer are all BIG_ENDIAN.
+
+Bitmap only support the following data type:
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 10%">Paimon Data Type</th>
+      <th class="text-left" style="width: 5%">Supported</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><code>TinyIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>SmallIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>IntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>BigIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DateType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TimeType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>LocalZonedTimestampType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TimestampType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>CharType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>VarCharType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>StringType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>BooleanType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DecimalType(precision, scale)</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>FloatType</code></td>
+      <td>Not recommended</td>
+    </tr>
+    <tr>
+      <td><code>DoubleType</code></td>
+      <td>Not recommended</td>
+    </tr>
+    <tr>
+      <td><code>VarBinaryType</code>, <code>BinaryType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>RowType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>MapType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>ArrayType</code></td>
+      <td>false</td>
+    </tr>
+    </tbody>
+</table>
+
 
 ## Index: Bit-Slice Index Bitmap
 
