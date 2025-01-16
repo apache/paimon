@@ -22,7 +22,9 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mongodb.BsonValueConvertor;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.TypeUtils;
@@ -37,6 +39,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,6 +48,11 @@ import java.util.Objects;
 
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_PAYLOAD;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_SCHEMA;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.FIELD_TYPE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_DELETE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_INSERT;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_READE;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.OP_UPDATE;
 import static org.apache.paimon.utils.JsonSerdeUtil.writeValueAsString;
 
 /**
@@ -67,6 +75,28 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
 
     public DebeziumBsonRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         super(typeMapping, computedColumns);
+    }
+
+    @Override
+    public List<RichCdcMultiplexRecord> extractRecords() {
+        String operation = getAndCheck(FIELD_TYPE).asText();
+        List<RichCdcMultiplexRecord> records = new ArrayList<>();
+        switch (operation) {
+            case OP_INSERT:
+            case OP_READE:
+                processRecord(getData(), RowKind.INSERT, records);
+                break;
+            case OP_UPDATE:
+                processRecord(getBefore(operation), RowKind.DELETE, records);
+                processRecord(getData(), RowKind.INSERT, records);
+                break;
+            case OP_DELETE:
+                processRecord(getBefore(operation), RowKind.DELETE, records);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unknown record operation: " + operation);
+        }
+        return records;
     }
 
     @Override
