@@ -202,7 +202,10 @@ public class HttpClient implements RESTClient {
                         .dispatcher(dispatcher)
                         .retryOnConnectionFailure(true)
                         .connectionPool(connectionPool)
-                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
+                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
+                        .addInterceptor(
+                                new ExponentialHttpRetryInterceptor(
+                                        httpClientOptions.maxRetries()));
         httpClientOptions.connectTimeout().ifPresent(builder::connectTimeout);
         httpClientOptions.readTimeout().ifPresent(builder::readTimeout);
 

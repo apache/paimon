@@ -122,4 +122,21 @@ public class HttpClientTest {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(BadRequestException.class, () -> httpClient.delete(MOCK_PATH, headers));
     }
+
+    @Test
+    public void testRetry() {
+        HttpClient httpClient =
+                new HttpClient(
+                        new HttpClientOptions(
+                                server.getBaseUrl(),
+                                Duration.ofSeconds(30),
+                                Duration.ofSeconds(30),
+                                1,
+                                10,
+                                10,
+                                2));
+        server.enqueueResponse(mockResponseDataStr, 429);
+        server.enqueueResponse(mockResponseDataStr, 200);
+        assertDoesNotThrow(() -> httpClient.get(MOCK_PATH, MockRESTData.class, headers));
+    }
 }
