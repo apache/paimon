@@ -54,7 +54,7 @@ public class HttpClient implements RESTClient {
 
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
-    private static final int CONNECTION_KEEP_ALIVE_DURATION_IN_MS = 300_000;
+    private static final int CONNECTION_KEEP_ALIVE_DURATION_MS = 300_000;
 
     private final OkHttpClient okHttpClient;
     private final String uri;
@@ -197,7 +197,7 @@ public class HttpClient implements RESTClient {
         ConnectionPool connectionPool =
                 new ConnectionPool(
                         httpClientOptions.maxConnections(),
-                        CONNECTION_KEEP_ALIVE_DURATION_IN_MS,
+                        CONNECTION_KEEP_ALIVE_DURATION_MS,
                         TimeUnit.MILLISECONDS);
         Dispatcher dispatcher = new Dispatcher(executorService);
         // set max requests per host use max connections

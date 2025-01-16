@@ -43,12 +43,14 @@ class ExponentialHttpRetryInterceptorTest {
 
     @Test
     void testNeedRetryByMethod() {
+
         assertThat(interceptor.needRetry("GET", new IOException(), 1)).isTrue();
         assertThat(interceptor.needRetry("HEAD", new IOException(), 1)).isTrue();
         assertThat(interceptor.needRetry("PUT", new IOException(), 1)).isTrue();
         assertThat(interceptor.needRetry("DELETE", new IOException(), 1)).isTrue();
         assertThat(interceptor.needRetry("TRACE", new IOException(), 1)).isTrue();
         assertThat(interceptor.needRetry("OPTIONS", new IOException(), 1)).isTrue();
+
         assertThat(interceptor.needRetry("POST", new IOException(), 1)).isFalse();
         assertThat(interceptor.needRetry("PATCH", new IOException(), 1)).isFalse();
         assertThat(interceptor.needRetry("CONNECT", new IOException(), 1)).isFalse();
@@ -57,33 +59,40 @@ class ExponentialHttpRetryInterceptorTest {
 
     @Test
     void testNeedRetryByException() {
+
         assertThat(interceptor.needRetry("GET", new InterruptedIOException(), 1)).isFalse();
         assertThat(interceptor.needRetry("GET", new UnknownHostException(), 1)).isFalse();
         assertThat(interceptor.needRetry("GET", new ConnectException(), 1)).isFalse();
         assertThat(interceptor.needRetry("GET", new NoRouteToHostException(), 1)).isFalse();
         assertThat(interceptor.needRetry("GET", new SSLException("error"), 1)).isFalse();
+
+        assertThat(interceptor.needRetry("GET", new IOException("error"), 1)).isTrue();
+        assertThat(interceptor.needRetry("GET", new IOException("error"), maxRetries + 1))
+                .isFalse();
     }
 
     @Test
     void testRetryByResponse() {
+
         assertThat(interceptor.needRetry(createResponse(429), 1)).isTrue();
         assertThat(interceptor.needRetry(createResponse(503), 1)).isTrue();
         assertThat(interceptor.needRetry(createResponse(502), 1)).isTrue();
         assertThat(interceptor.needRetry(createResponse(504), 1)).isTrue();
+
         assertThat(interceptor.needRetry(createResponse(500), 1)).isFalse();
         assertThat(interceptor.needRetry(createResponse(404), 1)).isFalse();
         assertThat(interceptor.needRetry(createResponse(200), 1)).isFalse();
     }
 
     @Test
-    public void invalidRetryAfterHeader() {
+    void invalidRetryAfterHeader() {
         Response response = createResponse(429, "Stuff");
 
         assertThat(interceptor.getRetryIntervalInMilliseconds(response, 3)).isBetween(4000L, 5000L);
     }
 
     @Test
-    public void validRetryAfterHeader() {
+    void validRetryAfterHeader() {
         long retryAfter = 3;
         Response response = createResponse(429, retryAfter + "");
         assertThat(interceptor.getRetryIntervalInMilliseconds(response, 3))
@@ -91,7 +100,7 @@ class ExponentialHttpRetryInterceptorTest {
     }
 
     @Test
-    public void exponentialRetry() {
+    void exponentialRetry() {
         ExponentialHttpRetryInterceptor interceptor = new ExponentialHttpRetryInterceptor(10);
         Response response = createResponse(429, "Stuff");
 
@@ -111,16 +120,16 @@ class ExponentialHttpRetryInterceptorTest {
                 .isBetween(64000L, 72000L);
     }
 
-    public static Response createResponse(int httpCode) {
+    private static Response createResponse(int httpCode) {
         return createResponse(httpCode, "");
     }
 
-    public static Response createResponse(int httpCode, String retryAfter) {
+    private static Response createResponse(int httpCode, String retryAfter) {
         return new Response.Builder()
                 .code(httpCode)
                 .message("message")
                 .protocol(Protocol.HTTP_1_1)
-                .request(new Request.Builder().url("http://example.com").build())
+                .request(new Request.Builder().url("http://localhost").build())
                 .addHeader(HttpHeaders.RETRY_AFTER, retryAfter)
                 .build();
     }
