@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -29,7 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 /** A {@link Catalog} to delegate all operations to another {@link Catalog}. */
-public class DelegateCatalog implements Catalog {
+public abstract class DelegateCatalog implements Catalog {
 
     protected final Catalog wrapped;
 
@@ -59,6 +60,11 @@ public class DelegateCatalog implements Catalog {
     @Override
     public FileIO fileIO() {
         return wrapped.fileIO();
+    }
+
+    @Override
+    public FileIO fileIO(Path path) {
+        return wrapped.fileIO(path);
     }
 
     @Override
@@ -120,6 +126,30 @@ public class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.createPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.dropPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {
+        wrapped.alterPartitions(identifier, partitions);
+    }
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        wrapped.markDonePartitions(identifier, partitions);
+    }
+
+    @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return wrapped.getTable(identifier);
     }
@@ -150,18 +180,6 @@ public class DelegateCatalog implements Catalog {
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         wrapped.renameView(fromView, toView, ignoreIfNotExists);
-    }
-
-    @Override
-    public void createPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException {
-        wrapped.createPartition(identifier, partitions);
-    }
-
-    @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitions)
-            throws TableNotExistException, PartitionNotExistException {
-        wrapped.dropPartition(identifier, partitions);
     }
 
     @Override

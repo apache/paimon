@@ -18,15 +18,17 @@
 
 package org.apache.paimon.flink.sink.partition;
 
-import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.actions.AddDonePartitionAction;
+import org.apache.paimon.table.PartitionHandler;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -39,46 +41,38 @@ class AddDonePartitionActionTest {
     public void test() throws Exception {
         AtomicBoolean closed = new AtomicBoolean(false);
         Set<String> donePartitions = new HashSet<>();
-        MetastoreClient metastoreClient =
-                new MetastoreClient() {
+        PartitionHandler partitionHandler =
+                new PartitionHandler() {
 
                     @Override
-                    public void addPartition(LinkedHashMap<String, String> partition) {
-                        donePartitions.add(generatePartitionPath(partition));
-                    }
-
-                    @Override
-                    public void addPartitions(List<LinkedHashMap<String, String>> partitions) {
-                        partitions.forEach(this::addPartition);
-                    }
-
-                    @Override
-                    public void dropPartition(LinkedHashMap<String, String> partition) {
-                        throw new UnsupportedOperationException();
-                    }
-
-                    @Override
-                    public void dropPartitions(List<LinkedHashMap<String, String>> partitions) {
-                        throw new UnsupportedOperationException();
-                    }
-
-                    @Override
-                    public void markPartitionDone(LinkedHashMap<String, String> partitions) {
-                        throw new UnsupportedOperationException();
-                    }
-
-                    @Override
-                    public void alterPartition(Partition partition) {
-                        throw new UnsupportedOperationException();
-                    }
-
-                    @Override
-                    public void close() {
+                    public void close() throws Exception {
                         closed.set(true);
                     }
+
+                    @Override
+                    public void createPartitions(List<Map<String, String>> partitions)
+                            throws Catalog.TableNotExistException {
+                        partitions.forEach(
+                                partition ->
+                                        donePartitions.add(
+                                                generatePartitionPath(
+                                                        new LinkedHashMap<>(partition))));
+                    }
+
+                    @Override
+                    public void dropPartitions(List<Map<String, String>> partitions)
+                            throws Catalog.TableNotExistException {}
+
+                    @Override
+                    public void alterPartitions(List<Partition> partitions)
+                            throws Catalog.TableNotExistException {}
+
+                    @Override
+                    public void markDonePartitions(List<Map<String, String>> partitions)
+                            throws Catalog.TableNotExistException {}
                 };
 
-        AddDonePartitionAction action = new AddDonePartitionAction(metastoreClient);
+        AddDonePartitionAction action = new AddDonePartitionAction(partitionHandler);
 
         // test normal
         action.markDone("dt=20201202");

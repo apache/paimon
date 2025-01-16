@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -40,9 +42,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -50,14 +50,12 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -180,31 +178,21 @@ public class BucketsTable implements ReadonlyTable {
 
             List<BucketEntry> buckets = fileStoreTable.newSnapshotReader().bucketEntries();
 
-            RowDataToObjectArrayConverter converter =
-                    new RowDataToObjectArrayConverter(
-                            fileStoreTable.schema().logicalPartitionType());
+            @SuppressWarnings("unchecked")
+            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
+                    (CastExecutor<InternalRow, BinaryString>)
+                            CastExecutors.resolveToString(
+                                    fileStoreTable.schema().logicalPartitionType());
 
             // sorted by partition and bucket
-            List<Pair<String, BucketEntry>> bucketList =
+            Iterator<InternalRow> iterator =
                     buckets.stream()
-                            .map(
-                                    entry ->
-                                            Pair.of(
-                                                    Arrays.toString(
-                                                            converter.convert(entry.partition())),
-                                                    entry))
+                            .map(bucketEntry -> toRow(bucketEntry, partitionCastExecutor))
                             .sorted(
-                                    Comparator.comparing(
-                                                    (Pair<String, BucketEntry> p) -> p.getLeft())
-                                            .thenComparing(p -> p.getRight().bucket()))
-                            .collect(Collectors.toList());
+                                    Comparator.comparing((InternalRow row) -> row.getString(0))
+                                            .thenComparing(row -> row.getInt(1)))
+                            .iterator();
 
-            List<InternalRow> results = new ArrayList<>(buckets.size());
-            for (Pair<String, BucketEntry> pair : bucketList) {
-                results.add(toRow(pair.getLeft(), pair.getRight()));
-            }
-
-            Iterator<InternalRow> iterator = results.iterator();
             if (readType != null) {
                 iterator =
                         Iterators.transform(
@@ -216,9 +204,10 @@ public class BucketsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(iterator);
         }
 
-        private GenericRow toRow(String partStr, BucketEntry entry) {
+        private InternalRow toRow(
+                BucketEntry entry, CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
             return GenericRow.of(
-                    BinaryString.fromString(partStr),
+                    partitionCastExecutor.cast(entry.partition()),
                     entry.bucket(),
                     entry.recordCount(),
                     entry.fileSizeInBytes(),

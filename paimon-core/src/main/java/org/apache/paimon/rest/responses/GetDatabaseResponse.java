@@ -35,8 +35,12 @@ import static org.apache.paimon.rest.RESTCatalogInternalOptions.DATABASE_COMMENT
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GetDatabaseResponse implements RESTResponse, Database {
 
+    private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_OPTIONS = "options";
+
+    @JsonProperty(FIELD_ID)
+    private final String id;
 
     @JsonProperty(FIELD_NAME)
     private final String name;
@@ -46,10 +50,17 @@ public class GetDatabaseResponse implements RESTResponse, Database {
 
     @JsonCreator
     public GetDatabaseResponse(
+            @JsonProperty(FIELD_ID) String id,
             @JsonProperty(FIELD_NAME) String name,
             @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
+        this.id = id;
         this.name = name;
         this.options = options;
+    }
+
+    @JsonGetter(FIELD_ID)
+    public String getId() {
+        return id;
     }
 
     @JsonGetter(FIELD_NAME)

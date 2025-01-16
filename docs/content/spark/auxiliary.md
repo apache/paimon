@@ -93,7 +93,7 @@ The SHOW PARTITIONS statement is used to list partitions of a table. An optional
 SHOW PARTITIONS my_table;
 
 -- Lists partitions matching the supplied partition spec for my_table
-SHOW PARTITIONS my_table PARTITION (dt=20230817);
+SHOW PARTITIONS my_table PARTITION (dt='20230817');
 ```
 
 ## Show Table Extended

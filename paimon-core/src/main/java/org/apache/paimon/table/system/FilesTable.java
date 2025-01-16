@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -182,10 +184,10 @@ public class FilesTable implements ReadonlyTable {
             SnapshotReader snapshotReader = fileStoreTable.newSnapshotReader();
             if (partitionPredicate != null && partitionPredicate.function() instanceof Equal) {
                 String partitionStr = partitionPredicate.literals().get(0).toString();
-                if (partitionStr.startsWith("[")) {
+                if (partitionStr.startsWith("{")) {
                     partitionStr = partitionStr.substring(1);
                 }
-                if (partitionStr.endsWith("]")) {
+                if (partitionStr.endsWith("}")) {
                     partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
                 }
                 String[] partFields = partitionStr.split(", ");
@@ -318,8 +320,11 @@ public class FilesTable implements ReadonlyTable {
                     new SimpleStatsEvolutions(
                             sid -> schemaManager.schema(sid).fields(), storeTable.schema().id());
 
-            RowDataToObjectArrayConverter partitionConverter =
-                    new RowDataToObjectArrayConverter(storeTable.schema().logicalPartitionType());
+            @SuppressWarnings("unchecked")
+            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
+                    (CastExecutor<InternalRow, BinaryString>)
+                            CastExecutors.resolveToString(
+                                    storeTable.schema().logicalPartitionType());
 
             Function<Long, RowDataToObjectArrayConverter> keyConverters =
                     new Function<Long, RowDataToObjectArrayConverter>() {
@@ -349,7 +354,7 @@ public class FilesTable implements ReadonlyTable {
                                 file ->
                                         toRow(
                                                 (DataSplit) dataSplit,
-                                                partitionConverter,
+                                                partitionCastExecutor,
                                                 keyConverters,
                                                 file,
                                                 simpleStatsEvolutions)));
@@ -368,7 +373,7 @@ public class FilesTable implements ReadonlyTable {
 
         private LazyGenericRow toRow(
                 DataSplit dataSplit,
-                RowDataToObjectArrayConverter partitionConverter,
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor,
                 Function<Long, RowDataToObjectArrayConverter> keyConverters,
                 DataFileMeta file,
                 SimpleStatsEvolutions simpleStatsEvolutions) {
@@ -379,10 +384,7 @@ public class FilesTable implements ReadonlyTable {
                         () ->
                                 dataSplit.partition() == null
                                         ? null
-                                        : BinaryString.fromString(
-                                                Arrays.toString(
-                                                        partitionConverter.convert(
-                                                                dataSplit.partition()))),
+                                        : partitionCastExecutor.cast(dataSplit.partition()),
                         dataSplit::bucket,
                         () ->
                                 BinaryString.fromString(

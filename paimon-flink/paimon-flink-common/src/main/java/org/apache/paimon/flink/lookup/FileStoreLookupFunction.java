@@ -28,14 +28,12 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -58,10 +56,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -74,7 +70,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A lookup {@link TableFunction} for file store. */
@@ -90,6 +85,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
     @Nullable private final RefreshBlacklist refreshBlacklist;
+
+    private final List<InternalRow.FieldGetter> projectFieldsGetters;
 
     private transient File path;
     private transient LookupTable lookupTable;
@@ -121,6 +118,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.projectFields =
                 Arrays.stream(projection)
                         .mapToObj(i -> table.rowType().getFieldNames().get(i))
+                        .collect(Collectors.toList());
+
+        this.projectFieldsGetters =
+                Arrays.stream(projection)
+                        .mapToObj(i -> table.rowType().fieldGetters()[i])
                         .collect(Collectors.toList());
 
         // add primary keys
@@ -166,14 +168,22 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
+        LOG.info(
+                "lookup projection fields in lookup table:{}, join fields in lookup table:{}",
+                projectFields,
+                joinKeys);
+
         FileStoreTable storeTable = (FileStoreTable) table;
 
+        LOG.info("Creating lookup table for {}.", table.name());
         if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
             if (isRemoteServiceAvailable(storeTable)) {
                 this.lookupTable =
                         PrimaryKeyPartialLookupTable.createRemoteTable(
                                 storeTable, projection, joinKeys);
+                LOG.info(
+                        "Remote service is available. Created PrimaryKeyPartialLookupTable with remote service.");
             } else {
                 try {
                     this.lookupTable =
@@ -183,7 +193,13 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                                     path,
                                     joinKeys,
                                     getRequireCachedBucketIds());
-                } catch (UnsupportedOperationException ignore2) {
+                    LOG.info(
+                            "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
+                } catch (UnsupportedOperationException ignore) {
+                    LOG.info(
+                            "Remote service isn't available. Cannot create PrimaryKeyPartialLookupTable with LocalQueryExecutor "
+                                    + "because bucket mode isn't {}. Will create FullCacheLookupTable.",
+                            BucketMode.HASH_FIXED);
                 }
             }
         }
@@ -199,6 +215,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                             joinKeys,
                             getRequireCachedBucketIds());
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
+            LOG.info("Created {}.", lookupTable.getClass().getSimpleName());
         }
 
         if (partitionLoader != null) {
@@ -206,7 +223,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             partitionLoader.checkRefresh();
             List<BinaryRow> partitions = partitionLoader.partitions();
             if (!partitions.isEmpty()) {
-                lookupTable.specificPartitionFilter(createSpecificPartFilter(partitions));
+                lookupTable.specificPartitionFilter(partitionLoader.createSpecificPartFilter());
             }
         }
 
@@ -236,6 +253,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         try {
             tryRefresh();
 
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("lookup key:{}", keyRow.toString());
+            }
             InternalRow key = new FlinkRowWrapper(keyRow);
             if (partitionLoader == null) {
                 return lookupInternal(key);
@@ -264,34 +284,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         for (InternalRow matchedRow : lookupResults) {
             rows.add(new FlinkRowData(matchedRow));
         }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "matched rows in lookup table, size:{}, rows:{}",
+                    lookupResults.size(),
+                    lookupResults.stream()
+                            .map(row -> logRow(projectFieldsGetters, row))
+                            .collect(Collectors.toList()));
+        }
+
         return rows;
-    }
-
-    private Predicate createSpecificPartFilter(List<BinaryRow> partitions) {
-        Predicate partFilter = null;
-        for (BinaryRow partition : partitions) {
-            if (partFilter == null) {
-                partFilter = createSinglePartFilter(partition);
-            } else {
-                partFilter = PredicateBuilder.or(partFilter, createSinglePartFilter(partition));
-            }
-        }
-        return partFilter;
-    }
-
-    private Predicate createSinglePartFilter(BinaryRow partition) {
-        RowType rowType = table.rowType();
-        List<String> partitionKeys = table.partitionKeys();
-        Object[] partitionSpec =
-                new RowDataToObjectArrayConverter(rowType.project(partitionKeys))
-                        .convert(partition);
-        Map<String, Object> partitionMap = new HashMap<>(partitionSpec.length);
-        for (int i = 0; i < partitionSpec.length; i++) {
-            partitionMap.put(partitionKeys.get(i), partitionSpec[i]);
-        }
-
-        // create partition predicate base on rowType instead of partitionType
-        return createPartitionPredicate(rowType, partitionMap);
     }
 
     private void reopen() {
@@ -321,7 +324,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
             if (partitionChanged) {
                 // reopen with latest partition
-                lookupTable.specificPartitionFilter(createSpecificPartFilter(partitions));
+                lookupTable.specificPartitionFilter(partitionLoader.createSpecificPartFilter());
                 lookupTable.close();
                 lookupTable.open();
                 // no need to refresh the lookup table because it is reopened
@@ -412,5 +415,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     protected void setCacheRowFilter(@Nullable Filter<InternalRow> cacheRowFilter) {
         this.cacheRowFilter = cacheRowFilter;
+    }
+
+    private String logRow(List<InternalRow.FieldGetter> fieldGetters, InternalRow row) {
+        List<String> rowValues = new ArrayList<>(fieldGetters.size());
+
+        for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+            Object fieldValue = fieldGetter.getFieldOrNull(row);
+            String value = fieldValue == null ? "null" : fieldValue.toString();
+            rowValues.add(value);
+        }
+        return rowValues.toString();
     }
 }

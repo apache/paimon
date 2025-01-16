@@ -19,46 +19,36 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Preconditions;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.OBJECT_LOCATION;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -66,13 +56,11 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
+import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
-import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
-import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -100,6 +88,11 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public FileIO fileIO() {
+        return fileIO;
+    }
+
+    @Override
+    public FileIO fileIO(Path path) {
         return fileIO;
     }
 
@@ -160,32 +153,11 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract Database getDatabaseImpl(String name) throws DatabaseNotExistException;
 
     @Override
-    public void createPartition(Identifier identifier, Map<String, String> partitionSpec)
-            throws TableNotExistException {
-        Identifier tableIdentifier =
-                Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
-        FileStoreTable table = (FileStoreTable) getTable(tableIdentifier);
-
-        if (table.partitionKeys().isEmpty() || !table.coreOptions().partitionedTableInMetastore()) {
-            return;
-        }
-
-        MetastoreClient.Factory metastoreFactory =
-                table.catalogEnvironment().metastoreClientFactory();
-        if (metastoreFactory == null) {
-            throw new UnsupportedOperationException(
-                    "The catalog must have metastore to create partition.");
-        }
-
-        try (MetastoreClient client = metastoreFactory.create()) {
-            client.addPartition(new LinkedHashMap<>(partitionSpec));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
 
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "dropPartition");
         Table table = getTable(identifier);
@@ -195,10 +167,17 @@ public abstract class AbstractCatalog implements Catalog {
                         .store()
                         .newCommit(
                                 createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
-            commit.dropPartitions(
-                    Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
+            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
         }
     }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {}
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
 
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
@@ -329,7 +308,7 @@ public abstract class AbstractCatalog implements Catalog {
                 ObjectTable.SCHEMA,
                 rowType);
         checkArgument(
-                schema.options().containsKey(CoreOptions.OBJECT_LOCATION.key()),
+                schema.options().containsKey(OBJECT_LOCATION.key()),
                 "Object table should have object-location option.");
         createTableImpl(identifier, schema.copy(ObjectTable.SCHEMA));
     }
@@ -387,65 +366,10 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        if (isSystemDatabase(identifier.getDatabaseName())) {
-            String tableName = identifier.getTableName();
-            switch (tableName.toLowerCase()) {
-                case ALL_TABLE_OPTIONS:
-                    return new AllTableOptionsTable(fileIO, allTablePaths());
-                case CATALOG_OPTIONS:
-                    return new CatalogOptionsTable(catalogOptions);
-                default:
-                    throw new TableNotExistException(identifier);
-            }
-        } else if (identifier.isSystemTable()) {
-            Table originTable =
-                    getDataOrFormatTable(
-                            new Identifier(
-                                    identifier.getDatabaseName(),
-                                    identifier.getTableName(),
-                                    identifier.getBranchName(),
-                                    null));
-            return CatalogUtils.createSystemTable(identifier, originTable);
-        } else {
-            return getDataOrFormatTable(identifier);
-        }
-    }
-
-    protected Table getDataOrFormatTable(Identifier identifier) throws TableNotExistException {
-        Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        TableMeta tableMeta = getDataTableMeta(identifier);
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                        fileIO,
-                        getTableLocation(identifier),
-                        tableMeta.schema,
-                        new CatalogEnvironment(
-                                identifier,
-                                tableMeta.uuid,
-                                Lock.factory(
-                                        lockFactory().orElse(null),
-                                        lockContext().orElse(null),
-                                        identifier),
-                                metastoreClientFactory(identifier).orElse(null)));
-        CoreOptions options = table.coreOptions();
-        if (options.type() == TableType.OBJECT_TABLE) {
-            String objectLocation = options.objectLocation();
-            checkNotNull(objectLocation, "Object location should not be null for object table.");
-            table =
-                    ObjectTable.builder()
-                            .underlyingTable(table)
-                            .objectLocation(objectLocation)
-                            .objectFileIO(objectFileIO(objectLocation))
-                            .build();
-        }
-        return table;
-    }
-
-    /**
-     * Catalog implementation may override this method to provide {@link FileIO} to object table.
-     */
-    protected FileIO objectFileIO(String objectLocation) {
-        return fileIO;
+        SnapshotCommit.Factory commitFactory =
+                new RenamingSnapshotCommit.Factory(
+                        lockFactory().orElse(null), lockContext().orElse(null));
+        return CatalogUtils.loadTable(this, identifier, this::loadTableMetadata, commitFactory);
     }
 
     /**
@@ -470,33 +394,12 @@ public abstract class AbstractCatalog implements Catalog {
         return newDatabasePath(warehouse(), database);
     }
 
-    public Map<String, Map<String, Path>> allTablePaths() {
-        try {
-            Map<String, Map<String, Path>> allPaths = new HashMap<>();
-            for (String database : listDatabases()) {
-                Map<String, Path> tableMap =
-                        allPaths.computeIfAbsent(database, d -> new HashMap<>());
-                for (String table : listTables(database)) {
-                    tableMap.put(table, getTableLocation(Identifier.create(database, table)));
-                }
-            }
-            return allPaths;
-        } catch (DatabaseNotExistException e) {
-            throw new RuntimeException("Database is deleted while listing", e);
-        }
+    protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+        return new TableMetadata(loadTableSchema(identifier), null);
     }
 
-    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
-        return new TableMeta(getDataTableSchema(identifier), null);
-    }
-
-    protected abstract TableSchema getDataTableSchema(Identifier identifier)
+    protected abstract TableSchema loadTableSchema(Identifier identifier)
             throws TableNotExistException;
-
-    /** Get metastore client factory for the table specified by {@code identifier}. */
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
-        return Optional.empty();
-    }
 
     public Path getTableLocation(Identifier identifier) {
         return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getTableName());
@@ -524,17 +427,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     private void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
-    }
-
-    private void validateAutoCreateClose(Map<String, String> options) {
-        checkArgument(
-                !Boolean.parseBoolean(
-                        options.getOrDefault(
-                                CoreOptions.AUTO_CREATE.key(),
-                                CoreOptions.AUTO_CREATE.defaultValue().toString())),
-                String.format(
-                        "The value of %s property should be %s.",
-                        CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
     }
 
     private void validateCustomTablePath(Map<String, String> options) {
@@ -584,38 +476,17 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
-        return new SchemaManager(fileIO, tablePath, branchName)
-                .latest()
-                .map(
-                        s -> {
-                            if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
+        Optional<TableSchema> schema = new SchemaManager(fileIO, tablePath, branchName).latest();
+        if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
+            schema =
+                    schema.map(
+                            s -> {
                                 Options branchOptions = new Options(s.options());
                                 branchOptions.set(CoreOptions.BRANCH, branchName);
                                 return s.copy(branchOptions.toMap());
-                            } else {
-                                return s;
-                            }
-                        });
-    }
-
-    /** Table metadata. */
-    protected static class TableMeta {
-
-        private final TableSchema schema;
-        @Nullable private final String uuid;
-
-        public TableMeta(TableSchema schema, @Nullable String uuid) {
-            this.schema = schema;
-            this.uuid = uuid;
+                            });
         }
-
-        public TableSchema schema() {
-            return schema;
-        }
-
-        @Nullable
-        public String uuid() {
-            return uuid;
-        }
+        schema.ifPresent(s -> s.options().put(PATH.key(), tablePath.toString()));
+        return schema;
     }
 }

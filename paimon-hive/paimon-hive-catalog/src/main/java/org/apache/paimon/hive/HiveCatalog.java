@@ -23,15 +23,16 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.pool.CachedClientPool;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -40,22 +41,19 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
@@ -66,9 +64,12 @@ import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
+import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.UnknownTableException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
@@ -91,6 +92,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -105,13 +107,12 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
-import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
-import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
+import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
-import static org.apache.paimon.hive.HiveTableUtils.convertToFormatTable;
+import static org.apache.paimon.hive.HiveTableUtils.tryToFormatSchema;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.FORMAT_TABLE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
@@ -145,6 +146,8 @@ public class HiveCatalog extends AbstractCatalog {
     public static final String HIVE_SITE_FILE = "hive-site.xml";
     private static final String HIVE_EXTERNAL_TABLE_PROP = "EXTERNAL";
     private static final int DEFAULT_TABLE_BATCH_SIZE = 300;
+    private static final String HIVE_LAST_UPDATE_TIME_PROP = "transient_lastDdlTime";
+
     private final HiveConf hiveConf;
     private final String clientClassName;
     private final Options options;
@@ -197,15 +200,6 @@ public class HiveCatalog extends AbstractCatalog {
         return Optional.of(
                 new HiveCatalogLockContext(
                         new SerializableHiveConf(hiveConf), clientClassName, catalogOptions));
-    }
-
-    @Override
-    public Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
-        Identifier tableIdentifier =
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName());
-        return Optional.of(
-                new HiveMetastoreClient.Factory(
-                        tableIdentifier, hiveConf, clientClassName, options));
     }
 
     @Override
@@ -344,40 +338,231 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
+    private boolean metastorePartitioned(TableSchema schema) {
+        CoreOptions options = CoreOptions.fromMap(schema.options());
+        return (!schema.partitionKeys().isEmpty() && options.partitionedTableInMetastore())
+                || options.tagToPartitionField() != null;
+    }
+
     @Override
-    public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        TableSchema tableSchema = getDataTableSchema(identifier);
+        Identifier tableIdentifier =
+                Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
+        Table hmsTable = getHmsTable(tableIdentifier);
+        Path location = getTableLocation(tableIdentifier, hmsTable);
+        TableSchema schema = loadTableSchema(tableIdentifier, hmsTable);
+
+        if (!metastorePartitioned(schema)) {
+            return;
+        }
+
+        int currentTime = (int) (System.currentTimeMillis() / 1000);
+        StorageDescriptor sd = hmsTable.getSd();
+        String dataFilePath =
+                hmsTable.getParameters().containsKey(DATA_FILE_PATH_DIRECTORY.key())
+                        ? sd.getLocation()
+                                + "/"
+                                + hmsTable.getParameters().get(DATA_FILE_PATH_DIRECTORY.key())
+                        : sd.getLocation();
+        List<Partition> hivePartitions = new ArrayList<>();
+        for (Map<String, String> partitionSpec : partitions) {
+            Partition hivePartition = new Partition();
+            StorageDescriptor newSd = new StorageDescriptor(sd);
+            newSd.setLocation(
+                    dataFilePath
+                            + "/"
+                            + PartitionPathUtils.generatePartitionPath(
+                                    new LinkedHashMap<>(partitionSpec)));
+            hivePartition.setDbName(identifier.getDatabaseName());
+            hivePartition.setTableName(identifier.getTableName());
+            hivePartition.setValues(new ArrayList<>(partitionSpec.values()));
+            hivePartition.setSd(newSd);
+            hivePartition.setCreateTime(currentTime);
+            hivePartition.setLastAccessTime(currentTime);
+            hivePartitions.add(hivePartition);
+        }
+        try {
+            clients.execute(client -> client.add_partitions(hivePartitions, true, false));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        TableSchema schema = this.loadTableSchema(identifier);
+        CoreOptions options = CoreOptions.fromMap(schema.options());
+        boolean tagToPart = options.tagToPartitionField() != null;
+        if (metastorePartitioned(schema)) {
+            List<Map<String, String>> metaPartitions =
+                    tagToPart
+                            ? partitions
+                            : removePartitionsExistsInOtherBranches(identifier, partitions);
+            for (Map<String, String> part : metaPartitions) {
+                List<String> partitionValues = new ArrayList<>(part.values());
+                try {
+                    clients.execute(
+                            client ->
+                                    client.dropPartition(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            partitionValues,
+                                            false));
+                } catch (NoSuchObjectException e) {
+                    // do nothing if the partition not exists
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        if (!tagToPart) {
+            super.dropPartitions(identifier, partitions);
+        }
+    }
+
+    @Override
+    public void alterPartitions(
+            Identifier identifier, List<org.apache.paimon.partition.Partition> partitions)
+            throws TableNotExistException {
+        TableSchema tableSchema = this.loadTableSchema(identifier);
         if (!tableSchema.partitionKeys().isEmpty()
-                && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()
-                && !partitionExistsInOtherBranches(identifier, partitionSpec)) {
+                && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
+            for (org.apache.paimon.partition.Partition partition : partitions) {
+                Map<String, String> spec = partition.spec();
+                List<String> partitionValues =
+                        tableSchema.partitionKeys().stream()
+                                .map(spec::get)
+                                .collect(Collectors.toList());
+
+                Map<String, String> statistic = new HashMap<>();
+                statistic.put(NUM_FILES_PROP, String.valueOf(partition.fileCount()));
+                statistic.put(TOTAL_SIZE_PROP, String.valueOf(partition.fileSizeInBytes()));
+                statistic.put(NUM_ROWS_PROP, String.valueOf(partition.recordCount()));
+
+                String modifyTimeSeconds = String.valueOf(partition.lastFileCreationTime() / 1000);
+                statistic.put(LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
+
+                // just for being compatible with hive metastore
+                statistic.put(HIVE_LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
+
+                try {
+                    Partition hivePartition =
+                            clients.run(
+                                    client ->
+                                            client.getPartition(
+                                                    identifier.getDatabaseName(),
+                                                    identifier.getObjectName(),
+                                                    partitionValues));
+                    hivePartition.setValues(partitionValues);
+                    hivePartition.setLastAccessTime(
+                            (int) (partition.lastFileCreationTime() / 1000));
+                    hivePartition.getParameters().putAll(statistic);
+                    clients.execute(
+                            client ->
+                                    client.alter_partition(
+                                            identifier.getDatabaseName(),
+                                            identifier.getObjectName(),
+                                            hivePartition));
+                } catch (NoSuchObjectException e) {
+                    // do nothing if the partition not exists
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+    }
+
+    @Override
+    public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        try {
+            clients.execute(
+                    client -> {
+                        for (Map<String, String> partition : partitions) {
+                            client.markPartitionForEvent(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    partition,
+                                    PartitionEventType.LOAD_DONE);
+                        }
+                    });
+        } catch (NoSuchObjectException e) {
+            // do nothing if the partition not exists
+        } catch (UnknownTableException e) {
+            throw new TableNotExistException(identifier);
+        } catch (TException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public List<org.apache.paimon.partition.Partition> listPartitions(Identifier identifier)
+            throws TableNotExistException {
+        FileStoreTable table = (FileStoreTable) getTable(identifier);
+        String tagToPartitionField = table.coreOptions().tagToPartitionField();
+        if (tagToPartitionField != null) {
             try {
-                // Do not close client, it is for HiveCatalog
-                @SuppressWarnings("resource")
-                HiveMetastoreClient metastoreClient =
-                        new HiveMetastoreClient(
-                                new Identifier(
-                                        identifier.getDatabaseName(), identifier.getTableName()),
-                                clients);
-                metastoreClient.dropPartition(new LinkedHashMap<>(partitionSpec));
+                List<Partition> partitions =
+                        clients.run(
+                                client ->
+                                        client.listPartitions(
+                                                identifier.getDatabaseName(),
+                                                identifier.getTableName(),
+                                                Short.MAX_VALUE));
+                return partitions.stream()
+                        .map(
+                                part -> {
+                                    Map<String, String> parameters = part.getParameters();
+                                    long recordCount =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(NUM_ROWS_PROP, "1"));
+                                    long fileSizeInBytes =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(TOTAL_SIZE_PROP, "1"));
+                                    long fileCount =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(NUM_FILES_PROP, "1"));
+                                    long lastFileCreationTime =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(
+                                                            LAST_UPDATE_TIME_PROP,
+                                                            System.currentTimeMillis() + ""));
+                                    return new org.apache.paimon.partition.Partition(
+                                            Collections.singletonMap(
+                                                    tagToPartitionField, part.getValues().get(0)),
+                                            recordCount,
+                                            fileSizeInBytes,
+                                            fileCount,
+                                            lastFileCreationTime);
+                                })
+                        .collect(Collectors.toList());
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
-        super.dropPartition(identifier, partitionSpec);
+        return listPartitionsFromFileSystem(table);
     }
 
-    private boolean partitionExistsInOtherBranches(
-            Identifier identifier, Map<String, String> partitionSpec)
-            throws TableNotExistException {
+    private List<Map<String, String>> removePartitionsExistsInOtherBranches(
+            Identifier identifier, List<Map<String, String>> inputs) throws TableNotExistException {
         FileStoreTable mainTable =
                 (FileStoreTable)
                         getTable(
                                 new Identifier(
                                         identifier.getDatabaseName(), identifier.getTableName()));
+
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        mainTable.coreOptions().partitionDefaultName(),
+                        mainTable.rowType().project(mainTable.partitionKeys()),
+                        mainTable.partitionKeys().toArray(new String[0]),
+                        mainTable.coreOptions().legacyPartitionName());
         List<String> branchNames = new ArrayList<>(mainTable.branchManager().branches());
         branchNames.add(DEFAULT_MAIN_BRANCH);
 
+        Set<Map<String, String>> inputsToRemove = new HashSet<>(inputs);
         for (String branchName : branchNames) {
             if (branchName.equals(identifier.getBranchNameOrDefault())) {
                 continue;
@@ -389,12 +574,13 @@ public class HiveCatalog extends AbstractCatalog {
                 continue;
             }
 
-            FileStoreTable table = mainTable.switchToBranch(branchName);
-            if (!table.newScan().withPartitionFilter(partitionSpec).listPartitions().isEmpty()) {
-                return true;
-            }
+            mainTable.switchToBranch(branchName).newScan()
+                    .withPartitionsFilter(new ArrayList<>(inputsToRemove)).listPartitions().stream()
+                    .map(partitionComputer::generatePartValues)
+                    .forEach(inputsToRemove::remove);
         }
-        return false;
+
+        return new ArrayList<>(inputsToRemove);
     }
 
     @Override
@@ -416,20 +602,18 @@ public class HiveCatalog extends AbstractCatalog {
     protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
         try {
             Database database = clients.run(client -> client.getDatabase(name));
-            Map<String, String> parameter = Maps.newHashMap();
-            parameter.putAll(database.getParameters());
+            Map<String, String> parameter = new HashMap<>(database.getParameters());
             Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
                     PropertyChange.getSetPropertiesToRemoveKeys(changes);
             Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
             Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
-            if (setProperties.size() > 0) {
+            if (!setProperties.isEmpty()) {
                 parameter.putAll(setProperties);
             }
-            if (removeKeys.size() > 0) {
+            if (!removeKeys.isEmpty()) {
                 parameter.keySet().removeAll(removeKeys);
             }
-            Map<String, String> newProperties = Collections.unmodifiableMap(parameter);
-            Database alterDatabase = convertToHiveDatabase(name, newProperties);
+            Database alterDatabase = convertToHiveDatabase(name, parameter);
             clients.execute(client -> client.alterDatabase(name, alterDatabase));
         } catch (TException e) {
             throw new RuntimeException("Failed to alter database " + name, e);
@@ -487,32 +671,41 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected TableMeta getDataTableMeta(Identifier identifier) throws TableNotExistException {
-        return getDataTableMeta(identifier, getHmsTable(identifier));
+    protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+        return loadTableMetadata(identifier, getHmsTable(identifier));
     }
 
-    private TableMeta getDataTableMeta(Identifier identifier, Table table)
+    private TableMetadata loadTableMetadata(Identifier identifier, Table table)
             throws TableNotExistException {
-        return new TableMeta(
-                getDataTableSchema(identifier, table),
+        return new TableMetadata(
+                loadTableSchema(identifier, table),
                 identifier.getFullName() + "." + table.getCreateTime());
     }
 
     @Override
-    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+    public TableSchema loadTableSchema(Identifier identifier) throws TableNotExistException {
         Table table = getHmsTable(identifier);
-        return getDataTableSchema(identifier, table);
+        return loadTableSchema(identifier, table);
     }
 
-    private TableSchema getDataTableSchema(Identifier identifier, Table table)
+    private TableSchema loadTableSchema(Identifier identifier, Table table)
             throws TableNotExistException {
-        if (!isPaimonTable(table)) {
-            throw new TableNotExistException(identifier);
+        if (isPaimonTable(table)) {
+            return tableSchemaInFileSystem(
+                            getTableLocation(identifier, table),
+                            identifier.getBranchNameOrDefault())
+                    .orElseThrow(() -> new TableNotExistException(identifier));
         }
 
-        return tableSchemaInFileSystem(
-                        getTableLocation(identifier, table), identifier.getBranchNameOrDefault())
-                .orElseThrow(() -> new TableNotExistException(identifier));
+        if (!formatTableDisabled()) {
+            try {
+                Schema schema = tryToFormatSchema(table);
+                return TableSchema.create(0, schema);
+            } catch (UnsupportedOperationException ignored) {
+            }
+        }
+
+        throw new TableNotExistException(identifier);
     }
 
     @Override
@@ -649,39 +842,6 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public org.apache.paimon.table.Table getDataOrFormatTable(Identifier identifier)
-            throws TableNotExistException {
-        Preconditions.checkArgument(identifier.getSystemTableName() == null);
-        Table table = getHmsTable(identifier);
-        try {
-            TableMeta tableMeta = getDataTableMeta(identifier, table);
-            return FileStoreTableFactory.create(
-                    fileIO,
-                    getTableLocation(identifier, table),
-                    tableMeta.schema(),
-                    new CatalogEnvironment(
-                            identifier,
-                            tableMeta.uuid(),
-                            Lock.factory(
-                                    lockFactory().orElse(null),
-                                    lockContext().orElse(null),
-                                    identifier),
-                            metastoreClientFactory(identifier).orElse(null)));
-        } catch (TableNotExistException ignore) {
-        }
-
-        if (formatTableDisabled()) {
-            throw new TableNotExistException(identifier);
-        }
-
-        try {
-            return convertToFormatTable(table);
-        } catch (UnsupportedOperationException e) {
-            throw new TableNotExistException(identifier);
-        }
-    }
-
-    @Override
     public void createFormatTable(Identifier identifier, Schema schema) {
         if (formatTableDisabled()) {
             throw new UnsupportedOperationException(
@@ -774,7 +934,14 @@ public class HiveCatalog extends AbstractCatalog {
         boolean externalTable = pair.getRight();
         TableSchema tableSchema;
         try {
-            tableSchema = schemaManager(identifier, location).createTable(schema, externalTable);
+            tableSchema =
+                    runWithLock(
+                            identifier,
+                            () ->
+                                    schemaManager(identifier, location)
+                                            .createTable(schema, externalTable));
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
@@ -907,9 +1074,19 @@ public class HiveCatalog extends AbstractCatalog {
             throw new UnsupportedOperationException("Only data table support alter table.");
         }
 
-        final SchemaManager schemaManager = schemaManager(identifier, getTableLocation(identifier));
-        // first commit changes to underlying files
-        TableSchema schema = schemaManager.commitChanges(changes);
+        SchemaManager schemaManager = schemaManager(identifier, getTableLocation(identifier));
+        TableSchema schema;
+        try {
+            // first commit changes to underlying files
+            schema = runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+        } catch (TableNotExistException
+                | ColumnAlreadyExistException
+                | ColumnNotExistException
+                | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to alter table " + identifier.getFullName(), e);
+        }
 
         // currently only changes to main branch affects metastore
         if (!DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault())) {
@@ -1036,9 +1213,8 @@ public class HiveCatalog extends AbstractCatalog {
                                 tableSchema.logicalPartitionType(),
                                 tableSchema.partitionKeys().toArray(new String[0]),
                                 options.legacyPartitionName());
-                @SuppressWarnings("resource")
-                HiveMetastoreClient metastoreClient = new HiveMetastoreClient(identifier, clients);
-                metastoreClient.addPartitions(
+                createPartitions(
+                        identifier,
                         getTable(identifier).newReadBuilder().newScan().listPartitions().stream()
                                 .map(partitionComputer::generatePartValues)
                                 .collect(Collectors.toList()));
@@ -1056,6 +1232,12 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public String warehouse() {
         return warehouse;
+    }
+
+    @Override
+    public CatalogLoader catalogLoader() {
+        return new HiveCatalogLoader(
+                fileIO, new SerializableHiveConf(hiveConf), clientClassName, options, warehouse);
     }
 
     public Table getHmsTable(Identifier identifier) throws TableNotExistException {
@@ -1086,7 +1268,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     private boolean isFormatTable(Table table) {
         try {
-            convertToFormatTable(table);
+            tryToFormatSchema(table);
             return true;
         } catch (UnsupportedOperationException e) {
             return false;
@@ -1308,18 +1490,20 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier, Path location) {
-        return new SchemaManager(fileIO, location, identifier.getBranchNameOrDefault())
-                .withLock(lock(identifier));
+        return new SchemaManager(fileIO, location, identifier.getBranchNameOrDefault());
     }
 
-    private Lock lock(Identifier identifier) {
+    public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
         if (!lockEnabled()) {
-            return new Lock.EmptyLock();
+            return callable.call();
         }
 
         HiveCatalogLock lock =
-                new HiveCatalogLock(clients, checkMaxSleep(hiveConf), acquireTimeout(hiveConf));
-        return Lock.fromCatalog(lock, identifier);
+                new HiveCatalogLock(
+                        clients,
+                        HiveCatalogLock.checkMaxSleep(hiveConf),
+                        HiveCatalogLock.acquireTimeout(hiveConf));
+        return Lock.fromCatalog(lock, identifier).runWithLock(callable);
     }
 
     public static HiveConf createHiveConf(

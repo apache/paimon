@@ -623,7 +623,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRemoveRecordOnDelete() {
+    public void testRemoveRecordOnDeleteWithoutSequenceGroup() {
         sql(
                 "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
@@ -645,6 +645,44 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         // batch read
         assertThat(sql("SELECT * FROM remove_record_on_delete"))
                 .containsExactlyInAnyOrder(Row.of(1, "A", "apache"));
+    }
+
+    @Test
+    public void testRemoveRecordOnDeleteWithSequenceGroup() throws Exception {
+        sql(
+                "CREATE TABLE remove_record_on_delete_sequence_group"
+                        + " (pk INT PRIMARY KEY NOT ENFORCED, a STRING, seq_a INT, b STRING, seq_b INT) WITH ("
+                        + " 'merge-engine' = 'partial-update',"
+                        + " 'fields.seq_a.sequence-group' = 'a',"
+                        + " 'fields.seq_b.sequence-group' = 'b',"
+                        + " 'partial-update.remove-record-on-sequence-group' = 'seq_a'"
+                        + ")");
+
+        sql("INSERT INTO remove_record_on_delete_sequence_group VALUES (1, 'apple', 2, 'a', 1)");
+        sql("INSERT INTO remove_record_on_delete_sequence_group VALUES (1, 'banana', 1, 'b', 2)");
+        assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group"))
+                .containsExactlyInAnyOrder(Row.of(1, "apple", 2, "b", 2));
+
+        // delete with seq_b won't delete record but retract b
+        String id =
+                TestValuesTableFactory.registerData(
+                        Collections.singletonList(
+                                Row.ofKind(RowKind.DELETE, 1, null, null, "b", 2)));
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE delete_source1 (pk INT, a STRING, seq_a INT, b STRING, seq_b INT) "
+                                + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
+                                + "'changelog-mode' = 'I,D,UA,UB')",
+                        id));
+        sEnv.executeSql(
+                        "INSERT INTO remove_record_on_delete_sequence_group SELECT * FROM delete_source1")
+                .await();
+        assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group"))
+                .containsExactlyInAnyOrder(Row.of(1, "apple", 2, null, 2));
+
+        // delete record
+        sql("DELETE FROM remove_record_on_delete_sequence_group WHERE pk = 1");
+        assertThat(sql("SELECT * FROM remove_record_on_delete_sequence_group")).isEmpty();
     }
 
     @Test
@@ -684,5 +722,23 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         Row.ofKind(RowKind.UPDATE_BEFORE, 1, null, "apache"),
                         Row.ofKind(RowKind.UPDATE_AFTER, 1, "A", "apache"));
         iterator.close();
+    }
+
+    @Test
+    public void testSequenceGroupWithDefaultAgg() {
+        sql(
+                "CREATE TABLE seq_default_agg ("
+                        + " pk INT PRIMARY KEY NOT ENFORCED,"
+                        + " seq INT,"
+                        + " v INT) WITH ("
+                        + " 'merge-engine'='partial-update',"
+                        + " 'fields.seq.sequence-group'='v',"
+                        + " 'fields.default-aggregate-function'='sum'"
+                        + ")");
+
+        sql("INSERT INTO seq_default_agg VALUES (0, 1, 1)");
+        sql("INSERT INTO seq_default_agg VALUES (0, 2, 2)");
+
+        assertThat(sql("SELECT * FROM seq_default_agg")).containsExactly(Row.of(0, 2, 3));
     }
 }

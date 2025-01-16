@@ -70,7 +70,7 @@ public class DefaultErrorHandlerTest {
                 ServiceFailureException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(500)));
         assertThrows(
-                UnsupportedOperationException.class,
+                org.apache.paimon.rest.exceptions.UnsupportedOperationException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(501)));
         assertThrows(
                 RESTException.class, () -> defaultErrorHandler.accept(generateErrorResponse(502)));
@@ -80,6 +80,6 @@ public class DefaultErrorHandlerTest {
     }
 
     private ErrorResponse generateErrorResponse(int code) {
-        return new ErrorResponse("message", code, new ArrayList<String>());
+        return new ErrorResponse(null, null, "message", code, new ArrayList<String>());
     }
 }

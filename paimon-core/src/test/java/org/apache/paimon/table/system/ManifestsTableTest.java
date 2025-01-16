@@ -177,7 +177,21 @@ public class ManifestsTableTest extends TableTestBase {
                             manifestFileMeta.fileSize(),
                             manifestFileMeta.numAddedFiles(),
                             manifestFileMeta.numDeletedFiles(),
-                            manifestFileMeta.schemaId()));
+                            manifestFileMeta.schemaId(),
+                            BinaryString.fromString(
+                                    String.format(
+                                            "{%d}",
+                                            manifestFileMeta
+                                                    .partitionStats()
+                                                    .minValues()
+                                                    .getInt(0))),
+                            BinaryString.fromString(
+                                    String.format(
+                                            "{%d}",
+                                            manifestFileMeta
+                                                    .partitionStats()
+                                                    .maxValues()
+                                                    .getInt(0)))));
         }
         return expectedRow;
     }

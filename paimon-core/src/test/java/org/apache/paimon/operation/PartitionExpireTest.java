@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
@@ -27,14 +28,16 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -72,6 +75,7 @@ import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -82,7 +86,7 @@ public class PartitionExpireTest {
 
     private Path path;
     private FileStoreTable table;
-    private List<LinkedHashMap<String, String>> deletedPartitions;
+    private List<Map<String, String>> deletedPartitions;
 
     @BeforeEach
     public void beforeEach() {
@@ -97,36 +101,45 @@ public class PartitionExpireTest {
         String branchName = CoreOptions.branch(options.toMap());
         TableSchema tableSchema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
         deletedPartitions = new ArrayList<>();
-        MetastoreClient.Factory factory =
-                () ->
-                        new MetastoreClient() {
-                            @Override
-                            public void addPartition(LinkedHashMap<String, String> partition) {}
+        PartitionHandler partitionHandler =
+                new PartitionHandler() {
+                    @Override
+                    public void createPartitions(List<Map<String, String>> partitions)
+                            throws Catalog.TableNotExistException {}
 
-                            @Override
-                            public void addPartitions(
-                                    List<LinkedHashMap<String, String>> partitions) {}
+                    @Override
+                    public void dropPartitions(List<Map<String, String>> partitions)
+                            throws Catalog.TableNotExistException {
+                        deletedPartitions.addAll(partitions);
+                        try (FileStoreCommit commit =
+                                table.store()
+                                        .newCommit(
+                                                createCommitUser(
+                                                        table.coreOptions().toConfiguration()))) {
+                            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                        }
+                    }
 
-                            @Override
-                            public void dropPartition(LinkedHashMap<String, String> partition) {
-                                deletedPartitions.add(partition);
-                            }
+                    @Override
+                    public void alterPartitions(List<Partition> partitions)
+                            throws Catalog.TableNotExistException {}
 
-                            @Override
-                            public void dropPartitions(
-                                    List<LinkedHashMap<String, String>> partitions) {
-                                deletedPartitions.addAll(partitions);
-                            }
+                    @Override
+                    public void markDonePartitions(List<Map<String, String>> partitions)
+                            throws Catalog.TableNotExistException {}
 
-                            @Override
-                            public void markPartitionDone(LinkedHashMap<String, String> partition) {
-                                throw new UnsupportedOperationException();
-                            }
+                    @Override
+                    public void close() throws Exception {}
+                };
 
-                            @Override
-                            public void close() {}
-                        };
-        CatalogEnvironment env = new CatalogEnvironment(null, null, Lock.emptyFactory(), factory);
+        CatalogEnvironment env =
+                new CatalogEnvironment(null, null, null, null) {
+
+                    @Override
+                    public PartitionHandler partitionHandler() {
+                        return partitionHandler;
+                    }
+                };
         table = FileStoreTableFactory.create(fileIO, path, tableSchema, env);
     }
 

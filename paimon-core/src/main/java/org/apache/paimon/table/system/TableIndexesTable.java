@@ -19,6 +19,8 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -46,7 +48,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -182,13 +183,16 @@ public class TableIndexesTable implements ReadonlyTable {
             }
             List<IndexManifestEntry> manifestFileMetas = allIndexEntries(dataTable);
 
-            RowDataToObjectArrayConverter partitionConverter =
-                    new RowDataToObjectArrayConverter(dataTable.schema().logicalPartitionType());
+            @SuppressWarnings("unchecked")
+            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
+                    (CastExecutor<InternalRow, BinaryString>)
+                            CastExecutors.resolveToString(
+                                    dataTable.schema().logicalPartitionType());
 
             Iterator<InternalRow> rows =
                     Iterators.transform(
                             manifestFileMetas.iterator(),
-                            indexManifestEntry -> toRow(indexManifestEntry, partitionConverter));
+                            indexManifestEntry -> toRow(indexManifestEntry, partitionCastExecutor));
             if (readType != null) {
                 rows =
                         Iterators.transform(
@@ -202,13 +206,11 @@ public class TableIndexesTable implements ReadonlyTable {
 
         private InternalRow toRow(
                 IndexManifestEntry indexManifestEntry,
-                RowDataToObjectArrayConverter partitionConverter) {
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
             LinkedHashMap<String, DeletionVectorMeta> dvMetas =
                     indexManifestEntry.indexFile().deletionVectorMetas();
             return GenericRow.of(
-                    BinaryString.fromString(
-                            Arrays.toString(
-                                    partitionConverter.convert(indexManifestEntry.partition()))),
+                    partitionCastExecutor.cast(indexManifestEntry.partition()),
                     indexManifestEntry.bucket(),
                     BinaryString.fromString(indexManifestEntry.indexFile().indexType()),
                     BinaryString.fromString(indexManifestEntry.indexFile().fileName()),

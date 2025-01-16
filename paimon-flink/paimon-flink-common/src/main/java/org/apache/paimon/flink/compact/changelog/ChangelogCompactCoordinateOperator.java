@@ -90,7 +90,7 @@ public class ChangelogCompactCoordinateOperator
                     .addNewChangelogFile(bucket, meta);
             PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
             if (partitionChangelog.totalFileSize >= targetFileSize) {
-                emitPartitionChanglogCompactTask(partition);
+                emitPartitionChangelogCompactTask(partition);
             }
         }
         for (DataFileMeta meta : message.compactIncrement().changelogFiles()) {
@@ -99,7 +99,7 @@ public class ChangelogCompactCoordinateOperator
                     .addCompactChangelogFile(bucket, meta);
             PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
             if (partitionChangelog.totalFileSize >= targetFileSize) {
-                emitPartitionChanglogCompactTask(partition);
+                emitPartitionChangelogCompactTask(partition);
             }
         }
 
@@ -122,14 +122,14 @@ public class ChangelogCompactCoordinateOperator
     }
 
     public void prepareSnapshotPreBarrier(long checkpointId) {
-        emitAllPartitionsChanglogCompactTask();
+        emitAllPartitionsChangelogCompactTask();
     }
 
     public void endInput() {
-        emitAllPartitionsChanglogCompactTask();
+        emitAllPartitionsChangelogCompactTask();
     }
 
-    private void emitPartitionChanglogCompactTask(BinaryRow partition) {
+    private void emitPartitionChangelogCompactTask(BinaryRow partition) {
         PartitionChangelog partitionChangelog = partitionChangelogs.get(partition);
         output.collect(
                 new StreamRecord<>(
@@ -142,10 +142,10 @@ public class ChangelogCompactCoordinateOperator
         partitionChangelogs.remove(partition);
     }
 
-    private void emitAllPartitionsChanglogCompactTask() {
+    private void emitAllPartitionsChangelogCompactTask() {
         List<BinaryRow> partitions = new ArrayList<>(partitionChangelogs.keySet());
         for (BinaryRow partition : partitions) {
-            emitPartitionChanglogCompactTask(partition);
+            emitPartitionChangelogCompactTask(partition);
         }
     }
 

@@ -58,8 +58,8 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql("select count(*) from `T$partitions`"), Row(5) :: Nil)
     checkAnswer(
       spark.sql("select partition from `T$partitions`"),
-      Row("[2024-10-09, 01]") :: Row("[2024-10-09, 02]") :: Row("[2024-10-10, 01]") :: Row(
-        "[2024-10-10, 12]") :: Row("[2024-10-10, 23]") :: Nil
+      Row("{2024-10-09, 01}") :: Row("{2024-10-09, 02}") :: Row("{2024-10-10, 01}") :: Row(
+        "{2024-10-10, 12}") :: Row("{2024-10-10, 23}") :: Nil
     )
   }
 
@@ -79,7 +79,25 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql("select count(*) from `T$partitions`"), Row(1) :: Nil)
     checkAnswer(
       spark.sql("select partition,bucket from `T$buckets`"),
-      Row("[2024-10-10, 01]", 0) :: Row("[2024-10-10, 01]", 1) :: Row("[2024-10-10, 01]", 2) :: Nil)
+      Row("{2024-10-10, 01}", 0) :: Row("{2024-10-10, 01}", 1) :: Row("{2024-10-10, 01}", 2) :: Nil)
+  }
+
+  test("system table: date partition table") {
+    sql(s"""
+           |CREATE TABLE T (a INT, p1 DATE, p2 INT)
+           |PARTITIONED BY (p1, p2)
+           |""".stripMargin)
+
+    sql("INSERT INTO T VALUES(1, cast('2024-10-10' as date), 1)")
+    sql("INSERT INTO T VALUES(2, null, 1)")
+
+    checkAnswer(
+      sql("SELECT partition FROM `T$partitions`"),
+      Seq(Row("{2024-10-10, 1}"), Row("{null, 1}")))
+
+    checkAnswer(
+      sql("SELECT partition, bucket FROM `T$buckets`"),
+      Seq(Row("{2024-10-10, 1}", 0), Row("{null, 1}", 0)))
   }
 
   test("system table: binlog table") {

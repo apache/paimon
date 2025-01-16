@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -26,36 +25,26 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
 import java.util.Map;
 
-/** Request for creating partition. */
+/** Request for partitions action. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class CreatePartitionRequest implements RESTRequest {
+public abstract class BasePartitionsRequest implements RESTRequest {
 
-    private static final String FIELD_IDENTIFIER = "identifier";
-    private static final String FIELD_PARTITION_SPEC = "spec";
+    protected static final String FIELD_PARTITION_SPECS = "specs";
 
-    @JsonProperty(FIELD_IDENTIFIER)
-    private final Identifier identifier;
-
-    @JsonProperty(FIELD_PARTITION_SPEC)
-    private final Map<String, String> partitionSpec;
+    @JsonProperty(FIELD_PARTITION_SPECS)
+    private final List<Map<String, String>> partitionSpecs;
 
     @JsonCreator
-    public CreatePartitionRequest(
-            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
-            @JsonProperty(FIELD_PARTITION_SPEC) Map<String, String> partitionSpec) {
-        this.identifier = identifier;
-        this.partitionSpec = partitionSpec;
+    public BasePartitionsRequest(
+            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
+        this.partitionSpecs = partitionSpecs;
     }
 
-    @JsonGetter(FIELD_IDENTIFIER)
-    public Identifier getIdentifier() {
-        return identifier;
-    }
-
-    @JsonGetter(FIELD_PARTITION_SPEC)
-    public Map<String, String> getPartitionSpec() {
-        return partitionSpec;
+    @JsonGetter(FIELD_PARTITION_SPECS)
+    public List<Map<String, String>> getPartitionSpecs() {
+        return partitionSpecs;
     }
 }

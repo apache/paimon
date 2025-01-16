@@ -52,7 +52,7 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql_sync_table
+    mysql_sync_table \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
@@ -70,7 +70,7 @@ To use this feature through `flink run`, run the following shell command.
 
 If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
 
-Example 1: synchronize tables into one Paimon table
+### Example 1: synchronize tables into one Paimon table
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -97,7 +97,7 @@ Example 1: synchronize tables into one Paimon table
 As example shows, the mysql_conf's table-name supports regular expressions to monitor multiple tables that satisfy
 the regular expressions. The schemas of all the tables will be merged into one Paimon table schema.
 
-Example 2: synchronize shards into one Paimon table
+### Example 2: synchronize shards into one Paimon table
 
 You can also set 'database-name' with a regular expression to capture multiple databases. A typical scenario is that a 
 table 'source_table' is split into database 'source_db1', 'source_db2' ..., then you can synchronize data of all the 
@@ -134,7 +134,7 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql_sync_database
+    mysql_sync_database \
     --warehouse <warehouse-path> \
     --database <database-name> \
     [--ignore_incompatible <true/false>] \
@@ -159,7 +159,7 @@ Only tables with primary keys will be synchronized.
 
 For each MySQL table to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
 
-Example 1: synchronize entire database
+### Example 1: synchronize entire database
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -178,7 +178,7 @@ Example 1: synchronize entire database
     --table_conf sink.parallelism=4
 ```
 
-Example 2: synchronize newly added tables under database
+### Example 2: synchronize newly added tables under database
 
 Let's say at first a Flink job is synchronizing tables [product, user, address] 
 under database `source_db`. The command to submit the job looks like:
@@ -209,7 +209,6 @@ position automatically.
 
 The command to recover from previous snapshot and add new tables to synchronize looks like:
 
-
 ```bash
 <FLINK_HOME>/bin/flink run \
     --fromSavepoint savepointPath \
@@ -231,7 +230,7 @@ The command to recover from previous snapshot and add new tables to synchronize 
 You can set `--mode combined` to enable synchronizing newly added tables without restarting job.
 {{< /hint >}}
 
-Example 3: synchronize and merge multiple shards
+### Example 3: synchronize and merge multiple shards
 
 Let's say you have multiple database shards `db1`, `db2`, ... and each database has tables `tbl1`, `tbl2`, .... You can 
 synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... by following command:

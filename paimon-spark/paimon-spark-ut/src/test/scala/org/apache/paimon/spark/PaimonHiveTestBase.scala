@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.hive.TestHiveMetastore
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.SparkConf
@@ -77,6 +78,10 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
   override protected def beforeEach(): Unit = {
     spark.sql(s"USE $sparkCatalogName")
     spark.sql(s"USE $hiveDbName")
+  }
+
+  override def loadTable(tableName: String): FileStoreTable = {
+    loadTable(hiveDbName, tableName)
   }
 }
 

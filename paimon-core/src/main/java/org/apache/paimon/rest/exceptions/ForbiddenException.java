@@ -20,6 +20,7 @@ package org.apache.paimon.rest.exceptions;
 
 /** Exception thrown on HTTP 403 Forbidden. */
 public class ForbiddenException extends RESTException {
+
     public ForbiddenException(String message, Object... args) {
         super(message, args);
     }

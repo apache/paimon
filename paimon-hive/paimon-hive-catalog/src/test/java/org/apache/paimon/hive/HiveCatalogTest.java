@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
@@ -55,6 +56,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
+import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -167,11 +169,6 @@ public class HiveCatalogTest extends CatalogTestBase {
                 HiveCatalog.createHiveConf(
                         null, null, HadoopUtils.getHadoopConfiguration(new Options()));
         assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
-    }
-
-    @Test
-    public void testAlterDatabase() throws Exception {
-        this.alterDatabaseWhenSupportAlter();
     }
 
     @Test
@@ -308,8 +305,6 @@ public class HiveCatalogTest extends CatalogTestBase {
             Thread thread1 =
                     new Thread(
                             () -> {
-                                System.out.println(
-                                        "First thread started at " + System.currentTimeMillis());
                                 try {
                                     tables1.addAll(catalog.listTables(databaseName));
                                 } catch (Catalog.DatabaseNotExistException e) {
@@ -319,8 +314,6 @@ public class HiveCatalogTest extends CatalogTestBase {
             Thread thread2 =
                     new Thread(
                             () -> {
-                                System.out.println(
-                                        "Second thread started at " + System.currentTimeMillis());
                                 try {
                                     tables2.addAll(catalog.listTables(databaseName));
                                 } catch (Catalog.DatabaseNotExistException e) {
@@ -413,8 +406,19 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Override
+    protected boolean supportPartitions() {
+        return true;
+    }
+
+    @Override
     protected boolean supportsFormatTable() {
         return true;
+    }
+
+    @Override
+    protected void checkPartition(Partition expected, Partition actual) {
+        assertThat(actual.recordCount()).isEqualTo(expected.recordCount());
+        assertThat(actual.lastFileCreationTime()).isEqualTo(expected.lastFileCreationTime() / 1000);
     }
 
     @Test
@@ -447,5 +451,36 @@ public class HiveCatalogTest extends CatalogTestBase {
                 .isEqualTo("file:" + externalTablePath);
 
         externalWarehouseCatalog.close();
+    }
+
+    @Test
+    public void testTagToPartitionTable() throws Exception {
+        String databaseName = "testTagToPartitionTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .build(),
+                true);
+
+        catalog.createPartitions(
+                identifier,
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102")));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrder(
+                        Collections.singletonMap("dt", "20250102"),
+                        Collections.singletonMap("dt", "20250101"));
+    }
+
+    @Override
+    protected boolean supportsAlterDatabase() {
+        return true;
     }
 }

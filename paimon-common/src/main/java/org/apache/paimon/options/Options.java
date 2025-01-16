@@ -149,8 +149,8 @@ public class Options implements Serializable {
         return new Options(convertToPropertiesPrefixKey(data, prefix));
     }
 
-    public synchronized void remove(String key) {
-        data.remove(key);
+    public synchronized String remove(String key) {
+        return data.remove(key);
     }
 
     public synchronized void remove(ConfigOption<?> option) {

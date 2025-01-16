@@ -29,7 +29,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
@@ -452,7 +451,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotExpire,
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser),
                 options.writeOnly() ? null : store().newTagCreationManager(),
-                catalogEnvironment.lockFactory().create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
@@ -464,34 +462,33 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         List<CommitCallback> callbacks =
                 new ArrayList<>(CallbackUtils.loadCommitCallbacks(coreOptions()));
         CoreOptions options = coreOptions();
-        MetastoreClient.Factory metastoreClientFactory =
-                catalogEnvironment.metastoreClientFactory();
 
-        if (options.partitionedTableInMetastore()
-                && metastoreClientFactory != null
-                && !tableSchema.partitionKeys().isEmpty()) {
-            InternalRowPartitionComputer partitionComputer =
-                    new InternalRowPartitionComputer(
-                            options.partitionDefaultName(),
-                            tableSchema.logicalPartitionType(),
-                            tableSchema.partitionKeys().toArray(new String[0]),
-                            options.legacyPartitionName());
-            callbacks.add(
-                    new AddPartitionCommitCallback(
-                            metastoreClientFactory.create(), partitionComputer));
+        if (options.partitionedTableInMetastore() && !tableSchema.partitionKeys().isEmpty()) {
+            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
+            if (partitionHandler != null) {
+                InternalRowPartitionComputer partitionComputer =
+                        new InternalRowPartitionComputer(
+                                options.partitionDefaultName(),
+                                tableSchema.logicalPartitionType(),
+                                tableSchema.partitionKeys().toArray(new String[0]),
+                                options.legacyPartitionName());
+                callbacks.add(new AddPartitionCommitCallback(partitionHandler, partitionComputer));
+            }
         }
 
         TagPreview tagPreview = TagPreview.create(options);
         if (options.tagToPartitionField() != null
                 && tagPreview != null
-                && metastoreClientFactory != null
                 && tableSchema.partitionKeys().isEmpty()) {
-            TagPreviewCommitCallback callback =
-                    new TagPreviewCommitCallback(
-                            new AddPartitionTagCallback(
-                                    metastoreClientFactory.create(), options.tagToPartitionField()),
-                            tagPreview);
-            callbacks.add(callback);
+            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
+            if (partitionHandler != null) {
+                TagPreviewCommitCallback callback =
+                        new TagPreviewCommitCallback(
+                                new AddPartitionTagCallback(
+                                        partitionHandler, options.tagToPartitionField()),
+                                tagPreview);
+                callbacks.add(callback);
+            }
         }
 
         return callbacks;

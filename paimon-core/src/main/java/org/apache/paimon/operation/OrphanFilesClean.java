@@ -33,6 +33,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableConsumer;
@@ -58,6 +59,7 @@ import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
@@ -252,12 +254,14 @@ public abstract class OrphanFilesClean implements Serializable {
 
     /** List directories that contains data files and manifest files. */
     protected List<Path> listPaimonFileDirs() {
+        FileStorePathFactory pathFactory = table.store().pathFactory();
+
         List<Path> paimonFileDirs = new ArrayList<>();
 
-        paimonFileDirs.add(new Path(location, "manifest"));
-        paimonFileDirs.add(new Path(location, "index"));
-        paimonFileDirs.add(new Path(location, "statistics"));
-        paimonFileDirs.addAll(listFileDirs(location, partitionKeysNum));
+        paimonFileDirs.add(pathFactory.manifestPath());
+        paimonFileDirs.add(pathFactory.indexPath());
+        paimonFileDirs.add(pathFactory.statisticsPath());
+        paimonFileDirs.addAll(listFileDirs(pathFactory.dataFilePath(), partitionKeysNum));
 
         return paimonFileDirs;
     }
@@ -385,6 +389,25 @@ public abstract class OrphanFilesClean implements Serializable {
                     "The arg olderThan must be less than now, because dataFiles that are currently being written and not referenced by snapshots will be mistakenly cleaned up.");
 
             return parsedTimestampData.getMillisecond();
+        }
+    }
+
+    /** Try to clean empty data directories. */
+    protected void tryCleanDataDirectory(Set<Path> dataDirs, int maxLevel) {
+        for (int level = 0; level < maxLevel; level++) {
+            dataDirs =
+                    dataDirs.stream()
+                            .filter(this::tryDeleteEmptyDirectory)
+                            .map(Path::getParent)
+                            .collect(Collectors.toSet());
+        }
+    }
+
+    public boolean tryDeleteEmptyDirectory(Path path) {
+        try {
+            return fileIO.delete(path, false);
+        } catch (IOException e) {
+            return false;
         }
     }
 }

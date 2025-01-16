@@ -26,6 +26,7 @@ import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeJsonParser;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -43,6 +44,7 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -50,6 +52,7 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -199,6 +202,44 @@ public class DataTypeJsonParserTest {
         }
     }
 
+    @Test
+    void testParingRowTypeWithoutFieldId() {
+        String jsonString1 =
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"field1\",\"type\":\"INT\"},{\"name\":\"field2\",\"type\":\"STRING\"}]}";
+        RowType rowType1 =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.STRING()},
+                                new String[] {"field1", "field2"})
+                        .build();
+        assertThat(parse(jsonString1)).isEqualTo(rowType1);
+
+        String jsonString2 =
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"field1\",\"type\":\"INT\"},{\"name\":\"field2\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"s1\",\"type\":\"INT\"},{\"name\":\"s2\",\"type\":\"STRING\"}]}}]}";
+        RowType rowType2 =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    RowType.builder(new AtomicInteger(1))
+                                            .fields(
+                                                    new DataType[] {
+                                                        DataTypes.INT(), DataTypes.STRING()
+                                                    },
+                                                    new String[] {"s1", "s2"})
+                                            .build()
+                                },
+                                new String[] {"field1", "field2"})
+                        .build();
+        assertThat(parse(jsonString2)).isEqualTo(rowType2);
+
+        String jsonString3 =
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"field1\",\"type\":\"INT\"},{\"id\":1, \"name\":\"field2\",\"type\":\"STRING\"}]}";
+        assertThatThrownBy(() -> parse(jsonString3))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Partial field id is not allowed.");
+    }
+
     private static String toJson(DataType type) {
         return JsonSerdeUtil.toFlatJson(type);
     }
@@ -207,9 +248,7 @@ public class DataTypeJsonParserTest {
         if (!json.startsWith("\"") && !json.startsWith("{")) {
             json = "\"" + json + "\"";
         }
-        String dataFieldJson =
-                String.format("{\"id\": 0, \"name\": \"dummy\", \"type\": %s}", json);
-        return JsonSerdeUtil.fromJson(dataFieldJson, DataField.class).type();
+        return JsonSerdeUtil.fromJson(json, DataType.class);
     }
 
     // --------------------------------------------------------------------------------------------

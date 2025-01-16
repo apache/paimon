@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -40,38 +41,7 @@ import java.util.Map;
 @Public
 public interface Catalog extends AutoCloseable {
 
-    // constants for system table and database
-    String SYSTEM_TABLE_SPLITTER = "$";
-    String SYSTEM_DATABASE_NAME = "sys";
-    String SYSTEM_BRANCH_PREFIX = "branch_";
-
-    // constants for table and database
-    String COMMENT_PROP = "comment";
-    String OWNER_PROP = "owner";
-
-    // constants for database
-    String DEFAULT_DATABASE = "default";
-    String DB_SUFFIX = ".db";
-    String DB_LOCATION_PROP = "location";
-
-    // constants for table
-    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    String NUM_ROWS_PROP = "numRows";
-    String NUM_FILES_PROP = "numFiles";
-    String TOTAL_SIZE_PROP = "totalSize";
-    String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
-
-    /** Warehouse root path for creating new databases. */
-    String warehouse();
-
-    /** {@link FileIO} of this catalog. It can access {@link #warehouse()} path. */
-    FileIO fileIO();
-
-    /** Catalog options for re-creating this catalog. */
-    Map<String, String> options();
-
-    /** Return a boolean that indicates whether this catalog is case-sensitive. */
-    boolean caseSensitive();
+    // ======================= database methods ===============================
 
     /**
      * Get the names of all databases in this catalog.
@@ -138,6 +108,8 @@ public interface Catalog extends AutoCloseable {
      */
     void alterDatabase(String name, List<PropertyChange> changes, boolean ignoreIfNotExists)
             throws DatabaseNotExistException;
+
+    // ======================= table methods ===============================
 
     /**
      * Return a {@link Table} identified by the given {@link Identifier}.
@@ -231,38 +203,6 @@ public interface Catalog extends AutoCloseable {
     default void invalidateTable(Identifier identifier) {}
 
     /**
-     * Create the partition of the specify table.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
-     *
-     * @param identifier path of the table to drop partition
-     * @param partitionSpec the partition to be created
-     * @throws TableNotExistException if the table does not exist
-     */
-    void createPartition(Identifier identifier, Map<String, String> partitionSpec)
-            throws TableNotExistException;
-
-    /**
-     * Drop the partition of the specify table.
-     *
-     * @param identifier path of the table to drop partition
-     * @param partition the partition to be deleted
-     * @throws TableNotExistException if the table does not exist
-     * @throws PartitionNotExistException if the partition does not exist
-     */
-    void dropPartition(Identifier identifier, Map<String, String> partition)
-            throws TableNotExistException, PartitionNotExistException;
-
-    /**
-     * Get Partition of all partitions of the table.
-     *
-     * @param identifier path of the table to list partitions
-     * @throws TableNotExistException if the table does not exist
-     */
-    List<Partition> listPartitions(Identifier identifier) throws TableNotExistException;
-
-    /**
      * Modify an existing table from a {@link SchemaChange}.
      *
      * <p>NOTE: System tables can not be altered.
@@ -277,6 +217,67 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
+
+    // ======================= partition methods ===============================
+
+    /**
+     * Create partitions of the specify table.
+     *
+     * <p>Only catalog with metastore can support this method, and only table with
+     * 'metastore.partitioned-table' can support this method.
+     *
+     * @param identifier path of the table to create partitions
+     * @param partitions partitions to be created
+     * @throws TableNotExistException if the table does not exist
+     */
+    void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException;
+
+    /**
+     * Drop partitions of the specify table.
+     *
+     * @param identifier path of the table to drop partitions
+     * @param partitions partitions to be deleted
+     * @throws TableNotExistException if the table does not exist
+     */
+    void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException;
+
+    /**
+     * Alter partitions of the specify table.
+     *
+     * <p>Only catalog with metastore can support this method, and only table with
+     * 'metastore.partitioned-table' can support this method.
+     *
+     * @param identifier path of the table to alter partitions
+     * @param partitions partitions to be altered
+     * @throws TableNotExistException if the table does not exist
+     */
+    void alterPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException;
+
+    /**
+     * Mark partitions done of the specify table.
+     *
+     * <p>Only catalog with metastore can support this method, and only table with
+     * 'metastore.partitioned-table' can support this method.
+     *
+     * @param identifier path of the table to mark done partitions
+     * @param partitions partitions to be marked done
+     * @throws TableNotExistException if the table does not exist
+     */
+    void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException;
+
+    /**
+     * Get Partition of all partitions of the table.
+     *
+     * @param identifier path of the table to list partitions
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<Partition> listPartitions(Identifier identifier) throws TableNotExistException;
+
+    // ======================= view methods ===============================
 
     /**
      * Return a {@link View} identified by the given {@link Identifier}.
@@ -340,6 +341,8 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
+    // ======================= repair methods ===============================
+
     /**
      * Repair the entire Catalog, repair the metadata in the metastore consistent with the metadata
      * in the filesystem, register missing tables in the metastore.
@@ -363,6 +366,51 @@ public interface Catalog extends AutoCloseable {
     default void repairTable(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
+
+    // ==================== Catalog Information ==========================
+
+    /** Warehouse root path for creating new databases. */
+    String warehouse();
+
+    /** {@link FileIO} of this catalog. It can access {@link #warehouse()} path. */
+    FileIO fileIO();
+
+    /** {@link FileIO} of this catalog. */
+    FileIO fileIO(Path path);
+
+    /** Catalog options for re-creating this catalog. */
+    Map<String, String> options();
+
+    /** Serializable loader to create catalog. */
+    CatalogLoader catalogLoader();
+
+    /** Return a boolean that indicates whether this catalog is case-sensitive. */
+    boolean caseSensitive();
+
+    // ======================= Constants ===============================
+
+    // constants for system table and database
+    String SYSTEM_TABLE_SPLITTER = "$";
+    String SYSTEM_DATABASE_NAME = "sys";
+    String SYSTEM_BRANCH_PREFIX = "branch_";
+
+    // constants for table and database
+    String COMMENT_PROP = "comment";
+    String OWNER_PROP = "owner";
+
+    // constants for database
+    String DEFAULT_DATABASE = "default";
+    String DB_SUFFIX = ".db";
+    String DB_LOCATION_PROP = "location";
+
+    // constants for table
+    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    String NUM_ROWS_PROP = "numRows";
+    String NUM_FILES_PROP = "numFiles";
+    String TOTAL_SIZE_PROP = "totalSize";
+    String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
+
+    // ======================= Exceptions ===============================
 
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
@@ -505,36 +553,6 @@ public interface Catalog extends AutoCloseable {
 
         public Identifier identifier() {
             return identifier;
-        }
-    }
-
-    /** Exception for trying to operate on a partition that doesn't exist. */
-    class PartitionNotExistException extends Exception {
-
-        private static final String MSG = "Partition %s do not exist in the table %s.";
-
-        private final Identifier identifier;
-
-        private final Map<String, String> partitionSpec;
-
-        public PartitionNotExistException(
-                Identifier identifier, Map<String, String> partitionSpec) {
-            this(identifier, partitionSpec, null);
-        }
-
-        public PartitionNotExistException(
-                Identifier identifier, Map<String, String> partitionSpec, Throwable cause) {
-            super(String.format(MSG, partitionSpec, identifier.getFullName()), cause);
-            this.identifier = identifier;
-            this.partitionSpec = partitionSpec;
-        }
-
-        public Identifier identifier() {
-            return identifier;
-        }
-
-        public Map<String, String> partitionSpec() {
-            return partitionSpec;
         }
     }
 

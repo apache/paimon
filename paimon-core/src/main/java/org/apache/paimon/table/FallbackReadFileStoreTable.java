@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
@@ -255,6 +256,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public Scan withPartitionFilter(List<BinaryRow> partitions) {
             mainScan.withPartitionFilter(partitions);
             fallbackScan.withPartitionFilter(partitions);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+            mainScan.withPartitionsFilter(partitions);
+            fallbackScan.withPartitionsFilter(partitions);
             return this;
         }
 

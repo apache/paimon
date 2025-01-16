@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.DelegateCatalog
 import org.apache.paimon.fs.Path
-import org.apache.paimon.hive.HiveMetastoreClient
+import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
 
@@ -129,6 +130,54 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
               }
             }
+        }
+    }
+  }
+
+  test(
+    "Paimon partition expire test with hive catalog: expire partition for paimon table sparkCatalogName") {
+    spark.sql(s"USE $paimonHiveCatalogName")
+    withTempDir {
+      dBLocation =>
+        withDatabase("paimon_db") {
+          spark.sql(s"CREATE DATABASE paimon_db LOCATION '${dBLocation.getCanonicalPath}'")
+          withTable("paimon_db.paimon_tbl") {
+            spark.sql(s"""
+                         |CREATE TABLE paimon_db.paimon_tbl (id STRING, name STRING, pt STRING)
+                         |USING PAIMON
+                         |PARTITIONED BY (pt)
+                         |TBLPROPERTIES('metastore.partitioned-table' = 'false')
+                         |""".stripMargin)
+            spark.sql("insert into paimon_db.paimon_tbl select '1', 'n', '2024-11-01'")
+            spark.sql("insert into paimon_db.paimon_tbl select '2', 'n', '9999-11-01'")
+
+            spark.sql(
+              "CALL paimon_hive.sys.expire_partitions(table => 'paimon_db.paimon_tbl', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
+
+            checkAnswer(
+              spark.sql("SELECT * FROM paimon_db.paimon_tbl"),
+              Row("2", "n", "9999-11-01") :: Nil)
+          }
+
+          withTable("paimon_db.paimon_tbl2") {
+            spark.sql(s"""
+                         |CREATE TABLE paimon_db.paimon_tbl2 (id STRING, name STRING, pt STRING)
+                         |USING PAIMON
+                         |PARTITIONED BY (pt)
+                         |TBLPROPERTIES('metastore.partitioned-table' = 'true')
+                         |""".stripMargin)
+            spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n', '2024-11-01'")
+
+            spark.sql("insert into paimon_db.paimon_tbl2 select '2', 'n', '9999-11-01'")
+
+            spark.sql(
+              "CALL paimon_hive.sys.expire_partitions(table => 'paimon_db.paimon_tbl2', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd')")
+
+            checkAnswer(
+              spark.sql("SELECT * FROM paimon_db.paimon_tbl2"),
+              Row("2", "n", "9999-11-01") :: Nil)
+          }
+
         }
     }
   }
@@ -315,12 +364,6 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                            |""".stripMargin)
 
               val table = loadTable(dbName, tblName)
-              val metastoreClient = table
-                .catalogEnvironment()
-                .metastoreClientFactory()
-                .create()
-                .asInstanceOf[HiveMetastoreClient]
-                .client()
               val fileIO = table.fileIO()
 
               def containsDir(root: Path, targets: Array[String]): Boolean = {
@@ -333,7 +376,12 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 spark.sql(s"show partitions $tblName"),
                 Seq(Row("pt=1"), Row("pt=2"), Row("pt=3")))
               // check partitions in HMS
-              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+              var catalog = paimonCatalog
+              while (catalog.isInstanceOf[DelegateCatalog]) {
+                catalog = catalog.asInstanceOf[DelegateCatalog].wrapped()
+              }
+              val hmsClient = catalog.asInstanceOf[HiveCatalog].getHmsClient
+              assert(hmsClient.listPartitions(dbName, tblName, 100).size() == 3)
               // check partitions in filesystem
               if (dataFilePathDir.isEmpty) {
                 assert(containsDir(table.location(), Array("pt=1", "pt=2", "pt=3")))
@@ -347,13 +395,13 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
               checkAnswer(
                 spark.sql(s"show partitions $tblName"),
                 Seq(Row("pt=1"), Row("pt=2"), Row("pt=3"), Row("pt=4")))
-              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 4)
+              assert(hmsClient.listPartitions(dbName, tblName, 100).size() == 4)
 
               spark.sql(s"ALTER TABLE $tblName DROP PARTITION (pt=1)")
               checkAnswer(
                 spark.sql(s"show partitions $tblName"),
                 Seq(Row("pt=2"), Row("pt=3"), Row("pt=4")))
-              assert(metastoreClient.listPartitions(dbName, tblName, 100).size() == 3)
+              assert(hmsClient.listPartitions(dbName, tblName, 100).size() == 3)
             }
         }
     }
