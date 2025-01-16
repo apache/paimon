@@ -56,14 +56,7 @@ public class HttpClientTest {
         server.start();
         errorHandler = DefaultErrorHandler.getInstance();
         HttpClientOptions httpClientOptions =
-                new HttpClientOptions(
-                        server.getBaseUrl(),
-                        Duration.ofSeconds(3),
-                        Duration.ofSeconds(3),
-                        1,
-                        10,
-                        10,
-                        2);
+                new HttpClientOptions(server.getBaseUrl(), Duration.ofSeconds(3), 1, 10, 10, 2);
         mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = server.createResponseBody(mockResponseData);
         errorResponseStr =
@@ -128,13 +121,7 @@ public class HttpClientTest {
         HttpClient httpClient =
                 new HttpClient(
                         new HttpClientOptions(
-                                server.getBaseUrl(),
-                                Duration.ofSeconds(30),
-                                Duration.ofSeconds(30),
-                                1,
-                                10,
-                                10,
-                                2));
+                                server.getBaseUrl(), Duration.ofSeconds(30), 1, 10, 10, 2));
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 200);
         assertDoesNotThrow(() -> httpClient.get(MOCK_PATH, MockRESTData.class, headers));

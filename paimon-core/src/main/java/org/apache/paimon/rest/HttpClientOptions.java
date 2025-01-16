@@ -30,7 +30,6 @@ public class HttpClientOptions {
 
     private final String uri;
     @Nullable private final Duration connectTimeout;
-    @Nullable private final Duration readTimeout;
     private final int threadPoolSize;
     private final int maxConnections;
     private final int maxConnectionsPerRoute;
@@ -39,14 +38,12 @@ public class HttpClientOptions {
     public HttpClientOptions(
             String uri,
             @Nullable Duration connectTimeout,
-            @Nullable Duration readTimeout,
             int threadPoolSize,
             int maxConnections,
             int maxConnectionsPerRoute,
             int maxRetries) {
         this.uri = uri;
         this.connectTimeout = connectTimeout;
-        this.readTimeout = readTimeout;
         this.threadPoolSize = threadPoolSize;
         this.maxConnections = maxConnections;
         this.maxConnectionsPerRoute = maxConnectionsPerRoute;
@@ -57,7 +54,6 @@ public class HttpClientOptions {
         return new HttpClientOptions(
                 options.get(RESTCatalogOptions.URI),
                 options.get(RESTCatalogOptions.CONNECTION_TIMEOUT),
-                options.get(RESTCatalogOptions.READ_TIMEOUT),
                 options.get(RESTCatalogOptions.THREAD_POOL_SIZE),
                 options.get(RESTCatalogOptions.MAX_CONNECTIONS),
                 options.get(RESTCatalogOptions.MAX_CONNECTIONS_PER_ROUTE),
@@ -72,10 +68,6 @@ public class HttpClientOptions {
         return Optional.ofNullable(connectTimeout);
     }
 
-    public Optional<Duration> readTimeout() {
-        return Optional.ofNullable(readTimeout);
-    }
-
     public int threadPoolSize() {
         return threadPoolSize;
     }
@@ -85,10 +77,10 @@ public class HttpClientOptions {
     }
 
     public int maxConnectionsPerRoute() {
-        return maxConnectionsPerRoute;
+        return Math.min(maxConnections, maxConnectionsPerRoute);
     }
 
     public int maxRetries() {
-        return maxRetries;
+        return Math.max(maxRetries, 0);
     }
 }

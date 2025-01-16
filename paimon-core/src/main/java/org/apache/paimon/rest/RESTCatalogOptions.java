@@ -32,19 +32,12 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
 
-    // default  same with iceberg 3min
+    // default same with iceberg 3min
     public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
             ConfigOptions.key("rest.client.connection-timeout")
                     .durationType()
                     .defaultValue(Duration.ofSeconds(180))
                     .withDescription("REST Catalog http client connect timeout.");
-
-    // as read timeout need less than connect timeout default 170s
-    public static final ConfigOption<Duration> READ_TIMEOUT =
-            ConfigOptions.key("rest.client.read-timeout")
-                    .durationType()
-                    .defaultValue(Duration.ofSeconds(170))
-                    .withDescription("REST Catalog http client read timeout.");
 
     public static final ConfigOption<Integer> MAX_CONNECTIONS =
             ConfigOptions.key("rest.client..max-connections")

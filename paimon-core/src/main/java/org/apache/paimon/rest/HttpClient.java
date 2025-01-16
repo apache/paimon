@@ -54,6 +54,7 @@ public class HttpClient implements RESTClient {
 
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+    private static final int CONNECTION_KEEP_ALIVE_DURATION_IN_MS = 300_000;
 
     private final OkHttpClient okHttpClient;
     private final String uri;
@@ -194,9 +195,12 @@ public class HttpClient implements RESTClient {
         ExecutorService executorService =
                 createCachedThreadPool(httpClientOptions.threadPoolSize(), THREAD_NAME, workQueue);
         ConnectionPool connectionPool =
-                new ConnectionPool(httpClientOptions.maxConnections(), 300, TimeUnit.MILLISECONDS);
+                new ConnectionPool(
+                        httpClientOptions.maxConnections(),
+                        CONNECTION_KEEP_ALIVE_DURATION_IN_MS,
+                        TimeUnit.MILLISECONDS);
         Dispatcher dispatcher = new Dispatcher(executorService);
-        dispatcher.setMaxRequestsPerHost(httpClientOptions.maxRetries());
+        dispatcher.setMaxRequestsPerHost(httpClientOptions.maxConnectionsPerRoute());
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
                         .dispatcher(dispatcher)
@@ -206,8 +210,13 @@ public class HttpClient implements RESTClient {
                         .addInterceptor(
                                 new ExponentialHttpRetryInterceptor(
                                         httpClientOptions.maxRetries()));
-        httpClientOptions.connectTimeout().ifPresent(builder::connectTimeout);
-        httpClientOptions.readTimeout().ifPresent(builder::readTimeout);
+        httpClientOptions
+                .connectTimeout()
+                .ifPresent(
+                        timeoutDuration -> {
+                            builder.connectTimeout(timeoutDuration);
+                            builder.readTimeout(timeoutDuration);
+                        });
 
         return builder.build();
     }

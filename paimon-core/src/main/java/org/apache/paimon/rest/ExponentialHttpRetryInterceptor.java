@@ -36,7 +36,8 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Defines an exponential HTTP request retry interceptor.
+ * Defines an exponential HTTP request retry interceptor. The following retrievable IOException
+ * status codes are defined:
  *
  * <ul>
  *   <li>InterruptedIOException
@@ -76,7 +77,7 @@ public class ExponentialHttpRetryInterceptor implements Interceptor {
         this.maxRetries = maxRetries;
         this.retrievableMethods =
                 ImmutableSet.of("GET", "HEAD", "PUT", "DELETE", "TRACE", "OPTIONS");
-        this.retrievableCodes = ImmutableSet.of(429, 503, 502, 504);
+        this.retrievableCodes = ImmutableSet.of(429, 502, 503, 504);
         this.nonRetriableExceptions =
                 ImmutableSet.of(
                         InterruptedIOException.class,
@@ -115,18 +116,15 @@ public class ExponentialHttpRetryInterceptor implements Interceptor {
         if (execCount > maxRetries) {
             return false;
         }
-        if (response != null
-                && (response.isSuccessful() || !retrievableCodes.contains(response.code()))) {
-            return false;
-        }
-        return true;
+        return response == null
+                || (!response.isSuccessful() && retrievableCodes.contains(response.code()));
     }
 
-    public boolean needRetry(String Method, IOException e, int execCount) {
+    public boolean needRetry(String method, IOException e, int execCount) {
         if (execCount > maxRetries) {
             return false;
         }
-        if (!retrievableMethods.contains(Method)) {
+        if (!retrievableMethods.contains(method)) {
             return false;
         }
         if (nonRetriableExceptions.contains(e.getClass())) {
