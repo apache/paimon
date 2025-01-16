@@ -21,9 +21,10 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.catalog.DelegateCatalog
 import org.apache.paimon.fs.Path
 import org.apache.paimon.hive.HiveCatalog
-import org.apache.paimon.spark.PaimonHiveTestBase.hiveUri
 import org.apache.paimon.spark.{PaimonHiveTestBase, SparkCatalog}
+import org.apache.paimon.spark.PaimonHiveTestBase.hiveUri
 import org.apache.paimon.table.FileStoreTable
+
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.junit.jupiter.api.Assertions
