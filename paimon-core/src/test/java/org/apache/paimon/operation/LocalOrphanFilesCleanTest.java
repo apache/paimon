@@ -90,14 +90,14 @@ public class LocalOrphanFilesCleanTest {
     private static final Random RANDOM = new Random(System.currentTimeMillis());
 
     @TempDir private java.nio.file.Path tempDir;
-    private static Path tablePath;
+    @TempDir private java.nio.file.Path tmpExternalPath;
+    private Path tablePath;
     private FileIO fileIO;
     private RowType rowType;
     private FileStoreTable table;
     private TableWriteImpl<?> write;
     private TableCommitImpl commit;
     private Path manifestDir;
-    @TempDir private java.nio.file.Path tmpExternalPath;
     private long incrementalIdentifier;
     private List<Path> manuallyAddedFiles;
 

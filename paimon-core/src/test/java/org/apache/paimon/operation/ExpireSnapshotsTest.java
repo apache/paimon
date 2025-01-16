@@ -115,14 +115,6 @@ public class ExpireSnapshotsTest {
                         .filter(p -> !filesInUse.contains(p))
                         .collect(Collectors.toList());
 
-        for (int i = 0; i < unusedFileList.size(); i++) {
-            System.out.println("qihouliang111= " + unusedFileList.get(i));
-        }
-
-        for (Path path : filesInUse) {
-            System.out.println("qihouliang222= " + path);
-        }
-
         // shuffle list
         ThreadLocalRandom random = ThreadLocalRandom.current();
         for (int i = unusedFileList.size() - 1; i > 0; i--) {
