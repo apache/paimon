@@ -26,6 +26,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
+import okhttp3.ConnectionPool;
 import okhttp3.Dispatcher;
 import okhttp3.Headers;
 import okhttp3.MediaType;
@@ -40,6 +41,7 @@ import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.TimeUnit;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
@@ -191,11 +193,15 @@ public class HttpClient implements RESTClient {
         BlockingQueue<Runnable> workQueue = new SynchronousQueue<>();
         ExecutorService executorService =
                 createCachedThreadPool(httpClientOptions.threadPoolSize(), THREAD_NAME, workQueue);
-
+        ConnectionPool connectionPool =
+                new ConnectionPool(httpClientOptions.maxConnections(), 300, TimeUnit.MILLISECONDS);
+        Dispatcher dispatcher = new Dispatcher(executorService);
+        dispatcher.setMaxRequestsPerHost(httpClientOptions.maxRetries());
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
-                        .dispatcher(new Dispatcher(executorService))
+                        .dispatcher(dispatcher)
                         .retryOnConnectionFailure(true)
+                        .connectionPool(connectionPool)
                         .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
         httpClientOptions.connectTimeout().ifPresent(builder::connectTimeout);
         httpClientOptions.readTimeout().ifPresent(builder::readTimeout);

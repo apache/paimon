@@ -57,7 +57,13 @@ public class HttpClientTest {
         errorHandler = DefaultErrorHandler.getInstance();
         HttpClientOptions httpClientOptions =
                 new HttpClientOptions(
-                        server.getBaseUrl(), Duration.ofSeconds(3), Duration.ofSeconds(3), 1);
+                        server.getBaseUrl(),
+                        Duration.ofSeconds(3),
+                        Duration.ofSeconds(3),
+                        1,
+                        10,
+                        10,
+                        2);
         mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = server.createResponseBody(mockResponseData);
         errorResponseStr =

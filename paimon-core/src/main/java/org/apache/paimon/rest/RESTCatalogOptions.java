@@ -32,17 +32,38 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
 
+    // default  same with iceberg 3min
     public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
             ConfigOptions.key("rest.client.connection-timeout")
                     .durationType()
-                    .noDefaultValue()
+                    .defaultValue(Duration.ofSeconds(180))
                     .withDescription("REST Catalog http client connect timeout.");
 
+    // as read timeout need less than connect timeout default 170s
     public static final ConfigOption<Duration> READ_TIMEOUT =
             ConfigOptions.key("rest.client.read-timeout")
                     .durationType()
-                    .noDefaultValue()
+                    .defaultValue(Duration.ofSeconds(170))
                     .withDescription("REST Catalog http client read timeout.");
+
+    public static final ConfigOption<Integer> MAX_CONNECTIONS =
+            ConfigOptions.key("rest.client..max-connections")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("REST Catalog http client's max connections.");
+
+    // need less than max connections default 100
+    public static final ConfigOption<Integer> MAX_CONNECTIONS_PER_ROUTE =
+            ConfigOptions.key("connections-per-route")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("REST Catalog http client's max connections per route.");
+
+    public static final ConfigOption<Integer> MAX_RETIES =
+            ConfigOptions.key("rest.client..max-retries")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription("REST Catalog http client's max retry times.");
 
     public static final ConfigOption<Integer> THREAD_POOL_SIZE =
             ConfigOptions.key("rest.client.num-threads")
