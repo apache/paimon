@@ -94,10 +94,10 @@ public class CdcActionCommonUtils {
                 UpdatedDataFieldsProcessFunction.ConvertAction action = UpdatedDataFieldsProcessFunction.canConvert(field.type(), type);
                 if (action != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
                     LOG.info(
-                        "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
-                        field.name(),
-                        field.type(),
-                        type);
+                            "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
+                            field.name(),
+                            field.type(),
+                            type);
                     return false;
                 }
             }
