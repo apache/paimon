@@ -21,13 +21,27 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.catalog.DelegateCatalog
 import org.apache.paimon.fs.Path
 import org.apache.paimon.hive.HiveCatalog
-import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.spark.PaimonHiveTestBase.hiveUri
+import org.apache.paimon.spark.{PaimonHiveTestBase, SparkCatalog}
 import org.apache.paimon.table.FileStoreTable
-
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.junit.jupiter.api.Assertions
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
+
+  protected val paimonHiveNoCacheCatalogName: String = "paimon_hive_no_cache"
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set(s"spark.sql.catalog.$paimonHiveNoCacheCatalogName.cache-enabled", "false")
+      .set(s"spark.sql.catalog.$paimonHiveNoCacheCatalogName", classOf[SparkCatalog].getName)
+      .set(s"spark.sql.catalog.$paimonHiveNoCacheCatalogName.metastore", "hive")
+      .set(
+        s"spark.sql.catalog.$paimonHiveNoCacheCatalogName.warehouse",
+        tempHiveDBDir.getCanonicalPath)
+      .set(s"spark.sql.catalog.$paimonHiveNoCacheCatalogName.uri", hiveUri)
+  }
 
   test("Paimon DDL with hive catalog: create database with location and comment") {
     Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
@@ -665,6 +679,29 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 }
               }
             }
+        }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: drop table which location has been deleted") {
+    Seq("paimon", sparkCatalogName, paimonHiveCatalogName, paimonHiveNoCacheCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withDatabase("paimon_db") {
+          spark.sql(s"CREATE DATABASE paimon_db")
+          spark.sql(s"USE paimon_db")
+          spark.sql("CREATE TABLE t USING paimon")
+          val table = loadTable("paimon_db", "t")
+          table.fileIO().delete(table.location(), true)
+          if (catalogName.equals("paimon")) {
+            // Filesystem catalog determines whether a table exists based on table location
+            assert(spark.sql("SHOW TABLES").count() == 0)
+          } else {
+            // Hive catalog determines whether a table exists based on metadata in hms
+            assert(spark.sql("SHOW TABLES").count() == 1)
+          }
+          spark.sql("DROP TABLE IF EXISTS t")
+          assert(spark.sql("SHOW TABLES").count() == 0)
         }
     }
   }
