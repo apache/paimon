@@ -46,9 +46,9 @@ import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
 
 /** Common utils for CDC Action. */
 public class CdcActionCommonUtils {
-
+    
     private static final Logger LOG = LoggerFactory.getLogger(CdcActionCommonUtils.class);
-
+    
     public static final String KAFKA_CONF = "kafka_conf";
     public static final String MONGODB_CONF = "mongodb_conf";
     public static final String MYSQL_CONF = "mysql_conf";
@@ -69,7 +69,7 @@ public class CdcActionCommonUtils {
     public static final String COMPUTED_COLUMN = "computed_column";
     public static final String METADATA_COLUMN = "metadata_column";
     public static final String MULTIPLE_TABLE_PARTITION_KEYS = "multiple_table_partition_keys";
-
+    
     public static void assertSchemaCompatible(
             TableSchema paimonSchema, List<DataField> sourceTableFields) {
         if (!schemaCompatible(paimonSchema, sourceTableFields)) {
@@ -81,7 +81,7 @@ public class CdcActionCommonUtils {
                             + sourceTableFields);
         }
     }
-
+    
     public static boolean schemaCompatible(
             TableSchema paimonSchema, List<DataField> sourceTableFields) {
         for (DataField field : sourceTableFields) {
@@ -91,8 +91,8 @@ public class CdcActionCommonUtils {
                 return false;
             } else {
                 DataType type = paimonSchema.fields().get(idx).type();
-                UpdatedDataFieldsProcessFunction.ConvertAction action = UpdatedDataFieldsProcessFunction.canConvert(field.type(), type);
-                if (action != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
+                if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
+                        != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
                     LOG.info(
                             "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
                             field.name(),
@@ -104,13 +104,13 @@ public class CdcActionCommonUtils {
         }
         return true;
     }
-
+    
     public static List<String> listCaseConvert(List<String> origin, boolean caseSensitive) {
         return caseSensitive
                 ? origin
                 : origin.stream().map(String::toLowerCase).collect(Collectors.toList());
     }
-
+    
     public static Schema buildPaimonSchema(
             String tableName,
             List<String> specifiedPartitionKeys,
@@ -123,36 +123,36 @@ public class CdcActionCommonUtils {
             boolean strictlyCheckSpecified,
             boolean requirePrimaryKeys) {
         Schema.Builder builder = Schema.newBuilder();
-
+        
         // options
         builder.options(tableConfig);
         builder.options(sourceSchema.options());
-
+        
         // fields
         List<String> allFieldNames = new ArrayList<>();
-
+        
         for (DataField field : sourceSchema.fields()) {
             String fieldName = toLowerCaseIfNeed(field.name(), caseSensitive);
             allFieldNames.add(fieldName);
             builder.column(fieldName, field.type(), field.description());
         }
-
+        
         for (ComputedColumn computedColumn : computedColumns) {
             String computedColumnName =
                     toLowerCaseIfNeed(computedColumn.columnName(), caseSensitive);
             allFieldNames.add(computedColumnName);
             builder.column(computedColumnName, computedColumn.columnType());
         }
-
+        
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
             String metadataColumnName =
                     toLowerCaseIfNeed(metadataConverter.columnName(), caseSensitive);
             allFieldNames.add(metadataColumnName);
             builder.column(metadataColumnName, metadataConverter.dataType());
         }
-
+        
         checkDuplicateFields(tableName, allFieldNames);
-
+        
         // primary keys
         specifiedPrimaryKeys = listCaseConvert(specifiedPrimaryKeys, caseSensitive);
         List<String> sourceSchemaPrimaryKeys =
@@ -165,18 +165,18 @@ public class CdcActionCommonUtils {
                 allFieldNames,
                 strictlyCheckSpecified,
                 requirePrimaryKeys);
-
+        
         // partition keys
         specifiedPartitionKeys = listCaseConvert(specifiedPartitionKeys, caseSensitive);
         setPartitionKeys(
                 tableName, builder, specifiedPartitionKeys, allFieldNames, strictlyCheckSpecified);
-
+        
         // comment
         builder.comment(sourceSchema.comment());
-
+        
         return builder.build();
     }
-
+    
     private static void setPrimaryKeys(
             String tableName,
             Schema.Builder builder,
@@ -190,7 +190,7 @@ public class CdcActionCommonUtils {
                 builder.primaryKey(specifiedPrimaryKeys);
                 return;
             }
-
+            
             String message =
                     String.format(
                             "For sink table %s, not all specified primary keys '%s' exist in source tables or computed columns '%s'.",
@@ -203,12 +203,12 @@ public class CdcActionCommonUtils {
                         message);
             }
         }
-
+        
         if (!sourceSchemaPrimaryKeys.isEmpty()) {
             builder.primaryKey(sourceSchemaPrimaryKeys);
             return;
         }
-
+        
         if (requirePrimaryKeys) {
             throw new IllegalArgumentException(
                     "Failed to set specified primary keys for sink table "
@@ -217,7 +217,7 @@ public class CdcActionCommonUtils {
                             + "source tables have no primary keys or have different primary keys.");
         }
     }
-
+    
     private static void setPartitionKeys(
             String tableName,
             Schema.Builder builder,
@@ -229,7 +229,7 @@ public class CdcActionCommonUtils {
                 builder.partitionKeys(specifiedPartitionKeys);
                 return;
             }
-
+            
             String message =
                     String.format(
                             "For sink table %s, not all specified partition keys '%s' exist in source tables or computed columns '%s'.",
@@ -241,7 +241,7 @@ public class CdcActionCommonUtils {
             }
         }
     }
-
+    
     public static void checkDuplicateFields(String tableName, List<String> fieldNames) {
         List<String> duplicates =
                 fieldNames.stream()
@@ -256,7 +256,7 @@ public class CdcActionCommonUtils {
                 tableName,
                 duplicates);
     }
-
+    
     public static String tableList(
             MultiTablesSinkMode mode,
             String databasePattern,
@@ -268,41 +268,41 @@ public class CdcActionCommonUtils {
         } else if (mode == COMBINED) {
             return combinedModeTableList(databasePattern, includingTablePattern, excludedTables);
         }
-
+        
         throw new UnsupportedOperationException("Unknown MultiTablesSinkMode: " + mode);
     }
-
+    
     private static String dividedModeTableList(List<Identifier> monitoredTables) {
         // In DIVIDED mode, we only concern about existed tables
         return monitoredTables.stream()
                 .map(t -> t.getDatabaseName() + "\\." + t.getObjectName())
                 .collect(Collectors.joining("|"));
     }
-
+    
     public static String combinedModeTableList(
             String databasePattern, String includingTablePattern, List<Identifier> excludedTables) {
         // In COMBINED mode, we should consider both existed tables
         // and possible newly created
         // tables, so we should use regular expression to monitor all valid tables and exclude
         // certain invalid tables
-
+        
         // The table list is built by template:
         // (?!(^db\\.tbl$)|(^...$))((databasePattern)\\.(including_pattern1|...))
-
+        
         // The excluding pattern ?!(^db\\.tbl$)|(^...$) can exclude tables whose qualified name
         // is exactly equal to 'db.tbl'
         // The including pattern (databasePattern)\\.(including_pattern1|...) can include tables
         // whose qualified name matches one of the patterns
-
+        
         // a table can be monitored only when its name meets the including pattern and doesn't
         // be excluded by excluding pattern at the same time
         String includingPattern =
                 String.format("(%s)\\.(%s)", databasePattern, includingTablePattern);
-
+        
         if (excludedTables.isEmpty()) {
             return includingPattern;
         }
-
+        
         String excludingPattern =
                 excludedTables.stream()
                         .map(
@@ -314,7 +314,7 @@ public class CdcActionCommonUtils {
         excludingPattern = "?!" + excludingPattern;
         return String.format("(%s)(%s)", excludingPattern, includingPattern);
     }
-
+    
     public static void checkRequiredOptions(
             Configuration config, String confName, ConfigOption<?>... configOptions) {
         for (ConfigOption<?> configOption : configOptions) {
@@ -325,7 +325,7 @@ public class CdcActionCommonUtils {
                     configOption.key());
         }
     }
-
+    
     public static void checkOneRequiredOption(
             Configuration config, String confName, ConfigOption<?>... configOptions) {
         checkArgument(
