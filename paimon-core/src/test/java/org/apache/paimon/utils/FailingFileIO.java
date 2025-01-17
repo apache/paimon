@@ -206,6 +206,8 @@ public class FailingFileIO extends TraceableFileIO {
     /** Loader for {@link FailingFileIO}. */
     public static class Loader implements FileIOLoader {
 
+        private static final long serialVersionUID = 1L;
+
         @Override
         public String getScheme() {
             return SCHEME;
