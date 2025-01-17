@@ -56,8 +56,7 @@ public class HttpClientTest {
         server.start();
         errorHandler = DefaultErrorHandler.getInstance();
         HttpClientOptions httpClientOptions =
-                new HttpClientOptions(
-                        server.getBaseUrl(), Duration.ofSeconds(3), Duration.ofSeconds(3), 1);
+                new HttpClientOptions(server.getBaseUrl(), Duration.ofSeconds(3), 1, 10, 2);
         mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = server.createResponseBody(mockResponseData);
         errorResponseStr =
@@ -115,5 +114,16 @@ public class HttpClientTest {
     public void testDeleteFail() {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(BadRequestException.class, () -> httpClient.delete(MOCK_PATH, headers));
+    }
+
+    @Test
+    public void testRetry() {
+        HttpClient httpClient =
+                new HttpClient(
+                        new HttpClientOptions(
+                                server.getBaseUrl(), Duration.ofSeconds(30), 1, 10, 2));
+        server.enqueueResponse(mockResponseDataStr, 429);
+        server.enqueueResponse(mockResponseDataStr, 200);
+        assertDoesNotThrow(() -> httpClient.get(MOCK_PATH, MockRESTData.class, headers));
     }
 }

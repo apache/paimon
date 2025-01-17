@@ -26,6 +26,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
+import okhttp3.ConnectionPool;
 import okhttp3.Dispatcher;
 import okhttp3.Headers;
 import okhttp3.MediaType;
@@ -40,6 +41,7 @@ import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.TimeUnit;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
@@ -52,6 +54,7 @@ public class HttpClient implements RESTClient {
 
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+    private static final int CONNECTION_KEEP_ALIVE_DURATION_MS = 300_000;
 
     private final OkHttpClient okHttpClient;
     private final String uri;
@@ -191,14 +194,30 @@ public class HttpClient implements RESTClient {
         BlockingQueue<Runnable> workQueue = new SynchronousQueue<>();
         ExecutorService executorService =
                 createCachedThreadPool(httpClientOptions.threadPoolSize(), THREAD_NAME, workQueue);
-
+        ConnectionPool connectionPool =
+                new ConnectionPool(
+                        httpClientOptions.maxConnections(),
+                        CONNECTION_KEEP_ALIVE_DURATION_MS,
+                        TimeUnit.MILLISECONDS);
+        Dispatcher dispatcher = new Dispatcher(executorService);
+        // set max requests per host use max connections
+        dispatcher.setMaxRequestsPerHost(httpClientOptions.maxConnections());
         OkHttpClient.Builder builder =
                 new OkHttpClient.Builder()
-                        .dispatcher(new Dispatcher(executorService))
+                        .dispatcher(dispatcher)
                         .retryOnConnectionFailure(true)
-                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT));
-        httpClientOptions.connectTimeout().ifPresent(builder::connectTimeout);
-        httpClientOptions.readTimeout().ifPresent(builder::readTimeout);
+                        .connectionPool(connectionPool)
+                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
+                        .addInterceptor(
+                                new ExponentialHttpRetryInterceptor(
+                                        httpClientOptions.maxRetries()));
+        httpClientOptions
+                .connectTimeout()
+                .ifPresent(
+                        timeoutDuration -> {
+                            builder.connectTimeout(timeoutDuration);
+                            builder.readTimeout(timeoutDuration);
+                        });
 
         return builder.build();
     }

@@ -35,14 +35,20 @@ public class RESTCatalogOptions {
     public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
             ConfigOptions.key("rest.client.connection-timeout")
                     .durationType()
-                    .noDefaultValue()
+                    .defaultValue(Duration.ofSeconds(180))
                     .withDescription("REST Catalog http client connect timeout.");
 
-    public static final ConfigOption<Duration> READ_TIMEOUT =
-            ConfigOptions.key("rest.client.read-timeout")
-                    .durationType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog http client read timeout.");
+    public static final ConfigOption<Integer> MAX_CONNECTIONS =
+            ConfigOptions.key("rest.client.max-connections")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("REST Catalog http client's max connections.");
+
+    public static final ConfigOption<Integer> MAX_RETIES =
+            ConfigOptions.key("rest.client.max-retries")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription("REST Catalog http client's max retry times.");
 
     public static final ConfigOption<Integer> THREAD_POOL_SIZE =
             ConfigOptions.key("rest.client.num-threads")
