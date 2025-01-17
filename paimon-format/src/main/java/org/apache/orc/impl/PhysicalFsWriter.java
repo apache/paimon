@@ -122,8 +122,7 @@ public class PhysicalFsWriter implements PhysicalWriter {
     public PhysicalFsWriter(
             FSDataOutputStream outputStream,
             OrcFile.WriterOptions opts,
-            WriterEncryptionVariant[] encryption)
-            throws IOException {
+            WriterEncryptionVariant[] encryption) {
         this.rawWriter = outputStream;
         long defaultStripeSize = opts.getStripeSize();
         this.addBlockPadding = opts.getBlockPadding();
@@ -659,8 +658,7 @@ public class PhysicalFsWriter implements PhysicalWriter {
         }
     }
 
-    void buildStreamList(OrcProto.StripeFooter.Builder footerBuilder, SizeCounters sizes)
-            throws IOException {
+    void buildStreamList(OrcProto.StripeFooter.Builder footerBuilder, SizeCounters sizes) {
         footerBuilder.addAllStreams(unencrypted.placeStreams(StreamName.Area.INDEX, sizes));
         final long unencryptedIndexSize = sizes.index;
         int v = 0;

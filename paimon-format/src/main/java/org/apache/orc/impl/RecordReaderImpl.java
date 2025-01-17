@@ -1267,7 +1267,6 @@ public class RecordReaderImpl implements RecordReader {
          *
          * @return an array with a boolean for each row group or null if all of the row groups must
          *     be read.
-         * @throws IOException
          */
         public boolean[] pickRowGroups(
                 StripeInformation stripe,
@@ -1277,8 +1276,7 @@ public class RecordReaderImpl implements RecordReader {
                 OrcProto.BloomFilterIndex[] bloomFilterIndices,
                 boolean returnNone,
                 long rowBaseInStripe,
-                @Nullable RoaringBitmap32 selection)
-                throws IOException {
+                @Nullable RoaringBitmap32 selection) {
             long rowsInStripe = stripe.getNumberOfRows();
             int groupsInStripe = (int) ((rowsInStripe + rowIndexStride - 1) / rowIndexStride);
             boolean[] result = new boolean[groupsInStripe]; // TODO: avoid alloc?
