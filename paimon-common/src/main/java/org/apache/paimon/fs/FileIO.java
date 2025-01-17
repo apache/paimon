@@ -39,12 +39,15 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -103,6 +106,75 @@ public interface FileIO extends Serializable {
      * @return the statuses of the files/directories in the given path
      */
     FileStatus[] listStatus(Path path) throws IOException;
+
+    /**
+     * List the statuses of the files in the given path if the path is a directory.
+     *
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
+     *     otherwise only files in the current directory will be listed
+     * @return the statuses of the files in the given path
+     */
+    default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+        List<FileStatus> files = new ArrayList<>();
+        try (RemoteIterator<FileStatus> iter = listFilesIterative(path, recursive)) {
+            while (iter.hasNext()) {
+                files.add(iter.next());
+            }
+        }
+        return files.toArray(new FileStatus[0]);
+    }
+
+    /**
+     * List the statuses of the files iteratively in the given path if the path is a directory.
+     *
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
+     *     otherwise only files in the current directory will be listed
+     * @return an {@link RemoteIterator} over {@link FileStatus} of the files in the given path
+     */
+    default RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        return new RemoteIterator<FileStatus>() {
+            private Queue<FileStatus> files = new LinkedList<>();
+            private Queue<Path> subdirStack = new LinkedList<>(Collections.singletonList(path));
+
+            @Override
+            public boolean hasNext() throws IOException {
+                maybeUnpackSubdir();
+                return !files.isEmpty();
+            }
+
+            @Override
+            public FileStatus next() throws IOException {
+                maybeUnpackSubdir();
+                return files.remove();
+            }
+
+            private void maybeUnpackSubdir() throws IOException {
+                if (!files.isEmpty()) {
+                    return;
+                }
+                if (subdirStack.isEmpty()) {
+                    return;
+                }
+                FileStatus[] statuses = listStatus(subdirStack.remove());
+                for (FileStatus f : statuses) {
+                    if (!f.isDir()) {
+                        files.add(f);
+                        continue;
+                    }
+                    if (!recursive) {
+                        continue;
+                    }
+                    subdirStack.add(f.getPath());
+                }
+            }
+
+            @Override
+            public void close() throws IOException {}
+        };
+    }
 
     /**
      * List the statuses of the directories in the given path if the path is a directory.
