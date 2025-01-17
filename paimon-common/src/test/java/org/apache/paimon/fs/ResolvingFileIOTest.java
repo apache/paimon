@@ -35,23 +35,23 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-/** Tests for {@link LaziedFileIO}. */
-public class LaziedFileIOTest {
+/** Tests for {@link ResolvingFileIO}. */
+public class ResolvingFileIOTest {
 
-    private LaziedFileIO laziedFileIO;
+    private ResolvingFileIO resolvingFileIO;
 
     @BeforeEach
     public void setUp() {
-        laziedFileIO = new LaziedFileIO();
+        resolvingFileIO = new ResolvingFileIO();
         Options options = new Options();
         CatalogContext catalogContext = CatalogContext.create(options);
-        laziedFileIO.configure(catalogContext);
+        resolvingFileIO.configure(catalogContext);
     }
 
     @Test
     public void testFileIONullSchemeReturnsFallbackFileIO() throws IOException {
         Path path = new Path("/path/to/file");
-        FileIO result = laziedFileIO.fileIO(path);
+        FileIO result = resolvingFileIO.fileIO(path);
         assertNotNull(result);
         assertInstanceOf(LocalFileIO.class, result);
     }
@@ -59,7 +59,7 @@ public class LaziedFileIOTest {
     @Test
     public void testFileIOReturnsLocalFileIO() throws IOException {
         Path path = new Path("file:///path/to/file");
-        FileIO result = laziedFileIO.fileIO(path);
+        FileIO result = resolvingFileIO.fileIO(path);
         assertNotNull(result);
         assertInstanceOf(LocalFileIO.class, result);
     }
@@ -67,7 +67,7 @@ public class LaziedFileIOTest {
     @Test
     public void testFileIOWithSchemeReturnsHdfsFileIO() throws IOException {
         Path path = new Path("hdfs:///path/to/file");
-        FileIO result = laziedFileIO.fileIO(path);
+        FileIO result = resolvingFileIO.fileIO(path);
         assertNotNull(result);
         assertInstanceOf(HadoopFileIO.class, result);
     }
@@ -76,8 +76,10 @@ public class LaziedFileIOTest {
     public void testFileIOConcurrentAccessInitializesFallbackFileIO() throws Exception {
         Path fileSchemePath = new Path("file:///path/to/file");
         ExecutorService executorService = Executors.newFixedThreadPool(2);
-        Future<FileIO> future1 = executorService.submit(() -> laziedFileIO.fileIO(fileSchemePath));
-        Future<FileIO> future2 = executorService.submit(() -> laziedFileIO.fileIO(fileSchemePath));
+        Future<FileIO> future1 =
+                executorService.submit(() -> resolvingFileIO.fileIO(fileSchemePath));
+        Future<FileIO> future2 =
+                executorService.submit(() -> resolvingFileIO.fileIO(fileSchemePath));
 
         FileIO result1 = future1.get();
         FileIO result2 = future2.get();
@@ -88,8 +90,8 @@ public class LaziedFileIOTest {
         assertInstanceOf(LocalFileIO.class, result1);
 
         Path noSchemePath = new Path("/path/to/file");
-        future1 = executorService.submit(() -> laziedFileIO.fileIO(noSchemePath));
-        future2 = executorService.submit(() -> laziedFileIO.fileIO(noSchemePath));
+        future1 = executorService.submit(() -> resolvingFileIO.fileIO(noSchemePath));
+        future2 = executorService.submit(() -> resolvingFileIO.fileIO(noSchemePath));
 
         result1 = future1.get();
         result2 = future2.get();
@@ -100,8 +102,8 @@ public class LaziedFileIOTest {
         assertInstanceOf(LocalFileIO.class, result1);
 
         Path hdfsSchemePath = new Path("hdfs:///path/to/file");
-        future1 = executorService.submit(() -> laziedFileIO.fileIO(hdfsSchemePath));
-        future2 = executorService.submit(() -> laziedFileIO.fileIO(hdfsSchemePath));
+        future1 = executorService.submit(() -> resolvingFileIO.fileIO(hdfsSchemePath));
+        future2 = executorService.submit(() -> resolvingFileIO.fileIO(hdfsSchemePath));
 
         result1 = future1.get();
         result2 = future2.get();
@@ -118,8 +120,8 @@ public class LaziedFileIOTest {
         Path hdfsPath = new Path("hdfs:///path/to/hdfs/file1");
 
         // First call should create new instances
-        FileIO localFileIO = laziedFileIO.fileIO(localPath);
-        FileIO hdfsFileIO = laziedFileIO.fileIO(hdfsPath);
+        FileIO localFileIO = resolvingFileIO.fileIO(localPath);
+        FileIO hdfsFileIO = resolvingFileIO.fileIO(hdfsPath);
 
         assertNotNull(localFileIO);
         assertNotNull(hdfsFileIO);
@@ -127,8 +129,8 @@ public class LaziedFileIOTest {
         assertInstanceOf(HadoopFileIO.class, hdfsFileIO);
 
         // Second call should return the same instances from fileIOMap
-        FileIO localFileIOAgain = laziedFileIO.fileIO(new Path("file:///path/to/local/file2"));
-        FileIO hdfsFileIOAgain = laziedFileIO.fileIO(new Path("hdfs:///path/to/local/file2"));
+        FileIO localFileIOAgain = resolvingFileIO.fileIO(new Path("file:///path/to/local/file2"));
+        FileIO hdfsFileIOAgain = resolvingFileIO.fileIO(new Path("hdfs:///path/to/local/file2"));
 
         assertNotNull(localFileIOAgain);
         assertNotNull(hdfsFileIOAgain);

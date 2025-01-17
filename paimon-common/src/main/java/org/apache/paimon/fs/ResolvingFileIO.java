@@ -27,10 +27,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * A lazy implementation of {@link FileIO} that supports multiple file system schemas. It
- * dynamically selects the appropriate {@link FileIO} based on the URI scheme of the given path.
+ * An implementation of {@link FileIO} that supports multiple file system schemas. It dynamically
+ * selects the appropriate {@link FileIO} based on the URI scheme of the given path.
  */
-public class LaziedFileIO implements FileIO {
+public class ResolvingFileIO implements FileIO {
     private static final long serialVersionUID = 1L;
 
     private CatalogContext context;
@@ -123,7 +123,7 @@ public class LaziedFileIO implements FileIO {
     private <T> T wrap(Func<T> func) throws IOException {
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         try {
-            Thread.currentThread().setContextClassLoader(LaziedFileIO.class.getClassLoader());
+            Thread.currentThread().setContextClassLoader(ResolvingFileIO.class.getClassLoader());
             return func.apply();
         } finally {
             Thread.currentThread().setContextClassLoader(cl);

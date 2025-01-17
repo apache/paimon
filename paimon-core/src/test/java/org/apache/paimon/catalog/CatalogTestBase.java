@@ -20,7 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.LaziedFileIO;
+import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -85,7 +85,7 @@ public abstract class CatalogTestBase {
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         CatalogContext catalogContext = CatalogContext.create(catalogOptions);
-        fileIO = new LaziedFileIO();
+        fileIO = new ResolvingFileIO();
         fileIO.configure(catalogContext);
     }
 
