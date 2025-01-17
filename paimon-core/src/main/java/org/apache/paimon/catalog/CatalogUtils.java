@@ -170,6 +170,7 @@ public class CatalogUtils {
      */
     public static Table loadTable(
             Catalog catalog,
+            FileIO fileIO,
             Identifier identifier,
             TableMetadata.Loader metadataLoader,
             SnapshotCommit.Factory commitFactory)
@@ -189,11 +190,10 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         identifier, metadata.uuid(), catalog.catalogLoader(), commitFactory);
         Path path = new Path(schema.options().get(PATH.key()));
-        FileStoreTable table =
-                FileStoreTableFactory.create(catalog.fileIO(), path, schema, catalogEnv);
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, path, schema, catalogEnv);
 
         if (options.type() == TableType.OBJECT_TABLE) {
-            table = toObjectTable(catalog, table);
+            table = toObjectTable(fileIO, table);
         }
 
         if (identifier.isSystemTable()) {
@@ -265,10 +265,11 @@ public class CatalogUtils {
                 .build();
     }
 
-    private static ObjectTable toObjectTable(Catalog catalog, FileStoreTable underlyingTable) {
+    private static ObjectTable toObjectTable(FileIO fileIO, FileStoreTable underlyingTable) {
         CoreOptions options = underlyingTable.coreOptions();
         String objectLocation = options.objectLocation();
-        FileIO objectFileIO = catalog.fileIO(new Path(objectLocation));
+        // todo: check whether here is ok.
+        FileIO objectFileIO = fileIO;
         return ObjectTable.builder()
                 .underlyingTable(underlyingTable)
                 .objectLocation(objectLocation)

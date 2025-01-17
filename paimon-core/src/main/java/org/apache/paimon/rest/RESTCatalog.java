@@ -109,6 +109,7 @@ public class RESTCatalog implements Catalog {
     private final ResourcePaths resourcePaths;
     private final AuthSession catalogAuth;
     private final Options options;
+    private final boolean fileIORefreshCredentialEnable;
     private final FileIO fileIO;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
@@ -130,13 +131,20 @@ public class RESTCatalog implements Catalog {
                                 .merge(context.options().toMap()));
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
 
+        this.fileIORefreshCredentialEnable =
+                options.get(CatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE);
         try {
-            String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
-            this.fileIO =
-                    FileIO.get(
-                            new Path(warehouseStr),
-                            CatalogContext.create(
-                                    options, context.preferIO(), context.fallbackIO()));
+            if (fileIORefreshCredentialEnable) {
+                // todo: check whether is ok
+                this.fileIO = null;
+            } else {
+                String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
+                this.fileIO =
+                        FileIO.get(
+                                new Path(warehouseStr),
+                                CatalogContext.create(
+                                        options, context.preferIO(), context.fallbackIO()));
+            }
         } catch (IOException e) {
             LOG.warn("Can not get FileIO from options.");
             throw new RuntimeException(e);
@@ -149,6 +157,9 @@ public class RESTCatalog implements Catalog {
         this.options = options;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
         this.fileIO = fileIO;
+        this.fileIORefreshCredentialEnable =
+                options.get(CatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE);
+        ;
     }
 
     @Override
@@ -168,11 +179,27 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public FileIO fileIO() {
+        if (fileIORefreshCredentialEnable) {
+            throw new UnsupportedOperationException();
+        }
         return fileIO;
     }
 
+    // todo: need cache table identifier location
     @Override
     public FileIO fileIO(Path path) {
+        if (fileIORefreshCredentialEnable) {
+            throw new UnsupportedOperationException();
+        }
+        return fileIO;
+    }
+
+    // todo: need cache table identifier fileIO
+    public FileIO fileIO(Identifier identifier) {
+        if (fileIORefreshCredentialEnable) {
+            return new RefreshCredentialFileIO(
+                    resourcePaths, catalogAuth, options, client, identifier);
+        }
         return fileIO;
     }
 
@@ -288,6 +315,7 @@ public class RESTCatalog implements Catalog {
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return CatalogUtils.loadTable(
                 this,
+                this.fileIO(identifier),
                 identifier,
                 this::loadTableMetadata,
                 new RESTSnapshotCommitFactory(catalogLoader()));
