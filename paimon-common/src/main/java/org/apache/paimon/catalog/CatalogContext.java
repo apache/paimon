@@ -21,8 +21,8 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.hadoop.SerializableConfiguration;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.SerializableHadoopConfig;
 
 import org.apache.hadoop.conf.Configuration;
 
@@ -45,7 +45,7 @@ public class CatalogContext implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final Options options;
-    private final SerializableHadoopConfig hadoopConf;
+    private final SerializableConfiguration hadoopConf;
     @Nullable private final FileIOLoader preferIOLoader;
     @Nullable private final FileIOLoader fallbackIOLoader;
 
@@ -56,7 +56,7 @@ public class CatalogContext implements Serializable {
             @Nullable FileIOLoader fallbackIOLoader) {
         this.options = checkNotNull(options);
         this.hadoopConf =
-                new SerializableHadoopConfig(
+                new SerializableConfiguration(
                         hadoopConf == null ? getHadoopConfiguration(options) : hadoopConf);
         this.preferIOLoader = preferIOLoader;
         this.fallbackIOLoader = fallbackIOLoader;
