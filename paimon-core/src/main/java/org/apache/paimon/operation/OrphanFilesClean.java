@@ -263,6 +263,14 @@ public abstract class OrphanFilesClean implements Serializable {
         paimonFileDirs.add(pathFactory.statisticsPath());
         paimonFileDirs.addAll(listFileDirs(pathFactory.dataFilePath(), partitionKeysNum));
 
+        // add external data paths
+        String dataFileExternalPaths = table.store().options().dataFileExternalPaths();
+        if (dataFileExternalPaths != null) {
+            String[] externalPathArr = dataFileExternalPaths.split(",");
+            for (String externalPath : externalPathArr) {
+                paimonFileDirs.addAll(listFileDirs(new Path(externalPath), partitionKeysNum));
+            }
+        }
         return paimonFileDirs;
     }
 

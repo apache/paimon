@@ -110,6 +110,14 @@ public class DataFilePathFactory {
         return new Path(aligned.externalPathDir().map(Path::new).orElse(parent), fileName);
     }
 
+    public Path toAlignedPath(String fileName, FileEntry aligned) {
+        Optional<String> externalPathDir =
+                Optional.ofNullable(aligned.externalPath())
+                        .map(Path::new)
+                        .map(p -> p.getParent().toUri().toString());
+        return new Path(externalPathDir.map(Path::new).orElse(parent), fileName);
+    }
+
     public static Path dataFileToFileIndexPath(Path dataFilePath) {
         return new Path(dataFilePath.getParent(), dataFilePath.getName() + INDEX_PATH_SUFFIX);
     }
