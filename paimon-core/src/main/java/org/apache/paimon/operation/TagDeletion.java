@@ -23,11 +23,13 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Pair;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,12 +80,19 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
         }
 
         Set<Path> dataFileToDelete = new HashSet<>();
+        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap = new HashMap<>();
         for (ExpireFileEntry entry : manifestEntries) {
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            DataFilePathFactory dataFilePathFactory =
+                    dataFilePathFactoryMap.computeIfAbsent(
+                            bucket,
+                            b ->
+                                    pathFactory.createDataFilePathFactory(
+                                            entry.partition(), entry.bucket()));
             if (!skipper.test(entry)) {
-                Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-                dataFileToDelete.add(new Path(bucketPath, entry.fileName()));
+                dataFileToDelete.add(dataFilePathFactory.toPath(entry));
                 for (String file : entry.extraFiles()) {
-                    dataFileToDelete.add(new Path(bucketPath, file));
+                    dataFileToDelete.add(dataFilePathFactory.toAlignedPath(file, entry));
                 }
 
                 recordDeletionBuckets(entry);

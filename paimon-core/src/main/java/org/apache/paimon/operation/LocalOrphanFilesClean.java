@@ -104,7 +104,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         // specially handle to clear snapshot dir
         cleanSnapshotDir(branches, deleteFiles::add, deletedFilesLenInBytes::addAndGet);
 
-        // delete candidate files
+        // get candidate files
         Map<String, Pair<Path, Long>> candidates = getCandidateDeletingFiles();
         if (candidates.isEmpty()) {
             return new CleanOrphanFilesResult(
