@@ -27,25 +27,21 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Triple;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
-import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 /** A Operator to copy files. */
-public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
-        implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo>, BoundedOneInput {
+public class CopyDataFileOperator extends AbstractStreamOperator<CloneFileInfo>
+        implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CopyFileOperator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CopyDataFileOperator.class);
 
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
@@ -55,13 +51,10 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
 
     private transient Map<String, Path> targetLocations;
 
-    private final Set<Triple<String, String, Long>> identifiersAndSnapshotIds;
-
-    public CopyFileOperator(
+    public CopyDataFileOperator(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
-        identifiersAndSnapshotIds = new HashSet<>();
     }
 
     @Override
@@ -111,11 +104,7 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
             // the job fails due to snapshot expiration when cloning table B.
             // If we don't re-send file information of table A to SnapshotHintOperator,
             // the snapshot hint file of A will not be created after the restart.
-            identifiersAndSnapshotIds.add(
-                    Triple.of(
-                            cloneFileInfo.getSourceIdentifier(),
-                            cloneFileInfo.getTargetIdentifier(),
-                            cloneFileInfo.getSnapshotId()));
+            output.collect(streamRecord);
             return;
         }
 
@@ -129,29 +118,11 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
             LOG.debug("End copy file from {} to {}.", sourcePath, targetPath);
         }
 
-        identifiersAndSnapshotIds.add(
-                Triple.of(
-                        cloneFileInfo.getSourceIdentifier(),
-                        cloneFileInfo.getTargetIdentifier(),
-                        cloneFileInfo.getSnapshotId()));
+        output.collect(streamRecord);
     }
 
     private Path pathOfTable(Table table) {
         return new Path(table.options().get(CoreOptions.PATH.key()));
-    }
-
-    @Override
-    public void endInput() throws Exception {
-        for (Triple<String, String, Long> identifierAndSnapshotId : identifiersAndSnapshotIds) {
-            output.collect(
-                    new StreamRecord<>(
-                            new CloneFileInfo(
-                                    null,
-                                    null,
-                                    identifierAndSnapshotId.f0,
-                                    identifierAndSnapshotId.f1,
-                                    identifierAndSnapshotId.f2)));
-        }
     }
 
     @Override

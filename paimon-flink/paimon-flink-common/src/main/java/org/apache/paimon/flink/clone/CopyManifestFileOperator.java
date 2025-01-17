@@ -31,11 +31,10 @@ import org.apache.paimon.manifest.ManifestFile.ManifestEntryWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Triple;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
-import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
@@ -44,14 +43,12 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** A Operator to copy files. */
 public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileInfo>
-        implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo>, BoundedOneInput {
+        implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CopyManifestFileOperator.class);
 
@@ -63,13 +60,10 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
 
     private transient Map<String, Path> targetLocations;
 
-    private final Set<Triple<String, String, Long>> identifiersAndSnapshotIds;
-
     public CopyManifestFileOperator(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
-        identifiersAndSnapshotIds = new HashSet<>();
     }
 
     @Override
@@ -112,17 +106,14 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
                         targetPath);
             }
 
-            // We still send record to SnapshotHintOperator to avoid the following corner case:
-            //
-            // When cloning two tables under a catalog, after clone table A is completed,
-            // the job fails due to snapshot expiration when cloning table B.
-            // If we don't re-send file information of table A to SnapshotHintOperator,
-            // the snapshot hint file of A will not be created after the restart.
-            identifiersAndSnapshotIds.add(
-                    Triple.of(
-                            cloneFileInfo.getSourceIdentifier(),
-                            cloneFileInfo.getTargetIdentifier(),
-                            cloneFileInfo.getSnapshotId()));
+            // in this case,we don't need to copy the manifest file, just pick the data files
+            copyOrRewriteManifestFile(
+                    sourceTableFileIO,
+                    targetTableFileIO,
+                    sourcePath,
+                    targetPath,
+                    cloneFileInfo,
+                    false);
             return;
         }
 
@@ -130,16 +121,10 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
             LOG.debug("Begin copy file from {} to {}.", sourcePath, targetPath);
         }
         copyOrRewriteManifestFile(
-                sourceTableFileIO, targetTableFileIO, sourcePath, targetPath, cloneFileInfo);
+                sourceTableFileIO, targetTableFileIO, sourcePath, targetPath, cloneFileInfo, true);
         if (LOG.isDebugEnabled()) {
             LOG.debug("End copy file from {} to {}.", sourcePath, targetPath);
         }
-
-        identifiersAndSnapshotIds.add(
-                Triple.of(
-                        cloneFileInfo.getSourceIdentifier(),
-                        cloneFileInfo.getTargetIdentifier(),
-                        cloneFileInfo.getSnapshotId()));
     }
 
     private void copyOrRewriteManifestFile(
@@ -147,7 +132,8 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
             FileIO targetTableFileIO,
             Path sourcePath,
             Path targetPath,
-            CloneFileInfo cloneFileInfo)
+            CloneFileInfo cloneFileInfo,
+            boolean needCopyManifestFile)
             throws IOException, Catalog.TableNotExistException {
         Identifier sourceIdentifier = Identifier.fromString(cloneFileInfo.getSourceIdentifier());
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
@@ -158,29 +144,58 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
                 manifestFile.readWithIOException(sourcePath.getName());
         List<ManifestEntry> targetManifestEntries = new ArrayList<>(manifestEntries.size());
 
-        if (containsExternalPath(manifestEntries)) {
-            // rewrite it, clone job will clone the source path to target warehouse path, so the
-            // target external
-            // path is null
-            for (ManifestEntry manifestEntry : manifestEntries) {
-                ManifestEntry newManifestEntry =
-                        new ManifestEntry(
-                                manifestEntry.kind(),
-                                manifestEntry.partition(),
-                                manifestEntry.bucket(),
-                                manifestEntry.totalBuckets(),
-                                manifestEntry.file().newExternalPath(null));
-                targetManifestEntries.add(newManifestEntry);
+        if (needCopyManifestFile) {
+            if (containsExternalPath(manifestEntries)) {
+                // rewrite it, clone job will clone the source path to target warehouse path, so the
+                // target external
+                // path is null
+                for (ManifestEntry manifestEntry : manifestEntries) {
+                    ManifestEntry newManifestEntry =
+                            new ManifestEntry(
+                                    manifestEntry.kind(),
+                                    manifestEntry.partition(),
+                                    manifestEntry.bucket(),
+                                    manifestEntry.totalBuckets(),
+                                    manifestEntry.file().newExternalPath(null));
+                    targetManifestEntries.add(newManifestEntry);
+                }
+                ManifestEntryWriter manifestEntryWriter =
+                        manifestFile.createManifestEntryWriter(targetPath);
+                manifestEntryWriter.write(targetManifestEntries);
+                manifestEntryWriter.close();
+            } else {
+                // copy it
+                IOUtils.copyBytes(
+                        sourceTableFileIO.newInputStream(sourcePath),
+                        targetTableFileIO.newOutputStream(targetPath, true));
             }
-            ManifestEntryWriter manifestEntryWriter =
-                    manifestFile.createManifestEntryWriter(targetPath);
-            manifestEntryWriter.write(targetManifestEntries);
-            manifestEntryWriter.close();
-        } else {
-            // copy it
-            IOUtils.copyBytes(
-                    sourceTableFileIO.newInputStream(sourcePath),
-                    targetTableFileIO.newOutputStream(targetPath, true));
+        }
+        // pick data files
+        pickDataFilesForClone(manifestEntries, store, cloneFileInfo);
+    }
+
+    private void pickDataFilesForClone(
+            List<ManifestEntry> manifestEntries, FileStore<?> store, CloneFileInfo cloneFileInfo) {
+        // pick the data files
+        for (ManifestEntry manifestEntry : manifestEntries) {
+            FileStorePathFactory fileStorePathFactory = store.pathFactory();
+            Path dataFilePath =
+                    fileStorePathFactory
+                            .createDataFilePathFactory(
+                                    manifestEntry.partition(), manifestEntry.bucket())
+                            .toPath(manifestEntry);
+            Path relativeBucketPath =
+                    fileStorePathFactory.relativeBucketPath(
+                            manifestEntry.partition(), manifestEntry.bucket());
+            Path relativeTablePath = new Path("/" + relativeBucketPath, dataFilePath.getName());
+
+            output.collect(
+                    new StreamRecord<>(
+                            new CloneFileInfo(
+                                    dataFilePath.toString(),
+                                    relativeTablePath.toString(),
+                                    cloneFileInfo.getSourceIdentifier(),
+                                    cloneFileInfo.getTargetIdentifier())));
         }
     }
 
@@ -197,20 +212,6 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
 
     private Path pathOfTable(Table table) {
         return new Path(table.options().get(CoreOptions.PATH.key()));
-    }
-
-    @Override
-    public void endInput() throws Exception {
-        for (Triple<String, String, Long> identifierAndSnapshotId : identifiersAndSnapshotIds) {
-            output.collect(
-                    new StreamRecord<>(
-                            new CloneFileInfo(
-                                    null,
-                                    null,
-                                    identifierAndSnapshotId.f0,
-                                    identifierAndSnapshotId.f1,
-                                    identifierAndSnapshotId.f2)));
-        }
     }
 
     @Override

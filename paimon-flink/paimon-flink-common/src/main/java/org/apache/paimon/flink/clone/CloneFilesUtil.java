@@ -211,7 +211,7 @@ public class CloneFilesUtil {
     }
 
     @Nullable
-    private static <T> T retryReadingFiles(SupplierWithIOException<T> reader) throws IOException {
+    public static <T> T retryReadingFiles(SupplierWithIOException<T> reader) throws IOException {
         int retryNumber = 0;
         IOException caught = null;
         while (retryNumber++ < READ_FILE_RETRY_NUM) {
@@ -237,8 +237,7 @@ public class CloneFilesUtil {
             List<Path> fileList,
             Path sourceTableRoot,
             String sourceIdentifier,
-            String targetIdentifier,
-            long snapshotId) {
+            String targetIdentifier) {
         List<CloneFileInfo> result = new ArrayList<>();
         for (Path file : fileList) {
             Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
@@ -247,17 +246,13 @@ public class CloneFilesUtil {
                             file.toUri().toString(),
                             relativePath.toString(),
                             sourceIdentifier,
-                            targetIdentifier,
-                            snapshotId));
+                            targetIdentifier));
         }
         return result;
     }
 
     public static List<CloneFileInfo> toCloneFileInfos(
-            List<Pair<Path, Path>> fileList,
-            String sourceIdentifier,
-            String targetIdentifier,
-            long snapshotId) {
+            List<Pair<Path, Path>> fileList, String sourceIdentifier, String targetIdentifier) {
         List<CloneFileInfo> result = new ArrayList<>();
         for (Pair<Path, Path> file : fileList) {
             result.add(
@@ -265,8 +260,7 @@ public class CloneFilesUtil {
                             file.getLeft().toUri().toString(),
                             file.getRight().toString(),
                             sourceIdentifier,
-                            targetIdentifier,
-                            snapshotId));
+                            targetIdentifier));
         }
         return result;
     }
