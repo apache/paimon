@@ -92,7 +92,7 @@ public class Identifier implements Serializable {
         this.database = database;
 
         StringBuilder builder = new StringBuilder(table);
-        if (branch != null) {
+        if (branch != null && !"main".equalsIgnoreCase(branch)) {
             builder.append(Catalog.SYSTEM_TABLE_SPLITTER)
                     .append(Catalog.SYSTEM_BRANCH_PREFIX)
                     .append(branch);

@@ -41,6 +41,7 @@ import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshotSummary;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
@@ -446,11 +447,16 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             Map<String, BinaryRow> removedFiles,
             Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles) {
         boolean isAddOnly = true;
+        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap = new HashMap<>();
         for (ManifestEntry entry : manifestEntries) {
-            String path =
-                    fileStorePathFactory.bucketPath(entry.partition(), entry.bucket())
-                            + "/"
-                            + entry.fileName();
+            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
+            DataFilePathFactory dataFilePathFactory =
+                    dataFilePathFactoryMap.computeIfAbsent(
+                            bucket,
+                            b ->
+                                    fileStorePathFactory.createDataFilePathFactory(
+                                            entry.partition(), entry.bucket()));
+            String path = dataFilePathFactory.toPath(entry).toString();
             switch (entry.kind()) {
                 case ADD:
                     if (shouldAddFileToIceberg(entry.file())) {

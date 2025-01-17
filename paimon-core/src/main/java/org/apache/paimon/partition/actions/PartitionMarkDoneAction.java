@@ -24,32 +24,27 @@ import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Closeable;
-import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_CUSTOM_CLASS;
+import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.CUSTOM;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Action to mark partitions done. */
 public interface PartitionMarkDoneAction extends Closeable {
 
-    String SUCCESS_FILE = "success-file";
-    String DONE_PARTITION = "done-partition";
-    String MARK_EVENT = "mark-event";
-    String CUSTOM = "custom";
-
     void markDone(String partition) throws Exception;
 
     static List<PartitionMarkDoneAction> createActions(
             ClassLoader cl, FileStoreTable fileStoreTable, CoreOptions options) {
-        return Arrays.stream(options.toConfiguration().get(PARTITION_MARK_DONE_ACTION).split(","))
+        return options.partitionMarkDoneActions().stream()
                 .map(
                         action -> {
-                            switch (action.toLowerCase()) {
+                            switch (action) {
                                 case SUCCESS_FILE:
                                     return new SuccessFileMarkDoneAction(
                                             fileStoreTable.fileIO(), fileStoreTable.location());
@@ -59,10 +54,12 @@ public interface PartitionMarkDoneAction extends Closeable {
                                 case MARK_EVENT:
                                     return new MarkPartitionDoneEventAction(
                                             createPartitionHandler(fileStoreTable, options));
+                                case HTTP_REPORT:
+                                    return new HttpReportMarkDoneAction(fileStoreTable, options);
                                 case CUSTOM:
                                     return generateCustomMarkDoneAction(cl, options);
                                 default:
-                                    throw new UnsupportedOperationException(action);
+                                    throw new UnsupportedOperationException(action.toString());
                             }
                         })
                 .collect(Collectors.toList());

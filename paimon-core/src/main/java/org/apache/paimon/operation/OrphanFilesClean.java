@@ -59,6 +59,7 @@ import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
@@ -262,6 +263,14 @@ public abstract class OrphanFilesClean implements Serializable {
         paimonFileDirs.add(pathFactory.statisticsPath());
         paimonFileDirs.addAll(listFileDirs(pathFactory.dataFilePath(), partitionKeysNum));
 
+        // add external data paths
+        String dataFileExternalPaths = table.store().options().dataFileExternalPaths();
+        if (dataFileExternalPaths != null) {
+            String[] externalPathArr = dataFileExternalPaths.split(",");
+            for (String externalPath : externalPathArr) {
+                paimonFileDirs.addAll(listFileDirs(new Path(externalPath), partitionKeysNum));
+            }
+        }
         return paimonFileDirs;
     }
 
@@ -388,6 +397,25 @@ public abstract class OrphanFilesClean implements Serializable {
                     "The arg olderThan must be less than now, because dataFiles that are currently being written and not referenced by snapshots will be mistakenly cleaned up.");
 
             return parsedTimestampData.getMillisecond();
+        }
+    }
+
+    /** Try to clean empty data directories. */
+    protected void tryCleanDataDirectory(Set<Path> dataDirs, int maxLevel) {
+        for (int level = 0; level < maxLevel; level++) {
+            dataDirs =
+                    dataDirs.stream()
+                            .filter(this::tryDeleteEmptyDirectory)
+                            .map(Path::getParent)
+                            .collect(Collectors.toSet());
+        }
+    }
+
+    public boolean tryDeleteEmptyDirectory(Path path) {
+        try {
+            return fileIO.delete(path, false);
+        } catch (IOException e) {
+            return false;
         }
     }
 }

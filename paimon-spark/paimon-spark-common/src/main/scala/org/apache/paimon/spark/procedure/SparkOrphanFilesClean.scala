@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.orphan
+package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.{utils, Snapshot}
 import org.apache.paimon.catalog.{Catalog, Identifier}
@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.{ManifestEntry, ManifestFile}
 import org.apache.paimon.operation.{CleanOrphanFilesResult, OrphanFilesClean}
 import org.apache.paimon.operation.OrphanFilesClean.retryReadingFiles
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX
 import org.apache.paimon.utils.SerializableConsumer
 
 import org.apache.spark.internal.Logging
@@ -37,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.function.Consumer
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 case class SparkOrphanFilesClean(
@@ -44,6 +46,7 @@ case class SparkOrphanFilesClean(
     specifiedOlderThanMillis: Long,
     specifiedFileCleaner: SerializableConsumer[Path],
     parallelism: Int,
+    dryRun: Boolean,
     @transient spark: SparkSession)
   extends OrphanFilesClean(specifiedTable, specifiedOlderThanMillis, specifiedFileCleaner)
   with SQLConfHelper
@@ -124,19 +127,23 @@ case class SparkOrphanFilesClean(
       .flatMap {
         dir =>
           tryBestListingDirs(new Path(dir)).asScala.filter(oldEnough).map {
-            file => (file.getPath.getName, file.getPath.toUri.toString, file.getLen)
+            file =>
+              val path = file.getPath
+              (path.getName, path.toUri.toString, file.getLen, path.getParent.toUri.toString)
           }
       }
-      .toDF("name", "path", "len")
+      .toDF("name", "path", "len", "dataDir")
       .repartition(parallelism)
 
     // use left anti to filter files which is not used
     val deleted = candidates
       .join(usedFiles, $"name" === $"used_name", "left_anti")
+      .repartition($"dataDir")
       .mapPartitions {
         it =>
           var deletedFilesCount = 0L
           var deletedFilesLenInBytes = 0L
+          val dataDirs = new mutable.HashSet[String]()
 
           while (it.hasNext) {
             val fileInfo = it.next();
@@ -145,12 +152,23 @@ case class SparkOrphanFilesClean(
             deletedFilesLenInBytes += fileInfo.getLong(2)
             specifiedFileCleaner.accept(deletedPath)
             logInfo(s"Cleaned file: $pathToClean")
+            dataDirs.add(fileInfo.getString(3))
             deletedFilesCount += 1
           }
+
+          // clean empty directory
+          if (!dryRun) {
+            val bucketDirs = dataDirs
+              .filter(_.contains(BUCKET_PATH_PREFIX))
+              .map(new Path(_))
+            tryCleanDataDirectory(bucketDirs.asJava, partitionKeysNum + 1)
+          }
+
           logInfo(
             s"Total cleaned files: $deletedFilesCount, Total cleaned files len : $deletedFilesLenInBytes")
           Iterator.single((deletedFilesCount, deletedFilesLenInBytes))
       }
+
     val finalDeletedDataset =
       if (deletedFilesCountInLocal.get() != 0 || deletedFilesLenInBytesInLocal.get() != 0) {
         deleted.union(
@@ -181,7 +199,8 @@ object SparkOrphanFilesClean extends SQLConfHelper {
       tableName: String,
       olderThanMillis: Long,
       fileCleaner: SerializableConsumer[Path],
-      parallelismOpt: Integer): CleanOrphanFilesResult = {
+      parallelismOpt: Integer,
+      dryRun: Boolean): CleanOrphanFilesResult = {
     val spark = SparkSession.active
     val parallelism = if (parallelismOpt == null) {
       Math.max(spark.sparkContext.defaultParallelism, conf.numShufflePartitions)
@@ -213,6 +232,7 @@ object SparkOrphanFilesClean extends SQLConfHelper {
           olderThanMillis,
           fileCleaner,
           parallelism,
+          dryRun,
           spark
         ).doOrphanClean()
     }.unzip

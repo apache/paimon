@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
@@ -37,7 +36,7 @@ public class RESTCatalogLoader implements CatalogLoader {
     }
 
     @Override
-    public Catalog load() {
+    public RESTCatalog load() {
         return new RESTCatalog(options, fileIO);
     }
 }

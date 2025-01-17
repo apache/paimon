@@ -19,11 +19,13 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
+import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
-import org.apache.paimon.rest.requests.DropPartitionRequest;
+import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -31,16 +33,16 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
-import org.apache.paimon.rest.responses.PartitionResponse;
+import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.Test;
 
@@ -48,13 +50,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 import static org.junit.Assert.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for {@link RESTObjectMapper}. */
 public class RESTObjectMapperTest {
-
-    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
 
     @Test
     public void configResponseParseTest() throws Exception {
@@ -175,11 +175,12 @@ public class RESTObjectMapperTest {
 
     @Test
     public void renameTableRequestParseTest() throws Exception {
-        RenameTableRequest request = MockRESTMessage.renameRequest("t2");
+        RenameTableRequest request = MockRESTMessage.renameRequest("t1", "t2");
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         RenameTableRequest parseData =
                 OBJECT_MAPPER.readValue(requestStr, RenameTableRequest.class);
-        assertEquals(request.getNewIdentifier(), parseData.getNewIdentifier());
+        assertEquals(request.getSource(), parseData.getSource());
+        assertEquals(request.getDestination(), parseData.getDestination());
     }
 
     @Test
@@ -210,21 +211,20 @@ public class RESTObjectMapperTest {
 
     @Test
     public void createPartitionRequestParseTest() throws JsonProcessingException {
-        CreatePartitionRequest request = MockRESTMessage.createPartitionRequest("t1");
+        CreatePartitionsRequest request = MockRESTMessage.createPartitionRequest();
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        CreatePartitionRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, CreatePartitionRequest.class);
-        assertEquals(parseData.getIdentifier(), parseData.getIdentifier());
-        assertEquals(parseData.getPartitionSpec().size(), parseData.getPartitionSpec().size());
+        CreatePartitionsRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, CreatePartitionsRequest.class);
+        assertEquals(parseData.getPartitionSpecs().size(), parseData.getPartitionSpecs().size());
     }
 
     @Test
     public void dropPartitionRequestParseTest() throws JsonProcessingException {
-        DropPartitionRequest request = MockRESTMessage.dropPartitionRequest();
+        DropPartitionsRequest request = MockRESTMessage.dropPartitionsRequest();
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        DropPartitionRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, DropPartitionRequest.class);
-        assertEquals(parseData.getPartitionSpec().size(), parseData.getPartitionSpec().size());
+        DropPartitionsRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, DropPartitionsRequest.class);
+        assertEquals(parseData.getPartitionSpecs().size(), parseData.getPartitionSpecs().size());
     }
 
     @Test
@@ -239,13 +239,38 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void partitionResponseParseTest() throws Exception {
-        PartitionResponse response = MockRESTMessage.partitionResponse();
-        assertDoesNotThrow(() -> OBJECT_MAPPER.writeValueAsString(response));
-        assertDoesNotThrow(
-                () ->
-                        OBJECT_MAPPER.readValue(
-                                OBJECT_MAPPER.writeValueAsString(response),
-                                PartitionResponse.class));
+    public void alterPartitionsRequestParseTest() throws Exception {
+        AlterPartitionsRequest request = MockRESTMessage.alterPartitionsRequest();
+        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
+        AlterPartitionsRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, AlterPartitionsRequest.class);
+        assertEquals(request.getPartitions(), parseData.getPartitions());
+    }
+
+    @Test
+    public void createViewRequestParseTest() throws Exception {
+        CreateViewRequest request = MockRESTMessage.createViewRequest("t1");
+        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
+        CreateViewRequest parseData = OBJECT_MAPPER.readValue(requestStr, CreateViewRequest.class);
+        assertEquals(request.getIdentifier(), parseData.getIdentifier());
+        assertEquals(request.getSchema(), parseData.getSchema());
+    }
+
+    @Test
+    public void getViewResponseParseTest() throws Exception {
+        GetViewResponse response = MockRESTMessage.getViewResponse();
+        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        GetViewResponse parseData = OBJECT_MAPPER.readValue(responseStr, GetViewResponse.class);
+        assertEquals(response.getId(), parseData.getId());
+        assertEquals(response.getName(), parseData.getName());
+        assertEquals(response.getSchema(), parseData.getSchema());
+    }
+
+    @Test
+    public void listViewsResponseParseTest() throws Exception {
+        ListViewsResponse response = MockRESTMessage.listViewsResponse();
+        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        ListViewsResponse parseData = OBJECT_MAPPER.readValue(responseStr, ListViewsResponse.class);
+        assertEquals(response.getViews(), parseData.getViews());
     }
 }

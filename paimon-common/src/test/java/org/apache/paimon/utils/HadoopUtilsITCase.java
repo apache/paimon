@@ -56,6 +56,8 @@ public class HadoopUtilsITCase {
     /** {@link FileIOLoader} for this test. */
     public static class TestFileIOLoader implements FileIOLoader {
 
+        private static final long serialVersionUID = 1L;
+
         private static final String SCHEME = "hadoop-utils-test-file-io";
 
         @Override

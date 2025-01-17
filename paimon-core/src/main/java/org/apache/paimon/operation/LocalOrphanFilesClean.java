@@ -52,6 +52,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
@@ -69,6 +70,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private final List<Path> deleteFiles;
 
+    private final boolean dryRun;
+
     private final AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
 
     private Set<String> candidateDeletes;
@@ -78,16 +81,20 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     }
 
     public LocalOrphanFilesClean(FileStoreTable table, long olderThanMillis) {
-        this(table, olderThanMillis, path -> table.fileIO().deleteQuietly(path));
+        this(table, olderThanMillis, path -> table.fileIO().deleteQuietly(path), false);
     }
 
     public LocalOrphanFilesClean(
-            FileStoreTable table, long olderThanMillis, SerializableConsumer<Path> fileCleaner) {
+            FileStoreTable table,
+            long olderThanMillis,
+            SerializableConsumer<Path> fileCleaner,
+            boolean dryRun) {
         super(table, olderThanMillis, fileCleaner);
         this.deleteFiles = new ArrayList<>();
         this.executor =
                 createCachedThreadPool(
                         table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
+        this.dryRun = dryRun;
     }
 
     public CleanOrphanFilesResult clean()
@@ -97,7 +104,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         // specially handle to clear snapshot dir
         cleanSnapshotDir(branches, deleteFiles::add, deletedFilesLenInBytes::addAndGet);
 
-        // delete candidate files
+        // get candidate files
         Map<String, Pair<Path, Long>> candidates = getCandidateDeletingFiles();
         if (candidates.isEmpty()) {
             return new CleanOrphanFilesResult(
@@ -127,8 +134,30 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         .collect(Collectors.toList()));
         candidateDeletes.clear();
 
+        // clean empty directory
+        if (!dryRun) {
+            cleanEmptyDataDirectory(deleteFiles);
+        }
+
         return new CleanOrphanFilesResult(
                 deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
+    }
+
+    private void cleanEmptyDataDirectory(List<Path> deleteFiles) {
+        if (deleteFiles.isEmpty()) {
+            return;
+        }
+        Set<Path> bucketDirs =
+                deleteFiles.stream()
+                        .map(Path::getParent)
+                        .filter(path -> path.toUri().toString().contains(BUCKET_PATH_PREFIX))
+                        .collect(Collectors.toSet());
+        randomlyOnlyExecute(executor, this::tryDeleteEmptyDirectory, bucketDirs);
+
+        // Clean partition directory individually to avoiding conflicts
+        Set<Path> partitionDirs =
+                bucketDirs.stream().map(Path::getParent).collect(Collectors.toSet());
+        tryCleanDataDirectory(partitionDirs, partitionKeysNum);
     }
 
     private void collectWithoutDataFile(
@@ -211,7 +240,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             @Nullable String tableName,
             long olderThanMillis,
             SerializableConsumer<Path> fileCleaner,
-            @Nullable Integer parallelism)
+            @Nullable Integer parallelism,
+            boolean dryRun)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         List<String> tableNames = Collections.singletonList(tableName);
         if (tableName == null || "*".equals(tableName)) {
@@ -240,7 +270,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
             orphanFilesCleans.add(
                     new LocalOrphanFilesClean(
-                            (FileStoreTable) table, olderThanMillis, fileCleaner));
+                            (FileStoreTable) table, olderThanMillis, fileCleaner, dryRun));
         }
 
         return orphanFilesCleans;
@@ -252,7 +282,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             @Nullable String tableName,
             long olderThanMillis,
             SerializableConsumer<Path> fileCleaner,
-            @Nullable Integer parallelism)
+            @Nullable Integer parallelism,
+            boolean dryRun)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         List<LocalOrphanFilesClean> tableCleans =
                 createOrphanFilesCleans(
@@ -261,7 +292,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         tableName,
                         olderThanMillis,
                         fileCleaner,
-                        parallelism);
+                        parallelism,
+                        dryRun);
 
         ExecutorService executorService =
                 Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());

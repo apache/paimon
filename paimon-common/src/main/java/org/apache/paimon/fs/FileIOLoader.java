@@ -20,6 +20,7 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 
+import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
 
@@ -29,7 +30,7 @@ import java.util.List;
  * @since 0.4.0
  */
 @Public
-public interface FileIOLoader {
+public interface FileIOLoader extends Serializable {
 
     String getScheme();
 

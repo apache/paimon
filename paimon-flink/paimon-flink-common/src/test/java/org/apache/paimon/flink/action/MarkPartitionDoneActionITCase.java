@@ -22,8 +22,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.sink.partition.MockCustomPartitionMarkDoneAction;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
+import org.apache.paimon.partition.actions.HttpReportMarkDoneAction;
 import org.apache.paimon.partition.file.SuccessFile;
+import org.apache.paimon.rest.TestHttpWebServer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
@@ -31,6 +32,9 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -39,10 +43,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
+import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_CUSTOM_CLASS;
+import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.CUSTOM;
+import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.HTTP_REPORT;
+import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.SUCCESS_FILE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link MarkPartitionDoneAction}. */
@@ -158,10 +167,8 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
     @MethodSource("testArguments")
     public void testCustomPartitionMarkDoneAction(boolean hasPk, String invoker) throws Exception {
 
-        Map<String, String> options = new HashMap<>();
-        options.put(
-                PARTITION_MARK_DONE_ACTION.key(),
-                PartitionMarkDoneAction.SUCCESS_FILE + "," + PartitionMarkDoneAction.CUSTOM);
+        Map<String, String> options = new HashMap<>(2);
+        options.put(PARTITION_MARK_DONE_ACTION.key(), SUCCESS_FILE + "," + CUSTOM);
         options.put(
                 PARTITION_MARK_DONE_CUSTOM_CLASS.key(),
                 MockCustomPartitionMarkDoneAction.class.getName());
@@ -211,6 +218,96 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
         assertThat(MockCustomPartitionMarkDoneAction.getMarkedDonePartitions())
                 .containsExactlyInAnyOrder("partKey0=0/partKey1=1/", "partKey0=1/partKey1=0/");
+    }
+
+    @ParameterizedTest
+    @MethodSource("testArguments")
+    public void testHttpReportPartitionMarkDoneAction(boolean hasPk, String invoker)
+            throws Exception {
+
+        TestHttpWebServer server = new TestHttpWebServer("");
+        server.start();
+        try {
+            Map<String, String> options = new HashMap<>();
+            options.put(PARTITION_MARK_DONE_ACTION.key(), SUCCESS_FILE + "," + HTTP_REPORT);
+            options.put(PARTITION_MARK_DONE_ACTION_URL.key(), server.getBaseUrl());
+
+            FileStoreTable table = prepareTable(hasPk, options);
+
+            String expectResponse = "{\"result\":\"success\"}";
+            server.enqueueResponse(expectResponse, 200);
+            server.enqueueResponse(expectResponse, 200);
+
+            switch (invoker) {
+                case "action":
+                    createAction(
+                                    MarkPartitionDoneAction.class,
+                                    "mark_partition_done",
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database,
+                                    "--table",
+                                    tableName,
+                                    "--partition",
+                                    "partKey0=0,partKey1=1",
+                                    "--partition",
+                                    "partKey0=1,partKey1=0")
+                            .run();
+                    break;
+                case "procedure_indexed":
+                    executeSQL(
+                            String.format(
+                                    "CALL sys.mark_partition_done('%s.%s', 'partKey0=0,partKey1=1;partKey0=1,partKey1=0')",
+                                    database, tableName));
+                    break;
+                case "procedure_named":
+                    executeSQL(
+                            String.format(
+                                    "CALL sys.mark_partition_done(`table` => '%s.%s', partitions => 'partKey0=0,partKey1=1;partKey0=1,partKey1=0')",
+                                    database, tableName));
+                    break;
+                default:
+                    throw new UnsupportedOperationException(invoker);
+            }
+
+            Path successPath1 = new Path(table.location(), "partKey0=0/partKey1=1/_SUCCESS");
+            SuccessFile successFile1 = SuccessFile.safelyFromPath(table.fileIO(), successPath1);
+            assertThat(successFile1).isNotNull();
+
+            Path successPath2 = new Path(table.location(), "partKey0=1/partKey1=0/_SUCCESS");
+            SuccessFile successFile2 = SuccessFile.safelyFromPath(table.fileIO(), successPath2);
+            assertThat(successFile2).isNotNull();
+
+            RecordedRequest recordedRequest = server.takeRequest(10, TimeUnit.SECONDS);
+            RecordedRequest recordedRequest2 = server.takeRequest(10, TimeUnit.SECONDS);
+
+            assertRequest(server, table, recordedRequest, "partKey0=0/partKey1=1/");
+            assertRequest(server, table, recordedRequest2, "partKey0=1/partKey1=0/");
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            server.stop();
+        }
+    }
+
+    public static void assertRequest(
+            TestHttpWebServer server,
+            FileStoreTable table,
+            RecordedRequest recordedRequest,
+            String exceptPartition)
+            throws JsonProcessingException {
+        String requestBody = recordedRequest.getBody().readUtf8();
+        HttpReportMarkDoneAction.HttpReportMarkDoneRequest request =
+                server.readRequestBody(
+                        requestBody, HttpReportMarkDoneAction.HttpReportMarkDoneRequest.class);
+
+        assertThat(
+                        request.getPath().equals(table.location().toString())
+                                && request.getPartition().equals(exceptPartition)
+                                && request.getTable().equals(table.fullName()))
+                .isTrue();
     }
 
     private FileStoreTable prepareTable(boolean hasPk) throws Exception {

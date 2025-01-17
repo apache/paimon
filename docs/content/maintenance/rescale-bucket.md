@@ -116,7 +116,7 @@ The pipeline has been running well for the past few weeks. However, the data vol
 and the job's latency keeps increasing. To improve the data freshness, users can 
 - Suspend the streaming job with a savepoint ( see 
   [Suspended State](https://nightlies.apache.org/flink/flink-docs-stable/docs/internals/job_scheduling/) and 
-  [Stopping a Job Gracefully Creating a Final Savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/cli/) )
+  [Stopping a Job Gracefully Creating a Final Savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/cli/#terminating-a-job) )
   ```bash
   $ ./bin/flink stop \
         --savepointPath /tmp/flink-savepoints \
