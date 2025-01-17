@@ -24,6 +24,7 @@ import org.apache.paimon.options.CatalogOptions;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -31,12 +32,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * selects the appropriate {@link FileIO} based on the URI scheme of the given path.
  */
 public class ResolvingFileIO implements FileIO {
+
     private static final long serialVersionUID = 1L;
 
-    private CatalogContext context;
+    private final Map<CacheKey, FileIO> fileIOMap = new ConcurrentHashMap<>();
 
-    private Map<String, FileIO> fileIOMap;
-    private volatile FileIO fallbackFileIO;
+    private CatalogContext context;
 
     // TODO, how to decide the real fileio is object store or not?
     @Override
@@ -55,7 +56,6 @@ public class ResolvingFileIO implements FileIO {
     @Override
     public void configure(CatalogContext context) {
         this.context = context;
-        this.fileIOMap = new ConcurrentHashMap<>();
     }
 
     @Override
@@ -100,27 +100,16 @@ public class ResolvingFileIO implements FileIO {
 
     @VisibleForTesting
     public FileIO fileIO(Path path) throws IOException {
-        String scheme = path.toUri().getScheme();
-        if (scheme == null) {
-            if (fallbackFileIO == null) {
-                synchronized (this) {
-                    if (fallbackFileIO == null) {
-                        fallbackFileIO = FileIO.get(path, context);
+        CacheKey cacheKey = new CacheKey(path.toUri().getScheme(), path.toUri().getAuthority());
+        return fileIOMap.computeIfAbsent(
+                cacheKey,
+                k -> {
+                    try {
+                        return FileIO.get(path, context);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
                     }
-                }
-            }
-            return fallbackFileIO;
-        }
-
-        if (!fileIOMap.containsKey(scheme)) {
-            synchronized (this) {
-                if (!fileIOMap.containsKey(scheme)) {
-                    FileIO fileIO = FileIO.get(path, context);
-                    fileIOMap.put(scheme, fileIO);
-                }
-            }
-        }
-        return fileIOMap.get(scheme);
+                });
     }
 
     private <T> T wrap(Func<T> func) throws IOException {
@@ -137,5 +126,33 @@ public class ResolvingFileIO implements FileIO {
     @FunctionalInterface
     protected interface Func<T> {
         T apply() throws IOException;
+    }
+
+    private static class CacheKey {
+        private final String scheme;
+        private final String authority;
+
+        private CacheKey(String scheme, String authority) {
+            this.scheme = scheme;
+            this.authority = authority;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            CacheKey cacheKey = (CacheKey) o;
+            return Objects.equals(scheme, cacheKey.scheme)
+                    && Objects.equals(authority, cacheKey.authority);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(scheme, authority);
+        }
     }
 }
