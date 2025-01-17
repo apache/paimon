@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.CatalogOptions;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -128,7 +129,7 @@ public class ResolvingFileIO implements FileIO {
         T apply() throws IOException;
     }
 
-    private static class CacheKey {
+    private static class CacheKey implements Serializable {
         private final String scheme;
         private final String authority;
 
