@@ -42,6 +42,9 @@ public class ResolvingFileIO implements FileIO {
     @Override
     public boolean isObjectStore() {
         String warehouse = context.options().get(CatalogOptions.WAREHOUSE);
+        if (warehouse == null) {
+            return false;
+        }
         Path path = new Path(warehouse);
         String scheme = path.toUri().getScheme();
         return scheme != null
