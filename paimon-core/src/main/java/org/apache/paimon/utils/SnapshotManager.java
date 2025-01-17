@@ -164,8 +164,8 @@ public class SnapshotManager implements Serializable {
     }
 
     private @Nullable Snapshot tryGetEarliestSnapshotLaterThanOrEqualTo(
-            long snapshotId, long stopId) {
-        while (snapshotId <= stopId) {
+            long snapshotId, long stopSnapshotId) {
+        while (snapshotId <= stopSnapshotId) {
             try {
                 return tryGetSnapshot(snapshotId);
             } catch (FileNotFoundException e) {
@@ -230,17 +230,21 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Long latest = null;
+        Long latestSnapshotId = null;
         do {
             try {
                 return tryGetSnapshot(snapshotId);
             } catch (FileNotFoundException e) {
+                LOG.warn(
+                        "The earliest snapshot was once identified but disappeared. "
+                                + "It might have been expired by other jobs operating on this table. "
+                                + "Searching for the second earliest snapshot instead. ");
                 snapshotId++;
-                if (latest == null) {
-                    latest = latestSnapshotId();
+                if (latestSnapshotId == null) {
+                    latestSnapshotId = latestSnapshotId();
                 }
             }
-        } while (latest != null && snapshotId <= latest);
+        } while (latestSnapshotId != null && snapshotId <= latestSnapshotId);
 
         return null;
     }
@@ -317,8 +321,8 @@ public class SnapshotManager implements Serializable {
         Long earliestSnapshotId = earliestSnapshotId();
         Long earliest;
         if (startFromChangelog) {
-            Long earliestChangelog = earliestLongLivedChangelogId();
-            earliest = earliestChangelog == null ? earliestSnapshotId : earliestChangelog;
+            Long earliestChangelogId = earliestLongLivedChangelogId();
+            earliest = earliestChangelogId == null ? earliestSnapshotId : earliestChangelogId;
         } else {
             earliest = earliestSnapshotId;
         }
@@ -333,6 +337,10 @@ public class SnapshotManager implements Serializable {
                 earliestSnapshot = tryGetChangelogOrSnapshot(earliest);
                 break;
             } catch (FileNotFoundException e) {
+                LOG.warn(
+                        "The earliest snapshot or changelog was once identified but disappeared. "
+                                + "It might have been expired by other jobs operating on this table. "
+                                + "Searching for the second earliest snapshot or changelog instead. ");
                 earliest++;
             }
         }
