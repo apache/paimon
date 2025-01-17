@@ -31,6 +31,8 @@ import java.util.List;
 /** A {@link PluginLoader} to load oss. */
 public class S3Loader implements FileIOLoader {
 
+    private static final long serialVersionUID = 1L;
+
     private static final String S3_CLASSES_DIR = "paimon-plugin-s3";
 
     private static final String S3_CLASS = "org.apache.paimon.s3.S3FileIO";

@@ -24,6 +24,8 @@ import org.apache.paimon.fs.Path;
 /** {@link FileIOLoader} to load {@link HadoopFileIO}. */
 public class HadoopFileIOLoader implements FileIOLoader {
 
+    private static final long serialVersionUID = 1L;
+
     @Override
     public String getScheme() {
         return "hdfs";
