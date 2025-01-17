@@ -56,13 +56,13 @@ public class DataTableSource extends BaseDataTableSource
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
             Table table,
-            boolean streaming,
+            boolean unbounded,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this(
                 tableIdentifier,
                 table,
-                streaming,
+                unbounded,
                 context,
                 logStoreTableFactory,
                 null,
@@ -76,7 +76,7 @@ public class DataTableSource extends BaseDataTableSource
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
             Table table,
-            boolean streaming,
+            boolean unbounded,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
@@ -88,7 +88,7 @@ public class DataTableSource extends BaseDataTableSource
         super(
                 tableIdentifier,
                 table,
-                streaming,
+                unbounded,
                 context,
                 logStoreTableFactory,
                 predicate,
@@ -104,7 +104,7 @@ public class DataTableSource extends BaseDataTableSource
         return new DataTableSource(
                 tableIdentifier,
                 table,
-                streaming,
+                unbounded,
                 context,
                 logStoreTableFactory,
                 predicate,
@@ -117,7 +117,7 @@ public class DataTableSource extends BaseDataTableSource
 
     @Override
     public TableStats reportStatistics() {
-        if (streaming) {
+        if (unbounded) {
             return TableStats.UNKNOWN;
         }
         Optional<Statistics> optionStatistics = table.statistics();
@@ -142,13 +142,13 @@ public class DataTableSource extends BaseDataTableSource
     @Override
     public List<String> listAcceptedFilterFields() {
         // note that streaming query doesn't support dynamic filtering
-        return streaming ? Collections.emptyList() : table.partitionKeys();
+        return unbounded ? Collections.emptyList() : table.partitionKeys();
     }
 
     @Override
     public void applyDynamicFiltering(List<String> candidateFilterFields) {
         checkState(
-                !streaming,
+                !unbounded,
                 "Cannot apply dynamic filtering to Paimon table '%s' when streaming reading.",
                 table.name());
 
