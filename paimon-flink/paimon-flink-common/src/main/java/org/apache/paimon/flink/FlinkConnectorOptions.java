@@ -444,6 +444,14 @@ public class FlinkConnectorOptions {
                                     + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
                                     + "automatically generate the operator uid, which may be incompatible when the topology changes.");
 
+    public static final ConfigOption<Boolean> SCAN_BOUNDED =
+            key("scan.bounded")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Bounded mode for Paimon consumer. "
+                                    + "By default, Paimon automatically selects bounded mode based on the mode of the Flink job.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

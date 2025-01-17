@@ -25,6 +25,8 @@ import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SnapshotNotExistException;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -634,6 +636,20 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM parquet_row_timestamp"))
                 .containsExactly(
                         Row.of(Row.of(DateTimeUtils.toLocalDateTime("2024-11-13 18:00:00", 0))));
+    }
+
+    @Test
+    public void testScanBounded() {
+        sql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+        List<Row> result;
+        try (CloseableIterator<Row> iter =
+                sEnv.executeSql("SELECT * FROM T /*+ OPTIONS('scan.bounded'='true') */")
+                        .collect()) {
+            result = ImmutableList.copyOf(iter);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
     }
 
     private void validateCount1PushDown(String sql) {
