@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.orc;
+package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
@@ -31,17 +31,17 @@ import java.io.Serializable;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Utility class to make a {@link Configuration Hadoop Configuration} serializable. */
-public final class SerializableHadoopConfigWrapper implements Serializable {
+public final class SerializableHadoopConfig implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private transient Configuration hadoopConfig;
 
-    public SerializableHadoopConfigWrapper(Configuration hadoopConfig) {
+    public SerializableHadoopConfig(Configuration hadoopConfig) {
         this.hadoopConfig = checkNotNull(hadoopConfig);
     }
 
-    public Configuration getHadoopConfig() {
+    public Configuration get() {
         return hadoopConfig;
     }
 
@@ -49,11 +49,7 @@ public final class SerializableHadoopConfigWrapper implements Serializable {
 
     private void writeObject(ObjectOutputStream out) throws IOException {
         out.defaultWriteObject();
-
-        // we write the Hadoop config through a separate serializer to avoid cryptic exceptions when
-        // it
-        // corrupts the serialization stream
-        final DataOutputSerializer ser = new DataOutputSerializer(256);
+        DataOutputSerializer ser = new DataOutputSerializer(256);
         hadoopConfig.write(ser);
         out.writeInt(ser.length());
         out.write(ser.getSharedBuffer(), 0, ser.length());
@@ -62,13 +58,13 @@ public final class SerializableHadoopConfigWrapper implements Serializable {
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         in.defaultReadObject();
 
-        final byte[] data = new byte[in.readInt()];
+        byte[] data = new byte[in.readInt()];
         in.readFully(data);
-        final DataInputDeserializer deser = new DataInputDeserializer(data);
-        this.hadoopConfig = new Configuration();
+        DataInputDeserializer deserializer = new DataInputDeserializer(data);
+        this.hadoopConfig = new Configuration(false);
 
         try {
-            this.hadoopConfig.readFields(deser);
+            this.hadoopConfig.readFields(deserializer);
         } catch (IOException e) {
             throw new IOException(
                     "Could not deserialize Hadoop Configuration, the serialized and de-serialized don't match.",
