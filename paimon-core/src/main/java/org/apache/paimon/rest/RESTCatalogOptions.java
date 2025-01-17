@@ -32,7 +32,6 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
 
-    // default same with iceberg 3min
     public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
             ConfigOptions.key("rest.client.connection-timeout")
                     .durationType()
