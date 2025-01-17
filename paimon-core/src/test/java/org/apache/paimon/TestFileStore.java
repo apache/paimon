@@ -58,6 +58,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
@@ -645,16 +646,11 @@ public class TestFileStore extends KeyValueFileStore {
                         .flatMap(m -> manifestFile.read(m.fileName()).stream())
                         .collect(Collectors.toList());
         entries = new ArrayList<>(FileEntry.mergeEntries(entries));
-        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap = new HashMap<>();
+        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
 
         for (ManifestEntry entry : entries) {
-            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
             DataFilePathFactory dataFilePathFactory =
-                    dataFilePathFactoryMap.computeIfAbsent(
-                            bucket,
-                            b ->
-                                    pathFactory.createDataFilePathFactory(
-                                            entry.partition(), entry.bucket()));
+                    factories.get(entry.partition(), entry.bucket());
             result.add(dataFilePathFactory.toPath(entry));
         }
 
@@ -674,13 +670,8 @@ public class TestFileStore extends KeyValueFileStore {
                 if (entry.kind() == FileKind.DELETE
                         && entry.file().fileSource().orElse(FileSource.APPEND)
                                 == FileSource.APPEND) {
-                    Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
                     DataFilePathFactory dataFilePathFactory =
-                            dataFilePathFactoryMap.computeIfAbsent(
-                                    bucket,
-                                    b ->
-                                            pathFactory.createDataFilePathFactory(
-                                                    entry.partition(), entry.bucket()));
+                            factories.get(entry.partition(), entry.bucket());
                     result.add(dataFilePathFactory.toPath(entry));
                 }
             }

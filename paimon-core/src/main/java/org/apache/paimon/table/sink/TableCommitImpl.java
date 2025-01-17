@@ -20,7 +20,6 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -31,8 +30,8 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.tag.TagAutoManager;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -246,19 +245,13 @@ public class TableCommitImpl implements InnerTableCommit {
 
     private void checkFilesExistence(List<ManifestCommittable> committables) {
         List<Path> files = new ArrayList<>();
-        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> factoryMap = new HashMap<>();
+        DataFilePathFactories factories = new DataFilePathFactories(commit.pathFactory());
         PathFactory indexFileFactory = commit.pathFactory().indexFileFactory();
         for (ManifestCommittable committable : committables) {
             for (CommitMessage message : committable.fileCommittables()) {
                 CommitMessageImpl msg = (CommitMessageImpl) message;
                 DataFilePathFactory pathFactory =
-                        factoryMap.computeIfAbsent(
-                                Pair.of(message.partition(), message.bucket()),
-                                k ->
-                                        commit.pathFactory()
-                                                .createDataFilePathFactory(
-                                                        k.getKey(), k.getValue()));
-
+                        factories.get(message.partition(), message.bucket());
                 Consumer<DataFileMeta> collector = f -> files.addAll(f.collectFiles(pathFactory));
                 msg.newFilesIncrement().newFiles().forEach(collector);
                 msg.newFilesIncrement().changelogFiles().forEach(collector);
