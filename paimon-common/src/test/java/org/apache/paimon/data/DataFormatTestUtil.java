@@ -20,6 +20,8 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
@@ -62,6 +64,79 @@ public class DataFormatTestUtil {
             }
         }
         return build.toString();
+    }
+
+    /** Stringify the given {@link InternalRow} with ArrayType, RowType and MapType. */
+    public static String toStringWithRowKind(InternalRow row, RowType type) {
+        StringBuilder build = new StringBuilder();
+        for (int i = 0; i < type.getFieldCount(); i++) {
+            if (i != 0) {
+                build.append(", ");
+            }
+            if (row.isNullAt(i)) {
+                build.append("NULL");
+            } else {
+                InternalRow.FieldGetter fieldGetter =
+                        InternalRow.createFieldGetter(type.getTypeAt(i), i);
+                Object field = fieldGetter.getFieldOrNull(row);
+                build.append(getDataFieldString(field, type.getTypeAt(i)));
+            }
+        }
+        return build.toString();
+    }
+
+    /** Stringify the given field, including ArrayType, RowType and MapType. */
+    public static String getDataFieldString(Object field, DataType type) {
+        if (field instanceof byte[]) {
+            return Arrays.toString((byte[]) field);
+        } else if (field instanceof InternalArray) {
+            InternalArray internalArray = (InternalArray) field;
+            ArrayType arrayType = (ArrayType) type;
+            InternalArray.ElementGetter elementGetter =
+                    InternalArray.createElementGetter(arrayType.getElementType());
+            String[] result = new String[internalArray.size()];
+            for (int j = 0; j < internalArray.size(); j++) {
+                Object object = elementGetter.getElementOrNull(internalArray, j);
+                result[j] =
+                        null == object
+                                ? null
+                                : getDataFieldString(object, arrayType.getElementType());
+            }
+            return Arrays.toString(result);
+        } else if (field instanceof InternalRow) {
+            return String.format("(%s)", toStringWithRowKind((InternalRow) field, (RowType) type));
+        } else if (field instanceof InternalMap) {
+            InternalMap internalMap = (InternalMap) field;
+            MapType mapType = (MapType) type;
+
+            InternalArray keyArray = internalMap.keyArray();
+            InternalArray.ElementGetter keyElementGetter =
+                    InternalArray.createElementGetter(mapType.getKeyType());
+            InternalArray valueArray = internalMap.valueArray();
+            InternalArray.ElementGetter valueElementGetter =
+                    InternalArray.createElementGetter(mapType.getValueType());
+
+            StringBuilder mapBuild = new StringBuilder();
+            mapBuild.append("{");
+            for (int j = 0; j < internalMap.size(); j++) {
+                if (j != 0) {
+                    mapBuild.append(", ");
+                }
+                mapBuild.append(
+                                getDataFieldString(
+                                        keyElementGetter.getElementOrNull(keyArray, j),
+                                        mapType.getKeyType()))
+                        .append("=")
+                        .append(
+                                getDataFieldString(
+                                        valueElementGetter.getElementOrNull(valueArray, j),
+                                        mapType.getValueType()));
+            }
+            mapBuild.append("}");
+            return mapBuild.toString();
+        } else {
+            return field.toString();
+        }
     }
 
     /** Stringify the given {@link InternalRow}. */

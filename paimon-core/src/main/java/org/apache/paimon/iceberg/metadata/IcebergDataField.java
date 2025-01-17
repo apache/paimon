@@ -43,6 +43,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -71,6 +72,7 @@ public class IcebergDataField {
     private final boolean required;
 
     @JsonProperty(FIELD_TYPE)
+    @JsonDeserialize(using = IcebergDataTypeDeserializer.class)
     private final Object type;
 
     @JsonIgnore private DataType dataType;
@@ -138,7 +140,8 @@ public class IcebergDataField {
         if (dataType != null) {
             return dataType;
         }
-        dataType = getDataTypeFromType();
+
+        dataType = getDataTypeFromType(type, required);
         return Preconditions.checkNotNull(dataType);
     }
 
@@ -203,63 +206,91 @@ public class IcebergDataField {
         }
     }
 
-    private DataType getDataTypeFromType() {
-        String simpleType = type.toString();
-        String delimiter = "(";
-        if (simpleType.contains("[")) {
-            delimiter = "[";
-        }
-        String typePrefix =
-                !simpleType.contains(delimiter)
-                        ? simpleType
-                        : simpleType.substring(0, simpleType.indexOf(delimiter));
-        switch (typePrefix) {
-            case "boolean":
-                return new BooleanType(!required);
-            case "int":
-                return new IntType(!required);
-            case "long":
-                return new BigIntType(!required);
-            case "float":
-                return new FloatType(!required);
-            case "double":
-                return new DoubleType(!required);
-            case "date":
-                return new DateType(!required);
-            case "string":
-                return new VarCharType(!required, VarCharType.MAX_LENGTH);
-            case "binary":
-                return new VarBinaryType(!required, VarBinaryType.MAX_LENGTH);
-            case "fixed":
-                int fixedLength =
-                        Integer.parseInt(
-                                simpleType.substring(
-                                        simpleType.indexOf("[") + 1, simpleType.indexOf("]")));
-                return new BinaryType(!required, fixedLength);
-            case "uuid":
-                // https://iceberg.apache.org/spec/?h=vector#primitive-types
-                // uuid should use 16-byte fixed
-                return new BinaryType(!required, 16);
-            case "decimal":
-                int precision =
-                        Integer.parseInt(
-                                simpleType.substring(
-                                        simpleType.indexOf("(") + 1, simpleType.indexOf(",")));
-                int scale =
-                        Integer.parseInt(
-                                simpleType.substring(
-                                        simpleType.indexOf(",") + 2, simpleType.indexOf(")")));
-                return new DecimalType(!required, precision, scale);
-            case "timestamp":
-                return new TimestampType(!required, 6);
-            case "timestamptz":
-                return new LocalZonedTimestampType(!required, 6);
-            case "timestamp_ns": // iceberg v3 format
-                return new TimestampType(!required, 9);
-            case "timestamptz_ns": // iceberg v3 format
-                return new LocalZonedTimestampType(!required, 9);
-            default:
-                throw new UnsupportedOperationException("Unsupported data type: " + type);
+    private DataType getDataTypeFromType(Object icebergType, boolean isRequired) {
+        if (icebergType instanceof String) {
+            // for primitive type
+            String simpleType = icebergType.toString();
+            String delimiter = "(";
+            if (simpleType.contains("[")) {
+                delimiter = "[";
+            }
+            String typePrefix =
+                    !simpleType.contains(delimiter)
+                            ? simpleType
+                            : simpleType.substring(0, simpleType.indexOf(delimiter));
+            switch (typePrefix) {
+                case "boolean":
+                    return new BooleanType(!isRequired);
+                case "int":
+                    return new IntType(!isRequired);
+                case "long":
+                    return new BigIntType(!isRequired);
+                case "float":
+                    return new FloatType(!isRequired);
+                case "double":
+                    return new DoubleType(!isRequired);
+                case "date":
+                    return new DateType(!isRequired);
+                case "string":
+                    return new VarCharType(!isRequired, VarCharType.MAX_LENGTH);
+                case "binary":
+                    return new VarBinaryType(!isRequired, VarBinaryType.MAX_LENGTH);
+                case "fixed":
+                    int fixedLength =
+                            Integer.parseInt(
+                                    simpleType.substring(
+                                            simpleType.indexOf("[") + 1, simpleType.indexOf("]")));
+                    return new BinaryType(!isRequired, fixedLength);
+                case "uuid":
+                    // https://iceberg.apache.org/spec/?h=vector#primitive-types
+                    // uuid should use 16-byte fixed
+                    return new BinaryType(!isRequired, 16);
+                case "decimal":
+                    int precision =
+                            Integer.parseInt(
+                                    simpleType.substring(
+                                            simpleType.indexOf("(") + 1, simpleType.indexOf(",")));
+                    int scale =
+                            Integer.parseInt(
+                                    simpleType.substring(
+                                            simpleType.indexOf(",") + 2, simpleType.indexOf(")")));
+                    return new DecimalType(!isRequired, precision, scale);
+                case "timestamp":
+                    return new TimestampType(!isRequired, 6);
+                case "timestamptz":
+                    return new LocalZonedTimestampType(!isRequired, 6);
+                case "timestamp_ns": // iceberg v3 format
+                    return new TimestampType(!isRequired, 9);
+                case "timestamptz_ns": // iceberg v3 format
+                    return new LocalZonedTimestampType(!isRequired, 9);
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported primitive data type: " + icebergType);
+            }
+        } else {
+            // for nested type
+            if (icebergType instanceof IcebergListType) {
+                IcebergListType listType = (IcebergListType) icebergType;
+                return new ArrayType(
+                        !isRequired,
+                        getDataTypeFromType(listType.element(), !listType.elementRequired()));
+            } else if (icebergType instanceof IcebergMapType) {
+                IcebergMapType mapType = (IcebergMapType) icebergType;
+                return new MapType(
+                        !isRequired,
+                        getDataTypeFromType(mapType.key(), true),
+                        getDataTypeFromType(mapType.value(), !mapType.valueRequired()));
+            } else if (icebergType instanceof IcebergStructType) {
+                IcebergStructType structType = (IcebergStructType) icebergType;
+                return new RowType(
+                        !isRequired,
+                        structType.fields().stream()
+                                .map(IcebergDataField::toDatafield)
+                                .collect(Collectors.toList()));
+            } else {
+                throw new UnsupportedOperationException(
+                        "Unsupported nested data type: " + icebergType.getClass());
+            }
         }
     }
 
