@@ -21,7 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.HybridFileIO;
+import org.apache.paimon.fs.LaziedFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
@@ -37,7 +37,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class FileStoreTableFactory {
 
     public static FileStoreTable create(CatalogContext context) {
-        FileIO fileIO = new HybridFileIO();
+        FileIO fileIO = new LaziedFileIO();
         fileIO.configure(context);
         return create(fileIO, context.options());
     }

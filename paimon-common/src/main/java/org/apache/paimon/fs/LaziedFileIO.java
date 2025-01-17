@@ -20,20 +20,20 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.options.CatalogOptions;
 
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * A hybrid implementation of {@link FileIO} that supports multiple file system schemas. It
+ * A lazy implementation of {@link FileIO} that supports multiple file system schemas. It
  * dynamically selects the appropriate {@link FileIO} based on the URI scheme of the given path.
  */
-public class HybridFileIO implements FileIO {
+public class LaziedFileIO implements FileIO {
     private static final long serialVersionUID = 1L;
 
-    private Options options;
+    private CatalogContext context;
 
     private Map<String, FileIO> fileIOMap;
     private volatile FileIO fallbackFileIO;
@@ -41,12 +41,17 @@ public class HybridFileIO implements FileIO {
     // TODO, how to decide the real fileio is object store or not?
     @Override
     public boolean isObjectStore() {
-        return false;
+        String warehouse = context.options().get(CatalogOptions.WAREHOUSE);
+        Path path = new Path(warehouse);
+        String scheme = path.toUri().getScheme();
+        return scheme != null
+                && !scheme.equalsIgnoreCase("file")
+                && !scheme.equalsIgnoreCase("hdfs");
     }
 
     @Override
     public void configure(CatalogContext context) {
-        this.options = context.options();
+        this.context = context;
         this.fileIOMap = new ConcurrentHashMap<>();
     }
 
@@ -97,8 +102,7 @@ public class HybridFileIO implements FileIO {
             if (fallbackFileIO == null) {
                 synchronized (this) {
                     if (fallbackFileIO == null) {
-                        CatalogContext catalogContext = CatalogContext.create(options);
-                        fallbackFileIO = FileIO.get(path, catalogContext);
+                        fallbackFileIO = FileIO.get(path, context);
                     }
                 }
             }
@@ -108,8 +112,7 @@ public class HybridFileIO implements FileIO {
         if (!fileIOMap.containsKey(scheme)) {
             synchronized (this) {
                 if (!fileIOMap.containsKey(scheme)) {
-                    CatalogContext catalogContext = CatalogContext.create(options);
-                    FileIO fileIO = FileIO.get(path, catalogContext);
+                    FileIO fileIO = FileIO.get(path, context);
                     fileIOMap.put(scheme, fileIO);
                 }
             }
@@ -120,7 +123,7 @@ public class HybridFileIO implements FileIO {
     private <T> T wrap(Func<T> func) throws IOException {
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         try {
-            Thread.currentThread().setContextClassLoader(HybridFileIO.class.getClassLoader());
+            Thread.currentThread().setContextClassLoader(LaziedFileIO.class.getClassLoader());
             return func.apply();
         } finally {
             Thread.currentThread().setContextClassLoader(cl);
