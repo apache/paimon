@@ -28,8 +28,8 @@ import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Pair;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,15 +80,10 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
         }
 
         Set<Path> dataFileToDelete = new HashSet<>();
-        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap = new HashMap<>();
+        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
         for (ExpireFileEntry entry : manifestEntries) {
-            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
             DataFilePathFactory dataFilePathFactory =
-                    dataFilePathFactoryMap.computeIfAbsent(
-                            bucket,
-                            b ->
-                                    pathFactory.createDataFilePathFactory(
-                                            entry.partition(), entry.bucket()));
+                    factories.get(entry.partition(), entry.bucket());
             if (!skipper.test(entry)) {
                 dataFileToDelete.add(dataFilePathFactory.toPath(entry));
                 for (String file : entry.extraFiles()) {

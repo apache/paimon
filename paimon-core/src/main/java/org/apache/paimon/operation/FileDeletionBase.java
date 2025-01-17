@@ -34,6 +34,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileDeletionThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -217,15 +218,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             List<ExpireFileEntry> dataFileEntries) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
-        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap = new HashMap<>();
+        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
         for (ExpireFileEntry entry : dataFileEntries) {
-            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
             DataFilePathFactory dataFilePathFactory =
-                    dataFilePathFactoryMap.computeIfAbsent(
-                            bucket,
-                            b ->
-                                    pathFactory.createDataFilePathFactory(
-                                            entry.partition(), entry.bucket()));
+                    factories.get(entry.partition(), entry.bucket());
             Path dataFilePath = dataFilePathFactory.toPath(entry);
             switch (entry.kind()) {
                 case ADD:
@@ -267,15 +263,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     private void deleteAddedDataFiles(List<ExpireFileEntry> manifestEntries) {
         List<Path> dataFileToDelete = new ArrayList<>();
-        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap = new HashMap<>();
+        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
         for (ExpireFileEntry entry : manifestEntries) {
-            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
             DataFilePathFactory dataFilePathFactory =
-                    dataFilePathFactoryMap.computeIfAbsent(
-                            bucket,
-                            b ->
-                                    pathFactory.createDataFilePathFactory(
-                                            entry.partition(), entry.bucket()));
+                    factories.get(entry.partition(), entry.bucket());
             if (entry.kind() == FileKind.ADD) {
                 dataFileToDelete.add(dataFilePathFactory.toPath(entry));
                 recordDeletionBuckets(entry);

@@ -55,6 +55,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
@@ -447,15 +448,10 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
             Map<String, BinaryRow> removedFiles,
             Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles) {
         boolean isAddOnly = true;
-        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap = new HashMap<>();
+        DataFilePathFactories factories = new DataFilePathFactories(fileStorePathFactory);
         for (ManifestEntry entry : manifestEntries) {
-            Pair<BinaryRow, Integer> bucket = Pair.of(entry.partition(), entry.bucket());
             DataFilePathFactory dataFilePathFactory =
-                    dataFilePathFactoryMap.computeIfAbsent(
-                            bucket,
-                            b ->
-                                    fileStorePathFactory.createDataFilePathFactory(
-                                            entry.partition(), entry.bucket()));
+                    factories.get(entry.partition(), entry.bucket());
             String path = dataFilePathFactory.toPath(entry).toString();
             switch (entry.kind()) {
                 case ADD:
