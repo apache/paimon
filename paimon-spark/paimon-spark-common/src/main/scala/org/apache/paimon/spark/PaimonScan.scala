@@ -162,7 +162,7 @@ case class PaimonScan(
     val partitionKeys = table.partitionKeys().asScala.toSeq
     val partitionFilter = predicates.flatMap {
       case p if SparkV2FilterConverter.isSupportedRuntimeFilter(p, partitionKeys) =>
-        converter.convert(p, ignoreFailure = true)
+        converter.convert(p)
       case _ => None
     }
     if (partitionFilter.nonEmpty) {

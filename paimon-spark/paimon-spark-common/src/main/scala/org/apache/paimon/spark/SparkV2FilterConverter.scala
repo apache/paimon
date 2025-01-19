@@ -37,16 +37,16 @@ case class SparkV2FilterConverter(rowType: RowType) {
 
   val builder = new PredicateBuilder(rowType)
 
-  def convert(sparkPredicate: SparkPredicate, ignoreFailure: Boolean): Option[Predicate] = {
+  def convert(sparkPredicate: SparkPredicate, ignoreFailure: Boolean = true): Option[Predicate] = {
     try {
       Some(convert(sparkPredicate))
     } catch {
       case _ if ignoreFailure => None
-      case e: Exception => throw e
+      case e: Throwable => throw e
     }
   }
 
-  def convert(sparkPredicate: SparkPredicate): Predicate = {
+  private def convert(sparkPredicate: SparkPredicate): Predicate = {
     sparkPredicate.name() match {
       case EQUAL_TO =>
         BinaryPredicate.unapply(sparkPredicate) match {

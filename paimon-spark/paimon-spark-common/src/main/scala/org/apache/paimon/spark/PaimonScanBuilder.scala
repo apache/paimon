@@ -52,7 +52,7 @@ class PaimonScanBuilder(table: Table)
     val visitor = new PartitionPredicateVisitor(table.partitionKeys())
     predicates.foreach {
       predicate =>
-        converter.convert(predicate, ignoreFailure = true) match {
+        converter.convert(predicate) match {
           case Some(paimonPredicate) =>
             pushable.append((predicate, paimonPredicate))
             if (paimonPredicate.visit(visitor)) {

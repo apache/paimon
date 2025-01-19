@@ -92,49 +92,49 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: all types") {
     var filter = "string_col = 'hello'"
-    var actual = converter.convert(v2Filter(filter))
+    var actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(0, BinaryString.fromString("hello"))))
     checkAnswer(sql(s"SELECT string_col from test_tbl WHERE $filter"), Seq(Row("hello")))
     assert(scanFilesCount(filter) == 1)
 
     filter = "byte_col = 1"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(1, 1.toByte)))
     checkAnswer(sql(s"SELECT byte_col from test_tbl WHERE $filter"), Seq(Row(1.toByte)))
     assert(scanFilesCount(filter) == 1)
 
     filter = "short_col = 1"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(2, 1.toShort)))
     checkAnswer(sql(s"SELECT short_col from test_tbl WHERE $filter"), Seq(Row(1.toShort)))
     assert(scanFilesCount(filter) == 1)
 
     filter = "int_col = 1"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(3, 1)))
     checkAnswer(sql(s"SELECT int_col from test_tbl WHERE $filter"), Seq(Row(1)))
     assert(scanFilesCount(filter) == 1)
 
     filter = "long_col = 1"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(4, 1L)))
     checkAnswer(sql(s"SELECT long_col from test_tbl WHERE $filter"), Seq(Row(1L)))
     assert(scanFilesCount(filter) == 1)
 
     filter = "float_col = 1.0"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(5, 1.0f)))
     checkAnswer(sql(s"SELECT float_col from test_tbl WHERE $filter"), Seq(Row(1.0f)))
     assert(scanFilesCount(filter) == 1)
 
     filter = "double_col = 1.0"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(6, 1.0d)))
     checkAnswer(sql(s"SELECT double_col from test_tbl WHERE $filter"), Seq(Row(1.0d)))
     assert(scanFilesCount(filter) == 1)
 
     filter = "decimal_col = 12.12345"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(
       actual.equals(
         builder.equal(7, Decimal.fromBigDecimal(new java.math.BigDecimal("12.12345"), 10, 5))))
@@ -144,13 +144,13 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(scanFilesCount(filter) == 1)
 
     filter = "boolean_col = true"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(8, true)))
     checkAnswer(sql(s"SELECT boolean_col from test_tbl WHERE $filter"), Seq(Row(true), Row(true)))
     assert(scanFilesCount(filter) == 2)
 
     filter = "date_col = date('2025-01-15')"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     val localDate = LocalDate.parse("2025-01-15")
     val epochDay = localDate.toEpochDay.toInt
     assert(actual.equals(builder.equal(9, epochDay)))
@@ -160,9 +160,8 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(scanFilesCount(filter) == 1)
 
     filter = "binary_col = binary('b1')"
-    intercept[UnsupportedOperationException] {
-      actual = converter.convert(v2Filter(filter))
-    }
+    assert(converter.convert(v2Filter(filter)).isEmpty)
+
     checkAnswer(sql(s"SELECT binary_col from test_tbl WHERE $filter"), sql("SELECT binary('b1')"))
     assert(scanFilesCount(filter) == 4)
   }
@@ -177,7 +176,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
         val filter1 = "ts_col = timestamp'2025-01-15 00:00:00.123'"
         val rowType1 = loadTable("ts_tbl").rowType()
         val converter1 = SparkV2FilterConverter(rowType1)
-        val actual1 = converter1.convert(v2Filter(filter1, "ts_tbl"))
+        val actual1 = converter1.convert(v2Filter(filter1, "ts_tbl")).get
         if (treatPaimonTimestampTypeAsSparkTimestampType()) {
           assert(actual1.equals(new PredicateBuilder(rowType1)
             .equal(0, Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-01-15T00:00:00.123")))))
@@ -198,7 +197,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
           val filter2 = "ts_ntz_col = timestamp_ntz'2025-01-15 00:00:00.123'"
           val rowType2 = loadTable("ts_ntz_tbl").rowType()
           val converter2 = SparkV2FilterConverter(rowType2)
-          val actual2 = converter2.convert(v2Filter(filter2, "ts_ntz_tbl"))
+          val actual2 = converter2.convert(v2Filter(filter2, "ts_ntz_tbl")).get
           assert(actual2.equals(new PredicateBuilder(rowType2)
             .equal(0, Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-01-15T00:00:00.123")))))
           checkAnswer(
@@ -212,7 +211,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: EqualTo") {
     val filter = "int_col = 1"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(3, 1)))
     checkAnswer(sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"), Seq(Row(1)))
     assert(scanFilesCount(filter) == 1)
@@ -220,13 +219,13 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: EqualNullSafe") {
     var filter = "int_col <=> 1"
-    var actual = converter.convert(v2Filter(filter))
+    var actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.equal(3, 1)))
     checkAnswer(sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"), Seq(Row(1)))
     assert(scanFilesCount(filter) == 1)
 
     filter = "int_col <=> null"
-    actual = converter.convert(v2Filter(filter))
+    actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.isNull(3)))
     checkAnswer(sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"), Seq(Row(null)))
     assert(scanFilesCount(filter) == 1)
@@ -234,7 +233,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: GreaterThan") {
     val filter = "int_col > 2"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.greaterThan(3, 2)))
     checkAnswer(sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"), Seq(Row(3)))
     assert(scanFilesCount(filter) == 1)
@@ -242,7 +241,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: GreaterThanOrEqual") {
     val filter = "int_col >= 2"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.greaterOrEqual(3, 2)))
     checkAnswer(
       sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"),
@@ -252,7 +251,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: LessThan") {
     val filter = "int_col < 2"
-    val actual = converter.convert(v2Filter("int_col < 2"))
+    val actual = converter.convert(v2Filter("int_col < 2")).get
     assert(actual.equals(builder.lessThan(3, 2)))
     checkAnswer(sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"), Seq(Row(1)))
     assert(scanFilesCount(filter) == 1)
@@ -260,7 +259,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: LessThanOrEqual") {
     val filter = "int_col <= 2"
-    val actual = converter.convert(v2Filter("int_col <= 2"))
+    val actual = converter.convert(v2Filter("int_col <= 2")).get
     assert(actual.equals(builder.lessOrEqual(3, 2)))
     checkAnswer(
       sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col "),
@@ -270,7 +269,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: In") {
     val filter = "int_col IN (1, 2)"
-    val actual = converter.convert(v2Filter("int_col IN (1, 2)"))
+    val actual = converter.convert(v2Filter("int_col IN (1, 2)")).get
     assert(actual.equals(builder.in(3, List(1, 2).map(_.asInstanceOf[AnyRef]).asJava)))
     checkAnswer(
       sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"),
@@ -280,7 +279,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: IsNull") {
     val filter = "int_col IS NULL"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.isNull(3)))
     checkAnswer(sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"), Seq(Row(null)))
     assert(scanFilesCount(filter) == 1)
@@ -288,7 +287,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: IsNotNull") {
     val filter = "int_col IS NOT NULL"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.isNotNull(3)))
     checkAnswer(
       sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"),
@@ -298,7 +297,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: And") {
     val filter = "int_col > 1 AND int_col < 3"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(PredicateBuilder.and(builder.greaterThan(3, 1), builder.lessThan(3, 3))))
     checkAnswer(sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"), Seq(Row(2)))
     assert(scanFilesCount(filter) == 1)
@@ -306,7 +305,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: Or") {
     val filter = "int_col > 2 OR int_col IS NULL"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(PredicateBuilder.or(builder.greaterThan(3, 2), builder.isNull(3))))
     checkAnswer(
       sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"),
@@ -316,7 +315,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: Not") {
     val filter = "NOT (int_col > 2)"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.greaterThan(3, 2).negate().get()))
     checkAnswer(
       sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"),
@@ -326,7 +325,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: StartWith") {
     val filter = "string_col LIKE 'h%'"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.startsWith(0, BinaryString.fromString("h"))))
     checkAnswer(
       sql(s"SELECT string_col from test_tbl WHERE $filter ORDER BY string_col"),
@@ -336,7 +335,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: EndWith") {
     val filter = "string_col LIKE '%o'"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.endsWith(0, BinaryString.fromString("o"))))
     checkAnswer(
       sql(s"SELECT string_col from test_tbl WHERE $filter ORDER BY string_col"),
@@ -347,7 +346,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
 
   test("V2Filter: Contains") {
     val filter = "string_col LIKE '%e%'"
-    val actual = converter.convert(v2Filter(filter))
+    val actual = converter.convert(v2Filter(filter)).get
     assert(actual.equals(builder.contains(0, BinaryString.fromString("e"))))
     checkAnswer(
       sql(s"SELECT string_col from test_tbl WHERE $filter ORDER BY string_col"),
