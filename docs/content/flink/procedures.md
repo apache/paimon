@@ -389,6 +389,31 @@ All available procedures are listed below.
       <td>CALL sys.reset_consumer(`table` => 'default.T', consumer_id => 'myid', next_snapshot_id => cast(10 as bigint))</td>
    </tr>
    <tr>
+      <td>clear_consumers</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.clear_consumers(`table` => 'identifier', including_consumers => 'includingConsumers', excluding_consumers => 'excludingConsumers') <br/><br/>
+         -- Use indexed argument<br/>
+         -- clear all consumers in the table
+         CALL [catalog.]sys.clear_consumers('identifier')
+         -- clear some consumers in the table (accept regular expression)<br/>
+         CALL [catalog.]sys.clear_consumers('tableId', 'includingConsumers')<br/><br/>
+         -- exclude some consumers (accept regular expression)<br/>
+         CALL [catalog.]sys.clear_consumers('tableId', 'consumerIds', 'includingConsumers', 'excludingConsumers')
+      </td>
+      <td>
+         To reset or delete consumer. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>includingConsumers: consumers to be cleared.</li>
+            <li>excludingConsumers: consumers which not to be cleared.</li>
+      </td>
+      <td>CALL sys.clear_consumers(`table` => 'default.T')<br/><br/>
+          CALL sys.clear_consumers(`table` => 'default.T', including_consumers => 'myid.*')<br/><br/>
+          CALL sys.reset_consumer(table => 'default.T', including_consumers => '', excluding_consumers => 'myid1.*')<br/><br/>
+          CALL sys.reset_consumer(table => 'default.T', including_consumers => 'myid.*', excluding_consumers => 'myid1.*')
+     </td>
+   </tr>
+   <tr>
       <td>rollback_to</td>
       <td>
          -- for Flink 1.18<br/>
