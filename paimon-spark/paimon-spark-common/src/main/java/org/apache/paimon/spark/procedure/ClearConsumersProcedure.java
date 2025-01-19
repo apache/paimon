@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -29,26 +30,24 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.regex.Pattern;
 
-import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
  * Clear consumers procedure. Usage:
  *
  * <pre><code>
- *  -- clear all consumers except the specified consumer in the table
- *  CALL sys.clear_consumers('tableId', 'consumerIds', true)
- *
- * -- clear all specified consumers in the table
- *  CALL sys.clear_consumers('tableId', 'consumerIds') or CALL sys.clear_consumers('tableId', 'consumerIds', false)
+ *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- clear all consumers in the table
  *  CALL sys.clear_consumers('tableId')
+ *
+ * -- clear some consumers in the table (accept regular expression)
+ *  CALL sys.clear_consumers('tableId', 'includingConsumers')
+ *
+ * -- exclude some consumers (accept regular expression)
+ *  CALL sys.clear_consumers('tableId', 'consumerIds', 'includingConsumers', 'excludingConsumers')
  * </code></pre>
  */
 public class ClearConsumersProcedure extends BaseProcedure {
@@ -56,8 +55,8 @@ public class ClearConsumersProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("consumerIds", StringType),
-                ProcedureParameter.optional("clearUnspecified", BooleanType)
+                ProcedureParameter.optional("includingConsumers", StringType),
+                ProcedureParameter.optional("excludingConsumers", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -83,8 +82,19 @@ public class ClearConsumersProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String consumerIds = args.isNullAt(1) ? null : args.getString(1);
-        Boolean clearUnspecified = !args.isNullAt(2) && args.getBoolean(2);
+        String includingConsumers = args.isNullAt(1) ? null : args.getString(1);
+        includingConsumers =
+                StringUtils.isNullOrWhitespaceOnly(includingConsumers) ? null : includingConsumers;
+        String excludingConsumers = args.isNullAt(2) ? null : args.getString(2);
+        excludingConsumers =
+                StringUtils.isNullOrWhitespaceOnly(excludingConsumers) ? null : excludingConsumers;
+        Pattern includingPattern =
+                includingConsumers == null
+                        ? Pattern.compile(".*")
+                        : Pattern.compile(includingConsumers);
+        Pattern excludingPattern =
+                excludingConsumers == null ? null : Pattern.compile(excludingConsumers);
+
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
@@ -94,15 +104,7 @@ public class ClearConsumersProcedure extends BaseProcedure {
                                     fileStoreTable.fileIO(),
                                     fileStoreTable.location(),
                                     fileStoreTable.snapshotManager().branch());
-                    if (consumerIds != null) {
-                        List<String> specifiedConsumerIds =
-                                Optional.of(consumerIds)
-                                        .map(s -> Arrays.asList(s.split(",")))
-                                        .orElse(Collections.emptyList());
-                        consumerManager.clearConsumers(specifiedConsumerIds, clearUnspecified);
-                    } else {
-                        consumerManager.clearConsumers(null, null);
-                    }
+                    consumerManager.clearConsumers(includingPattern, excludingPattern);
 
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};

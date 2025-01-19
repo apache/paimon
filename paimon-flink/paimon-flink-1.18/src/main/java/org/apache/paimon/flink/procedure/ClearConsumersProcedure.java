@@ -25,23 +25,22 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Clear consumers procedure. Usage:
  *
  * <pre><code>
- *  -- clear all consumers except the specified consumer in the table
- *  CALL sys.clear_consumers('tableId', 'consumerIds', true)
- *
- * -- clear all specified consumers in the table
- *  CALL sys.clear_consumers('tableId', 'consumerIds') or CALL sys.clear_consumers('tableId', 'consumerIds', false)
+ *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- clear all consumers in the table
  *  CALL sys.clear_consumers('tableId')
+ *
+ * -- clear some consumers in the table (accept regular expression)
+ *  CALL sys.clear_consumers('tableId', 'includingConsumers')
+ *
+ * -- exclude some consumers (accept regular expression)
+ *  CALL sys.clear_consumers('tableId', 'consumerIds', 'includingConsumers', 'excludingConsumers')
  * </code></pre>
  */
 public class ClearConsumersProcedure extends ProcedureBase {
@@ -51,8 +50,8 @@ public class ClearConsumersProcedure extends ProcedureBase {
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
-            String consumerIds,
-            Boolean clearUnspecified)
+            String includingConsumers,
+            String excludingConsumers)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
@@ -61,33 +60,29 @@ public class ClearConsumersProcedure extends ProcedureBase {
                         fileStoreTable.fileIO(),
                         fileStoreTable.location(),
                         fileStoreTable.snapshotManager().branch());
-        List<String> specifiedConsumerIds =
-                Optional.of(consumerIds)
-                        .map(s -> Arrays.asList(s.split(",")))
-                        .orElse(Collections.emptyList());
-        consumerManager.clearConsumers(
-                specifiedConsumerIds, Optional.of(clearUnspecified).orElse(false));
+
+        includingConsumers = nullable(includingConsumers);
+        excludingConsumers = nullable(excludingConsumers);
+        Pattern includingPattern =
+                includingConsumers == null
+                        ? Pattern.compile(".*")
+                        : Pattern.compile(includingConsumers);
+        Pattern excludingPattern =
+                excludingConsumers == null ? null : Pattern.compile(excludingConsumers);
+        consumerManager.clearConsumers(includingPattern, excludingPattern);
 
         return new String[] {"Success"};
     }
 
-    public String[] call(ProcedureContext procedureContext, String tableId, String consumerIds)
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, String includingConsumers)
             throws Catalog.TableNotExistException {
-        return call(procedureContext, tableId, consumerIds, false);
+        return call(procedureContext, tableId, includingConsumers, null);
     }
 
     public String[] call(ProcedureContext procedureContext, String tableId)
             throws Catalog.TableNotExistException {
-        FileStoreTable fileStoreTable =
-                (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
-        ConsumerManager consumerManager =
-                new ConsumerManager(
-                        fileStoreTable.fileIO(),
-                        fileStoreTable.location(),
-                        fileStoreTable.snapshotManager().branch());
-        consumerManager.clearConsumers(null, null);
-
-        return new String[] {"Success"};
+        return call(procedureContext, tableId, null, null);
     }
 
     @Override

@@ -28,23 +28,22 @@ import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Clear consumers procedure. Usage:
  *
  * <pre><code>
- *  -- clear all consumers except the specified consumer in the table
- *  CALL sys.clear_consumers('tableId', 'consumerIds', true)
- *
- * -- clear all specified consumers in the table
- *  CALL sys.clear_consumers('tableId', 'consumerIds') or CALL sys.clear_consumers('tableId', 'consumerIds', false)
+ *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- clear all consumers in the table
  *  CALL sys.clear_consumers('tableId')
+ *
+ * -- clear some consumers in the table (accept regular expression)
+ *  CALL sys.clear_consumers('tableId', 'includingConsumers')
+ *
+ * -- exclude some consumers (accept regular expression)
+ *  CALL sys.clear_consumers('tableId', 'consumerIds', 'includingConsumers', 'excludingConsumers')
  * </code></pre>
  */
 public class ClearConsumersProcedure extends ProcedureBase {
@@ -55,19 +54,19 @@ public class ClearConsumersProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(
-                        name = "consumer_ids",
+                        name = "including_consumers",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
                 @ArgumentHint(
-                        name = "clear_unspecified",
-                        type = @DataTypeHint("BOOLEAN"),
+                        name = "excluding_consumers",
+                        type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
-            String consumerIds,
-            Boolean clearUnspecified)
+            String includingConsumers,
+            String excludingConsumers)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
@@ -76,16 +75,16 @@ public class ClearConsumersProcedure extends ProcedureBase {
                         fileStoreTable.fileIO(),
                         fileStoreTable.location(),
                         fileStoreTable.snapshotManager().branch());
-        if (consumerIds != null) {
-            List<String> specifiedConsumerIds =
-                    Optional.of(consumerIds)
-                            .map(s -> Arrays.asList(s.split(",")))
-                            .orElse(Collections.emptyList());
-            consumerManager.clearConsumers(
-                    specifiedConsumerIds, Optional.ofNullable(clearUnspecified).orElse(false));
-        } else {
-            consumerManager.clearConsumers(null, null);
-        }
+
+        includingConsumers = nullable(includingConsumers);
+        excludingConsumers = nullable(excludingConsumers);
+        Pattern includingPattern =
+                includingConsumers == null
+                        ? Pattern.compile(".*")
+                        : Pattern.compile(includingConsumers);
+        Pattern excludingPattern =
+                excludingConsumers == null ? null : Pattern.compile(excludingConsumers);
+        consumerManager.clearConsumers(includingPattern, excludingPattern);
 
         return new String[] {"Success"};
     }

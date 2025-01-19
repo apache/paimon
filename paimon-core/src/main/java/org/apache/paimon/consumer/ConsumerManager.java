@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
@@ -108,7 +109,7 @@ public class ConsumerManager implements Serializable {
     }
 
     /** Clear consumers. */
-    public void clearConsumers(List<String> consumerIds, Boolean clearUnspecified) {
+    public void clearConsumers(Pattern includingPattern, Pattern excludingPattern) {
         try {
             listVersionedFileStatus(fileIO, consumerDirectory(), CONSUMER_PREFIX)
                     .forEach(
@@ -117,10 +118,16 @@ public class ConsumerManager implements Serializable {
                                         status.getPath()
                                                 .getName()
                                                 .substring(CONSUMER_PREFIX.length());
-                                if (consumerIds == null
-                                        || (!clearUnspecified && consumerIds.contains(consumerName))
-                                        || (clearUnspecified
-                                                && !consumerIds.contains(consumerName))) {
+                                boolean shouldCompaction =
+                                        includingPattern.matcher(consumerName).matches();
+                                if (excludingPattern != null) {
+                                    shouldCompaction =
+                                            shouldCompaction
+                                                    && !excludingPattern
+                                                            .matcher(consumerName)
+                                                            .matches();
+                                }
+                                if (shouldCompaction) {
                                     fileIO.deleteQuietly(status.getPath());
                                 }
                             });
