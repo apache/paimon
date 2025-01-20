@@ -49,7 +49,7 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9084;
+    private static final int PORT = 9087;
 
     @TempDir java.nio.file.Path iceTempDir;
     @TempDir java.nio.file.Path paiTempDir;
