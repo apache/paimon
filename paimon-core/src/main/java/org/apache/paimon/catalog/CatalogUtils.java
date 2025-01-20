@@ -171,6 +171,7 @@ public class CatalogUtils {
     public static Table loadTable(
             Catalog catalog,
             Identifier identifier,
+            FileIO fileIO,
             TableMetadata.Loader metadataLoader,
             SnapshotCommit.Factory commitFactory)
             throws Catalog.TableNotExistException {
@@ -189,12 +190,10 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         identifier, metadata.uuid(), catalog.catalogLoader(), commitFactory);
         Path path = new Path(schema.options().get(PATH.key()));
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                        catalog.fileIO(identifier, path), path, schema, catalogEnv);
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, path, schema, catalogEnv);
 
         if (options.type() == TableType.OBJECT_TABLE) {
-            table = toObjectTable(catalog, identifier, table);
+            table = toObjectTable(catalog, table);
         }
 
         if (identifier.isSystemTable()) {
@@ -266,11 +265,10 @@ public class CatalogUtils {
                 .build();
     }
 
-    private static ObjectTable toObjectTable(
-            Catalog catalog, Identifier identifier, FileStoreTable underlyingTable) {
+    private static ObjectTable toObjectTable(Catalog catalog, FileStoreTable underlyingTable) {
         CoreOptions options = underlyingTable.coreOptions();
         String objectLocation = options.objectLocation();
-        FileIO objectFileIO = catalog.fileIO(identifier, new Path(objectLocation));
+        FileIO objectFileIO = catalog.fileIO(new Path(objectLocation));
         return ObjectTable.builder()
                 .underlyingTable(underlyingTable)
                 .objectLocation(objectLocation)

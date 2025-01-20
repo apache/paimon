@@ -73,9 +73,6 @@ import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Ticker;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.slf4j.Logger;
@@ -114,7 +111,6 @@ public class RESTCatalog implements Catalog {
     private final Options options;
     private final boolean fileIORefreshCredentialEnable;
     private final FileIO fileIO;
-    protected Cache<Path, FileIO> path2FileIO;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
@@ -139,12 +135,6 @@ public class RESTCatalog implements Catalog {
                 options.get(RESTCatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE);
         try {
             if (fileIORefreshCredentialEnable) {
-                path2FileIO =
-                        Caffeine.newBuilder()
-                                .softValues()
-                                .executor(Runnable::run)
-                                .ticker(Ticker.systemTicker())
-                                .build();
                 this.fileIO = null;
             } else {
                 String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
@@ -194,18 +184,13 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public FileIO fileIO(Identifier identifier, Path path) {
-        if (fileIORefreshCredentialEnable) {
-            FileIO pathFileIO = path2FileIO.getIfPresent(path);
-            if (pathFileIO == null) {
-                pathFileIO =
-                        new RefreshCredentialFileIO(
-                                resourcePaths, catalogAuth, options, client, identifier);
-                path2FileIO.put(path, pathFileIO);
-            }
-            return pathFileIO;
+    public FileIO fileIO(Path path) {
+        try {
+            return FileIO.get(path, CatalogContext.create(options));
+        } catch (IOException e) {
+            LOG.warn("Can not get FileIO from options.");
+            throw new RuntimeException(e);
         }
-        return fileIO;
     }
 
     @Override
@@ -321,6 +306,7 @@ public class RESTCatalog implements Catalog {
         return CatalogUtils.loadTable(
                 this,
                 identifier,
+                this.fileIO(identifier),
                 this::loadTableMetadata,
                 new RESTSnapshotCommitFactory(catalogLoader()));
     }
@@ -676,5 +662,13 @@ public class RESTCatalog implements Catalog {
         }
 
         return refreshExecutor;
+    }
+
+    private FileIO fileIO(Identifier identifier) {
+        if (fileIORefreshCredentialEnable) {
+            return new RefreshCredentialFileIO(
+                    resourcePaths, catalogAuth, options, client, identifier);
+        }
+        return fileIO;
     }
 }
