@@ -149,10 +149,4 @@ public class CatalogOptions {
                             "Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. "
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
-
-    public static final ConfigOption<Boolean> FILE_IO_REFRESH_CREDENTIAL_ENABLE =
-            ConfigOptions.key("file-io-refresh-credential.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to support file io refresh credential.");
 }

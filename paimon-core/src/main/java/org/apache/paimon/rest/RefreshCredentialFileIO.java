@@ -36,12 +36,16 @@ import java.util.Map;
 
 /** A {@link FileIO} to support refresh credential. */
 public class RefreshCredentialFileIO implements FileIO {
+
+    private static final long serialVersionUID = 1L;
+
     private final ResourcePaths resourcePaths;
     private final AuthSession catalogAuth;
-    private RESTClient client;
     protected Options options;
-    private Identifier identifier;
+    private final Identifier identifier;
+    private final transient RESTClient client;
     private Date expireAt;
+    private Map<String, String> credential;
     private transient volatile FileIO lazyFileIO;
 
     public RefreshCredentialFileIO(
@@ -59,8 +63,6 @@ public class RefreshCredentialFileIO implements FileIO {
 
     @Override
     public void configure(CatalogContext context) {
-        // Do not get Hadoop Configuration in CatalogOptions
-        // The class is in different classloader from pluginClassLoader!
         this.options = context.options();
     }
 
@@ -119,8 +121,8 @@ public class RefreshCredentialFileIO implements FileIO {
                 if (lazyFileIO == null || shouldRefresh()) {
                     GetTableCredentialsResponse response = getCredential();
                     expireAt = response.getExpiresAt();
-                    Map<String, String> conf =
-                            RESTUtil.merge(options.toMap(), response.getCredential());
+                    credential = response.getCredential();
+                    Map<String, String> conf = RESTUtil.merge(options.toMap(), credential);
                     Options updateCredentialOption = new Options(conf);
                     lazyFileIO =
                             FileIO.get(
