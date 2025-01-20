@@ -134,7 +134,7 @@ public class FileSystemCatalog extends AbstractCatalog {
                 lockFactory
                         .map(factory -> factory.createLock(lockContext().orElse(null)))
                         .map(l -> Lock.fromCatalog(l, identifier))
-                        .orElseGet(() -> Lock.emptyFactory().create())) {
+                        .orElseGet(Lock::empty)) {
             return lock.runWithLock(callable);
         }
     }

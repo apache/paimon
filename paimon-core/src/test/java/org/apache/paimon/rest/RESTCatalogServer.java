@@ -318,7 +318,7 @@ public class RESTCatalogServer {
         FileStoreTable table =
                 (FileStoreTable) catalog.getTable(Identifier.create(databaseName, tableName));
         RenamingSnapshotCommit commit =
-                new RenamingSnapshotCommit(table.snapshotManager(), Lock.emptyFactory().create());
+                new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
         String branchName = requestBody.getIdentifier().getBranchName();
         if (branchName == null) {
             branchName = "main";

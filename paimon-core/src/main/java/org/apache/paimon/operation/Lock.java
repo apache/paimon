@@ -20,13 +20,8 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.CatalogLockContext;
-import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 
-import javax.annotation.Nullable;
-
-import java.io.Serializable;
 import java.util.concurrent.Callable;
 
 /**
@@ -40,57 +35,8 @@ public interface Lock extends AutoCloseable {
     /** Run with lock. */
     <T> T runWithLock(Callable<T> callable) throws Exception;
 
-    /** A factory to create {@link Lock}. */
-    interface Factory extends Serializable {
-        Lock create();
-    }
-
-    static Factory factory(
-            @Nullable CatalogLockFactory lockFactory,
-            @Nullable CatalogLockContext lockContext,
-            Identifier tablePath) {
-        return lockFactory == null
-                ? new EmptyFactory()
-                : new LockFactory(lockFactory, lockContext, tablePath);
-    }
-
-    static Factory emptyFactory() {
-        return new EmptyFactory();
-    }
-
-    /** A {@link Factory} creating lock from catalog. */
-    class LockFactory implements Factory {
-
-        private static final long serialVersionUID = 1L;
-
-        private final CatalogLockFactory lockFactory;
-        private final CatalogLockContext lockContext;
-        private final Identifier tablePath;
-
-        public LockFactory(
-                CatalogLockFactory lockFactory,
-                CatalogLockContext lockContext,
-                Identifier tablePath) {
-            this.lockFactory = lockFactory;
-            this.lockContext = lockContext;
-            this.tablePath = tablePath;
-        }
-
-        @Override
-        public Lock create() {
-            return fromCatalog(lockFactory.createLock(lockContext), tablePath);
-        }
-    }
-
-    /** A {@link Factory} creating empty lock. */
-    class EmptyFactory implements Factory {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public Lock create() {
-            return new EmptyLock();
-        }
+    static Lock empty() {
+        return new EmptyLock();
     }
 
     /** An empty lock. */
