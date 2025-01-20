@@ -38,7 +38,7 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         RemoveOrphanFilesAction action =
                 new RemoveOrphanFilesAction(
                         params.getRequired(DATABASE),
-                        params.getRequired(TABLE),
+                        params.get(TABLE),
                         params.get(PARALLELISM),
                         catalogConfigMap(params));
 
