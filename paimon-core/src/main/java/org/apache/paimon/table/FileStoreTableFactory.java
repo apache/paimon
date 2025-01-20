@@ -39,7 +39,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
     public static FileStoreTable create(CatalogContext context) {
-        boolean resolvingFileIOEnabled = context.options().get(CatalogOptions.RESOLVING_FILEIO_ENABLED);
+        boolean resolvingFileIOEnabled =
+                context.options().get(CatalogOptions.RESOLVING_FILEIO_ENABLED);
         FileIO fileIO;
         if (resolvingFileIOEnabled) {
             fileIO = new ResolvingFileIO();
