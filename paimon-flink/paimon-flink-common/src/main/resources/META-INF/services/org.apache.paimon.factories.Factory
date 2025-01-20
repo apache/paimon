@@ -86,3 +86,4 @@ org.apache.paimon.flink.procedure.CompactManifestProcedure
 org.apache.paimon.flink.procedure.RefreshObjectTableProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingFilesProcedure
 org.apache.paimon.flink.procedure.ClearConsumersProcedure
+org.apache.paimon.flink.procedure.MigrateIcebergTableProcedure

@@ -21,14 +21,15 @@ package org.apache.paimon.flink.action;
 import java.util.Map;
 import java.util.Optional;
 
-/** Action Factory for {@link MigrateTableAction}. */
-public class MigrateTableActionFactory implements ActionFactory {
+/** Action Factory for {@link MigrateIcebergTableAction}. */
+public class MigrateIcebergTableActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "migrate_table";
+    public static final String IDENTIFIER = "migrate_iceberg_table";
 
-    private static final String SOURCE_TYPE = "source_type";
     private static final String OPTIONS = "options";
     private static final String PARALLELISM = "parallelism";
+
+    private static final String ICEBERG_OPTIONS = "iceberg_options";
 
     @Override
     public String identifier() {
@@ -37,30 +38,33 @@ public class MigrateTableActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        String connector = params.get(SOURCE_TYPE);
-        String sourceHiveTable = params.get(TABLE);
+
+        String sourceTable = params.get(TABLE);
         Map<String, String> catalogConfig = catalogConfigMap(params);
         String tableConf = params.get(OPTIONS);
-        Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
+        Integer parallelism =
+                params.get(PARALLELISM) == null ? null : Integer.parseInt(params.get(PARALLELISM));
 
-        MigrateTableAction migrateTableAction =
-                new MigrateTableAction(
-                        connector, sourceHiveTable, catalogConfig, tableConf, parallelism);
-        return Optional.of(migrateTableAction);
+        String icebergOptions = params.get(ICEBERG_OPTIONS);
+
+        MigrateIcebergTableAction migrateIcebergTableAction =
+                new MigrateIcebergTableAction(
+                        sourceTable, catalogConfig, icebergOptions, tableConf, parallelism);
+        return Optional.of(migrateIcebergTableAction);
     }
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"migrate_table\" runs a migrating job from hive to paimon.");
+        System.out.println(
+                "Action \"migrate_iceberg_table\" runs a migrating job from iceberg to paimon.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  migrate_table \\\n"
-                        + "--warehouse <warehouse_path> \\\n"
-                        + "--source_type hive \\\n"
-                        + "--table <database.table_name> \\\n"
-                        + "[--catalog_conf <key>=<value] \\\n"
+                "  migrate_iceberg_table"
+                        + "--table <database.table_name> "
+                        + "--iceberg_options <key>=<value>[,<key>=<value>,...]"
+                        + "[--catalog_conf <key>=<value] "
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }
