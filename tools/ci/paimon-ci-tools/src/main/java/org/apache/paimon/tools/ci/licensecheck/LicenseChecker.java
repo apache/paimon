@@ -41,6 +41,8 @@ public class LicenseChecker {
 
         int severeIssueCount = NoticeFileChecker.run(new File(args[0]), Paths.get(args[1]));
 
+        LOG.warn("Found a total of {} severe issues", severeIssueCount);
+
         severeIssueCount += JarFileChecker.checkPath(Paths.get(args[2]));
 
         if (severeIssueCount > 0) {
