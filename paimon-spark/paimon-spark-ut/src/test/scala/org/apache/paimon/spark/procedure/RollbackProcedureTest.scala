@@ -151,4 +151,12 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Procedure: rollback with cache") {
+    sql("CREATE TABLE T (id INT)")
+    sql("INSERT INTO T VALUES (1), (2), (3), (4)")
+    sql("DELETE FROM T WHERE id = 1")
+    sql("CALL sys.rollback(table => 'T', version => '1')")
+    sql("DELETE FROM T WHERE id = 1")
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), Seq(Row(2), Row(3), Row(4)))
+  }
 }
