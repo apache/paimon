@@ -94,6 +94,58 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Procedure: rollback to tag check test") {
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, b STRING)
+                 |TBLPROPERTIES ('primary-key'='a', 'bucket'='3', 'file.format'='orc')
+                 |""".stripMargin)
+
+    val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+    // snapshot-1
+    spark.sql("insert into T select 1, 'a'")
+    checkAnswer(query(), Row(1, "a") :: Nil)
+
+    checkAnswer(
+      spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => '20250122', snapshot => 1)"),
+      Row(true) :: Nil)
+
+    // snapshot-2
+    spark.sql("insert into T select 2, 'b'")
+    checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+    // snapshot-3
+    spark.sql("insert into T select 2, 'b2'")
+    checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+    assertThrows[RuntimeException] {
+      spark.sql("CALL paimon.sys.rollback(table => 'test.T_exception', version => '2')")
+    }
+    // rollback to snapshot
+    checkAnswer(
+      spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '2')"),
+      Row(true) :: Nil)
+    checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+    // version/snapshot/tag can only set one of them
+    assertThrows[RuntimeException] {
+      spark.sql(
+        "CALL paimon.sys.rollback(table => 'test.T', version => '20250122', tag => '20250122')")
+    }
+
+    assertThrows[RuntimeException] {
+      spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '20250122', snapshot => 1)")
+    }
+
+    assertThrows[RuntimeException] {
+      spark.sql("CALL paimon.sys.rollback(table => 'test.T', tag => '20250122', snapshot => 1)")
+    }
+
+    // rollback to tag
+    spark.sql("CALL paimon.sys.rollback(table => 'test.T', tag => '20250122')")
+
+    checkAnswer(query(), Row(1, "a") :: Nil)
+  }
+
   test("Paimon Procedure: rollback to timestamp") {
     failAfter(streamingTimeout) {
       withTempDir {
