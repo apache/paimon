@@ -54,8 +54,8 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
-import org.apache.paimon.rest.responses.GetTableDataTokenResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
@@ -301,11 +301,10 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    protected GetTableDataTokenResponse loadTableDataToken(Identifier identifier) {
+    protected GetTableTokenResponse loadTableToken(Identifier identifier) {
         return client.get(
-                resourcePaths.tableCredentials(
-                        identifier.getDatabaseName(), identifier.getObjectName()),
-                GetTableDataTokenResponse.class,
+                resourcePaths.tableToken(identifier.getDatabaseName(), identifier.getObjectName()),
+                GetTableTokenResponse.class,
                 catalogAuth.getHeaders());
     }
 

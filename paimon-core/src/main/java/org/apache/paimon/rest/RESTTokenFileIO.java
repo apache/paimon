@@ -26,7 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.responses.GetTableDataTokenResponse;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.ThreadUtils;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -43,7 +43,7 @@ import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/** A {@link FileIO} to support data token from REST Server. */
+/** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
@@ -74,9 +74,9 @@ public class RESTTokenFileIO implements FileIO {
     // should create catalog from catalog loader
     private final transient RESTCatalog catalogInstance;
 
-    // the latest data token from REST Server, serializable in order to avoid loading token from the
-    // REST Server again after serialization
-    private volatile Token dataToken;
+    // the latest token from REST Server, serializable in order to avoid loading token from the REST
+    // Server again after serialization
+    private volatile Token token;
 
     public RESTTokenFileIO(
             RESTCatalogLoader catalogLoader,
@@ -152,48 +152,48 @@ public class RESTTokenFileIO implements FileIO {
             }
         }
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(dataToken);
+        FileIO fileIO = FILE_IO_CACHE.getIfPresent(token);
         if (fileIO != null) {
             return fileIO;
         }
 
         synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(dataToken);
+            fileIO = FILE_IO_CACHE.getIfPresent(token);
             if (fileIO != null) {
                 return fileIO;
             }
 
             CatalogContext context = catalogLoader.context();
             Options options = context.options();
-            options = new Options(RESTUtil.merge(options.toMap(), dataToken.token));
+            options = new Options(RESTUtil.merge(options.toMap(), token.token));
             context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
             try {
                 fileIO = FileIO.get(path, context);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
-            FILE_IO_CACHE.put(dataToken, fileIO);
+            FILE_IO_CACHE.put(token, fileIO);
             return fileIO;
         }
     }
 
     private boolean shouldRefresh() {
-        return dataToken == null || System.currentTimeMillis() > dataToken.expireAtMillis;
+        return token == null || System.currentTimeMillis() > token.expireAtMillis;
     }
 
     private void refreshToken() {
-        GetTableDataTokenResponse response;
+        GetTableTokenResponse response;
         if (catalogInstance != null) {
-            response = catalogInstance.loadTableDataToken(identifier);
+            response = catalogInstance.loadTableToken(identifier);
         } else {
             try (RESTCatalog catalog = catalogLoader.load()) {
-                response = catalog.loadTableDataToken(identifier);
+                response = catalog.loadTableToken(identifier);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
 
-        dataToken = new Token(response.getToken(), response.getExpiresAtMillis());
+        token = new Token(response.getToken(), response.getExpiresAtMillis());
     }
 
     private static class Token implements Serializable {

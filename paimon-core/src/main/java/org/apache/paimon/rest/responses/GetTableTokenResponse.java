@@ -27,9 +27,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.Map;
 
-/** Response for table data token. */
+/** Response for table token. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetTableDataTokenResponse implements RESTResponse {
+public class GetTableTokenResponse implements RESTResponse {
 
     private static final String FIELD_TOKEN = "token";
     private static final String FIELD_EXPIRES_AT_MILLIS = "expiresAtMillis";
@@ -41,7 +41,7 @@ public class GetTableDataTokenResponse implements RESTResponse {
     private final long expiresAtMillis;
 
     @JsonCreator
-    public GetTableDataTokenResponse(
+    public GetTableTokenResponse(
             @JsonProperty(FIELD_TOKEN) Map<String, String> token,
             @JsonProperty(FIELD_EXPIRES_AT_MILLIS) long expiresAtMillis) {
         this.token = token;

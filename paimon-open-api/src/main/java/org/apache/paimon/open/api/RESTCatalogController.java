@@ -37,8 +37,8 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
-import org.apache.paimon.rest.responses.GetTableDataTokenResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
@@ -364,7 +364,7 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "200",
                 content = {
-                    @Content(schema = @Schema(implementation = GetTableDataTokenResponse.class))
+                    @Content(schema = @Schema(implementation = GetTableTokenResponse.class))
                 }),
         @ApiResponse(
                 responseCode = "404",
@@ -375,11 +375,11 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/credentials")
-    public GetTableDataTokenResponse listCredentials(
+    public GetTableTokenResponse listCredentials(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table) {
-        return new GetTableDataTokenResponse(
+        return new GetTableTokenResponse(
                 ImmutableMap.of("key", "value"), System.currentTimeMillis());
     }
 
