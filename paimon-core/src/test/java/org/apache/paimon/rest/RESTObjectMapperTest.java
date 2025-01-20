@@ -32,6 +32,7 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableCredentialsResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -272,5 +273,15 @@ public class RESTObjectMapperTest {
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         ListViewsResponse parseData = OBJECT_MAPPER.readValue(responseStr, ListViewsResponse.class);
         assertEquals(response.getViews(), parseData.getViews());
+    }
+
+    @Test
+    public void getTableCredentialsResponseParseTest() throws Exception {
+        GetTableCredentialsResponse response = MockRESTMessage.getTableCredentialsResponse();
+        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        GetTableCredentialsResponse parseData =
+                OBJECT_MAPPER.readValue(responseStr, GetTableCredentialsResponse.class);
+        assertEquals(response.getCredential(), parseData.getCredential());
+        assertEquals(response.getExpiresAtMillis(), parseData.getExpiresAtMillis());
     }
 }

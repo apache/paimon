@@ -32,6 +32,7 @@ import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableCredentialsResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -48,6 +49,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import java.util.ArrayList;
@@ -246,6 +248,11 @@ public class MockRESTMessage {
 
     public static ListViewsResponse listViewsResponse() {
         return new ListViewsResponse(ImmutableList.of("view"));
+    }
+
+    public static GetTableCredentialsResponse getTableCredentialsResponse() {
+        return new GetTableCredentialsResponse(
+                System.currentTimeMillis(), ImmutableMap.of("key", "value"));
     }
 
     private static ViewSchema viewSchema() {
