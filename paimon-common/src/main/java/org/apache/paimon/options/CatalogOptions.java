@@ -150,11 +150,12 @@ public class CatalogOptions {
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
 
-    public static final ConfigOption<Boolean> EXTERNAL_PATH_ENABLED =
-            ConfigOptions.key("data-file.external-paths.enabled")
+    public static final ConfigOption<Boolean> RESOLVING_FILEIO_ENABLED =
+            ConfigOptions.key("resolving-fileio.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to enable external paths for data files, external paths allow you to specify the path of the data file, if you specify the path of the data file, "
-                                    + "you should also specify the access key and secret key catalog options.");
+                            "Whether to enable resolving fileio, when this option is enabled, in conjunction with the table's property data-file.external-paths, "
+                                    + "Paimon can read and write to external storage paths, such as OSS or S3. "
+                                    + "In order to access these external paths correctly, you also need to configure the corresponding access key and secret key.");
 }

@@ -39,9 +39,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
     public static FileStoreTable create(CatalogContext context) {
-        boolean externalPathEnabled = context.options().get(CatalogOptions.EXTERNAL_PATH_ENABLED);
+        boolean resolvingFileIOEnabled = context.options().get(CatalogOptions.RESOLVING_FILEIO_ENABLED);
         FileIO fileIO;
-        if (externalPathEnabled) {
+        if (resolvingFileIOEnabled) {
             fileIO = new ResolvingFileIO();
             fileIO.configure(context);
         } else {
