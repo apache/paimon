@@ -63,8 +63,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public FileIO fileIO(Path path) {
-        return wrapped.fileIO(path);
+    public FileIO fileIO(Identifier identifier, Path path) {
+        return wrapped.fileIO(identifier, path);
     }
 
     @Override

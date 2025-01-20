@@ -376,7 +376,7 @@ public interface Catalog extends AutoCloseable {
     FileIO fileIO();
 
     /** {@link FileIO} of this catalog. */
-    FileIO fileIO(Path path);
+    FileIO fileIO(Identifier identifier, Path path);
 
     /** Catalog options for re-creating this catalog. */
     Map<String, String> options();

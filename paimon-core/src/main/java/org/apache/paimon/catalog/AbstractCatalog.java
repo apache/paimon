@@ -92,7 +92,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public FileIO fileIO(Path path) {
+    public FileIO fileIO(Identifier identifier, Path path) {
         return fileIO;
     }
 
@@ -369,8 +369,7 @@ public abstract class AbstractCatalog implements Catalog {
         SnapshotCommit.Factory commitFactory =
                 new RenamingSnapshotCommit.Factory(
                         lockFactory().orElse(null), lockContext().orElse(null));
-        return CatalogUtils.loadTable(
-                this, this.fileIO(), identifier, this::loadTableMetadata, commitFactory);
+        return CatalogUtils.loadTable(this, identifier, this::loadTableMetadata, commitFactory);
     }
 
     /**

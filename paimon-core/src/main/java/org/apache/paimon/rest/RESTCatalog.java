@@ -114,7 +114,7 @@ public class RESTCatalog implements Catalog {
     private final Options options;
     private final boolean fileIORefreshCredentialEnable;
     private final FileIO fileIO;
-    protected Cache<String, FileIO> tableFullName2FileIO;
+    protected Cache<Path, FileIO> path2FileIO;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
@@ -139,7 +139,7 @@ public class RESTCatalog implements Catalog {
                 options.get(RESTCatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE);
         try {
             if (fileIORefreshCredentialEnable) {
-                tableFullName2FileIO =
+                path2FileIO =
                         Caffeine.newBuilder()
                                 .softValues()
                                 .executor(Runnable::run)
@@ -194,24 +194,16 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public FileIO fileIO(Path path) {
+    public FileIO fileIO(Identifier identifier, Path path) {
         if (fileIORefreshCredentialEnable) {
-            // todo: check path's identifier and get FileIO
-            throw new UnsupportedOperationException();
-        }
-        return fileIO;
-    }
-
-    public FileIO fileIO(Identifier identifier) {
-        if (fileIORefreshCredentialEnable) {
-            FileIO tableFileIO = tableFullName2FileIO.getIfPresent(identifier.getFullName());
-            if (tableFileIO != null) {
-                tableFileIO =
+            FileIO pathFileIO = path2FileIO.getIfPresent(path);
+            if (pathFileIO == null) {
+                pathFileIO =
                         new RefreshCredentialFileIO(
                                 resourcePaths, catalogAuth, options, client, identifier);
-                tableFullName2FileIO.put(identifier.getFullName(), tableFileIO);
-                return tableFileIO;
+                path2FileIO.put(path, pathFileIO);
             }
+            return pathFileIO;
         }
         return fileIO;
     }
@@ -328,7 +320,6 @@ public class RESTCatalog implements Catalog {
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return CatalogUtils.loadTable(
                 this,
-                this.fileIO(identifier),
                 identifier,
                 this::loadTableMetadata,
                 new RESTSnapshotCommitFactory(catalogLoader()));
