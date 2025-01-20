@@ -18,9 +18,6 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.TagManager;
-
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -38,7 +35,8 @@ public class RollbackProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 // snapshot id or tag name
-                ProcedureParameter.required("version", StringType)
+                ProcedureParameter.required("version", StringType),
+                ProcedureParameter.optional("type", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -65,18 +63,26 @@ public class RollbackProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String version = args.getString(1);
+        String type = args.isNullAt(2) ? "snapshot" : args.getString(2);
+        if (!type.equals("snapshot") && !type.equals("tag")) {
+            throw new IllegalArgumentException(
+                    "type in RollbackProcedure must be one of snapshot or tag.");
+        }
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    FileStoreTable fileStoreTable = (FileStoreTable) table;
-                    TagManager tagManager = fileStoreTable.tagManager();
-                    if (version.chars().allMatch(Character::isDigit)
-                            && !tagManager.tagExists(version)) {
-                        table.rollbackTo(Long.parseLong(version));
+                    if (type.equals("snapshot")) {
+                        if (version.chars().allMatch(Character::isDigit)) {
+                            table.rollbackTo(Long.parseLong(version));
+                        } else {
+                            throw new IllegalArgumentException(
+                                    "version should be a digit if rollback to a snapshot.");
+                        }
                     } else {
                         table.rollbackTo(version);
                     }
+
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
                 });

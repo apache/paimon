@@ -126,10 +126,14 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
       Row(true) :: Nil)
     checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
 
+    // digtal version would throw out if not set type = tag
+    assertThrows[RuntimeException] {
+      spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '20250122')")
+    }
+
     // rollback to tag
-    checkAnswer(
-      spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '20250122')"),
-      Row(true) :: Nil)
+    spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '20250122', type => 'tag')")
+
     checkAnswer(query(), Row(1, "a") :: Nil)
   }
 
