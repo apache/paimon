@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
  *  CALL sys.clear_consumers('tableId', 'includingConsumers')
  *
  * -- exclude some consumers (accept regular expression)
- *  CALL sys.clear_consumers('tableId', 'consumerIds', 'includingConsumers', 'excludingConsumers')
+ *  CALL sys.clear_consumers('tableId', 'includingConsumers', 'excludingConsumers')
  * </code></pre>
  */
 public class ClearConsumersProcedure extends ProcedureBase {
