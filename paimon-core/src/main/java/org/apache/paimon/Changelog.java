@@ -28,6 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Map;
 
@@ -106,8 +107,18 @@ public class Changelog extends Snapshot {
 
     public static Changelog fromPath(FileIO fileIO, Path path) {
         try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException("Fails to read changelog from path " + path, e);
+        }
+    }
+
+    public static Changelog tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
             String json = fileIO.readFileUtf8(path);
             return Changelog.fromJson(json);
+        } catch (FileNotFoundException e) {
+            throw e;
         } catch (IOException e) {
             throw new RuntimeException("Fails to read changelog from path " + path, e);
         }
