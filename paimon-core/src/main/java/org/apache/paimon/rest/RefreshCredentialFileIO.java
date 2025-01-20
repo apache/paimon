@@ -31,7 +31,6 @@ import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.responses.GetTableCredentialsResponse;
 
 import java.io.IOException;
-import java.util.Date;
 import java.util.Map;
 
 /** A {@link FileIO} to support refresh credential. */
@@ -43,7 +42,7 @@ public class RefreshCredentialFileIO implements FileIO {
     private final AuthSession catalogAuth;
     protected Options options;
     private final Identifier identifier;
-    private Date expireAt;
+    private Long expireAtMillis;
     private Map<String, String> credential;
     private final transient RESTClient client;
     private transient volatile FileIO lazyFileIO;
@@ -120,7 +119,7 @@ public class RefreshCredentialFileIO implements FileIO {
             synchronized (this) {
                 if (lazyFileIO == null || shouldRefresh()) {
                     GetTableCredentialsResponse response = getCredential();
-                    expireAt = response.getExpiresAt();
+                    expireAtMillis = response.getExpiresAtMillis();
                     credential = response.getCredential();
                     Map<String, String> conf = RESTUtil.merge(options.toMap(), credential);
                     Options updateCredentialOption = new Options(conf);
@@ -144,6 +143,6 @@ public class RefreshCredentialFileIO implements FileIO {
     }
 
     private boolean shouldRefresh() {
-        return expireAt != null && expireAt.getTime() > System.currentTimeMillis();
+        return expireAtMillis != null && expireAtMillis > System.currentTimeMillis();
     }
 }

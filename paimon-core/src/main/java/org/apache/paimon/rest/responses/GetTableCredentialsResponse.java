@@ -25,7 +25,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.Date;
 import java.util.Map;
 
 /** Response for table credentials. */
@@ -33,19 +32,19 @@ import java.util.Map;
 public class GetTableCredentialsResponse implements RESTResponse {
 
     private static final String FIELD_CREDENTIAL = "credential";
-    private static final String FIELD_EXPIREAT = "expiresAt";
+    private static final String FIELD_EXPIREAT_MILLIS = "expiresAtMillis";
 
     @JsonProperty(FIELD_CREDENTIAL)
     private final Map<String, String> credential;
 
-    @JsonProperty(FIELD_EXPIREAT)
-    private Date expiresAt;
+    @JsonProperty(FIELD_EXPIREAT_MILLIS)
+    private long expiresAtMillis;
 
     @JsonCreator
     public GetTableCredentialsResponse(
-            @JsonProperty(FIELD_EXPIREAT) Date expiresAt,
+            @JsonProperty(FIELD_EXPIREAT_MILLIS) long expiresAtMillis,
             @JsonProperty(FIELD_CREDENTIAL) Map<String, String> credential) {
-        this.expiresAt = expiresAt;
+        this.expiresAtMillis = expiresAtMillis;
         this.credential = credential;
     }
 
@@ -54,8 +53,8 @@ public class GetTableCredentialsResponse implements RESTResponse {
         return credential;
     }
 
-    @JsonGetter(FIELD_EXPIREAT)
-    public Date getExpiresAt() {
-        return expiresAt;
+    @JsonGetter(FIELD_EXPIREAT_MILLIS)
+    public long getExpiresAtMillis() {
+        return expiresAtMillis;
     }
 }

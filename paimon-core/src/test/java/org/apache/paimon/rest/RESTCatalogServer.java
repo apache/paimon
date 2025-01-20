@@ -67,7 +67,6 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -212,7 +211,7 @@ public class RESTCatalogServer {
                         } else if (isTableCredentials) {
                             GetTableCredentialsResponse getTableCredentialsResponse =
                                     new GetTableCredentialsResponse(
-                                            new Date(System.currentTimeMillis()),
+                                            System.currentTimeMillis(),
                                             ImmutableMap.of("key", "value"));
                             return new MockResponse()
                                     .setResponseCode(200)
