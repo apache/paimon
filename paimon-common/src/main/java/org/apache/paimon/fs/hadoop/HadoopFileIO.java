@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
 import org.apache.paimon.utils.FunctionWithException;
@@ -102,6 +103,29 @@ public class HadoopFileIO implements FileIO {
             }
         }
         return statuses;
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.LocatedFileStatus> hadoopIter =
+                getFileSystem(hadoopPath).listFiles(hadoopPath, recursive);
+        return new RemoteIterator<FileStatus>() {
+            @Override
+            public boolean hasNext() throws IOException {
+                return hadoopIter.hasNext();
+            }
+
+            @Override
+            public FileStatus next() throws IOException {
+                org.apache.hadoop.fs.FileStatus hadoopStatus = hadoopIter.next();
+                return new HadoopFileStatus(hadoopStatus);
+            }
+
+            @Override
+            public void close() throws IOException {}
+        };
     }
 
     @Override
