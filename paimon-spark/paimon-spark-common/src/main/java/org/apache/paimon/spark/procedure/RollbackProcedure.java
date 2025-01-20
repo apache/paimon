@@ -26,6 +26,7 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import static org.apache.spark.sql.types.DataTypes.LongType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** A procedure to rollback to a snapshot or a tag. */
@@ -35,8 +36,9 @@ public class RollbackProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 // snapshot id or tag name
-                ProcedureParameter.required("version", StringType),
-                ProcedureParameter.optional("type", StringType)
+                ProcedureParameter.optional("version", StringType),
+                ProcedureParameter.optional("snapshot", LongType),
+                ProcedureParameter.optional("tag", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -62,25 +64,29 @@ public class RollbackProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String version = args.getString(1);
-        String type = args.isNullAt(2) ? "snapshot" : args.getString(2);
-        if (!type.equals("snapshot") && !type.equals("tag")) {
+        String version = args.isNullAt(1) ? null : args.getString(1);
+        Long snapshot = args.isNullAt(2) ? null : args.getLong(2);
+        String tag = args.isNullAt(3) ? null : args.getString(3);
+        if ((version != null && snapshot != null)
+                || (snapshot != null && tag != null)
+                || (tag != null && version != null)) {
             throw new IllegalArgumentException(
-                    "type in RollbackProcedure must be one of snapshot or tag.");
+                    "only can set one of version/snapshot/tag in RollbackProcedure.");
         }
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    if (type.equals("snapshot")) {
+                    if (snapshot != null) {
+                        table.rollbackTo(snapshot);
+                    } else if (tag != null) {
+                        table.rollbackTo(tag);
+                    } else {
                         if (version.chars().allMatch(Character::isDigit)) {
                             table.rollbackTo(Long.parseLong(version));
                         } else {
-                            throw new IllegalArgumentException(
-                                    "version should be a digit if rollback to a snapshot.");
+                            table.rollbackTo(version);
                         }
-                    } else {
-                        table.rollbackTo(version);
                     }
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
