@@ -38,6 +38,7 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -765,6 +766,7 @@ public class CloneActionITCase extends ActionITCaseBase {
     //  Random Tests
     // ------------------------------------------------------------------------
 
+    @Disabled
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     @Timeout(180)

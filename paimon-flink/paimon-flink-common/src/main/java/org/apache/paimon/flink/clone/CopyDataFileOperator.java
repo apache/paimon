@@ -34,6 +34,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -88,32 +89,41 @@ public class CopyDataFileOperator extends AbstractStreamOperator<CloneFileInfo>
         Path sourcePath = new Path(cloneFileInfo.getSourceFilePath());
         Path targetPath = new Path(targetTableRootPath + filePathExcludeTableRoot);
 
-        if (targetTableFileIO.exists(targetPath)
-                && targetTableFileIO.getFileSize(targetPath)
-                        == sourceTableFileIO.getFileSize(sourcePath)) {
+        try {
+            if (targetTableFileIO.exists(targetPath)
+                    && targetTableFileIO.getFileSize(targetPath)
+                            == sourceTableFileIO.getFileSize(sourcePath)) {
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Skipping clone target file {} because it already exists and has the same size.",
-                        targetPath);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Skipping clone target file {} because it already exists and has the same size.",
+                            targetPath);
+                }
+
+                // We still send record to SnapshotHintOperator to avoid the following corner case:
+                //
+                // When cloning two tables under a catalog, after clone table A is completed,
+                // the job fails due to snapshot expiration when cloning table B.
+                // If we don't re-send file information of table A to SnapshotHintOperator,
+                // the snapshot hint file of A will not be created after the restart.
+                output.collect(streamRecord);
+                return;
             }
-
-            // We still send record to SnapshotHintOperator to avoid the following corner case:
-            //
-            // When cloning two tables under a catalog, after clone table A is completed,
-            // the job fails due to snapshot expiration when cloning table B.
-            // If we don't re-send file information of table A to SnapshotHintOperator,
-            // the snapshot hint file of A will not be created after the restart.
-            output.collect(streamRecord);
-            return;
+        } catch (FileNotFoundException e) {
+            LOG.warn("File {} does not exist. ignore it", sourcePath, e);
         }
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Begin copy file from {} to {}.", sourcePath, targetPath);
         }
-        IOUtils.copyBytes(
-                sourceTableFileIO.newInputStream(sourcePath),
-                targetTableFileIO.newOutputStream(targetPath, true));
+        try {
+            IOUtils.copyBytes(
+                    sourceTableFileIO.newInputStream(sourcePath),
+                    targetTableFileIO.newOutputStream(targetPath, true));
+        } catch (FileNotFoundException e) {
+            LOG.warn("File {} does not exist. ignore it", sourcePath, e);
+        }
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("End copy file from {} to {}.", sourcePath, targetPath);
         }
