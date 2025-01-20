@@ -159,10 +159,11 @@ This section introduce all available spark procedures about paimon.
     <tr>
       <td>rollback</td>
       <td>
-         To rollback to a specific version of target table. Argument:
+         To rollback to a specific version of target table, note version/snapshot/tag must set one of them. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>version: id of the snapshot or name of tag that will roll back to.</li>
-            <li>type: type of version and default is snapshot, user can set it with snapshot or tag.</li>
+            <li>snapshot: snapshot that will roll back to.</li>
+            <li>tag: tag that will roll back to.</li>
       </td>
       <td>
           CALL sys.rollback(table => 'default.T', version => 'my_tag')<br/><br/>
