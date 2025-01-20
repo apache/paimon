@@ -35,7 +35,7 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
           // define a pk table and test `forEachBatch` api
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3', 'file.format'='orc')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
