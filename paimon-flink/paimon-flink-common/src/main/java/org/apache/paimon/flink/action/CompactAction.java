@@ -74,6 +74,7 @@ public class CompactAction extends TableActionBase {
         }
         HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+        dynamicOptions.put(CoreOptions.WRITE_ACTIONS.key(), CoreOptions.WriteAction.ALL.toString());
         table = table.copy(dynamicOptions);
     }
 

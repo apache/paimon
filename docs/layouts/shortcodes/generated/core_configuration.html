@@ -1021,6 +1021,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li><li>"materialized-table": A materialized table combines normal Paimon table and materialized SQL.</li><li>"object-table": A object table combines normal Paimon table and object location.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>write-actions</h5></td>
+            <td style="word-wrap: break-word;">"all"</td>
+            <td>String</td>
+            <td>This parameter is used to specify which actions will be performed during the writing process. This parameter is effective only when write-only is false and has no effect on action or procedure.<br />1. 'all': By default, all actions will be performed.<br />2. 'partition-expire': Perform partition expiration action.<br />3. 'snapshot-expire': Perform snapshot expiration action.<br />4. 'tag-automatic-creation': Perform automatic creation tag action.<br />5. 'full-compact': Perform full compaction action.<br />6. 'minor-compact': Perform minor compaction action.<br />Both can be configured at the same time: 'partition-expire,snapshot-expire,tag-automatic-creation', if you want to skip all actions you can set this to ''.</td>
+        </tr>
+        <tr>
             <td><h5>write-buffer-for-append</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
