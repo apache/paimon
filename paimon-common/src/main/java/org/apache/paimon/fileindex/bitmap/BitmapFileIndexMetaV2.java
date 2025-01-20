@@ -32,10 +32,11 @@ import java.util.List;
 import java.util.function.Function;
 
 /**
- * When the bitmap-indexed column cardinality is high, using the first version of the bitmap index format
- * will take a lot of time to read the entire dictionary.
- * But in fact we don't need a full dictionary when dealing with a small number of predicates,
- * the performance of predicate hits on the bitmap can be improved by creating a secondary index on the dictionary.
+ * When the bitmap-indexed column cardinality is high, using the first version of the bitmap index
+ * format will take a lot of time to read the entire dictionary. But in fact we don't need a full
+ * dictionary when dealing with a small number of predicates, the performance of predicate hits on
+ * the bitmap can be improved by creating a secondary index on the dictionary.
+ *
  * <pre>
  * Bitmap file index format (V2)
  * +-------------------------------------------------+-----------------
