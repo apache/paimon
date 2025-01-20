@@ -135,30 +135,30 @@ public interface FileIO extends Serializable {
      */
     default RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
             throws IOException {
+        Queue<FileStatus> files = new LinkedList<>();
+        Queue<Path> directories = new LinkedList<>(Collections.singletonList(path));
         return new RemoteIterator<FileStatus>() {
-            private Queue<FileStatus> files = new LinkedList<>();
-            private Queue<Path> subdirStack = new LinkedList<>(Collections.singletonList(path));
 
             @Override
             public boolean hasNext() throws IOException {
-                maybeUnpackSubdir();
+                maybeUnpackDirectory();
                 return !files.isEmpty();
             }
 
             @Override
             public FileStatus next() throws IOException {
-                maybeUnpackSubdir();
+                maybeUnpackDirectory();
                 return files.remove();
             }
 
-            private void maybeUnpackSubdir() throws IOException {
+            private void maybeUnpackDirectory() throws IOException {
                 if (!files.isEmpty()) {
                     return;
                 }
-                if (subdirStack.isEmpty()) {
+                if (directories.isEmpty()) {
                     return;
                 }
-                FileStatus[] statuses = listStatus(subdirStack.remove());
+                FileStatus[] statuses = listStatus(directories.remove());
                 for (FileStatus f : statuses) {
                     if (!f.isDir()) {
                         files.add(f);
@@ -167,12 +167,12 @@ public interface FileIO extends Serializable {
                     if (!recursive) {
                         continue;
                     }
-                    subdirStack.add(f.getPath());
+                    directories.add(f.getPath());
                 }
             }
 
             @Override
-            public void close() throws IOException {}
+            public void close() {}
         };
     }
 
