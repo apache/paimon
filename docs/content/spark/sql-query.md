@@ -37,7 +37,11 @@ Paimon's batch read returns all the data in a snapshot of the table. By default,
 SELECT * FROM t;
 ```
 
-Paimon also supports reading some hidden metadata columns, such as `__paimon_file_path`, `__paimon_partition`, `__paimon_bucket`.
+Paimon also supports reading some hidden metadata columns, currently supporting the following columns:
+
+- `__paimon_file_path`: the file path of the record.
+- `__paimon_partition`: the partition of the record.
+- `__paimon_bucket`: the bucket of the record.
 
 ```sql
 -- read all columns and the corresponding file path, partition, bucket of the record
