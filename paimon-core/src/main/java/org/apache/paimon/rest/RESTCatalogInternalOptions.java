@@ -23,19 +23,10 @@ import org.apache.paimon.options.ConfigOptions;
 
 /** Internal options for REST Catalog. */
 public class RESTCatalogInternalOptions {
+
     public static final ConfigOption<String> PREFIX =
             ConfigOptions.key("prefix")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog uri's prefix.");
-    public static final ConfigOption<String> CREDENTIALS_PROVIDER =
-            ConfigOptions.key("credentials-provider")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog auth credentials provider.");
-    public static final ConfigOption<String> DATABASE_COMMENT =
-            ConfigOptions.key("comment")
-                    .stringType()
-                    .defaultValue(null)
-                    .withDescription("REST Catalog database comment.");
 }
