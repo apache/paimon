@@ -82,7 +82,6 @@ public class RollbackProcedure extends BaseProcedure {
                     } else {
                         table.rollbackTo(version);
                     }
-
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
                 });
