@@ -82,10 +82,9 @@ public class DataIncrement {
     @Override
     public String toString() {
         return String.format(
-                "NewFilesIncrement {newFiles = [\n%s\n], changelogFiles = [\n%s\n]}",
-                newFiles.stream().map(DataFileMeta::fileName).collect(Collectors.joining(",\n")),
-                changelogFiles.stream()
-                        .map(DataFileMeta::fileName)
-                        .collect(Collectors.joining(",\n")));
+                "DataIncrement {newFiles = %s, deletedFiles = %s, changelogFiles = %s}",
+                newFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
+                deletedFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
+                changelogFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()));
     }
 }
