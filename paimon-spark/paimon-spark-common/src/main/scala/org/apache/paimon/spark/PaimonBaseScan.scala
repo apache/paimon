@@ -49,8 +49,6 @@ abstract class PaimonBaseScan(
   with ColumnPruningAndPushDown
   with StatisticsHelper {
 
-  protected var runtimeFilters: Array[Filter] = Array.empty
-
   protected var inputPartitions: Seq[PaimonInputPartition] = _
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
