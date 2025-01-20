@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.TagManager;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -66,7 +68,9 @@ public class RollbackProcedure extends BaseProcedure {
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    if (version.chars().allMatch(Character::isDigit)) {
+                    FileStoreTable fileStoreTable = (FileStoreTable) table;
+                    TagManager tagManager = fileStoreTable.tagManager();
+                    if (version.chars().allMatch(Character::isDigit) && !tagManager.tagExists(version)) {
                         table.rollbackTo(Long.parseLong(version));
                     } else {
                         table.rollbackTo(version);
