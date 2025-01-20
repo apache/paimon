@@ -31,7 +31,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.function.Function;
 
-/*
+/**
  * When the bitmap-indexed column cardinality is high, using the first version of the bitmap index format
  * will take a lot of time to read the entire dictionary.
  * But in fact we don't need a full dictionary when dealing with a small number of predicates,
@@ -272,7 +272,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         bodyStart = seekableInputStream.getPos() + bitmapBodyOffset;
     }
 
-    /** Split of all bitmap entries */
+    /** Split of all bitmap entries. */
     class PartialBitmapDictionary {
 
         Object key;
@@ -406,7 +406,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         }
     }
 
-    /** Bitmap entry */
+    /** Bitmap entry. */
     static class Entry {
 
         Object key;
