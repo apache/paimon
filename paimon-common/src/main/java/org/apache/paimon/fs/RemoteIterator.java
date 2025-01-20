@@ -39,11 +39,4 @@ public interface RemoteIterator<E> extends Closeable {
      * @throws IOException - if failed to list entries lazily
      */
     E next() throws IOException;
-
-    /**
-     * Closes the iterator and its associated resources.
-     *
-     * @throws IOException - if failed to close the iterator
-     */
-    void close() throws IOException;
 }
