@@ -18,8 +18,8 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.rest.auth.BearTokenCredentialsProvider;
-import org.apache.paimon.rest.auth.CredentialsProvider;
+import org.apache.paimon.rest.auth.AuthProvider;
+import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -64,8 +64,8 @@ public class HttpClientTest {
                         new ErrorResponse(ErrorResponseResourceType.DATABASE, "test", "test", 400));
         httpClient = new HttpClient(httpClientOptions);
         httpClient.setErrorHandler(errorHandler);
-        CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(TOKEN);
-        headers = credentialsProvider.authHeader();
+        AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);
+        headers = authProvider.authHeader();
     }
 
     @After

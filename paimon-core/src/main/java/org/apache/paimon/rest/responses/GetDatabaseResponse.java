@@ -29,7 +29,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.rest.RESTCatalogInternalOptions.DATABASE_COMMENT;
+import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 
 /** Response for getting database. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -75,17 +75,16 @@ public class GetDatabaseResponse implements RESTResponse, Database {
 
     @Override
     public String name() {
-        return this.getName();
+        return getName();
     }
 
     @Override
     public Map<String, String> options() {
-        return this.getOptions();
+        return getOptions();
     }
 
     @Override
     public Optional<String> comment() {
-        return Optional.ofNullable(
-                this.options.getOrDefault(DATABASE_COMMENT.key(), DATABASE_COMMENT.defaultValue()));
+        return Optional.ofNullable(options.get(COMMENT_PROP));
     }
 }
