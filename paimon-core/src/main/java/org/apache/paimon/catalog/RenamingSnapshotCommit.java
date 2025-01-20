@@ -99,7 +99,7 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
                     Optional.ofNullable(lockFactory)
                             .map(factory -> factory.createLock(lockContext))
                             .map(l -> Lock.fromCatalog(l, identifier))
-                            .orElseGet(() -> Lock.emptyFactory().create());
+                            .orElseGet(Lock::empty);
             return new RenamingSnapshotCommit(snapshotManager, lock);
         }
 
