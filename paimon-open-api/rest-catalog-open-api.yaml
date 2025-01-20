@@ -432,12 +432,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/credentials:
+  /v1/{prefix}/databases/{database}/tables/{table}/token:
     get:
       tags:
         - table
-      summary: List credentials
-      operationId: listCredentials
+      summary: Get table token
+      operationId: getTableToken
       parameters:
         - name: prefix
           in: path

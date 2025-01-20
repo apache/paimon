@@ -276,7 +276,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void getTableCredentialsResponseParseTest() throws Exception {
+    public void getTableTokenResponseParseTest() throws Exception {
         GetTableTokenResponse response = MockRESTMessage.getTableCredentialsResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         GetTableTokenResponse parseData =

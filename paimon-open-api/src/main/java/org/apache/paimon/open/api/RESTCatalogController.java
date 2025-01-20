@@ -358,7 +358,7 @@ public class RESTCatalogController {
     }
 
     @Operation(
-            summary = "List credentials",
+            summary = "Get table token",
             tags = {"table"})
     @ApiResponses({
         @ApiResponse(
@@ -374,8 +374,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/credentials")
-    public GetTableTokenResponse listCredentials(
+    @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/token")
+    public GetTableTokenResponse getTableToken(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table) {
