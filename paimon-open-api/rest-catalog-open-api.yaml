@@ -1206,13 +1206,13 @@ components:
     GetTableDataTokenResponse:
       type: object
       properties:
-        expiresAt:
-          type: integer
-          format: int64
         token:
           type: object
           additionalProperties:
             type: string
+        expiresAt:
+          type: integer
+          format: int64
     AlterDatabaseRequest:
       type: object
       properties:
