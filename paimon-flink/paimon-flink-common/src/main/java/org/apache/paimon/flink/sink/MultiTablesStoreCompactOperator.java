@@ -45,6 +45,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
@@ -149,9 +150,14 @@ public class MultiTablesStoreCompactOperator
         FileStoreTable table = getTable(tableId);
 
         Preconditions.checkArgument(
-                !table.coreOptions().writeOnly(),
-                CoreOptions.WRITE_ONLY.key()
-                        + " should not be true for MultiTablesStoreCompactOperator.");
+                table.coreOptions().doCompact(),
+                String.format(
+                        "%s should not be true or %s should be %s or contains %s/%s for MultiTablesStoreCompactOperator.",
+                        CoreOptions.WRITE_ONLY.key(),
+                        CoreOptions.WRITE_ACTIONS.key(),
+                        CoreOptions.WriteAction.ALL,
+                        CoreOptions.WriteAction.MINOR_COMPACT,
+                        CoreOptions.WriteAction.FULL_COMPACT));
 
         storeSinkWriteProvider =
                 createWriteProvider(table, checkpointConfig, isStreaming, ignorePreviousFiles);
@@ -259,13 +265,12 @@ public class MultiTablesStoreCompactOperator
         Options options = fileStoreTable.coreOptions().toConfiguration();
         CoreOptions.ChangelogProducer changelogProducer =
                 fileStoreTable.coreOptions().changelogProducer();
-        boolean waitCompaction;
         CoreOptions coreOptions = fileStoreTable.coreOptions();
-        if (coreOptions.writeOnly()) {
-            waitCompaction = false;
-        } else {
-            waitCompaction = coreOptions.prepareCommitWaitCompaction();
-            int deltaCommits = -1;
+        boolean waitCompaction = coreOptions.prepareCommitWaitCompaction();
+        Set<CoreOptions.WriteAction> writeActions = coreOptions.writeActions();
+        int deltaCommits = -1;
+
+        if (coreOptions.doFullCompactionAction(writeActions)) {
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
                 deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
             } else if (options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {

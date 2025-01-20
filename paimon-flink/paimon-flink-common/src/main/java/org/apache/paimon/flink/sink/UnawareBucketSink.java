@@ -87,7 +87,7 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
                             .setParallelism(written.getParallelism());
         }
 
-        boolean enableCompaction = !table.coreOptions().writeOnly();
+        boolean enableCompaction = table.coreOptions().doCompact();
         boolean isStreamingMode =
                 input.getExecutionEnvironment()
                                 .getConfiguration()
