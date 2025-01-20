@@ -54,6 +54,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.LOG_CORRUPT_RECORD;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.MAX_RETRY_NUM_TIMES;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.SKIP_CORRUPT_RECORD;
@@ -155,14 +156,17 @@ public class CdcRecordStoreMultiWriteOperator
 
         ((StoreSinkWriteImpl) write).withCompactExecutor(compactExecutor);
 
+        boolean logCorruptRecord = table.coreOptions().toConfiguration().get(LOG_CORRUPT_RECORD);
         Optional<GenericRow> optionalConverted =
-                toGenericRow(record.record(), table.schema().fields());
+                toGenericRow(record.record(), table.schema().fields(), logCorruptRecord);
         if (!optionalConverted.isPresent()) {
             FileStoreTable latestTable = table;
             for (int retry = 0; retry < retryCnt; ++retry) {
                 latestTable = latestTable.copyWithLatestSchema();
                 tables.put(tableId, latestTable);
-                optionalConverted = toGenericRow(record.record(), latestTable.schema().fields());
+                optionalConverted =
+                        toGenericRow(
+                                record.record(), latestTable.schema().fields(), logCorruptRecord);
                 if (optionalConverted.isPresent()) {
                     break;
                 }
@@ -178,9 +182,13 @@ public class CdcRecordStoreMultiWriteOperator
 
         if (!optionalConverted.isPresent()) {
             if (skipCorruptRecord) {
-                LOG.warn("Skipping corrupt or unparsable record {}", record);
+                LOG.warn(
+                        "Skipping corrupt or unparsable record {}",
+                        (logCorruptRecord ? record : "<redacted>"));
             } else {
-                throw new RuntimeException("Unable to process element. Possibly a corrupt record");
+                throw new RuntimeException(
+                        "Unable to process element. Possibly a corrupt record: "
+                                + (logCorruptRecord ? record : "<redacted>"));
             }
         } else {
             try {
