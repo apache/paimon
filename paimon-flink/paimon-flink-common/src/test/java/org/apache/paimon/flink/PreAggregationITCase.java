@@ -1709,6 +1709,46 @@ public class PreAggregationITCase {
             select.close();
         }
 
+        @Test
+        public void testRetractInputNull() throws Exception {
+            sql(
+                    "CREATE TABLE test_collect ("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 ARRAY<STRING>,"
+                            + "  f1 INT"
+                            + ") WITH ("
+                            + "  'changelog-producer' = 'lookup',"
+                            + "  'merge-engine' = 'partial-update',"
+                            + "  'fields.f0.aggregate-function' = 'collect',"
+                            + "  'fields.f1.sequence-group' = 'f0'"
+                            + ")");
+
+            List<Row> input =
+                    Arrays.asList(
+                            Row.ofKind(RowKind.INSERT, 1, null, 1),
+                            Row.ofKind(RowKind.INSERT, 1, new String[] {"A"}, 2),
+                            Row.ofKind(RowKind.UPDATE_BEFORE, 1, null, 1),
+                            Row.ofKind(RowKind.UPDATE_AFTER, 1, new String[] {"B"}, 3));
+            sEnv.executeSql(
+                            String.format(
+                                    "CREATE TEMPORARY TABLE input ("
+                                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                                            + "  f0 ARRAY<STRING>,"
+                                            + "  f1 INT"
+                                            + ") WITH ("
+                                            + "  'connector' = 'values',"
+                                            + "  'data-id' = '%s',"
+                                            + "  'bounded' = 'true',"
+                                            + "  'changelog-mode' = 'UB,UA'"
+                                            + ")",
+                                    TestValuesTableFactory.registerData(input)))
+                    .await();
+            sEnv.executeSql("INSERT INTO test_collect SELECT * FROM input").await();
+
+            assertThat(sql("SELECT * FROM test_collect"))
+                    .containsExactly(Row.of(1, new String[] {"A", "B"}, 3));
+        }
+
         private void checkOneRecord(Row row, int id, String... elements) {
             assertThat(row.getField(0)).isEqualTo(id);
             if (elements == null || elements.length == 0) {
@@ -1757,6 +1797,47 @@ public class PreAggregationITCase {
             checkOneRecord(result.get(0), 1, toMap(1, "A"));
             checkOneRecord(result.get(1), 2, toMap(1, "B"));
             checkOneRecord(result.get(2), 3, toMap(1, "a", 2, "b", 3, "c"));
+        }
+
+        @Test
+        public void testRetractInputNull() throws Exception {
+            sql(
+                    "CREATE TABLE test_merge_map1 ("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 MAP<INT, STRING>,"
+                            + "  f1 INT"
+                            + ") WITH ("
+                            + "  'changelog-producer' = 'lookup',"
+                            + "  'merge-engine' = 'partial-update',"
+                            + "  'fields.f0.aggregate-function' = 'merge_map',"
+                            + "  'fields.f1.sequence-group' = 'f0'"
+                            + ")");
+
+            List<Row> input =
+                    Arrays.asList(
+                            Row.ofKind(RowKind.INSERT, 1, null, 1),
+                            Row.ofKind(RowKind.INSERT, 1, Collections.singletonMap(1, "A"), 2),
+                            Row.ofKind(RowKind.UPDATE_BEFORE, 1, null, 1),
+                            Row.ofKind(
+                                    RowKind.UPDATE_AFTER, 1, Collections.singletonMap(2, "B"), 3));
+            sEnv.executeSql(
+                            String.format(
+                                    "CREATE TEMPORARY TABLE input ("
+                                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                                            + "  f0 MAP<INT, STRING>,"
+                                            + "  f1 INT"
+                                            + ") WITH ("
+                                            + "  'connector' = 'values',"
+                                            + "  'data-id' = '%s',"
+                                            + "  'bounded' = 'true',"
+                                            + "  'changelog-mode' = 'UB,UA'"
+                                            + ")",
+                                    TestValuesTableFactory.registerData(input)))
+                    .await();
+            sEnv.executeSql("INSERT INTO test_merge_map1 SELECT * FROM input").await();
+
+            assertThat(sql("SELECT * FROM test_merge_map1"))
+                    .containsExactly(Row.of(1, toMap(1, "A", 2, "B"), 3));
         }
 
         private Map<Object, Object> toMap(Object... kvs) {

@@ -155,18 +155,26 @@ public class FieldCollectAgg extends FieldAggregator {
 
     @Override
     public Object retract(Object accumulator, Object retractField) {
+        // it's hard to mark the input is retracted without accumulator
         if (accumulator == null) {
             return null;
         }
 
-        InternalArray acc = (InternalArray) accumulator;
+        // nothing to be retracted
+        if (retractField == null) {
+            return accumulator;
+        }
         InternalArray retract = (InternalArray) retractField;
+        if (retract.size() == 0) {
+            return accumulator;
+        }
 
         List<Object> retractedElements = new ArrayList<>();
         for (int i = 0; i < retract.size(); i++) {
             retractedElements.add(elementGetter.getElementOrNull(retract, i));
         }
 
+        InternalArray acc = (InternalArray) accumulator;
         List<Object> accElements = new ArrayList<>();
         for (int i = 0; i < acc.size(); i++) {
             Object candidate = elementGetter.getElementOrNull(acc, i);
