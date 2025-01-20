@@ -47,7 +47,7 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  *  CALL sys.clear_consumers('tableId', 'includingConsumers')
  *
  * -- exclude some consumers (accept regular expression)
- *  CALL sys.clear_consumers('tableId', 'consumerIds', 'includingConsumers', 'excludingConsumers')
+ *  CALL sys.clear_consumers('tableId', 'includingConsumers', 'excludingConsumers')
  * </code></pre>
  */
 public class ClearConsumersProcedure extends BaseProcedure {

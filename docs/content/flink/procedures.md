@@ -399,7 +399,7 @@ All available procedures are listed below.
          -- clear some consumers in the table (accept regular expression)<br/>
          CALL [catalog.]sys.clear_consumers('tableId', 'includingConsumers')<br/><br/>
          -- exclude some consumers (accept regular expression)<br/>
-         CALL [catalog.]sys.clear_consumers('tableId', 'consumerIds', 'includingConsumers', 'excludingConsumers')
+         CALL [catalog.]sys.clear_consumers('tableId', 'includingConsumers', 'excludingConsumers')
       </td>
       <td>
          To reset or delete consumer. Arguments:
