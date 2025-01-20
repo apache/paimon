@@ -27,33 +27,33 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.Map;
 
-/** Response for table credentials. */
+/** Response for table token. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetTableCredentialsResponse implements RESTResponse {
+public class GetTableTokenResponse implements RESTResponse {
 
-    private static final String FIELD_CREDENTIAL = "credential";
-    private static final String FIELD_EXPIREAT_MILLIS = "expiresAtMillis";
+    private static final String FIELD_TOKEN = "token";
+    private static final String FIELD_EXPIRES_AT_MILLIS = "expiresAtMillis";
 
-    @JsonProperty(FIELD_CREDENTIAL)
-    private final Map<String, String> credential;
+    @JsonProperty(FIELD_TOKEN)
+    private final Map<String, String> token;
 
-    @JsonProperty(FIELD_EXPIREAT_MILLIS)
-    private long expiresAtMillis;
+    @JsonProperty(FIELD_EXPIRES_AT_MILLIS)
+    private final long expiresAtMillis;
 
     @JsonCreator
-    public GetTableCredentialsResponse(
-            @JsonProperty(FIELD_EXPIREAT_MILLIS) long expiresAtMillis,
-            @JsonProperty(FIELD_CREDENTIAL) Map<String, String> credential) {
+    public GetTableTokenResponse(
+            @JsonProperty(FIELD_TOKEN) Map<String, String> token,
+            @JsonProperty(FIELD_EXPIRES_AT_MILLIS) long expiresAtMillis) {
+        this.token = token;
         this.expiresAtMillis = expiresAtMillis;
-        this.credential = credential;
     }
 
-    @JsonGetter(FIELD_CREDENTIAL)
-    public Map<String, String> getCredential() {
-        return credential;
+    @JsonGetter(FIELD_TOKEN)
+    public Map<String, String> getToken() {
+        return token;
     }
 
-    @JsonGetter(FIELD_EXPIREAT_MILLIS)
+    @JsonGetter(FIELD_EXPIRES_AT_MILLIS)
     public long getExpiresAtMillis() {
         return expiresAtMillis;
     }

@@ -70,8 +70,8 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, "commit");
     }
 
-    public String tableCredentials(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "credentials");
+    public String tableToken(String databaseName, String tableName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "token");
     }
 
     public String partitions(String databaseName, String tableName) {

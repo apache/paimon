@@ -29,7 +29,6 @@ import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthSession;
@@ -56,6 +55,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
@@ -75,10 +75,8 @@ import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -95,6 +93,7 @@ import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
@@ -102,95 +101,71 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog {
 
-    private static final Logger LOG = LoggerFactory.getLogger(RESTCatalog.class);
     public static final String HEADER_PREFIX = "header.";
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
     private final AuthSession catalogAuth;
-    private final Options options;
-    private final boolean fileIORefreshCredentialEnable;
+    private final CatalogContext context;
+    private final boolean dataTokenEnabled;
     private final FileIO fileIO;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
     public RESTCatalog(CatalogContext context) {
-        if (context.options().getOptional(CatalogOptions.WAREHOUSE).isPresent()) {
-            throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
-        }
+        this(context, true);
+    }
+
+    public RESTCatalog(CatalogContext context, boolean configRequired) {
         this.client = new HttpClient(context.options());
         this.catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
 
-        Map<String, String> initHeaders =
-                RESTUtil.merge(
-                        extractPrefixMap(context.options(), HEADER_PREFIX),
-                        catalogAuth.getHeaders());
-        this.options =
-                new Options(
-                        client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, initHeaders)
-                                .merge(context.options().toMap()));
-        this.resourcePaths = ResourcePaths.forCatalogProperties(options);
-
-        this.fileIORefreshCredentialEnable =
-                options.get(RESTCatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE);
-        try {
-            if (fileIORefreshCredentialEnable) {
-                this.fileIO = null;
-            } else {
-                String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
-                this.fileIO =
-                        FileIO.get(
-                                new Path(warehouseStr),
-                                CatalogContext.create(
-                                        options, context.preferIO(), context.fallbackIO()));
+        Options options = context.options();
+        if (configRequired) {
+            if (context.options().contains(WAREHOUSE)) {
+                throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
             }
-        } catch (IOException e) {
-            LOG.warn("Can not get FileIO from options.");
-            throw new RuntimeException(e);
-        }
-    }
 
-    protected RESTCatalog(Options options, FileIO fileIO) {
-        this.client = new HttpClient(options);
-        this.catalogAuth = createAuthSession(options, tokenRefreshExecutor());
-        this.options = options;
+            Map<String, String> initHeaders =
+                    RESTUtil.merge(
+                            extractPrefixMap(context.options(), HEADER_PREFIX),
+                            catalogAuth.getHeaders());
+            options =
+                    new Options(
+                            client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, initHeaders)
+                                    .merge(context.options().toMap()));
+        }
+
+        context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
+        this.context = context;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
-        this.fileIO = fileIO;
-        this.fileIORefreshCredentialEnable =
-                options.get(RESTCatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE);
+
+        this.dataTokenEnabled = options.get(RESTCatalogOptions.DATA_TOKEN_ENABLED);
+        this.fileIO = dataTokenEnabled ? null : fileIOFromOptions(new Path(options.get(WAREHOUSE)));
     }
 
     @Override
     public String warehouse() {
-        return options.get(CatalogOptions.WAREHOUSE);
+        return context.options().get(WAREHOUSE);
     }
 
     @Override
     public Map<String, String> options() {
-        return options.toMap();
+        return context.options().toMap();
     }
 
     @Override
     public RESTCatalogLoader catalogLoader() {
-        return new RESTCatalogLoader(options, fileIO);
+        return new RESTCatalogLoader(context);
     }
 
     @Override
     public FileIO fileIO() {
-        if (fileIORefreshCredentialEnable) {
+        // TODO remove Catalog.fileIO
+        if (dataTokenEnabled) {
             throw new UnsupportedOperationException();
         }
         return fileIO;
-    }
-
-    @Override
-    public FileIO fileIO(Path path) {
-        try {
-            return FileIO.get(path, CatalogContext.create(options));
-        } catch (IOException e) {
-            LOG.warn("Can not get FileIO from options.");
-            throw new RuntimeException(e);
-        }
     }
 
     @Override
@@ -306,9 +281,31 @@ public class RESTCatalog implements Catalog {
         return CatalogUtils.loadTable(
                 this,
                 identifier,
-                this.fileIO(identifier),
+                path -> fileIOForData(path, identifier),
+                this::fileIOFromOptions,
                 this::loadTableMetadata,
                 new RESTSnapshotCommitFactory(catalogLoader()));
+    }
+
+    private FileIO fileIOForData(Path path, Identifier identifier) {
+        return dataTokenEnabled
+                ? new RESTTokenFileIO(catalogLoader(), this, identifier, path)
+                : this.fileIO;
+    }
+
+    private FileIO fileIOFromOptions(Path path) {
+        try {
+            return FileIO.get(path, context);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    protected GetTableTokenResponse loadTableToken(Identifier identifier) {
+        return client.get(
+                resourcePaths.tableToken(identifier.getDatabaseName(), identifier.getObjectName()),
+                GetTableTokenResponse.class,
+                catalogAuth.getHeaders());
     }
 
     public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {
@@ -630,7 +627,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public boolean caseSensitive() {
-        return options.getOptional(CASE_SENSITIVE).orElse(true);
+        return context.options().getOptional(CASE_SENSITIVE).orElse(true);
     }
 
     @Override
@@ -662,13 +659,5 @@ public class RESTCatalog implements Catalog {
         }
 
         return refreshExecutor;
-    }
-
-    private FileIO fileIO(Identifier identifier) {
-        if (fileIORefreshCredentialEnable) {
-            return new RefreshCredentialFileIO(
-                    resourcePaths, catalogAuth, options, client, identifier);
-        }
-        return fileIO;
     }
 }
