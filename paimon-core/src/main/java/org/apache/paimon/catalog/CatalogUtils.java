@@ -171,6 +171,7 @@ public class CatalogUtils {
     public static Table loadTable(
             Catalog catalog,
             Identifier identifier,
+            FileIO fileIO,
             TableMetadata.Loader metadataLoader,
             SnapshotCommit.Factory commitFactory)
             throws Catalog.TableNotExistException {
@@ -189,8 +190,7 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         identifier, metadata.uuid(), catalog.catalogLoader(), commitFactory);
         Path path = new Path(schema.options().get(PATH.key()));
-        FileStoreTable table =
-                FileStoreTableFactory.create(catalog.fileIO(), path, schema, catalogEnv);
+        FileStoreTable table = FileStoreTableFactory.create(fileIO, path, schema, catalogEnv);
 
         if (options.type() == TableType.OBJECT_TABLE) {
             table = toObjectTable(catalog, table);

@@ -109,6 +109,7 @@ public class RESTCatalog implements Catalog {
     private final ResourcePaths resourcePaths;
     private final AuthSession catalogAuth;
     private final Options options;
+    private final boolean fileIORefreshCredentialEnable;
     private final FileIO fileIO;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
@@ -130,13 +131,19 @@ public class RESTCatalog implements Catalog {
                                 .merge(context.options().toMap()));
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
 
+        this.fileIORefreshCredentialEnable =
+                options.get(RESTCatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE);
         try {
-            String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
-            this.fileIO =
-                    FileIO.get(
-                            new Path(warehouseStr),
-                            CatalogContext.create(
-                                    options, context.preferIO(), context.fallbackIO()));
+            if (fileIORefreshCredentialEnable) {
+                this.fileIO = null;
+            } else {
+                String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
+                this.fileIO =
+                        FileIO.get(
+                                new Path(warehouseStr),
+                                CatalogContext.create(
+                                        options, context.preferIO(), context.fallbackIO()));
+            }
         } catch (IOException e) {
             LOG.warn("Can not get FileIO from options.");
             throw new RuntimeException(e);
@@ -149,6 +156,8 @@ public class RESTCatalog implements Catalog {
         this.options = options;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
         this.fileIO = fileIO;
+        this.fileIORefreshCredentialEnable =
+                options.get(RESTCatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE);
     }
 
     @Override
@@ -168,12 +177,20 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public FileIO fileIO() {
+        if (fileIORefreshCredentialEnable) {
+            throw new UnsupportedOperationException();
+        }
         return fileIO;
     }
 
     @Override
     public FileIO fileIO(Path path) {
-        return fileIO;
+        try {
+            return FileIO.get(path, CatalogContext.create(options));
+        } catch (IOException e) {
+            LOG.warn("Can not get FileIO from options.");
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -289,6 +306,7 @@ public class RESTCatalog implements Catalog {
         return CatalogUtils.loadTable(
                 this,
                 identifier,
+                this.fileIO(identifier),
                 this::loadTableMetadata,
                 new RESTSnapshotCommitFactory(catalogLoader()));
     }
@@ -644,5 +662,13 @@ public class RESTCatalog implements Catalog {
         }
 
         return refreshExecutor;
+    }
+
+    private FileIO fileIO(Identifier identifier) {
+        if (fileIORefreshCredentialEnable) {
+            return new RefreshCredentialFileIO(
+                    resourcePaths, catalogAuth, options, client, identifier);
+        }
+        return fileIO;
     }
 }

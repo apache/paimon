@@ -369,7 +369,8 @@ public abstract class AbstractCatalog implements Catalog {
         SnapshotCommit.Factory commitFactory =
                 new RenamingSnapshotCommit.Factory(
                         lockFactory().orElse(null), lockContext().orElse(null));
-        return CatalogUtils.loadTable(this, identifier, this::loadTableMetadata, commitFactory);
+        return CatalogUtils.loadTable(
+                this, identifier, fileIO(), this::loadTableMetadata, commitFactory);
     }
 
     /**

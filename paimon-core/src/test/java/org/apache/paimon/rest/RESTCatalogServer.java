@@ -42,6 +42,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetTableCredentialsResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -63,6 +64,7 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
 import java.util.List;
@@ -149,6 +151,10 @@ public class RESTCatalogServer {
                                 resources.length == 3
                                         && "tables".equals(resources[1])
                                         && "commit".equals(resources[2]);
+                        boolean isTableCredentials =
+                                resources.length == 4
+                                        && "tables".equals(resources[1])
+                                        && "credentials".equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
@@ -202,6 +208,16 @@ public class RESTCatalogServer {
                         } else if (isPartitions) {
                             String tableName = resources[2];
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
+                        } else if (isTableCredentials) {
+                            GetTableCredentialsResponse getTableCredentialsResponse =
+                                    new GetTableCredentialsResponse(
+                                            System.currentTimeMillis(),
+                                            ImmutableMap.of("key", "value"));
+                            return new MockResponse()
+                                    .setResponseCode(200)
+                                    .setBody(
+                                            OBJECT_MAPPER.writeValueAsString(
+                                                    getTableCredentialsResponse));
                         } else if (isTableRename) {
                             return renameTableApiHandler(catalog, request);
                         } else if (isTableCommit) {
