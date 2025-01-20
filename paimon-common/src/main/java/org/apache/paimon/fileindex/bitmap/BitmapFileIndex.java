@@ -33,7 +33,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.ByteArrayOutputStream;
-import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.util.Collections;
@@ -49,23 +48,33 @@ import java.util.stream.Collectors;
 public class BitmapFileIndex implements FileIndexer {
 
     public static final int VERSION_1 = 1;
+    public static final int VERSION_2 = 2;
+    public static final int DEFAULT_SECONDARY_BLOCK_SIZE = 16 * 1024;
 
     private final DataType dataType;
+    private final Options options;
 
     public BitmapFileIndex(DataType dataType, Options options) {
         this.dataType = dataType;
+        this.options = options;
     }
 
     @Override
     public FileIndexWriter createWriter() {
-        return new Writer(dataType);
+        return new Writer(dataType, VERSION_2, options);
+    }
+
+    // this method is only used for test version 1 compatibility
+    @Deprecated
+    public FileIndexWriter createV1Writer() {
+        return new Writer(dataType, VERSION_1, options);
     }
 
     @Override
     public FileIndexReader createReader(
             SeekableInputStream seekableInputStream, int start, int length) {
         try {
-            return new Reader(seekableInputStream, start, length);
+            return new Reader(seekableInputStream, start);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -73,15 +82,19 @@ public class BitmapFileIndex implements FileIndexer {
 
     private static class Writer extends FileIndexWriter {
 
+        private final int version;
         private final DataType dataType;
         private final Function<Object, Object> valueMapper;
         private final Map<Object, RoaringBitmap32> id2bitmap = new HashMap<>();
         private final RoaringBitmap32 nullBitmap = new RoaringBitmap32();
         private int rowNumber;
+        private final Options options;
 
-        public Writer(DataType dataType) {
+        public Writer(DataType dataType, int version, Options options) {
+            this.version = version;
             this.dataType = dataType;
             this.valueMapper = getValueMapper(dataType);
+            this.options = options;
         }
 
         @Override
@@ -103,7 +116,7 @@ public class BitmapFileIndex implements FileIndexer {
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(output);
 
-                dos.writeByte(VERSION_1);
+                dos.writeByte(version);
 
                 // 1.serialize bitmaps to bytes
                 byte[] nullBitmapBytes = nullBitmap.serialize();
@@ -111,7 +124,7 @@ public class BitmapFileIndex implements FileIndexer {
                         id2bitmap.entrySet().stream()
                                 .collect(
                                         Collectors.toMap(
-                                                e -> e.getKey(), e -> e.getValue().serialize()));
+                                                Map.Entry::getKey, e -> e.getValue().serialize()));
 
                 // 2.build bitmap file index meta
                 LinkedHashMap<Object, Integer> bitmapOffsets = new LinkedHashMap<>();
@@ -132,16 +145,35 @@ public class BitmapFileIndex implements FileIndexer {
                                 offsetRef[0] += bytes.length;
                             }
                         });
-                BitmapFileIndexMeta bitmapFileIndexMeta =
-                        new BitmapFileIndexMeta(
-                                dataType,
-                                rowNumber,
-                                id2bitmap.size(),
-                                !nullBitmap.isEmpty(),
-                                nullBitmap.getCardinality() == 1
-                                        ? -1 - nullBitmap.iterator().next()
-                                        : 0,
-                                bitmapOffsets);
+                BitmapFileIndexMeta bitmapFileIndexMeta;
+                if (version == VERSION_1) {
+                    bitmapFileIndexMeta =
+                            new BitmapFileIndexMeta(
+                                    dataType,
+                                    rowNumber,
+                                    id2bitmap.size(),
+                                    !nullBitmap.isEmpty(),
+                                    nullBitmap.getCardinality() == 1
+                                            ? -1 - nullBitmap.iterator().next()
+                                            : 0,
+                                    bitmapOffsets);
+                } else if (version == VERSION_2) {
+                    int blockSize =
+                            options.getInteger("secondaryBlockSize", DEFAULT_SECONDARY_BLOCK_SIZE);
+                    bitmapFileIndexMeta =
+                            new BitmapFileIndexMetaV2(
+                                    dataType,
+                                    rowNumber,
+                                    id2bitmap.size(),
+                                    !nullBitmap.isEmpty(),
+                                    nullBitmap.getCardinality() == 1
+                                            ? -1 - nullBitmap.iterator().next()
+                                            : 0,
+                                    bitmapOffsets,
+                                    blockSize);
+                } else {
+                    throw new RuntimeException("invalid version: " + version);
+                }
 
                 // 3.serialize meta
                 bitmapFileIndexMeta.serialize(dos);
@@ -164,14 +196,12 @@ public class BitmapFileIndex implements FileIndexer {
 
         private final SeekableInputStream seekableInputStream;
         private final int headStart;
-        private int bodyStart;
         private final Map<Object, RoaringBitmap32> bitmaps = new LinkedHashMap<>();
 
-        private int version;
         private BitmapFileIndexMeta bitmapFileIndexMeta;
         private Function<Object, Object> valueMapper;
 
-        public Reader(SeekableInputStream seekableInputStream, int start, int length) {
+        public Reader(SeekableInputStream seekableInputStream, int start) {
             this.seekableInputStream = seekableInputStream;
             this.headStart = start;
         }
@@ -222,7 +252,7 @@ public class BitmapFileIndex implements FileIndexer {
                             .map(
                                     it ->
                                             bitmaps.computeIfAbsent(
-                                                    valueMapper.apply(it), k -> readBitmap(k)))
+                                                    valueMapper.apply(it), this::readBitmap))
                             .iterator());
         }
 
@@ -235,7 +265,7 @@ public class BitmapFileIndex implements FileIndexer {
                     if (offset < 0) {
                         return RoaringBitmap32.bitmapOf(-1 - offset);
                     } else {
-                        seekableInputStream.seek(bodyStart + offset);
+                        seekableInputStream.seek(bitmapFileIndexMeta.getBodyStart() + offset);
                         RoaringBitmap32 bitmap = new RoaringBitmap32();
                         bitmap.deserialize(new DataInputStream(seekableInputStream));
                         return bitmap;
@@ -251,18 +281,20 @@ public class BitmapFileIndex implements FileIndexer {
                 this.valueMapper = getValueMapper(dataType);
                 try {
                     seekableInputStream.seek(headStart);
-                    this.version = seekableInputStream.read();
-                    if (this.version > VERSION_1) {
+                    int version = seekableInputStream.read();
+                    if (version == VERSION_1) {
+                        this.bitmapFileIndexMeta = new BitmapFileIndexMeta(dataType);
+                        this.bitmapFileIndexMeta.deserialize(seekableInputStream);
+                    } else if (version == VERSION_2) {
+                        this.bitmapFileIndexMeta = new BitmapFileIndexMetaV2(dataType);
+                        this.bitmapFileIndexMeta.deserialize(seekableInputStream);
+                    } else if (version > VERSION_2) {
                         throw new RuntimeException(
                                 String.format(
                                         "read index file fail, "
                                                 + "your plugin version is lower than %d",
-                                        this.version));
+                                        version));
                     }
-                    DataInput input = new DataInputStream(seekableInputStream);
-                    this.bitmapFileIndexMeta = new BitmapFileIndexMeta(dataType);
-                    this.bitmapFileIndexMeta.deserialize(input);
-                    bodyStart = (int) seekableInputStream.getPos();
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -44,6 +45,7 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
 
 import java.io.DataInput;
+import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -88,13 +90,13 @@ import java.util.Map;
  */
 public class BitmapFileIndexMeta {
 
-    private final DataType dataType;
-
-    private int rowCount;
-    private int nonNullBitmapNumber;
-    private boolean hasNullValue;
-    private int nullValueOffset;
-    private LinkedHashMap<Object, Integer> bitmapOffsets;
+    protected final DataType dataType;
+    protected int rowCount;
+    protected int nonNullBitmapNumber;
+    protected boolean hasNullValue;
+    protected int nullValueOffset;
+    protected LinkedHashMap<Object, Integer> bitmapOffsets;
+    protected long bodyStart;
 
     public BitmapFileIndexMeta(DataType dataType) {
         this.dataType = dataType;
@@ -119,6 +121,10 @@ public class BitmapFileIndexMeta {
         return rowCount;
     }
 
+    public long getBodyStart() {
+        return bodyStart;
+    }
+
     public boolean contains(Object bitmapId) {
         if (bitmapId == null) {
             return hasNullValue;
@@ -135,6 +141,21 @@ public class BitmapFileIndexMeta {
 
     public void serialize(DataOutput out) throws Exception {
 
+        ThrowableConsumer valueWriter = getValueWriter(out);
+
+        out.writeInt(rowCount);
+        out.writeInt(nonNullBitmapNumber);
+        out.writeBoolean(hasNullValue);
+        if (hasNullValue) {
+            out.writeInt(nullValueOffset);
+        }
+        for (Map.Entry<Object, Integer> entry : bitmapOffsets.entrySet()) {
+            valueWriter.accept(entry.getKey());
+            out.writeInt(entry.getValue());
+        }
+    }
+
+    protected ThrowableConsumer getValueWriter(DataOutput out) {
         ThrowableConsumer valueWriter =
                 dataType.accept(
                         new DataTypeVisitorAdapter<ThrowableConsumer>() {
@@ -177,21 +198,26 @@ public class BitmapFileIndexMeta {
                                 return o -> out.writeDouble((double) o);
                             }
                         });
-
-        out.writeInt(rowCount);
-        out.writeInt(nonNullBitmapNumber);
-        out.writeBoolean(hasNullValue);
-        if (hasNullValue) {
-            out.writeInt(nullValueOffset);
-        }
-        for (Map.Entry<Object, Integer> entry : bitmapOffsets.entrySet()) {
-            valueWriter.accept(entry.getKey());
-            out.writeInt(entry.getValue());
-        }
+        return valueWriter;
     }
 
-    public void deserialize(DataInput in) throws Exception {
+    public void deserialize(SeekableInputStream seekableInputStream) throws Exception {
+        DataInput in = new DataInputStream(seekableInputStream);
+        ThrowableSupplier valueReader = getValueReader(in);
+        rowCount = in.readInt();
+        nonNullBitmapNumber = in.readInt();
+        hasNullValue = in.readBoolean();
+        if (hasNullValue) {
+            nullValueOffset = in.readInt();
+        }
+        bitmapOffsets = new LinkedHashMap<>();
+        for (int i = 0; i < nonNullBitmapNumber; i++) {
+            bitmapOffsets.put(valueReader.get(), in.readInt());
+        }
+        bodyStart = (int) seekableInputStream.getPos();
+    }
 
+    protected ThrowableSupplier getValueReader(DataInput in) {
         ThrowableSupplier valueReader =
                 dataType.accept(
                         new DataTypeVisitorAdapter<ThrowableSupplier>() {
@@ -235,17 +261,7 @@ public class BitmapFileIndexMeta {
                                 return in::readDouble;
                             }
                         });
-
-        rowCount = in.readInt();
-        nonNullBitmapNumber = in.readInt();
-        hasNullValue = in.readBoolean();
-        if (hasNullValue) {
-            nullValueOffset = in.readInt();
-        }
-        bitmapOffsets = new LinkedHashMap<>();
-        for (int i = 0; i < nonNullBitmapNumber; i++) {
-            bitmapOffsets.put(valueReader.get(), in.readInt());
-        }
+        return valueReader;
     }
 
     /** functional interface. */
