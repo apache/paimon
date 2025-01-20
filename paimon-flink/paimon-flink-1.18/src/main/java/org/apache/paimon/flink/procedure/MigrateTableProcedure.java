@@ -67,18 +67,6 @@ public class MigrateTableProcedure extends ProcedureBase {
             String properties,
             Integer parallelism)
             throws Exception {
-
-        return call(procedureContext, connector, sourceTablePath, properties, parallelism, "");
-    }
-
-    public String[] call(
-            ProcedureContext procedureContext,
-            String connector,
-            String sourceTablePath,
-            String properties,
-            Integer parallelism,
-            String icebergProperties)
-            throws Exception {
         String targetTablePath = sourceTablePath + PAIMON_SUFFIX;
 
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
@@ -93,8 +81,7 @@ public class MigrateTableProcedure extends ProcedureBase {
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         parallelism,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties),
-                        ParameterUtils.parseCommaSeparatedKeyValues(icebergProperties));
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties));
         LOG.info("create migrator success.");
         migrator.executeMigrate();
 

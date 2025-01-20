@@ -18,41 +18,43 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.flink.procedure.MigrateTableProcedure;
+import org.apache.paimon.flink.procedure.MigrateIcebergTableProcedure;
 
 import org.apache.flink.table.procedure.DefaultProcedureContext;
 
 import java.util.Map;
 
-/** Migrate from external hive table to paimon table. */
-public class MigrateTableAction extends ActionBase {
+/** Migrate from iceberg table to paimon table. */
+public class MigrateIcebergTableAction extends ActionBase {
 
-    private final String connector;
-    private final String hiveTableFullName;
+    private final String sourceTableFullName;
     private final String tableProperties;
     private final Integer parallelism;
 
-    public MigrateTableAction(
-            String connector,
-            String hiveTableFullName,
+    private final String icebergProperties;
+
+    public MigrateIcebergTableAction(
+            String sourceTableFullName,
             Map<String, String> catalogConfig,
+            String icebergProperties,
             String tableProperties,
             Integer parallelism) {
         super(catalogConfig);
-        this.connector = connector;
-        this.hiveTableFullName = hiveTableFullName;
+        this.sourceTableFullName = sourceTableFullName;
         this.tableProperties = tableProperties;
         this.parallelism = parallelism;
+        this.icebergProperties = icebergProperties;
     }
 
     @Override
     public void run() throws Exception {
-        MigrateTableProcedure migrateTableProcedure = new MigrateTableProcedure();
-        migrateTableProcedure.withCatalog(catalog);
-        migrateTableProcedure.call(
+        MigrateIcebergTableProcedure migrateIcebergTableProcedure =
+                new MigrateIcebergTableProcedure();
+        migrateIcebergTableProcedure.withCatalog(catalog);
+        migrateIcebergTableProcedure.call(
                 new DefaultProcedureContext(env),
-                connector,
-                hiveTableFullName,
+                sourceTableFullName,
+                icebergProperties,
                 tableProperties,
                 parallelism);
     }
