@@ -460,7 +460,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetTableCredentialsResponse'
+                $ref: '#/components/schemas/GetTableDataTokenResponse'
         "404":
           description: Resource not found
           content:
@@ -1203,13 +1203,13 @@ components:
       properties:
         success:
           type: boolean
-    GetTableCredentialsResponse:
+    GetTableDataTokenResponse:
       type: object
       properties:
         expiresAt:
           type: integer
           format: int64
-        credentials:
+        token:
           type: object
           additionalProperties:
             type: string

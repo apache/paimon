@@ -78,9 +78,9 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token provider path.");
 
-    public static final ConfigOption<Boolean> FILE_IO_REFRESH_CREDENTIAL_ENABLE =
-            ConfigOptions.key("file-io-refresh-credential.enabled")
+    public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
+            ConfigOptions.key("data-token.enabled")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to support file io refresh credential.");
+                    .withDescription("Whether to support data token provided by the REST server.");
 }

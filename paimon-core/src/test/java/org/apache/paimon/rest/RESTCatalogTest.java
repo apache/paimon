@@ -114,7 +114,7 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
-        options.set(RESTCatalogOptions.FILE_IO_REFRESH_CREDENTIAL_ENABLE, true);
+        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
         this.catalog = new RESTCatalog(CatalogContext.create(options));
         List<Identifier> identifiers =
                 Lists.newArrayList(

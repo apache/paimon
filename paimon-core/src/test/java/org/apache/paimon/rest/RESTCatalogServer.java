@@ -42,7 +42,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
-import org.apache.paimon.rest.responses.GetTableCredentialsResponse;
+import org.apache.paimon.rest.responses.GetTableDataTokenResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -209,15 +209,15 @@ public class RESTCatalogServer {
                             String tableName = resources[2];
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTableCredentials) {
-                            GetTableCredentialsResponse getTableCredentialsResponse =
-                                    new GetTableCredentialsResponse(
-                                            System.currentTimeMillis(),
-                                            ImmutableMap.of("key", "value"));
+                            GetTableDataTokenResponse getTableDataTokenResponse =
+                                    new GetTableDataTokenResponse(
+                                            ImmutableMap.of("key", "value"),
+                                            System.currentTimeMillis());
                             return new MockResponse()
                                     .setResponseCode(200)
                                     .setBody(
                                             OBJECT_MAPPER.writeValueAsString(
-                                                    getTableCredentialsResponse));
+                                                    getTableDataTokenResponse));
                         } else if (isTableRename) {
                             return renameTableApiHandler(catalog, request);
                         } else if (isTableCommit) {
