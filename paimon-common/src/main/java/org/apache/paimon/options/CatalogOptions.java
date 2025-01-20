@@ -149,4 +149,12 @@ public class CatalogOptions {
                             "Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. "
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
+
+    public static final ConfigOption<Boolean> EXTERNAL_PATH_ENABLED =
+            ConfigOptions.key("data-file.external-paths.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable external paths for data files, external paths allow you to specify the path of the data file, if you specify the path of the data file, "
+                                    + "you should also specify the access key and secret key catalog options.");
 }
