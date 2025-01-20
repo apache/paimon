@@ -83,7 +83,7 @@ public enum OrcConf {
             "orc.compress",
             "hive.exec.orc.default.compress",
             "ZLIB",
-            "Define the default compression codec for ORC file"),
+            "Define the default compression codec for ORC file."),
     WRITE_FORMAT(
             "orc.write.format",
             "hive.exec.orc.write.format",
@@ -159,12 +159,12 @@ public enum OrcConf {
             true,
             "Writers earlier than HIVE-4243 may have inaccurate schema metadata.\n"
                     + "This setting will enable best effort schema evolution rather\n"
-                    + "than rejecting mismatched schemas"),
+                    + "than rejecting mismatched schemas."),
     MEMORY_POOL(
             "orc.memory.pool",
             "hive.exec.orc.memory.pool",
             0.5,
-            "Maximum fraction of heap that can be used by ORC file writers"),
+            "Maximum fraction of heap that can be used by ORC file writers."),
     DICTIONARY_KEY_SIZE_THRESHOLD(
             "orc.dictionary.key.threshold",
             "hive.exec.orc.dictionary.key.size.threshold",
@@ -213,7 +213,7 @@ public enum OrcConf {
             Long.MAX_VALUE,
             "The maximum size of the file to read for finding the file tail. This\n"
                     + "is primarily used for streaming ingest to read intermediate\n"
-                    + "footers while the file is still open"),
+                    + "footers while the file is still open."),
     MAPRED_INPUT_SCHEMA(
             "orc.mapred.input.schema",
             null,
@@ -289,13 +289,13 @@ public enum OrcConf {
             "orc.schema.evolution.case.sensitive",
             "orc.schema.evolution.case.sensitive",
             true,
-            "A boolean flag to determine if the comparision of field names "
-                    + "in schema evolution is case sensitive .\n"),
+            "A boolean flag to determine if the comparison of field names "
+                    + "in schema evolution is case sensitive.\n"),
     ALLOW_SARG_TO_FILTER(
             "orc.sarg.to.filter",
             "orc.sarg.to.filter",
             false,
-            "A boolean flag to determine if a SArg is allowed to become a filter"),
+            "A boolean flag to determine if a SArg is allowed to become a filter."),
     READER_USE_SELECTED(
             "orc.filter.use.selected",
             "orc.filter.use.selected",
@@ -339,7 +339,7 @@ public enum OrcConf {
             0,
             "When determining contiguous reads, gaps within this size are "
                     + "read contiguously and not seeked. Default value of zero disables this "
-                    + "optimization"),
+                    + "optimization."),
     ORC_MIN_DISK_SEEK_SIZE_TOLERANCE(
             "orc.min.disk.seek.size.tolerance",
             "orc.min.disk.seek.size.tolerance",
@@ -349,8 +349,8 @@ public enum OrcConf {
                     + "(bytesRead - bytesNeeded) / bytesNeeded is greater than this "
                     + "threshold then extra work is performed to drop the extra bytes from "
                     + "memory after the read."),
-    ENCRYPTION("orc.encrypt", "orc.encrypt", null, "The list of keys and columns to encrypt with"),
-    DATA_MASK("orc.mask", "orc.mask", null, "The masks to apply to the encrypted columns"),
+    ENCRYPTION("orc.encrypt", "orc.encrypt", null, "The list of keys and columns to encrypt with."),
+    DATA_MASK("orc.mask", "orc.mask", null, "The masks to apply to the encrypted columns."),
     KEY_PROVIDER(
             "orc.key.provider",
             "orc.key.provider",
