@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.spark.analysis.SparkTableNotExistInFsException;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.util.SQLConfUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -152,6 +153,21 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
         // delegate to the session catalog because all tables share the same namespace
         return asTableCatalog().listTables(namespace);
+    }
+
+    @Override
+    public boolean tableExists(Identifier ident) {
+        try {
+            return this.loadTable(ident) != null;
+        } catch (SparkTableNotExistInFsException e) {
+            LOG.warn(
+                    "Table {}.{} exists in Hive metastore, but not in file system, we think table exists in this case",
+                    ident.namespace(),
+                    ident.name());
+            return true;
+        } catch (NoSuchTableException e) {
+            return false;
+        }
     }
 
     @Override
