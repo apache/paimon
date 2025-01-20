@@ -43,9 +43,9 @@ public class RefreshCredentialFileIO implements FileIO {
     private final AuthSession catalogAuth;
     protected Options options;
     private final Identifier identifier;
-    private final transient RESTClient client;
     private Date expireAt;
     private Map<String, String> credential;
+    private final transient RESTClient client;
     private transient volatile FileIO lazyFileIO;
 
     public RefreshCredentialFileIO(
@@ -134,6 +134,7 @@ public class RefreshCredentialFileIO implements FileIO {
         return lazyFileIO;
     }
 
+    // todo: handle exception
     private GetTableCredentialsResponse getCredential() {
         return client.get(
                 resourcePaths.tableCredentials(

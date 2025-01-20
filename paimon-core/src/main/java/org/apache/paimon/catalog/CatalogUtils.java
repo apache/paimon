@@ -194,7 +194,7 @@ public class CatalogUtils {
                         catalog.fileIO(identifier, path), path, schema, catalogEnv);
 
         if (options.type() == TableType.OBJECT_TABLE) {
-            table = toObjectTable(catalog, table);
+            table = toObjectTable(catalog, identifier, table);
         }
 
         if (identifier.isSystemTable()) {
@@ -266,10 +266,11 @@ public class CatalogUtils {
                 .build();
     }
 
-    private static ObjectTable toObjectTable(Catalog catalog, FileStoreTable underlyingTable) {
+    private static ObjectTable toObjectTable(
+            Catalog catalog, Identifier identifier, FileStoreTable underlyingTable) {
         CoreOptions options = underlyingTable.coreOptions();
         String objectLocation = options.objectLocation();
-        FileIO objectFileIO = catalog.fileIO(new Path(objectLocation));
+        FileIO objectFileIO = catalog.fileIO(identifier, new Path(objectLocation));
         return ObjectTable.builder()
                 .underlyingTable(underlyingTable)
                 .objectLocation(objectLocation)
