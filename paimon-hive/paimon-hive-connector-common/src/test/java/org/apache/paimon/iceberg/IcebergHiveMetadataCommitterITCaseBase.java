@@ -242,6 +242,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                                 + "( "
                                 + "'metadata.iceberg.storage' = 'hive-catalog', "
                                 + "'metadata.iceberg.uri' = '', "
+                                + "'metadata.iceberg.glue.skip-archive' = 'true', "
                                 + "'file.format' = 'avro', "
                                 + "'metadata.iceberg.hive-client-class' = '%s')",
                         createFailHiveMetaStoreClient()));
