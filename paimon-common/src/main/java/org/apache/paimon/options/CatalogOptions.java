@@ -139,7 +139,7 @@ public class CatalogOptions {
             ConfigOptions.key("sync-all-properties")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Sync all table properties to hive metastore");
+                    .withDescription("Sync all table properties to hive metastore.");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
             ConfigOptions.key("format-table.enabled")

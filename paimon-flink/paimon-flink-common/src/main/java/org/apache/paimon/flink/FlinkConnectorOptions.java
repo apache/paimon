@@ -346,7 +346,7 @@ public class FlinkConnectorOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "Allow sink committer and writer operator to be chained together");
+                            "Allow sink committer and writer operator to be chained together.");
 
     public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_DONE =
             key("partition.idle-time-to-done")
@@ -424,7 +424,7 @@ public class FlinkConnectorOptions {
                                     + "in order to compact several changelog files (for primary key tables) "
                                     + "or newly created data files (for unaware bucket tables) "
                                     + "from the same partition into large ones, "
-                                    + "which can decrease the number of small files. ");
+                                    + "which can decrease the number of small files.");
 
     public static final ConfigOption<String> SOURCE_OPERATOR_UID_SUFFIX =
             key("source.operator-uid.suffix")

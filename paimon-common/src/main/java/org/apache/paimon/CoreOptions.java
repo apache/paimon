@@ -470,7 +470,7 @@ public class CoreOptions implements Serializable {
                     .memoryType()
                     .defaultValue(MemorySize.MAX_VALUE)
                     .withDescription(
-                            "The max disk to use for write buffer spill. This only work when the write buffer spill is enabled");
+                            "The max disk to use for write buffer spill. This only work when the write buffer spill is enabled.");
 
     public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
             key("write-buffer-spillable")
@@ -491,7 +491,7 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(10)
                     .withDescription(
-                            "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
+                            "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory.");
 
     public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
             key("write-manifest-cache")
@@ -632,7 +632,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to double write to a changelog file. "
                                     + "This changelog file keeps the details of data changes, "
-                                    + "it can be read directly during stream reads. This can be applied to tables with primary keys. ");
+                                    + "it can be read directly during stream reads. This can be applied to tables with primary keys.");
 
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_ROW_DEDUPLICATE =
             key("changelog-producer.row-deduplicate")
@@ -701,7 +701,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional timestamp used in case of \"from-timestamp\" scan mode, it will be automatically converted to timestamp in unix milliseconds, use local time zone");
+                            "Optional timestamp used in case of \"from-timestamp\" scan mode, it will be automatically converted to timestamp in unix milliseconds, use local time zone.");
 
     public static final ConfigOption<Long> SCAN_TIMESTAMP_MILLIS =
             key("scan.timestamp-millis")
@@ -734,7 +734,7 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional snapshot id used in case of \"from-snapshot\" or \"from-snapshot-full\" scan mode");
+                            "Optional snapshot id used in case of \"from-snapshot\" or \"from-snapshot-full\" scan mode.");
 
     public static final ConfigOption<String> SCAN_TAG_NAME =
             key("scan.tag-name")
@@ -767,7 +767,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The parallelism of scanning manifest files, default value is the size of cpu processor. "
                                     + "Note: Scale-up this parameter will increase memory usage while scanning manifest files. "
-                                    + "We can consider downsize it when we encounter an out of memory exception while scanning");
+                                    + "We can consider downsize it when we encounter an out of memory exception while scanning.");
 
     public static final ConfigOption<Duration> STREAMING_READ_SNAPSHOT_DELAY =
             key("streaming.read.snapshot.delay")
@@ -1098,7 +1098,7 @@ public class CoreOptions implements Serializable {
                     .enumType(IncrementalBetweenScanMode.class)
                     .defaultValue(IncrementalBetweenScanMode.AUTO)
                     .withDescription(
-                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive). ");
+                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive).");
 
     public static final ConfigOption<String> INCREMENTAL_BETWEEN_TIMESTAMP =
             key("incremental-between-timestamp")

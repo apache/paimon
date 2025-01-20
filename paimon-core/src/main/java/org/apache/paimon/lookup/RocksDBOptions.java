@@ -91,7 +91,7 @@ public class RocksDBOptions {
                             "The maximum size of RocksDB's file used for information logging. "
                                     + "If the log files becomes larger than this, a new file will be created. "
                                     + "If 0, all logs will be written to one log file. "
-                                    + "The default maximum file size is '25MB'. ");
+                                    + "The default maximum file size is '25MB'.");
 
     @Documentation.ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<Integer> LOG_FILE_NUM =
