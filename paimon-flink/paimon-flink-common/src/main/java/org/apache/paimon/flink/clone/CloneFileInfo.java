@@ -18,17 +18,18 @@
 
 package org.apache.paimon.flink.clone;
 
+import javax.annotation.Nullable;
+
 /** The information of copy file. */
 public class CloneFileInfo {
-
-    private final String sourceFilePath;
-    private final String filePathExcludeTableRoot;
+    @Nullable private final String sourceFilePath;
+    @Nullable private final String filePathExcludeTableRoot;
     private final String sourceIdentifier;
     private final String targetIdentifier;
 
     public CloneFileInfo(
-            String sourceFilePath,
-            String filePathExcludeTableRoot,
+            @Nullable String sourceFilePath,
+            @Nullable String filePathExcludeTableRoot,
             String sourceIdentifier,
             String targetIdentifier) {
         this.sourceFilePath = sourceFilePath;
@@ -37,10 +38,12 @@ public class CloneFileInfo {
         this.targetIdentifier = targetIdentifier;
     }
 
+    @Nullable
     public String getSourceFilePath() {
         return sourceFilePath;
     }
 
+    @Nullable
     public String getFilePathExcludeTableRoot() {
         return filePathExcludeTableRoot;
     }
@@ -56,7 +59,7 @@ public class CloneFileInfo {
     @Override
     public String toString() {
         return String.format(
-                "{ sourceFilePath: %s, filePathExcludeTableRoot: %s, sourceIdentifier: %s, targetIdentifier: %s }",
+                "{ sourceFilePath: %s, filePathExcludeTableRoot: %s, sourceIdentifier: %s, targetIdentifier: %s}",
                 sourceFilePath, filePathExcludeTableRoot, sourceIdentifier, targetIdentifier);
     }
 }

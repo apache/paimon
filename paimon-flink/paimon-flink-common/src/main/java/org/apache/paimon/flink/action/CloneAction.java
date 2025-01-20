@@ -20,8 +20,9 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.clone.CloneFileInfo;
 import org.apache.paimon.flink.clone.CloneSourceBuilder;
-import org.apache.paimon.flink.clone.CopyFileOperator;
-import org.apache.paimon.flink.clone.PickFilesForCloneOperator;
+import org.apache.paimon.flink.clone.CopyDataFileOperator;
+import org.apache.paimon.flink.clone.CopyManifestFileOperator;
+import org.apache.paimon.flink.clone.CopyMetaFilesForCloneOperator;
 import org.apache.paimon.flink.clone.SnapshotHintChannelComputer;
 import org.apache.paimon.flink.clone.SnapshotHintOperator;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
@@ -105,27 +106,50 @@ public class CloneAction extends ActionBase {
                                 targetTableName)
                         .build();
 
-        SingleOutputStreamOperator<CloneFileInfo> pickFilesForClone =
+        SingleOutputStreamOperator<Void> copyMetaFiles =
                 cloneSource
-                        .transform(
-                                "Pick Files",
-                                TypeInformation.of(CloneFileInfo.class),
-                                new PickFilesForCloneOperator(
+                        .forward()
+                        .process(
+                                new CopyMetaFilesForCloneOperator(
                                         sourceCatalogConfig, targetCatalogConfig))
-                        .forceNonParallel();
+                        .name("Side Output")
+                        .setParallelism(1);
 
-        SingleOutputStreamOperator<CloneFileInfo> copyFiles =
-                pickFilesForClone
-                        .rebalance()
+        DataStream<CloneFileInfo> indexFilesStream =
+                copyMetaFiles.getSideOutput(CopyMetaFilesForCloneOperator.INDEX_FILES_TAG);
+        DataStream<CloneFileInfo> dataManifestFilesStream =
+                copyMetaFiles.getSideOutput(CopyMetaFilesForCloneOperator.DATA_MANIFEST_FILES_TAG);
+
+        SingleOutputStreamOperator<CloneFileInfo> copyIndexFiles =
+                indexFilesStream
                         .transform(
-                                "Copy Files",
+                                "Copy Index Files",
                                 TypeInformation.of(CloneFileInfo.class),
-                                new CopyFileOperator(sourceCatalogConfig, targetCatalogConfig))
+                                new CopyDataFileOperator(sourceCatalogConfig, targetCatalogConfig))
                         .setParallelism(parallelism);
+
+        SingleOutputStreamOperator<CloneFileInfo> copyDataManifestFiles =
+                dataManifestFilesStream
+                        .transform(
+                                "Copy Data Manifest Files",
+                                TypeInformation.of(CloneFileInfo.class),
+                                new CopyManifestFileOperator(
+                                        sourceCatalogConfig, targetCatalogConfig))
+                        .setParallelism(parallelism);
+
+        SingleOutputStreamOperator<CloneFileInfo> copyDataFile =
+                copyDataManifestFiles
+                        .transform(
+                                "Copy Data Files",
+                                TypeInformation.of(CloneFileInfo.class),
+                                new CopyDataFileOperator(sourceCatalogConfig, targetCatalogConfig))
+                        .setParallelism(parallelism);
+
+        DataStream<CloneFileInfo> combinedStream = copyDataFile.union(copyIndexFiles);
 
         SingleOutputStreamOperator<CloneFileInfo> snapshotHintOperator =
                 FlinkStreamPartitioner.partition(
-                                copyFiles, new SnapshotHintChannelComputer(), parallelism)
+                                combinedStream, new SnapshotHintChannelComputer(), parallelism)
                         .transform(
                                 "Recreate Snapshot Hint",
                                 TypeInformation.of(CloneFileInfo.class),
