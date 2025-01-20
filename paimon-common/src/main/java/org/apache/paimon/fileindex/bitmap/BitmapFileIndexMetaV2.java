@@ -36,7 +36,7 @@ import java.util.function.Function;
  * will take a lot of time to read the entire dictionary.
  * But in fact we don't need a full dictionary when dealing with a small number of predicates,
  * the performance of predicate hits on the bitmap can be improved by creating a secondary index on the dictionary.
- * <p>
+ * <pre>
  * Bitmap file index format (V2)
  * +-------------------------------------------------+-----------------
  * ｜ version (1 byte) = 2                           ｜
@@ -83,7 +83,7 @@ import java.util.function.Function;
  * +-------------------------------------------------+
  * ｜ ...                                            ｜
  * +-------------------------------------------------+
- * </p>
+ * </pre>
  */
 public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
