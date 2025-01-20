@@ -37,7 +37,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.rest.auth.AuthSession.MAX_REFRESH_WINDOW_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.MIN_REFRESH_WAIT_MILLIS;
-import static org.apache.paimon.rest.auth.AuthSession.TOKEN_REFRESH_NUM_RETRIES;
+import static org.apache.paimon.rest.auth.AuthSession.REFRESH_NUM_RETRIES;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -53,8 +53,8 @@ public class AuthSessionTest {
         Map<String, String> initialHeaders = new HashMap<>();
         initialHeaders.put("k1", "v1");
         initialHeaders.put("k2", "v2");
-        CredentialsProvider credentialsProvider = new BearTokenCredentialsProvider(token);
-        AuthSession session = new AuthSession(initialHeaders, credentialsProvider);
+        AuthProvider authProvider = new BearTokenAuthProvider(token);
+        AuthSession session = new AuthSession(initialHeaders, authProvider);
         Map<String, String> header = session.getHeaders();
         assertEquals(header.get("Authorization"), "Bearer " + token);
         assertEquals(header.get("k1"), "v1");
@@ -65,21 +65,19 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testRefreshBearTokenFileCredentialsProvider()
-            throws IOException, InterruptedException {
+    public void testRefreshBearTokenFileAuthProvider() throws IOException, InterruptedException {
         String fileName = "token";
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
         Map<String, String> initialHeaders = new HashMap<>();
         long expiresInMillis = 1000L;
-        CredentialsProvider credentialsProvider =
-                new BearTokenFileCredentialsProvider(tokenFile.getPath(), expiresInMillis);
+        AuthProvider authProvider =
+                new BearTokenFileAuthProvider(tokenFile.getPath(), expiresInMillis);
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session =
-                AuthSession.fromRefreshCredentialsProvider(
-                        executor, initialHeaders, credentialsProvider);
+                AuthSession.fromRefreshAuthProvider(executor, initialHeaders, authProvider);
         Map<String, String> header = session.getHeaders();
         assertEquals(header.get("Authorization"), "Bearer " + token);
         tokenFile.delete();
@@ -91,19 +89,17 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testRefreshCredentialsProviderIsSoonExpire()
-            throws IOException, InterruptedException {
+    public void testRefreshAuthProviderIsSoonExpire() throws IOException, InterruptedException {
         String fileName = "token";
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
         Map<String, String> initialHeaders = new HashMap<>();
         long expiresInMillis = 1000L;
-        CredentialsProvider credentialsProvider =
-                new BearTokenFileCredentialsProvider(tokenFile.getPath(), expiresInMillis);
+        AuthProvider authProvider =
+                new BearTokenFileAuthProvider(tokenFile.getPath(), expiresInMillis);
         AuthSession session =
-                AuthSession.fromRefreshCredentialsProvider(
-                        null, initialHeaders, credentialsProvider);
+                AuthSession.fromRefreshAuthProvider(null, initialHeaders, authProvider);
         Map<String, String> header = session.getHeaders();
         assertEquals(header.get("Authorization"), "Bearer " + token);
         tokenFile.delete();
@@ -112,8 +108,7 @@ public class AuthSessionTest {
         tokenFile = tokenFile2Token.getLeft();
         FileUtils.writeStringToFile(tokenFile, token);
         Thread.sleep(
-                (long) (expiresInMillis * (1 - BearTokenFileCredentialsProvider.EXPIRED_FACTOR))
-                        + 10L);
+                (long) (expiresInMillis * (1 - BearTokenFileAuthProvider.EXPIRED_FACTOR)) + 10L);
         header = session.getHeaders();
         assertEquals(header.get("Authorization"), "Bearer " + token);
     }
@@ -121,23 +116,21 @@ public class AuthSessionTest {
     @Test
     public void testRetryWhenRefreshFail() throws Exception {
         Map<String, String> initialHeaders = new HashMap<>();
-        CredentialsProvider credentialsProvider =
-                Mockito.mock(BearTokenFileCredentialsProvider.class);
+        AuthProvider authProvider = Mockito.mock(BearTokenFileAuthProvider.class);
         long expiresAtMillis = System.currentTimeMillis() - 1000L;
-        when(credentialsProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
-        when(credentialsProvider.expiresInMills()).thenReturn(Optional.of(50L));
-        when(credentialsProvider.supportRefresh()).thenReturn(true);
-        when(credentialsProvider.keepRefreshed()).thenReturn(true);
-        when(credentialsProvider.refresh()).thenReturn(false);
+        when(authProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
+        when(authProvider.expiresInMills()).thenReturn(Optional.of(50L));
+        when(authProvider.supportRefresh()).thenReturn(true);
+        when(authProvider.keepRefreshed()).thenReturn(true);
+        when(authProvider.refresh()).thenReturn(false);
         AuthSession session =
-                AuthSession.fromRefreshCredentialsProvider(
-                        null, initialHeaders, credentialsProvider);
+                AuthSession.fromRefreshAuthProvider(null, initialHeaders, authProvider);
         AuthSession.scheduleTokenRefresh(
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token"),
                 session,
                 expiresAtMillis);
         Thread.sleep(10_000L);
-        verify(credentialsProvider, Mockito.times(TOKEN_REFRESH_NUM_RETRIES + 1)).refresh();
+        verify(authProvider, Mockito.times(REFRESH_NUM_RETRIES + 1)).refresh();
     }
 
     @Test

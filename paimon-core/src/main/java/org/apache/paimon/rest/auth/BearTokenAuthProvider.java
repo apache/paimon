@@ -18,8 +18,33 @@
 
 package org.apache.paimon.rest.auth;
 
-/** Credentials provider type. */
-public enum CredentialsProviderType {
-    BEAR_TOKEN,
-    BEAR_TOKEN_FILE
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+
+import java.util.Map;
+
+/** Auth provider for bear token. */
+public class BearTokenAuthProvider implements AuthProvider {
+
+    private static final String AUTHORIZATION_HEADER = "Authorization";
+    private static final String BEARER_PREFIX = "Bearer ";
+
+    protected String token;
+
+    public BearTokenAuthProvider(String token) {
+        this.token = token;
+    }
+
+    public String token() {
+        return token;
+    }
+
+    @Override
+    public Map<String, String> authHeader() {
+        return ImmutableMap.of(AUTHORIZATION_HEADER, BEARER_PREFIX + token);
+    }
+
+    @Override
+    public boolean refresh() {
+        return true;
+    }
 }
