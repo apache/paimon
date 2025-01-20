@@ -71,7 +71,7 @@ public class RollbackProcedure extends BaseProcedure {
                 || (snapshot != null && tag != null)
                 || (tag != null && version != null)) {
             throw new IllegalArgumentException(
-                    "only can set only one of version/snapshot/tag in RollbackProcedure.");
+                    "only can set one of version/snapshot/tag in RollbackProcedure.");
         }
 
         if (version == null && snapshot == null && tag == null) {
