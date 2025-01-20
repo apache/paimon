@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 
-import java.io.Serializable;
 import java.util.concurrent.Callable;
 
 /**
@@ -36,24 +35,8 @@ public interface Lock extends AutoCloseable {
     /** Run with lock. */
     <T> T runWithLock(Callable<T> callable) throws Exception;
 
-    /** A factory to create {@link Lock}. */
-    interface Factory extends Serializable {
-        Lock create();
-    }
-
-    static Factory emptyFactory() {
-        return new EmptyFactory();
-    }
-
-    /** A {@link Factory} creating empty lock. */
-    class EmptyFactory implements Factory {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public Lock create() {
-            return new EmptyLock();
-        }
+    static Lock empty() {
+        return new EmptyLock();
     }
 
     /** An empty lock. */
