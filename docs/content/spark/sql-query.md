@@ -32,6 +32,18 @@ Just like all other tables, Paimon tables can be queried with `SELECT` statement
 
 Paimon's batch read returns all the data in a snapshot of the table. By default, batch reads return the latest snapshot.
 
+```sql
+-- read all columns
+SELECT * FROM t;
+```
+
+Paimon also supports reading some hidden metadata columns, such as `__paimon_file_path`, `__paimon_partition`, `__paimon_bucket`.
+
+```sql
+-- read all columns and the corresponding file path, partition, bucket of the record
+SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket FROM t;
+```
+
 ### Batch Time Travel
 
 Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.
