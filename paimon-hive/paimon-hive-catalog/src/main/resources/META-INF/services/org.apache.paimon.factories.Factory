@@ -16,3 +16,4 @@
 org.apache.paimon.hive.HiveCatalogFactory
 org.apache.paimon.hive.HiveCatalogLockFactory
 org.apache.paimon.iceberg.IcebergHiveMetadataCommitterFactory
+org.apache.paimon.iceberg.migrate.IcebergMigrateHiveMetadataFactory
