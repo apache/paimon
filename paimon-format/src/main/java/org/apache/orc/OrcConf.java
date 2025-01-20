@@ -284,13 +284,13 @@ public enum OrcConf {
             "orc.overwrite.output.file",
             "orc.overwrite.output.file",
             false,
-            "A boolean flag to enable overwriting of the output file if it already exists.\n"),
+            "A boolean flag to enable overwriting of the output file if it already exists."),
     IS_SCHEMA_EVOLUTION_CASE_SENSITIVE(
             "orc.schema.evolution.case.sensitive",
             "orc.schema.evolution.case.sensitive",
             true,
             "A boolean flag to determine if the comparison of field names "
-                    + "in schema evolution is case sensitive.\n"),
+                    + "in schema evolution is case sensitive."),
     ALLOW_SARG_TO_FILTER(
             "orc.sarg.to.filter",
             "orc.sarg.to.filter",
