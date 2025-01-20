@@ -1075,6 +1075,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testBatchOrderWithCompaction() throws Exception {
         FileStoreTable table = createFileStoreTable();
+        table = table.copy(Collections.singletonMap(CoreOptions.ASYNC_FILE_WRITE.key(), "false"));
 
         int number = 61;
         List<Integer> expected = new ArrayList<>();
