@@ -32,8 +32,8 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
-import org.apache.paimon.rest.responses.GetTableCredentialsResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
@@ -276,12 +276,12 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void getTableCredentialsResponseParseTest() throws Exception {
-        GetTableCredentialsResponse response = MockRESTMessage.getTableCredentialsResponse();
+    public void getTableTokenResponseParseTest() throws Exception {
+        GetTableTokenResponse response = MockRESTMessage.getTableCredentialsResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        GetTableCredentialsResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, GetTableCredentialsResponse.class);
-        assertEquals(response.getCredential(), parseData.getCredential());
+        GetTableTokenResponse parseData =
+                OBJECT_MAPPER.readValue(responseStr, GetTableTokenResponse.class);
+        assertEquals(response.getToken(), parseData.getToken());
         assertEquals(response.getExpiresAtMillis(), parseData.getExpiresAtMillis());
     }
 }

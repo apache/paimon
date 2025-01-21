@@ -432,12 +432,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/credentials:
+  /v1/{prefix}/databases/{database}/tables/{table}/token:
     get:
       tags:
         - table
-      summary: List credentials
-      operationId: listCredentials
+      summary: Get table token
+      operationId: getTableToken
       parameters:
         - name: prefix
           in: path
@@ -460,7 +460,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetTableCredentialsResponse'
+                $ref: '#/components/schemas/GetTableDataTokenResponse'
         "404":
           description: Resource not found
           content:
@@ -1203,16 +1203,16 @@ components:
       properties:
         success:
           type: boolean
-    GetTableCredentialsResponse:
+    GetTableDataTokenResponse:
       type: object
       properties:
-        expiresAt:
-          type: integer
-          format: int64
-        credentials:
+        token:
           type: object
           additionalProperties:
             type: string
+        expiresAt:
+          type: integer
+          format: int64
     AlterDatabaseRequest:
       type: object
       properties:
