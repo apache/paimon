@@ -55,8 +55,7 @@ public class RESTTokenFileIO implements FileIO {
                     .removalListener(
                             (ignored, value, cause) -> {
                                 if (value != null) {
-                                    // TODO close fileio
-                                    // ((FileIO) value).close();
+                                    ((FileIO) value).close();
                                 }
                             })
                     .scheduler(

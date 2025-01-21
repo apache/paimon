@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.BufferedReader;
+import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -62,7 +63,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 @Public
 @ThreadSafe
-public interface FileIO extends Serializable {
+public interface FileIO extends Serializable, Closeable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);
 
@@ -229,6 +230,13 @@ public interface FileIO extends Serializable {
      * @return <code>true</code> if the renaming was successful, <code>false</code> otherwise
      */
     boolean rename(Path src, Path dst) throws IOException;
+
+    /**
+     * Override this method to empty, many FileIO implementation classes rely on static variables
+     * and do not have the ability to close them.
+     */
+    @Override
+    default void close() {}
 
     // -------------------------------------------------------------------------
     //                            utils
