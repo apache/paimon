@@ -55,7 +55,7 @@ public class InitFileBasedPrivilegeProcedure extends ProcedureBase {
             throw new IllegalArgumentException(
                     String.format(
                             "Catalog %s cannot support Privileged Catalog.",
-                            catalog.getClass().getName()));
+                            rootCatalog(catalog).getClass().getName()));
         }
 
         Options options = new Options(catalog.options());

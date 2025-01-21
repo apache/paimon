@@ -58,10 +58,7 @@ public class PrivilegedCatalog extends DelegateCatalog {
 
     public static Catalog tryToCreate(Catalog catalog, Options options) {
         if (!(rootCatalog(catalog) instanceof AbstractCatalog)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Catalog %s cannot support Privileged Catalog.",
-                            catalog.getClass().getName()));
+            return catalog;
         }
 
         FileBasedPrivilegeManagerLoader fileBasedPrivilegeManagerLoader =
