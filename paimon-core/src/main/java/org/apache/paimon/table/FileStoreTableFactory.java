@@ -36,6 +36,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
+
     public static FileStoreTable create(CatalogContext context) {
         FileIO fileIO;
         try {
