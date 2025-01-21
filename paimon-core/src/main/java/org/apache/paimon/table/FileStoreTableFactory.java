@@ -22,8 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.ResolvingFileIO;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -39,18 +37,11 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
     public static FileStoreTable create(CatalogContext context) {
-        boolean resolvingFileIOEnabled =
-                context.options().get(CatalogOptions.RESOLVING_FILEIO_ENABLED);
         FileIO fileIO;
-        if (resolvingFileIOEnabled) {
-            fileIO = new ResolvingFileIO();
-            fileIO.configure(context);
-        } else {
-            try {
-                fileIO = FileIO.get(CoreOptions.path(context.options()), context);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+        try {
+            fileIO = FileIO.get(CoreOptions.path(context.options()), context);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
         return create(fileIO, context.options());
     }
