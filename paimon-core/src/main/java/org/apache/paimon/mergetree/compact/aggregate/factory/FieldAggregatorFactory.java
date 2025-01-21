@@ -27,6 +27,8 @@ import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
+
 /** Factory for {@link FieldAggregator}. */
 public interface FieldAggregatorFactory extends Factory {
 
@@ -35,37 +37,34 @@ public interface FieldAggregatorFactory extends Factory {
     String identifier();
 
     static FieldAggregator create(
-            DataType fieldType,
-            @Nullable String strAgg,
-            boolean ignoreRetract,
-            boolean isPrimaryKey,
-            CoreOptions options,
-            String field) {
-        FieldAggregator fieldAggregator;
-        if (isPrimaryKey) {
-            strAgg = FieldPrimaryKeyAggFactory.NAME;
-        } else if (strAgg == null) {
-            strAgg = FieldLastNonNullValueAggFactory.NAME;
-        }
-
+            DataType fieldType, String fieldName, String aggFuncName, CoreOptions options) {
         FieldAggregatorFactory fieldAggregatorFactory =
                 FactoryUtil.discoverFactory(
                         FieldAggregator.class.getClassLoader(),
                         FieldAggregatorFactory.class,
-                        strAgg);
+                        aggFuncName);
         if (fieldAggregatorFactory == null) {
             throw new RuntimeException(
                     String.format(
                             "Use unsupported aggregation: %s or spell aggregate function incorrectly!",
-                            strAgg));
+                            aggFuncName));
         }
 
-        fieldAggregator = fieldAggregatorFactory.create(fieldType, options, field);
+        FieldAggregator fieldAggregator =
+                fieldAggregatorFactory.create(fieldType, options, fieldName);
+        return options.fieldAggIgnoreRetract(fieldName)
+                ? new FieldIgnoreRetractAgg(fieldAggregator)
+                : fieldAggregator;
+    }
 
-        if (ignoreRetract) {
-            fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
+    @Nullable
+    static String getAggFuncName(String fieldName, List<String> primaryKeys, CoreOptions options) {
+        if (primaryKeys.contains(fieldName)) {
+            // aggregate by primary keys, so they do not aggregate
+            return FieldPrimaryKeyAggFactory.NAME;
         }
 
-        return fieldAggregator;
+        String aggFunc = options.fieldAggFunc(fieldName);
+        return aggFunc == null ? options.fieldsDefaultFunc() : aggFunc;
     }
 }
