@@ -99,6 +99,7 @@ case class DynamicBucketProcessor(
 ) extends BucketProcessor[Row] {
 
   private val targetBucketRowNumber = fileStoreTable.coreOptions.dynamicBucketTargetRowNum
+  private val maxBucketsNum = fileStoreTable.coreOptions.dynamicBucketMaxBucketsPerAssigner()
   private val rowType = fileStoreTable.rowType
   private val commitUser = UUID.randomUUID.toString
 
@@ -111,7 +112,8 @@ case class DynamicBucketProcessor(
       numSparkPartitions,
       numAssigners,
       TaskContext.getPartitionId(),
-      targetBucketRowNumber
+      targetBucketRowNumber,
+      maxBucketsNum
     )
 
     new Iterator[Row]() {

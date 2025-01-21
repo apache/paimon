@@ -20,6 +20,7 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.utils.Int2ShortHashMap;
 import org.apache.paimon.utils.IntIterator;
 
@@ -27,8 +28,8 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -57,13 +58,13 @@ public class PartitionIndex {
             long targetBucketRowNumber) {
         this.hash2Bucket = hash2Bucket;
         this.nonFullBucketInformation = bucketInformation;
-        this.totalBucket = new HashSet<>(bucketInformation.keySet());
+        this.totalBucket = new LinkedHashSet<>(bucketInformation.keySet());
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.lastAccessedCommitIdentifier = Long.MIN_VALUE;
         this.accessed = true;
     }
 
-    public int assign(int hash, IntPredicate bucketFilter) {
+    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum) {
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -80,29 +81,39 @@ public class PartitionIndex {
             Long number = entry.getValue();
             if (number < targetBucketRowNumber) {
                 entry.setValue(number + 1);
-                hash2Bucket.put(hash, bucket.shortValue());
-                return bucket;
+                return cacheBucketAndGet(hash, bucket);
             } else {
                 iterator.remove();
+                if (-1 != maxBucketsNum && totalBucket.size() == maxBucketsNum) {
+                    return cacheBucketAndGet(
+                            hash,
+                            KeyAndBucketExtractor.bucketWithUpperBound(
+                                    totalBucket, hash, maxBucketsNum));
+                }
             }
         }
 
-        // 3. create a new bucket
-        for (int i = 0; i < Short.MAX_VALUE; i++) {
-            if (bucketFilter.test(i) && !totalBucket.contains(i)) {
-                hash2Bucket.put(hash, (short) i);
-                nonFullBucketInformation.put(i, 1L);
-                totalBucket.add(i);
-                return i;
+        if (-1 == maxBucketsNum || totalBucket.size() < maxBucketsNum) {
+            // 3. create a new bucket
+            for (int i = 0; i < Short.MAX_VALUE; i++) {
+                if (bucketFilter.test(i) && !totalBucket.contains(i)) {
+                    nonFullBucketInformation.put(i, 1L);
+                    totalBucket.add(i);
+                    return cacheBucketAndGet(hash, i);
+                }
             }
-        }
 
-        @SuppressWarnings("OptionalGetWithoutIsPresent")
-        int maxBucket = totalBucket.stream().mapToInt(Integer::intValue).max().getAsInt();
-        throw new RuntimeException(
-                String.format(
-                        "Too more bucket %s, you should increase target bucket row number %s.",
-                        maxBucket, targetBucketRowNumber));
+            @SuppressWarnings("OptionalGetWithoutIsPresent")
+            int maxBucket = totalBucket.stream().mapToInt(Integer::intValue).max().getAsInt();
+            throw new RuntimeException(
+                    String.format(
+                            "Too more bucket %s, you should increase target bucket row number %s.",
+                            maxBucket, targetBucketRowNumber));
+        } else {
+            return cacheBucketAndGet(
+                    hash,
+                    KeyAndBucketExtractor.bucketWithUpperBound(totalBucket, hash, maxBucketsNum));
+        }
     }
 
     public static PartitionIndex loadIndex(
@@ -136,5 +147,10 @@ public class PartitionIndex {
             }
         }
         return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
+    }
+
+    private int cacheBucketAndGet(int hash, int bucket) {
+        hash2Bucket.put(hash, (short) bucket);
+        return bucket;
     }
 }

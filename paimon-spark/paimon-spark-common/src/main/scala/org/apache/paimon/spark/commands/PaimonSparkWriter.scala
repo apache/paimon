@@ -196,7 +196,8 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                 new SimpleHashBucketAssigner(
                   numAssigners,
                   TaskContext.getPartitionId(),
-                  table.coreOptions.dynamicBucketTargetRowNum)
+                  table.coreOptions.dynamicBucketTargetRowNum,
+                  table.coreOptions.dynamicBucketMaxBucketsPerAssigner())
               row => {
                 val sparkRow = new SparkRow(rowType, row)
                 assigner.assign(
