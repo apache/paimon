@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg.migrate;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -38,16 +39,14 @@ public class IcebergMigrateHadoopMetadata implements IcebergMigrateMetadata {
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
     private static final String ICEBERG_WAREHOUSE = "iceberg_warehouse";
 
-    private final FileIO fileIO;
     private final Identifier icebergIdentifier;
     private final Options icebergOptions;
 
     private Path icebergLatestMetaVersionPath;
     private IcebergPathFactory icebergMetaPathFactory;
+    private FileIO fileIO;
 
-    public IcebergMigrateHadoopMetadata(
-            Identifier icebergIdentifier, FileIO fileIO, Options icebergOptions) {
-        this.fileIO = fileIO;
+    public IcebergMigrateHadoopMetadata(Identifier icebergIdentifier, Options icebergOptions) {
         this.icebergIdentifier = icebergIdentifier;
         this.icebergOptions = icebergOptions;
     }
@@ -58,15 +57,19 @@ public class IcebergMigrateHadoopMetadata implements IcebergMigrateMetadata {
                 icebergOptions.get(ICEBERG_WAREHOUSE) != null,
                 "'iceberg_warehouse' is null. "
                         + "In hadoop-catalog, you should explicitly set this argument for finding iceberg metadata.");
+        Path path =
+                new Path(
+                        String.format(
+                                "%s/%s/metadata",
+                                icebergIdentifier.getDatabaseName(),
+                                icebergIdentifier.getTableName()));
+        try {
+            fileIO = FileIO.get(path, CatalogContext.create(icebergOptions));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         this.icebergMetaPathFactory =
-                new IcebergPathFactory(
-                        new Path(
-                                icebergOptions.get(ICEBERG_WAREHOUSE),
-                                new Path(
-                                        String.format(
-                                                "%s/%s/metadata",
-                                                icebergIdentifier.getDatabaseName(),
-                                                icebergIdentifier.getTableName()))));
+                new IcebergPathFactory(new Path(icebergOptions.get(ICEBERG_WAREHOUSE), path));
         long icebergLatestMetaVersion = getIcebergLatestMetaVersion();
 
         this.icebergLatestMetaVersionPath =
