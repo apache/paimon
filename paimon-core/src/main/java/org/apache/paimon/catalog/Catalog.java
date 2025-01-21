@@ -20,7 +20,6 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -374,9 +373,6 @@ public interface Catalog extends AutoCloseable {
 
     /** {@link FileIO} of this catalog. It can access {@link #warehouse()} path. */
     FileIO fileIO();
-
-    /** {@link FileIO} of this catalog. */
-    FileIO fileIO(Path path);
 
     /** Catalog options for re-creating this catalog. */
     Map<String, String> options();
