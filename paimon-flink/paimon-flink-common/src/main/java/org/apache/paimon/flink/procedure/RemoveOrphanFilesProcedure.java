@@ -84,7 +84,7 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     procedureContext.getExecutionEnvironment(),
                                     catalog,
                                     olderThanMillis(olderThan),
-                                    dryRun,
+                                    dryRun != null && dryRun,
                                     parallelism,
                                     databaseName,
                                     tableName);
@@ -97,7 +97,7 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     tableName,
                                     olderThanMillis(olderThan),
                                     parallelism,
-                                    dryRun);
+                                    dryRun != null && dryRun);
                     break;
                 default:
                     throw new IllegalArgumentException(
