@@ -368,6 +368,22 @@ class PaimonQueryTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Query: query metadata columns") {
+    sql("CREATE TABLE T (a INT, p1 INT, p2 INT) PARTITIONED BY (p1, p2)")
+    sql("INSERT INTO T VALUES (1, 1, 1), (2, 1, 2)")
+    checkAnswer(
+      sql("""
+            |SELECT
+            |*,
+            |element_at(split(__paimon_file_path, '\\.'), -1),
+            |__paimon_partition,
+            |__paimon_bucket
+            |FROM T ORDER BY a
+            |""".stripMargin),
+      Seq(Row(1, 1, 1, "parquet", Row(1, 1), 0), Row(2, 1, 2, "parquet", Row(1, 2), 0))
+    )
+  }
+
   private def getAllFiles(
       tableName: String,
       partitions: Seq[String],
