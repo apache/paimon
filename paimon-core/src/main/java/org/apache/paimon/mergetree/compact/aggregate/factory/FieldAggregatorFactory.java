@@ -25,10 +25,6 @@ import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldIgnoreRetractAgg;
 import org.apache.paimon.types.DataType;
 
-import javax.annotation.Nullable;
-
-import java.util.List;
-
 /** Factory for {@link FieldAggregator}. */
 public interface FieldAggregatorFactory extends Factory {
 
@@ -55,16 +51,5 @@ public interface FieldAggregatorFactory extends Factory {
         return options.fieldAggIgnoreRetract(fieldName)
                 ? new FieldIgnoreRetractAgg(fieldAggregator)
                 : fieldAggregator;
-    }
-
-    @Nullable
-    static String getAggFuncName(String fieldName, List<String> primaryKeys, CoreOptions options) {
-        if (primaryKeys.contains(fieldName)) {
-            // aggregate by primary keys, so they do not aggregate
-            return FieldPrimaryKeyAggFactory.NAME;
-        }
-
-        String aggFunc = options.fieldAggFunc(fieldName);
-        return aggFunc == null ? options.fieldsDefaultFunc() : aggFunc;
     }
 }
