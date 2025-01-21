@@ -18,6 +18,9 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
+
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -65,33 +68,34 @@ public class RollbackProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String version = args.isNullAt(1) ? null : args.getString(1);
-        Long snapshot = args.isNullAt(2) ? null : args.getLong(2);
-        String tag = args.isNullAt(3) ? null : args.getString(3);
-        if ((version != null && snapshot != null)
-                || (snapshot != null && tag != null)
-                || (tag != null && version != null)) {
-            throw new IllegalArgumentException(
-                    "only can set one of version/snapshot/tag in RollbackProcedure.");
-        }
-
-        if (version == null && snapshot == null && tag == null) {
-            throw new IllegalArgumentException(
-                    "must set one of version/snapshot/tag in RollbackProcedure.");
-        }
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
+                    Long snapshot = null;
+                    String tag = null;
+                    if (!StringUtils.isNullOrWhitespaceOnly(version)) {
+                        Preconditions.checkState(
+                                args.isNullAt(2) && args.isNullAt(3),
+                                "only can set one of version/snapshot/tag in RollbackProcedure.");
+                        if (version.chars().allMatch(Character::isDigit)) {
+                            snapshot = Long.parseLong(version);
+                        } else {
+                            tag = version;
+                        }
+                    } else {
+                        Preconditions.checkState(
+                                (args.isNullAt(2) && !args.isNullAt(3)
+                                        || !args.isNullAt(2) && args.isNullAt(3)),
+                                "only can set one of version/snapshot/tag in RollbackProcedure.");
+                        snapshot = args.isNullAt(2) ? null : args.getLong(2);
+                        tag = args.isNullAt(3) ? null : args.getString(3);
+                    }
+
                     if (snapshot != null) {
                         table.rollbackTo(snapshot);
-                    } else if (tag != null) {
-                        table.rollbackTo(tag);
                     } else {
-                        if (version.chars().allMatch(Character::isDigit)) {
-                            table.rollbackTo(Long.parseLong(version));
-                        } else {
-                            table.rollbackTo(version);
-                        }
+                        table.rollbackTo(tag);
                     }
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};

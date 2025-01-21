@@ -115,16 +115,21 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
     checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
 
     // snapshot-3
-    spark.sql("insert into T select 2, 'b2'")
-    checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+    spark.sql("insert into T select 3, 'c'")
+    checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+
+    // snapshot-4
+    spark.sql("insert into T select 4, 'd'")
+    checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Row(4, "d") :: Nil)
+
     assertThrows[RuntimeException] {
-      spark.sql("CALL paimon.sys.rollback(table => 'test.T_exception', version => '2')")
+      spark.sql("CALL paimon.sys.rollback(table => 'test.T_exception', version => '4')")
     }
     // rollback to snapshot
     checkAnswer(
-      spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '2')"),
+      spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '3')"),
       Row(true) :: Nil)
-    checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+    checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
 
     // version/snapshot/tag can only set one of them
     assertThrows[RuntimeException] {
@@ -140,9 +145,12 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
       spark.sql("CALL paimon.sys.rollback(table => 'test.T', tag => '20250122', snapshot => 1)")
     }
 
+    // rollback to snapshot
+    spark.sql("CALL paimon.sys.rollback(table => 'test.T', snapshot => 2)")
+    checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
     // rollback to tag
     spark.sql("CALL paimon.sys.rollback(table => 'test.T', tag => '20250122')")
-
     checkAnswer(query(), Row(1, "a") :: Nil)
   }
 
