@@ -27,7 +27,6 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.SerializableConsumer;
 
 import javax.annotation.Nullable;
 
@@ -81,15 +80,11 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     }
 
     public LocalOrphanFilesClean(FileStoreTable table, long olderThanMillis) {
-        this(table, olderThanMillis, path -> table.fileIO().deleteQuietly(path), false);
+        this(table, olderThanMillis, false);
     }
 
-    public LocalOrphanFilesClean(
-            FileStoreTable table,
-            long olderThanMillis,
-            SerializableConsumer<Path> fileCleaner,
-            boolean dryRun) {
-        super(table, olderThanMillis, fileCleaner);
+    public LocalOrphanFilesClean(FileStoreTable table, long olderThanMillis, boolean dryRun) {
+        super(table, olderThanMillis, dryRun);
         this.deleteFiles = new ArrayList<>();
         this.executor =
                 createCachedThreadPool(
@@ -125,7 +120,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                 .forEach(
                         deleteFileInfo -> {
                             deletedFilesLenInBytes.addAndGet(deleteFileInfo.getRight());
-                            fileCleaner.accept(deleteFileInfo.getLeft());
+                            cleanFile(deleteFileInfo.getLeft());
                         });
         deleteFiles.addAll(
                 candidateDeletes.stream()
@@ -239,7 +234,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             String databaseName,
             @Nullable String tableName,
             long olderThanMillis,
-            SerializableConsumer<Path> fileCleaner,
             @Nullable Integer parallelism,
             boolean dryRun)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
@@ -269,8 +263,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                     table.getClass().getName());
 
             orphanFilesCleans.add(
-                    new LocalOrphanFilesClean(
-                            (FileStoreTable) table, olderThanMillis, fileCleaner, dryRun));
+                    new LocalOrphanFilesClean((FileStoreTable) table, olderThanMillis, dryRun));
         }
 
         return orphanFilesCleans;
@@ -281,19 +274,12 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             String databaseName,
             @Nullable String tableName,
             long olderThanMillis,
-            SerializableConsumer<Path> fileCleaner,
             @Nullable Integer parallelism,
             boolean dryRun)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         List<LocalOrphanFilesClean> tableCleans =
                 createOrphanFilesCleans(
-                        catalog,
-                        databaseName,
-                        tableName,
-                        olderThanMillis,
-                        fileCleaner,
-                        parallelism,
-                        dryRun);
+                        catalog, databaseName, tableName, olderThanMillis, parallelism, dryRun);
 
         ExecutorService executorService =
                 Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());

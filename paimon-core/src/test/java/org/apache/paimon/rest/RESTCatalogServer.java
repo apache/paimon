@@ -88,7 +88,7 @@ public class RESTCatalogServer {
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
         this.catalog = TestRESTCatalog.create(CatalogContext.create(conf));
-        this.dispatcher = initDispatcher(catalog, authToken);
+        this.dispatcher = initDispatcher(catalog, warehouse, authToken);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
         server = mockWebServer;
@@ -106,7 +106,7 @@ public class RESTCatalogServer {
         server.shutdown();
     }
 
-    public static Dispatcher initDispatcher(Catalog catalog, String authToken) {
+    public static Dispatcher initDispatcher(Catalog catalog, String warehouse, String authToken) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
@@ -119,7 +119,7 @@ public class RESTCatalogServer {
                     if ("/v1/config".equals(request.getPath())) {
                         return new MockResponse()
                                 .setResponseCode(200)
-                                .setBody(getConfigBody(catalog.warehouse()));
+                                .setBody(getConfigBody(warehouse));
                     } else if (DATABASE_URI.equals(request.getPath())) {
                         return databasesApiHandler(catalog, request);
                     } else if (request.getPath().startsWith(DATABASE_URI)) {
