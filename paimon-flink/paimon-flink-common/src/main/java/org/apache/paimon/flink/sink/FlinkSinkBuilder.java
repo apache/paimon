@@ -215,8 +215,18 @@ public class FlinkSinkBuilder {
     public DataStreamSink<?> build() {
         setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
-        DataStream<InternalRow> input = mapToInternalRow(this.input, table.rowType());
-        if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
+        boolean isAppendOnlyTable = table.schema().primaryKeys().isEmpty();
+        BucketMode bucketMode = table.bucketMode();
+
+        DataStream<InternalRow> input =
+                mapToInternalRow(
+                        this.input,
+                        table.rowType(),
+                        isAppendOnlyTable && bucketMode == BUCKET_UNAWARE && parallelism != null
+                                ? parallelism
+                                : this.input.getParallelism());
+
+        if (table.coreOptions().localMergeEnabled() && !isAppendOnlyTable) {
             input =
                     input.forward()
                             .transform(
@@ -226,7 +236,6 @@ public class FlinkSinkBuilder {
                             .setParallelism(input.getParallelism());
         }
 
-        BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
             case HASH_FIXED:
                 return buildForFixedBucket(input);
@@ -242,13 +251,13 @@ public class FlinkSinkBuilder {
     }
 
     protected DataStream<InternalRow> mapToInternalRow(
-            DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
+            DataStream<RowData> input, org.apache.paimon.types.RowType rowType, int parallelism) {
         return input.transform(
                         "Map",
                         org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType),
                         new StreamMapWithForwardingRecordAttributes<>(
                                 (MapFunction<RowData, InternalRow>) FlinkRowWrapper::new))
-                .setParallelism(input.getParallelism());
+                .setParallelism(parallelism);
     }
 
     protected DataStreamSink<?> buildDynamicBucketSink(
