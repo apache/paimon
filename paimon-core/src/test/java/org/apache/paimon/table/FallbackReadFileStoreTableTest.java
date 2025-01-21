@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -57,7 +58,7 @@ public class FallbackReadFileStoreTableTest {
                     new DataType[] {
                         DataTypes.INT(), DataTypes.INT(),
                     },
-                    new String[] {"pt", "a"});
+                    new String[] {"a", "pt"});
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -81,14 +82,14 @@ public class FallbackReadFileStoreTableTest {
         FileStoreTable mainTable = createTable();
 
         // write data into partition 1 and 2.
-        writeDataIntoTable(mainTable, 0, rowData(1, 10), rowData(2, 20));
+        writeDataIntoTable(mainTable, 0, rowData(10, 1), rowData(20, 2));
 
         mainTable.createBranch(branchName);
 
         FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
 
         // write data into partition for branch only
-        writeDataIntoTable(branchTable, 0, rowData(3, 60));
+        writeDataIntoTable(branchTable, 0, rowData(60, 3));
 
         FallbackReadFileStoreTable fallbackTable =
                 new FallbackReadFileStoreTable(mainTable, branchTable);
@@ -105,6 +106,7 @@ public class FallbackReadFileStoreTableTest {
                         .collect(Collectors.toList());
         // this should contain all partitions
         assertThat(partitionsFromFallbackTable).containsExactlyInAnyOrder(1, 2, 3);
+        assertThat(CatalogUtils.listPartitionsFromFileSystem(mainTable)).size().isEqualTo(2);
     }
 
     @Test
@@ -114,14 +116,14 @@ public class FallbackReadFileStoreTableTest {
         FileStoreTable mainTable = createTable();
 
         // write data into partition 1 and 2.
-        writeDataIntoTable(mainTable, 0, rowData(1, 10), rowData(1, 30), rowData(2, 20));
+        writeDataIntoTable(mainTable, 0, rowData(10, 1), rowData(30, 1), rowData(20, 2));
 
         mainTable.createBranch(branchName);
 
         FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
 
         // write data into partition for branch only
-        writeDataIntoTable(branchTable, 0, rowData(1, 50), rowData(3, 60), rowData(4, 70));
+        writeDataIntoTable(branchTable, 0, rowData(50, 1), rowData(60, 3), rowData(70, 4));
 
         FallbackReadFileStoreTable fallbackTable =
                 new FallbackReadFileStoreTable(mainTable, branchTable);

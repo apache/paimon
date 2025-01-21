@@ -75,7 +75,7 @@ public class CatalogUtils {
         InternalRowPartitionComputer computer =
                 new InternalRowPartitionComputer(
                         options.get(PARTITION_DEFAULT_NAME),
-                        table.rowType(),
+                        table.rowType().project(table.partitionKeys()),
                         table.partitionKeys().toArray(new String[0]),
                         options.get(PARTITION_GENERATE_LEGCY_NAME));
         List<PartitionEntry> partitionEntries =
