@@ -145,11 +145,6 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public String warehouse() {
-        return context.options().get(WAREHOUSE);
-    }
-
-    @Override
     public Map<String, String> options() {
         return context.options().toMap();
     }
@@ -157,15 +152,6 @@ public class RESTCatalog implements Catalog {
     @Override
     public RESTCatalogLoader catalogLoader() {
         return new RESTCatalogLoader(context);
-    }
-
-    @Override
-    public FileIO fileIO() {
-        // TODO remove Catalog.fileIO
-        if (dataTokenEnabled) {
-            throw new UnsupportedOperationException();
-        }
-        return fileIO;
     }
 
     @Override

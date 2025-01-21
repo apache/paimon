@@ -73,7 +73,6 @@ public class IcebergMigrator implements Migrator {
     private final ThreadPoolExecutor executor;
 
     private final Catalog paimonCatalog;
-    private final FileIO paimonFileIO;
     private final String paimonDatabaseName;
     private final String paimonTableName;
 
@@ -100,7 +99,6 @@ public class IcebergMigrator implements Migrator {
             Options icebergOptions,
             Integer parallelism) {
         this.paimonCatalog = paimonCatalog;
-        this.paimonFileIO = paimonCatalog.fileIO();
         this.paimonDatabaseName = paimonDatabaseName;
         this.paimonTableName = paimonTableName;
 
@@ -126,9 +124,7 @@ public class IcebergMigrator implements Migrator {
 
         icebergMigrateMetadata =
                 icebergMigrateMetadataFactory.create(
-                        Identifier.create(icebergDatabaseName, icebergTableName),
-                        paimonFileIO,
-                        icebergOptions);
+                        Identifier.create(icebergDatabaseName, icebergTableName), icebergOptions);
 
         this.icebergMetadata = icebergMigrateMetadata.icebergMetadata();
         this.icebergLatestMetadataLocation = icebergMigrateMetadata.icebergLatestMetadataLocation();
@@ -148,6 +144,7 @@ public class IcebergMigrator implements Migrator {
 
         try {
             FileStoreTable paimonTable = (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
+            FileIO fileIO = paimonTable.fileIO();
 
             IcebergManifestFile manifestFile =
                     IcebergManifestFile.create(paimonTable, icebergMetaPathFactory);
@@ -214,8 +211,8 @@ public class IcebergMigrator implements Migrator {
                 for (Map.Entry<Path, Path> entry : rollback.entrySet()) {
                     Path newPath = entry.getKey();
                     Path origin = entry.getValue();
-                    if (paimonFileIO.exists(newPath)) {
-                        paimonFileIO.rename(newPath, origin);
+                    if (fileIO.exists(newPath)) {
+                        fileIO.rename(newPath, origin);
                     }
                 }
 
@@ -331,8 +328,7 @@ public class IcebergMigrator implements Migrator {
         BinaryRow partitionRow = BinaryRow.EMPTY_ROW;
         Path newDir = paimonTable.store().pathFactory().bucketPath(partitionRow, 0);
 
-        return new MigrateTask(
-                icebergDataFileMetas, paimonFileIO, paimonTable, partitionRow, newDir, rollback);
+        return new MigrateTask(icebergDataFileMetas, paimonTable, partitionRow, newDir, rollback);
     }
 
     private List<MigrateTask> importPartitionedTable(
@@ -347,13 +343,7 @@ public class IcebergMigrator implements Migrator {
             BinaryRow partitionRow = entry.getKey();
             Path newDir = paimonTable.store().pathFactory().bucketPath(partitionRow, 0);
             migrateTasks.add(
-                    new MigrateTask(
-                            entry.getValue(),
-                            paimonFileIO,
-                            paimonTable,
-                            partitionRow,
-                            newDir,
-                            rollback));
+                    new MigrateTask(entry.getValue(), paimonTable, partitionRow, newDir, rollback));
         }
         return migrateTasks;
     }
@@ -362,7 +352,6 @@ public class IcebergMigrator implements Migrator {
     public static class MigrateTask implements Callable<CommitMessage> {
 
         private final List<IcebergDataFileMeta> icebergDataFileMetas;
-        private final FileIO fileIO;
         private final FileStoreTable paimonTable;
         private final BinaryRow partitionRow;
         private final Path newDir;
@@ -370,13 +359,11 @@ public class IcebergMigrator implements Migrator {
 
         public MigrateTask(
                 List<IcebergDataFileMeta> icebergDataFileMetas,
-                FileIO fileIO,
                 FileStoreTable paimonTable,
                 BinaryRow partitionRow,
                 Path newDir,
                 Map<Path, Path> rollback) {
             this.icebergDataFileMetas = icebergDataFileMetas;
-            this.fileIO = fileIO;
             this.paimonTable = paimonTable;
             this.partitionRow = partitionRow;
             this.newDir = newDir;
@@ -385,6 +372,7 @@ public class IcebergMigrator implements Migrator {
 
         @Override
         public CommitMessage call() throws Exception {
+            FileIO fileIO = paimonTable.fileIO();
             if (!fileIO.exists(newDir)) {
                 fileIO.mkdirs(newDir);
             }

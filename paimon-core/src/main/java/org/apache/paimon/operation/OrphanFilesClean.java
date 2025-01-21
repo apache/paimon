@@ -19,7 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -36,7 +35,6 @@ import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.SerializableConsumer;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SupplierWithIOException;
 import org.apache.paimon.utils.TagManager;
@@ -90,18 +88,17 @@ public abstract class OrphanFilesClean implements Serializable {
     protected final FileStoreTable table;
     protected final FileIO fileIO;
     protected final long olderThanMillis;
-    protected final SerializableConsumer<Path> fileCleaner;
+    protected final boolean dryRun;
     protected final int partitionKeysNum;
     protected final Path location;
 
-    public OrphanFilesClean(
-            FileStoreTable table, long olderThanMillis, SerializableConsumer<Path> fileCleaner) {
+    public OrphanFilesClean(FileStoreTable table, long olderThanMillis, boolean dryRun) {
         this.table = table;
         this.fileIO = table.fileIO();
         this.partitionKeysNum = table.partitionKeys().size();
         this.location = table.location();
         this.olderThanMillis = olderThanMillis;
-        this.fileCleaner = fileCleaner;
+        this.dryRun = dryRun;
     }
 
     protected List<String> validBranches() {
@@ -163,7 +160,20 @@ public abstract class OrphanFilesClean implements Serializable {
         Long fileSize = deleteFileInfo.getRight();
         deletedFilesConsumer.accept(filePath);
         deletedFilesLenInBytesConsumer.accept(fileSize);
-        fileCleaner.accept(filePath);
+        cleanFile(filePath);
+    }
+
+    protected void cleanFile(Path path) {
+        if (!dryRun) {
+            try {
+                if (fileIO.isDir(path)) {
+                    fileIO.deleteDirectoryQuietly(path);
+                } else {
+                    fileIO.deleteQuietly(path);
+                }
+            } catch (IOException ignored) {
+            }
+        }
     }
 
     protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
@@ -362,28 +372,6 @@ public abstract class OrphanFilesClean implements Serializable {
         return status.getModificationTime() < olderThanMillis;
     }
 
-    public static SerializableConsumer<Path> createFileCleaner(
-            Catalog catalog, @Nullable Boolean dryRun) {
-        SerializableConsumer<Path> fileCleaner;
-        if (Boolean.TRUE.equals(dryRun)) {
-            fileCleaner = path -> {};
-        } else {
-            FileIO fileIO = catalog.fileIO();
-            fileCleaner =
-                    path -> {
-                        try {
-                            if (fileIO.isDir(path)) {
-                                fileIO.deleteDirectoryQuietly(path);
-                            } else {
-                                fileIO.deleteQuietly(path);
-                            }
-                        } catch (IOException ignored) {
-                        }
-                    };
-        }
-        return fileCleaner;
-    }
-
     public static long olderThanMillis(@Nullable String olderThan) {
         if (isNullOrWhitespaceOnly(olderThan)) {
             return System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1);
@@ -412,10 +400,20 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     public boolean tryDeleteEmptyDirectory(Path path) {
+        if (dryRun) {
+            return false;
+        }
+
         try {
             return fileIO.delete(path, false);
         } catch (IOException e) {
             return false;
         }
+    }
+
+    /** Cleaner to clean files. */
+    public interface FileCleaner extends Serializable {
+
+        void clean(String table, Path path);
     }
 }

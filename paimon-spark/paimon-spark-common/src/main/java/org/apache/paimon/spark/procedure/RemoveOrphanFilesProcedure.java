@@ -120,7 +120,6 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                                     identifier.getDatabaseName(),
                                     identifier.getTableName(),
                                     OrphanFilesClean.olderThanMillis(olderThan),
-                                    OrphanFilesClean.createFileCleaner(catalog, dryRun),
                                     parallelism,
                                     dryRun);
                     break;
@@ -131,7 +130,6 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
                                     identifier.getDatabaseName(),
                                     identifier.getTableName(),
                                     OrphanFilesClean.olderThanMillis(olderThan),
-                                    OrphanFilesClean.createFileCleaner(catalog, dryRun),
                                     parallelism,
                                     dryRun);
                     break;
