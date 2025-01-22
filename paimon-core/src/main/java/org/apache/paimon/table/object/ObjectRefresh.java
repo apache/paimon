@@ -35,7 +35,7 @@ import java.util.Collections;
 /** Util class for refreshing object table. */
 public class ObjectRefresh {
 
-    private static final long COMMIT_BATCH_SIZE = 1000;
+    private static final long COMMIT_BATCH_SIZE = 10_000;
 
     public static long refresh(ObjectTable table) throws Exception {
         long totalObjs = 0;
