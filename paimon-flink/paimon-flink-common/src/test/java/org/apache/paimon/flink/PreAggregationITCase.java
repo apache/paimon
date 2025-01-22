@@ -1195,6 +1195,24 @@ public class PreAggregationITCase {
             assertThat(batchSql("SELECT * FROM T where v = 1"))
                     .containsExactlyInAnyOrder(Row.of(2, 1, 1));
         }
+
+        @Test
+        public void testSequenceFieldWithDefaultAgg() {
+            sql(
+                    "CREATE TABLE seq_default_agg ("
+                            + " pk INT PRIMARY KEY NOT ENFORCED,"
+                            + " seq INT,"
+                            + " v INT) WITH ("
+                            + " 'merge-engine'='aggregation',"
+                            + " 'sequence.field'='seq',"
+                            + " 'fields.default-aggregate-function'='sum'"
+                            + ")");
+
+            sql("INSERT INTO seq_default_agg VALUES (0, 1, 1)");
+            sql("INSERT INTO seq_default_agg VALUES (0, 2, 2)");
+
+            assertThat(sql("SELECT * FROM seq_default_agg")).containsExactly(Row.of(0, 2, 3));
+        }
     }
 
     /** ITCase for {@link FieldNestedUpdateAgg}. */
