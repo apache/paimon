@@ -52,7 +52,10 @@ public abstract class AbstractHeapVector extends AbstractWritableVector
         isNull = new boolean[capacity];
     }
 
-    /** Resets the column to default state. - fills the isNull array with false. */
+    /**
+     * Resets the column to default state. - fills the isNull array with false. - sets noNulls to
+     * true.
+     */
     @Override
     public void reset() {
         super.reset();

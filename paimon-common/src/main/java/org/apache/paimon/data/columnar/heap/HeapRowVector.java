@@ -56,11 +56,7 @@ public class HeapRowVector extends AbstractStructVector
 
     @Override
     void reserveForHeapVector(int newCapacity) {
-        for (ColumnVector field : children) {
-            if (field instanceof WritableColumnVector) {
-                ((WritableColumnVector) field).reserve(newCapacity);
-            }
-        }
+        // Nothing to store.
     }
 
     public void setFields(WritableColumnVector[] fields) {
