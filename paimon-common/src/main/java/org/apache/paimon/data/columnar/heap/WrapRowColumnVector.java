@@ -27,17 +27,18 @@ import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 /** Wrap for RowColumnVector. */
 public class WrapRowColumnVector implements RowColumnVector {
 
+    private final ColumnarRow columnarRow;
     private final HeapRowVector heapRowVector;
     private final ColumnVector[] children;
 
     public WrapRowColumnVector(HeapRowVector heapRowVector, ColumnVector[] children) {
         this.heapRowVector = heapRowVector;
         this.children = children;
+        this.columnarRow = new ColumnarRow(new VectorizedColumnBatch(children));
     }
 
     @Override
     public InternalRow getRow(int i) {
-        ColumnarRow columnarRow = new ColumnarRow(new VectorizedColumnBatch(children));
         columnarRow.setRowId(i);
         return columnarRow;
     }
