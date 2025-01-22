@@ -76,7 +76,7 @@ public class AuthSession {
     public Boolean refresh() {
         if (this.authProvider.supportRefresh()
                 && this.authProvider.keepRefreshed()
-                && this.authProvider.expiresInMills().isPresent()) {
+                && this.authProvider.tokenRefreshInMills().isPresent()) {
             return this.authProvider.refresh();
         }
 
@@ -128,7 +128,7 @@ public class AuthSession {
             scheduleTokenRefresh(
                     executor,
                     session,
-                    refreshStartTime + session.authProvider.expiresInMills().get(),
+                    refreshStartTime + session.authProvider.tokenRefreshInMills().get(),
                     0);
         } else {
             scheduleTokenRefresh(executor, session, expiresAtMillis, retryTimes + 1);

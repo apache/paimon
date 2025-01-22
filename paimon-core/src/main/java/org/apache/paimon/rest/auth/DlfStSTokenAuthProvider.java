@@ -25,8 +25,8 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.File;
 import java.io.IOException;
@@ -34,6 +34,7 @@ import java.io.UncheckedIOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TimeZone;
 
@@ -46,17 +47,39 @@ public class DlfStSTokenAuthProvider implements AuthProvider {
     private final String tokenFileName;
 
     protected DlfStSToken token;
-    private boolean keepRefreshed = false;
-    private Long expiresAtMillis = null;
-    private Long expiresInMills = null;
+    private final boolean keepRefreshed;
+    private Long expiresAtMillis;
+    private final Long tokenRefreshInMills;
 
-    public DlfStSTokenAuthProvider(String tokenDirPath, String tokenFileName) {
+    public static DlfStSTokenAuthProvider buildRefreshToken(
+            String tokenDirPath, String tokenFileName, Long tokenRefreshInMills) {
+        DlfStSToken token = readToken(tokenDirPath, tokenFileName);
+        Long expiresAtMillis = token.getExpiresInMills();
+        return new DlfStSTokenAuthProvider(
+                tokenDirPath, tokenFileName, token, true, expiresAtMillis, tokenRefreshInMills);
+    }
+
+    public static DlfStSTokenAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
+        DlfStSToken token = new DlfStSToken(accessKeyId, accessKeySecret, null, null);
+        Long expiresInMills = -1L;
+        Long expiresAtMillis = -1L;
+        return new DlfStSTokenAuthProvider(
+                null, null, token, false, expiresAtMillis, expiresInMills);
+    }
+
+    public DlfStSTokenAuthProvider(
+            String tokenDirPath,
+            String tokenFileName,
+            DlfStSToken token,
+            boolean keepRefreshed,
+            Long expiresAtMillis,
+            Long tokenRefreshInMills) {
         this.tokenDirPath = tokenDirPath;
         this.tokenFileName = tokenFileName;
-        this.token = readToken(tokenDirPath, tokenFileName);
-        this.keepRefreshed = true;
-        this.expiresInMills = token.getExpiresInMills();
-        this.expiresAtMillis = System.currentTimeMillis() + expiresInMills;
+        this.token = token;
+        this.keepRefreshed = keepRefreshed;
+        this.expiresAtMillis = expiresAtMillis;
+        this.tokenRefreshInMills = tokenRefreshInMills;
     }
 
     @Override
@@ -65,13 +88,22 @@ public class DlfStSTokenAuthProvider implements AuthProvider {
     }
 
     @Override
+    public String token() {
+        try {
+            return OBJECT_MAPPER_INSTANCE.writeValueAsString(this.token);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public boolean refresh() {
         long start = System.currentTimeMillis();
         DlfStSToken newToken = readToken(tokenDirPath, tokenFileName);
-        if (newToken != null) {
+        if (newToken == null) {
             return false;
         }
-        this.expiresAtMillis = start + this.expiresInMills;
+        this.expiresAtMillis = start + this.tokenRefreshInMills;
         this.token = newToken;
         return true;
     }
@@ -90,7 +122,7 @@ public class DlfStSTokenAuthProvider implements AuthProvider {
     public boolean willSoonExpire() {
         if (keepRefreshed()) {
             return expiresAtMillis().get() - System.currentTimeMillis()
-                    < expiresInMills().get() * EXPIRED_FACTOR;
+                    < tokenRefreshInMills().get() * EXPIRED_FACTOR;
         } else {
             return false;
         }
@@ -102,11 +134,11 @@ public class DlfStSTokenAuthProvider implements AuthProvider {
     }
 
     @Override
-    public Optional<Long> expiresInMills() {
-        return Optional.ofNullable(this.expiresInMills);
+    public Optional<Long> tokenRefreshInMills() {
+        return Optional.ofNullable(this.tokenRefreshInMills);
     }
 
-    private DlfStSToken readToken(String tokenDirPath, String tokenFileName) {
+    private static DlfStSToken readToken(String tokenDirPath, String tokenFileName) {
         try {
             String tokenStr =
                     FileIOUtils.readFileUtf8(
@@ -197,6 +229,23 @@ public class DlfStSTokenAuthProvider implements AuthProvider {
             SimpleDateFormat sdf = new SimpleDateFormat(DEFAULT_DATE_FORMAT);
             sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
             return sdf.parse(dateStr).getTime();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            DlfStSToken that = (DlfStSToken) o;
+            return Objects.equals(accessKeyId, that.accessKeyId)
+                    && Objects.equals(accessKeySecret, that.accessKeySecret)
+                    && Objects.equals(securityToken, that.securityToken)
+                    && Objects.equals(expiration, that.expiration);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(accessKeyId, accessKeySecret, securityToken, expiration);
         }
     }
 }

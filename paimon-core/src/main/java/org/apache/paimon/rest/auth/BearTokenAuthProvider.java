@@ -36,6 +36,7 @@ public class BearTokenAuthProvider implements AuthProvider {
         this.token = token;
     }
 
+    @Override
     public String token() {
         return token;
     }

@@ -26,13 +26,16 @@ import org.apache.paimon.utils.StringUtils;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_EXPIRATION_TIME;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_FILE_NAME;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_PATH;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
 
 /** Authentication provider. */
 public interface AuthProvider {
 
     Map<String, String> authHeader(RESTRequest request);
+
+    String token();
 
     boolean refresh();
 
@@ -52,7 +55,7 @@ public interface AuthProvider {
         return Optional.empty();
     }
 
-    default Optional<Long> expiresInMills() {
+    default Optional<Long> tokenRefreshInMills() {
         return Optional.empty();
     }
 
@@ -62,21 +65,19 @@ public interface AuthProvider {
                 throw new IllegalArgumentException(TOKEN_PROVIDER_PATH.key() + " is required");
             }
             String tokenFilePath = options.get(TOKEN_PROVIDER_PATH);
-            if (options.getOptional(TOKEN_EXPIRATION_TIME).isPresent()) {
-                long tokenExpireInMills = options.get(TOKEN_EXPIRATION_TIME).toMillis();
-                return new BearTokenFileAuthProvider(tokenFilePath, tokenExpireInMills);
-
-            } else {
-                return new BearTokenFileAuthProvider(tokenFilePath);
+            long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
+            if (options.getOptional(TOKEN_REFRESH_TIME).isPresent()) {
+                String tokenFileName = options.get(TOKEN_PROVIDER_FILE_NAME);
+                return DlfStSTokenAuthProvider.buildRefreshToken(
+                        tokenFilePath, tokenFileName, tokenRefreshInMills);
             }
-        } else {
-            if (options.getOptional(RESTCatalogOptions.TOKEN)
-                    .map(StringUtils::isNullOrWhitespaceOnly)
-                    .orElse(true)) {
-                throw new IllegalArgumentException(
-                        RESTCatalogOptions.TOKEN.key() + " is required and not empty");
-            }
-            return new BearTokenAuthProvider(options.get(RESTCatalogOptions.TOKEN));
         }
+        if (options.getOptional(RESTCatalogOptions.TOKEN)
+                .map(StringUtils::isNullOrWhitespaceOnly)
+                .orElse(true)) {
+            throw new IllegalArgumentException(
+                    RESTCatalogOptions.TOKEN.key() + " is required and not empty");
+        }
+        return new BearTokenAuthProvider(options.get(RESTCatalogOptions.TOKEN));
     }
 }

@@ -21,6 +21,8 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ThreadPoolUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.apache.commons.io.FileUtils;
 import org.junit.Rule;
 import org.junit.Test;
@@ -29,9 +31,12 @@ import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -46,6 +51,7 @@ import static org.mockito.Mockito.when;
 public class AuthSessionTest {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
+    private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
 
     @Test
     public void testBearToken() {
@@ -65,20 +71,21 @@ public class AuthSessionTest {
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
-        long expiresInMillis = 1000L;
+        long tokenRefreshInMills = 1000L;
         AuthProvider authProvider =
-                new BearTokenFileAuthProvider(tokenFile.getPath(), expiresInMillis);
+                DlfStSTokenAuthProvider.buildRefreshToken(
+                        folder.getRoot().getPath(), fileName, tokenRefreshInMills);
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
-        Map<String, String> authHeader = session.getAuthProvider().authHeader(null);
-        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
+        String authToken = session.getAuthProvider().token();
+        assertEquals(authToken, token);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
-        Thread.sleep(expiresInMillis + 500L);
-        authHeader = session.getAuthProvider().authHeader(null);
-        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
+        Thread.sleep(tokenRefreshInMills * 2);
+        authToken = session.getAuthProvider().token();
+        assertEquals(authToken, token);
     }
 
     @Test
@@ -87,30 +94,30 @@ public class AuthSessionTest {
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
-        Map<String, String> initialHeaders = new HashMap<>();
-        long expiresInMillis = 1000L;
+        long tokenRefreshInMills = 1000L;
         AuthProvider authProvider =
-                new BearTokenFileAuthProvider(tokenFile.getPath(), expiresInMillis);
+                DlfStSTokenAuthProvider.buildRefreshToken(
+                        folder.getRoot().getPath(), fileName, tokenRefreshInMills);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
-        Map<String, String> authHeader = session.getAuthProvider().authHeader(null);
-        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
+        String authToken = session.getAuthProvider().token();
+        assertEquals(token, authToken);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
         tokenFile = tokenFile2Token.getLeft();
         FileUtils.writeStringToFile(tokenFile, token);
         Thread.sleep(
-                (long) (expiresInMillis * (1 - BearTokenFileAuthProvider.EXPIRED_FACTOR)) + 10L);
-        authHeader = session.getAuthProvider().authHeader(null);
-        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
+                (long) (tokenRefreshInMills * (1 - DlfStSTokenAuthProvider.EXPIRED_FACTOR)) + 10L);
+        authToken = session.getAuthProvider().token();
+        assertEquals(token, authToken);
     }
 
     @Test
     public void testRetryWhenRefreshFail() throws Exception {
-        AuthProvider authProvider = Mockito.mock(BearTokenFileAuthProvider.class);
+        AuthProvider authProvider = Mockito.mock(DlfStSTokenAuthProvider.class);
         long expiresAtMillis = System.currentTimeMillis() - 1000L;
         when(authProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
-        when(authProvider.expiresInMills()).thenReturn(Optional.of(50L));
+        when(authProvider.tokenRefreshInMills()).thenReturn(Optional.of(50L));
         when(authProvider.supportRefresh()).thenReturn(true);
         when(authProvider.keepRefreshed()).thenReturn(true);
         when(authProvider.refresh()).thenReturn(false);
@@ -141,8 +148,15 @@ public class AuthSessionTest {
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
         File tokenFile = folder.newFile(fileName);
-        String token = UUID.randomUUID().toString();
-        FileUtils.writeStringToFile(tokenFile, token);
-        return Pair.of(tokenFile, token);
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+        String expiration = sdf.format(new Date());
+        String secret = UUID.randomUUID().toString();
+        DlfStSTokenAuthProvider.DlfStSToken token =
+                new DlfStSTokenAuthProvider.DlfStSToken(
+                        "accessKeyId", secret, "securityToken", expiration);
+        String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
+        FileUtils.writeStringToFile(tokenFile, tokenStr);
+        return Pair.of(tokenFile, tokenStr);
     }
 }
