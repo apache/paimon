@@ -20,6 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagPeriodHandler;
 import org.apache.paimon.utils.Pair;
@@ -66,7 +67,10 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
                 endTagName);
 
         TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+                new TagManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch());
 
         Optional<Tag> endTag = tagManager.get(endTagName);
         if (!endTag.isPresent()) {
@@ -91,6 +95,14 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
         }
         LOG.info("Found start tag {} .", periodHandler.timeToTag(previousTags.get(0).getRight()));
         Snapshot start = previousTags.get(0).getLeft().trimToSnapshot();
+
+        TimeTravelUtil.checkRescaleBucketForIncrementalQuery(
+                new SchemaManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch()),
+                start.schemaId(),
+                end.schemaId());
 
         return new IncrementalTagStartingScanner(snapshotManager, start, end);
     }

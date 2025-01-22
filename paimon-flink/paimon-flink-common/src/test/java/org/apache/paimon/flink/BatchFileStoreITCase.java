@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SnapshotNotExistException;
@@ -37,6 +38,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -650,6 +652,38 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
             throw new RuntimeException(e);
         }
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+    }
+
+    @Test
+    public void testIncrementQueryWithRescaleBucket() throws Exception {
+        sql("CREATE TABLE test (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('bucket' = '1')");
+        Table table = paimonTable("test");
+
+        sql("INSERT INTO test VALUES (1, 11), (2, 22)");
+        long timestamp1 = System.currentTimeMillis();
+        sql("ALTER TABLE test SET ('bucket' = '2')");
+        sql("INSERT OVERWRITE test SELECT * FROM test");
+        sql("INSERT INTO test VALUES (3, 33)");
+        long timestamp2 = System.currentTimeMillis();
+
+        table.createTag("2024-01-01", 1);
+        table.createTag("2024-01-02", 3);
+
+        List<String> incrementalOptions =
+                Arrays.asList(
+                        "'incremental-between'='1,3'",
+                        "'incremental-between'='2024-01-01,2024-01-02'",
+                        "'incremental-to-auto-tag'='2024-01-02'",
+                        String.format(
+                                "'incremental-between-timestamp'='%s,%s'", timestamp1, timestamp2));
+
+        for (String option : incrementalOptions) {
+            assertThatThrownBy(() -> sql("SELECT * FROM test /*+ OPTIONS (%s) */", option))
+                    .satisfies(
+                            anyCauseMatches(
+                                    IllegalArgumentException.class,
+                                    "The bucket number of two snapshots are different (1, 2), which is not supported in incremental query."));
+        }
     }
 
     private void validateCount1PushDown(String sql) {
