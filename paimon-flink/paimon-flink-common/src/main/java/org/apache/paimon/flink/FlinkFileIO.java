@@ -55,7 +55,8 @@ public class FlinkFileIO implements FileIO {
                     || scheme.startsWith("emr")
                     || scheme.startsWith("oss")
                     || scheme.startsWith("wasb")
-                    || scheme.startsWith("gs")) {
+                    || scheme.startsWith("gs")
+                    || scheme.startsWith("cosn")) {
                 // the Amazon S3 storage or Aliyun OSS storage or Azure Blob Storage
                 // or Google Cloud Storage
                 return true;
