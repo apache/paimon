@@ -23,10 +23,10 @@ import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
-import org.apache.paimon.rest.exceptions.UnsupportedOperationException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
 /** Default error handler. */
@@ -61,7 +61,7 @@ public class DefaultErrorHandler extends ErrorHandler {
             case 500:
                 throw new ServiceFailureException("Server error: %s", message);
             case 501:
-                throw new UnsupportedOperationException(message);
+                throw new NotImplementedException(message);
             case 503:
                 throw new ServiceUnavailableException("Service unavailable: %s", message);
             default:
