@@ -78,6 +78,9 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
 
     @Override
     public long returnedPosition() {
+        if (nextPos == 0) {
+            return positions[0] - 1;
+        }
         return positions[nextPos - 1];
     }
 
