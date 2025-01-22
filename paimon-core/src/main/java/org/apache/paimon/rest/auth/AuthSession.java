@@ -20,18 +20,13 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.RESTUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-
-import static org.apache.paimon.rest.RESTCatalog.HEADER_PREFIX;
-import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 
 /** Authentication session. */
 public class AuthSession {
@@ -43,18 +38,14 @@ public class AuthSession {
     private static final Logger LOG = LoggerFactory.getLogger(AuthSession.class);
 
     private final AuthProvider authProvider;
-    private volatile Map<String, String> headers;
 
-    public AuthSession(Map<String, String> headers, AuthProvider authProvider) {
+    public AuthSession(AuthProvider authProvider) {
         this.authProvider = authProvider;
-        this.headers = RESTUtil.merge(headers, this.authProvider.authHeader());
     }
 
     public static AuthSession fromRefreshAuthProvider(
-            ScheduledExecutorService executor,
-            Map<String, String> headers,
-            AuthProvider authProvider) {
-        AuthSession session = new AuthSession(headers, authProvider);
+            ScheduledExecutorService executor, AuthProvider authProvider) {
+        AuthSession session = new AuthSession(authProvider);
 
         long startTimeMillis = System.currentTimeMillis();
         Optional<Long> expiresAtMillisOpt = authProvider.expiresAtMillis();
@@ -75,23 +66,18 @@ public class AuthSession {
         return session;
     }
 
-    public Map<String, String> getHeaders() {
+    public AuthProvider getAuthProvider() {
         if (this.authProvider.keepRefreshed() && this.authProvider.willSoonExpire()) {
             refresh();
         }
-        return headers;
+        return this.authProvider;
     }
 
     public Boolean refresh() {
         if (this.authProvider.supportRefresh()
                 && this.authProvider.keepRefreshed()
                 && this.authProvider.expiresInMills().isPresent()) {
-            boolean isSuccessful = this.authProvider.refresh();
-            if (isSuccessful) {
-                Map<String, String> currentHeaders = this.headers;
-                this.headers = RESTUtil.merge(currentHeaders, this.authProvider.authHeader());
-            }
-            return isSuccessful;
+            return this.authProvider.refresh();
         }
 
         return false;
@@ -151,12 +137,11 @@ public class AuthSession {
 
     public static AuthSession createAuthSession(
             Options options, ScheduledExecutorService refreshExecutor) {
-        Map<String, String> baseHeader = extractPrefixMap(options, HEADER_PREFIX);
         AuthProvider authProvider = AuthProvider.create(options);
         if (authProvider.keepRefreshed()) {
-            return AuthSession.fromRefreshAuthProvider(refreshExecutor, baseHeader, authProvider);
+            return AuthSession.fromRefreshAuthProvider(refreshExecutor, authProvider);
         } else {
-            return new AuthSession(baseHeader, authProvider);
+            return new AuthSession(authProvider);
         }
     }
 }

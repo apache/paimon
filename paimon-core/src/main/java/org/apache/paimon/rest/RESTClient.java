@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import java.io.Closeable;
 import java.util.Map;
+import java.util.function.Function;
 
 /** Interface for a basic HTTP Client for interfacing with the REST catalog. */
 public interface RESTClient extends Closeable {
@@ -30,6 +31,12 @@ public interface RESTClient extends Closeable {
 
     <T extends RESTResponse> T post(
             String path, RESTRequest body, Class<T> responseType, Map<String, String> headers);
+
+    <T extends RESTResponse> T post(
+            String path,
+            RESTRequest body,
+            Map<String, String> headers,
+            Function<RESTRequest, String> authenticationFunction);
 
     <T extends RESTResponse> T delete(String path, Map<String, String> headers);
 

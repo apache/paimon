@@ -42,6 +42,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
@@ -95,6 +96,17 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T post(
             String path, RESTRequest body, Map<String, String> headers) {
+        return post(path, body, null, headers);
+    }
+
+    @Override
+    public <T extends RESTResponse> T post(
+            String path,
+            RESTRequest body,
+            Map<String, String> headers,
+            Function<RESTRequest, String> authenticationFunction) {
+        String auth = authenticationFunction.apply(body);
+        headers.put("Authorization", auth);
         return post(path, body, null, headers);
     }
 

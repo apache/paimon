@@ -65,7 +65,7 @@ public class HttpClientTest {
         httpClient = new HttpClient(httpClientOptions);
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);
-        headers = authProvider.authHeader();
+        headers = authProvider.authHeader(null);
     }
 
     @After

@@ -20,6 +20,7 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.rest.RESTRequest;
 import org.apache.paimon.utils.StringUtils;
 
 import java.util.Map;
@@ -31,7 +32,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_PATH;
 /** Authentication provider. */
 public interface AuthProvider {
 
-    Map<String, String> authHeader();
+    Map<String, String> authHeader(RESTRequest request);
 
     boolean refresh();
 

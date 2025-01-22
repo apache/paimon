@@ -54,14 +54,9 @@ public class AuthSessionTest {
         initialHeaders.put("k1", "v1");
         initialHeaders.put("k2", "v2");
         AuthProvider authProvider = new BearTokenAuthProvider(token);
-        AuthSession session = new AuthSession(initialHeaders, authProvider);
-        Map<String, String> header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
-        assertEquals(header.get("k1"), "v1");
-        for (Map.Entry<String, String> entry : initialHeaders.entrySet()) {
-            assertEquals(entry.getValue(), header.get(entry.getKey()));
-        }
-        assertEquals(header.size(), initialHeaders.size() + 1);
+        AuthSession session = new AuthSession(authProvider);
+        Map<String, String> authHeader = session.getAuthProvider().authHeader(null);
+        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
     }
 
     @Test
@@ -70,22 +65,20 @@ public class AuthSessionTest {
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
-        Map<String, String> initialHeaders = new HashMap<>();
         long expiresInMillis = 1000L;
         AuthProvider authProvider =
                 new BearTokenFileAuthProvider(tokenFile.getPath(), expiresInMillis);
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
-        AuthSession session =
-                AuthSession.fromRefreshAuthProvider(executor, initialHeaders, authProvider);
-        Map<String, String> header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
+        AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
+        Map<String, String> authHeader = session.getAuthProvider().authHeader(null);
+        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
         Thread.sleep(expiresInMillis + 500L);
-        header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
+        authHeader = session.getAuthProvider().authHeader(null);
+        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
     }
 
     @Test
@@ -98,10 +91,9 @@ public class AuthSessionTest {
         long expiresInMillis = 1000L;
         AuthProvider authProvider =
                 new BearTokenFileAuthProvider(tokenFile.getPath(), expiresInMillis);
-        AuthSession session =
-                AuthSession.fromRefreshAuthProvider(null, initialHeaders, authProvider);
-        Map<String, String> header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
+        AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
+        Map<String, String> authHeader = session.getAuthProvider().authHeader(null);
+        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
@@ -109,13 +101,12 @@ public class AuthSessionTest {
         FileUtils.writeStringToFile(tokenFile, token);
         Thread.sleep(
                 (long) (expiresInMillis * (1 - BearTokenFileAuthProvider.EXPIRED_FACTOR)) + 10L);
-        header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
+        authHeader = session.getAuthProvider().authHeader(null);
+        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
     }
 
     @Test
     public void testRetryWhenRefreshFail() throws Exception {
-        Map<String, String> initialHeaders = new HashMap<>();
         AuthProvider authProvider = Mockito.mock(BearTokenFileAuthProvider.class);
         long expiresAtMillis = System.currentTimeMillis() - 1000L;
         when(authProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
@@ -123,8 +114,7 @@ public class AuthSessionTest {
         when(authProvider.supportRefresh()).thenReturn(true);
         when(authProvider.keepRefreshed()).thenReturn(true);
         when(authProvider.refresh()).thenReturn(false);
-        AuthSession session =
-                AuthSession.fromRefreshAuthProvider(null, initialHeaders, authProvider);
+        AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
         AuthSession.scheduleTokenRefresh(
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token"),
                 session,

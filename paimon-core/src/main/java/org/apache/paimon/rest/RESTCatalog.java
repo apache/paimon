@@ -109,6 +109,7 @@ public class RESTCatalog implements Catalog {
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
     private final FileIO fileIO;
+    private Map<String, String> baseHeaders = Collections.emptyMap();
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
@@ -126,14 +127,12 @@ public class RESTCatalog implements Catalog {
                 throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
             }
 
-            Map<String, String> initHeaders =
-                    RESTUtil.merge(
-                            extractPrefixMap(context.options(), HEADER_PREFIX),
-                            catalogAuth.getHeaders());
+            baseHeaders = extractPrefixMap(context.options(), HEADER_PREFIX);
             options =
                     new Options(
-                            client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, initHeaders)
+                            client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, baseHeaders)
                                     .merge(context.options().toMap()));
+            baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
 
         context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
@@ -305,7 +304,7 @@ public class RESTCatalog implements Catalog {
         return client.get(
                 resourcePaths.tableToken(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetTableTokenResponse.class,
-                catalogAuth.getHeaders());
+                headers());
     }
 
     public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {
@@ -646,7 +645,7 @@ public class RESTCatalog implements Catalog {
     }
 
     private Map<String, String> headers() {
-        return catalogAuth.getHeaders();
+        return baseHeaders;
     }
 
     private ScheduledExecutorService tokenRefreshExecutor() {
