@@ -51,10 +51,11 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     public void reset(long nextFilePos) {
-        this.positions = new long[row.batch().getNumRows()];
+        long[] positions = new long[row.batch().getNumRows()];
         for (int i = 0; i < row.batch().getNumRows(); i++) {
             positions[i] = nextFilePos++;
         }
+        reset(positions);
     }
 
     public void reset(long[] positions) {
