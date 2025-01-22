@@ -24,7 +24,7 @@ import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer
-import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
+import org.apache.paimon.index.{BucketAssigner, PartitionIndex, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
@@ -176,6 +176,9 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         val numAssigners = Option(table.coreOptions.dynamicBucketInitialBuckets)
           .map(initialBuckets => Math.min(initialBuckets.toInt, assignerParallelism))
           .getOrElse(assignerParallelism)
+        val maxBucketsArr = PartitionIndex.getMaxBucketsPerAssigner(
+          table.coreOptions.dynamicBucketMaxBuckets,
+          numAssigners)
 
         def partitionByKey(): DataFrame = {
           repartitionByKeyPartitionHash(
@@ -197,7 +200,8 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                   numAssigners,
                   TaskContext.getPartitionId(),
                   table.coreOptions.dynamicBucketTargetRowNum,
-                  table.coreOptions.dynamicBucketMaxBucketsPerAssigner())
+                  PartitionIndex.getSpecifiedMaxBuckets(maxBucketsArr, TaskContext.getPartitionId)
+                )
               row => {
                 val sparkRow = new SparkRow(rowType, row)
                 assigner.assign(

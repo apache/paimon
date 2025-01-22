@@ -27,7 +27,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.apache.paimon.CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS_PER_ASSIGNER;
+import static org.apache.paimon.CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -66,7 +66,7 @@ public interface KeyAndBucketExtractor<T> {
                 "Assign record (hashcode '{}') to new bucket exceed upper bound '{}' defined in '{}', Stop creating new buckets.",
                 hashcode,
                 maxBucketsNum,
-                DYNAMIC_BUCKET_MAX_BUCKETS_PER_ASSIGNER.key());
+                DYNAMIC_BUCKET_MAX_BUCKETS.key());
         return bucketsSet.stream()
                 .skip(ThreadLocalRandom.current().nextInt(maxBucketsNum))
                 .findFirst()

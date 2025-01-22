@@ -21,7 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.crosspartition.{GlobalIndexAssigner, KeyPartOrRow}
 import org.apache.paimon.data.{BinaryRow, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
 import org.apache.paimon.disk.IOManager
-import org.apache.paimon.index.HashBucketAssigner
+import org.apache.paimon.index.{HashBucketAssigner, PartitionIndex}
 import org.apache.paimon.spark.{DataConverter, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.util.EncoderUtils
@@ -99,9 +99,11 @@ case class DynamicBucketProcessor(
 ) extends BucketProcessor[Row] {
 
   private val targetBucketRowNumber = fileStoreTable.coreOptions.dynamicBucketTargetRowNum
-  private val maxBucketsNum = fileStoreTable.coreOptions.dynamicBucketMaxBucketsPerAssigner()
   private val rowType = fileStoreTable.rowType
   private val commitUser = UUID.randomUUID.toString
+  private val maxBucketsArr = PartitionIndex.getMaxBucketsPerAssigner(
+    fileStoreTable.coreOptions.dynamicBucketMaxBuckets,
+    numAssigners)
 
   def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
     val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(fileStoreTable.schema)
@@ -113,7 +115,7 @@ case class DynamicBucketProcessor(
       numAssigners,
       TaskContext.getPartitionId(),
       targetBucketRowNumber,
-      maxBucketsNum
+      PartitionIndex.getSpecifiedMaxBuckets(maxBucketsArr, TaskContext.getPartitionId)
     )
 
     new Iterator[Row]() {

@@ -37,6 +37,9 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.RecordAttributes;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import static org.apache.paimon.index.PartitionIndex.getMaxBucketsPerAssigner;
+import static org.apache.paimon.index.PartitionIndex.getSpecifiedMaxBuckets;
+
 /** Assign bucket for the input record, output record with bucket. */
 public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, Integer>>
         implements OneInputStreamOperator<T, Tuple2<T, Integer>> {
@@ -49,6 +52,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
     private final Integer numAssigners;
     private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
     private final boolean overwrite;
+    private int[] maxBucketsArr;
 
     private transient BucketAssigner assigner;
     private transient PartitionKeyExtractor<T> extractor;
@@ -80,11 +84,21 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
         int numberTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
         int taskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
         long targetRowNum = table.coreOptions().dynamicBucketTargetRowNum();
-        Integer maxBucketsNum = table.coreOptions().dynamicBucketMaxBucketsPerAssigner();
+        Integer maxBucketsNum = table.coreOptions().dynamicBucketMaxBuckets();
+        if (maxBucketsArr == null) {
+            this.maxBucketsArr =
+                    overwrite
+                            ? getMaxBucketsPerAssigner(maxBucketsNum, numberTasks)
+                            : getMaxBucketsPerAssigner(
+                                    maxBucketsNum, MathUtils.min(numAssigners, numberTasks));
+        }
         this.assigner =
                 overwrite
                         ? new SimpleHashBucketAssigner(
-                                numberTasks, taskId, targetRowNum, maxBucketsNum)
+                                numberTasks,
+                                taskId,
+                                targetRowNum,
+                                getSpecifiedMaxBuckets(maxBucketsArr, taskId))
                         : new HashBucketAssigner(
                                 table.snapshotManager(),
                                 commitUser,
@@ -93,7 +107,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                                 MathUtils.min(numAssigners, numberTasks),
                                 taskId,
                                 targetRowNum,
-                                maxBucketsNum);
+                                getSpecifiedMaxBuckets(maxBucketsArr, taskId));
         this.extractor = extractorFunction.apply(table.schema());
     }
 

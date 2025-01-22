@@ -24,9 +24,13 @@ import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.utils.Int2ShortHashMap;
 import org.apache.paimon.utils.IntIterator;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -39,6 +43,7 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
 /** Bucket Index Per Partition. */
 public class PartitionIndex {
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionIndex.class);
 
     public final Int2ShortHashMap hash2Bucket;
 
@@ -81,15 +86,9 @@ public class PartitionIndex {
             Long number = entry.getValue();
             if (number < targetBucketRowNumber) {
                 entry.setValue(number + 1);
-                return cacheBucketAndGet(hash, bucket);
+                return cacheBucketAndGet(hash2Bucket, hash, bucket);
             } else {
                 iterator.remove();
-                if (-1 != maxBucketsNum && totalBucket.size() == maxBucketsNum) {
-                    return cacheBucketAndGet(
-                            hash,
-                            KeyAndBucketExtractor.bucketWithUpperBound(
-                                    totalBucket, hash, maxBucketsNum));
-                }
             }
         }
 
@@ -99,7 +98,7 @@ public class PartitionIndex {
                 if (bucketFilter.test(i) && !totalBucket.contains(i)) {
                     nonFullBucketInformation.put(i, 1L);
                     totalBucket.add(i);
-                    return cacheBucketAndGet(hash, i);
+                    return cacheBucketAndGet(hash2Bucket, hash, i);
                 }
             }
 
@@ -110,7 +109,9 @@ public class PartitionIndex {
                             "Too more bucket %s, you should increase target bucket row number %s.",
                             maxBucket, targetBucketRowNumber));
         } else {
+            // exceed buckets upper bound
             return cacheBucketAndGet(
+                    hash2Bucket,
                     hash,
                     KeyAndBucketExtractor.bucketWithUpperBound(totalBucket, hash, maxBucketsNum));
         }
@@ -149,8 +150,46 @@ public class PartitionIndex {
         return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
     }
 
-    private int cacheBucketAndGet(int hash, int bucket) {
+    public static int cacheBucketAndGet(Int2ShortHashMap hash2Bucket, int hash, int bucket) {
         hash2Bucket.put(hash, (short) bucket);
         return bucket;
+    }
+
+    public static int[] getMaxBucketsPerAssigner(int maxBuckets, int assigners) {
+        int[] maxBucketsArr = new int[assigners];
+        if (-1 == maxBuckets) {
+            Arrays.fill(maxBucketsArr, -1);
+            return maxBucketsArr;
+        }
+        if (0 >= maxBuckets) {
+            throw new IllegalArgumentException(
+                    "Max-buckets should either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).");
+        }
+        int avg = maxBuckets / assigners;
+        int remainder = maxBuckets % assigners;
+        for (int i = 0; i < assigners; i++) {
+            maxBucketsArr[i] = avg;
+            if (remainder > 0) {
+                maxBucketsArr[i]++;
+                remainder--;
+            }
+        }
+        LOG.info(
+                "After distributing max-buckets '{}' to '{}' assigners evenly, maxBuckets layout: '{}'.",
+                maxBuckets,
+                assigners,
+                Arrays.toString(maxBucketsArr));
+        return maxBucketsArr;
+    }
+
+    public static int getSpecifiedMaxBuckets(int[] maxBucketsArr, int assignerId) {
+        int length = maxBucketsArr.length;
+        if (length == 0) {
+            throw new IllegalStateException("maxBuckets layout should exists!");
+        } else if (assignerId < length) {
+            return maxBucketsArr[assignerId];
+        } else {
+            return -1 == maxBucketsArr[0] ? -1 : 0;
+        }
     }
 }
