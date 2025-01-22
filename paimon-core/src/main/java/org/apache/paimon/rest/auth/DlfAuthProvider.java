@@ -38,7 +38,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.TimeZone;
 
-public class DlfStSTokenAuthProvider implements AuthProvider {
+/** DLF authentication provider. */
+public class DlfAuthProvider implements AuthProvider {
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
     public static final double EXPIRED_FACTOR = 0.4;
@@ -51,23 +52,22 @@ public class DlfStSTokenAuthProvider implements AuthProvider {
     private Long expiresAtMillis;
     private final Long tokenRefreshInMills;
 
-    public static DlfStSTokenAuthProvider buildRefreshToken(
+    public static DlfAuthProvider buildRefreshToken(
             String tokenDirPath, String tokenFileName, Long tokenRefreshInMills) {
         DlfStSToken token = readToken(tokenDirPath, tokenFileName);
         Long expiresAtMillis = token.getExpiresInMills();
-        return new DlfStSTokenAuthProvider(
+        return new DlfAuthProvider(
                 tokenDirPath, tokenFileName, token, true, expiresAtMillis, tokenRefreshInMills);
     }
 
-    public static DlfStSTokenAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
+    public static DlfAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
         DlfStSToken token = new DlfStSToken(accessKeyId, accessKeySecret, null, null);
         Long expiresInMills = -1L;
         Long expiresAtMillis = -1L;
-        return new DlfStSTokenAuthProvider(
-                null, null, token, false, expiresAtMillis, expiresInMills);
+        return new DlfAuthProvider(null, null, token, false, expiresAtMillis, expiresInMills);
     }
 
-    public DlfStSTokenAuthProvider(
+    public DlfAuthProvider(
             String tokenDirPath,
             String tokenFileName,
             DlfStSToken token,

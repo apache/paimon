@@ -68,11 +68,29 @@ public class RESTCatalogOptions {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("REST Catalog auth token refresh time.");
 
+    public static final ConfigOption<String> TOKEN_PROVIDER =
+            ConfigOptions.key("token.provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token provider.");
+
     public static final ConfigOption<String> TOKEN_PROVIDER_PATH =
             ConfigOptions.key("token.provider.path")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token provider path.");
+
+    public static final ConfigOption<String> TOKEN_ACCESS_KEY_ID =
+            ConfigOptions.key("token.access-key-id")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token access key id");
+
+    public static final ConfigOption<String> TOKEN_ACCESS_KEY_SECRET =
+            ConfigOptions.key("token.access-key-secret")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth token access key secret");
 
     public static final ConfigOption<String> TOKEN_PROVIDER_FILE_NAME =
             ConfigOptions.key("token.provider.file-name")

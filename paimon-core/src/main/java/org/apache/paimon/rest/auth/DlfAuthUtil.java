@@ -42,19 +42,6 @@ public class DlfAuthUtil {
     private static final String PRODUCT = "DlfNext";
     private static final String CHARSET_NAME = "UTF-8";
 
-    //    public static void main(String[] args) throws Exception {
-    //        String pathname = "/v1/catalogs/default/databases/default/tables/default/commit";
-    //        String method = "POST";
-    //        Map<String, String> query = ImmutableMap.of("key", "value");
-    //        Map<String, String> headers = ImmutableMap.of("content-type", "application/json",
-    // "host", "dlfnext-gw.cn-hangzhou.aliyuncs.com");
-    //        String ak = "LTAI5t8jJZYzmYjyQ8YJjKXe";
-    //        String accessKeySecret = "accessKeySecret";
-    //        String region = "cn-hangzhou";
-    //        String date = "2022-08-01T09:09:09Z";
-    //        System.out.println(getAuthorization(pathname, method, query, headers, accessKeySecret,
-    // ak, PRODUCT, region, date));
-    //    }
     public static String getAuthorization(
             String pathname,
             String method,
