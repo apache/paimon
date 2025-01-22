@@ -127,14 +127,14 @@ public class TimeTravelUtil {
         return tagManager.getOrThrow(tagName).trimToSnapshot();
     }
 
-    public static void checkRescaleBucketForIncrementalQuery(
+    public static void checkRescaleBucketForIncrementalTagQuery(
             SchemaManager schemaManager, long schemaId1, long schemaId2) {
         if (schemaId1 != schemaId2) {
             int bucketNumber1 = bucketNumber(schemaManager, schemaId1);
             int bucketNumber2 = bucketNumber(schemaManager, schemaId2);
             checkArgument(
                     bucketNumber1 == bucketNumber2,
-                    "The bucket number of two snapshots are different (%s, %s), which is not supported in incremental query.",
+                    "The bucket number of two tags are different (%s, %s), which is not supported in incremental tag query.",
                     bucketNumber1,
                     bucketNumber2);
         }

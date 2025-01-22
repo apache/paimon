@@ -655,34 +655,29 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIncrementQueryWithRescaleBucket() throws Exception {
+    public void testIncrementTagQueryWithRescaleBucket() throws Exception {
         sql("CREATE TABLE test (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('bucket' = '1')");
         Table table = paimonTable("test");
 
         sql("INSERT INTO test VALUES (1, 11), (2, 22)");
-        long timestamp1 = System.currentTimeMillis();
         sql("ALTER TABLE test SET ('bucket' = '2')");
         sql("INSERT OVERWRITE test SELECT * FROM test");
         sql("INSERT INTO test VALUES (3, 33)");
-        long timestamp2 = System.currentTimeMillis();
 
         table.createTag("2024-01-01", 1);
         table.createTag("2024-01-02", 3);
 
         List<String> incrementalOptions =
                 Arrays.asList(
-                        "'incremental-between'='1,3'",
                         "'incremental-between'='2024-01-01,2024-01-02'",
-                        "'incremental-to-auto-tag'='2024-01-02'",
-                        String.format(
-                                "'incremental-between-timestamp'='%s,%s'", timestamp1, timestamp2));
+                        "'incremental-to-auto-tag'='2024-01-02'");
 
         for (String option : incrementalOptions) {
             assertThatThrownBy(() -> sql("SELECT * FROM test /*+ OPTIONS (%s) */", option))
                     .satisfies(
                             anyCauseMatches(
                                     IllegalArgumentException.class,
-                                    "The bucket number of two snapshots are different (1, 2), which is not supported in incremental query."));
+                                    "The bucket number of two tags are different (1, 2), which is not supported in incremental tag query."));
         }
     }
 

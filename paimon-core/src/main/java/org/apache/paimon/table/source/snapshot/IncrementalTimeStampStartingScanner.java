@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -65,15 +64,6 @@ public class IncrementalTimeStampStartingScanner extends AbstractStartingScanner
                         : startingSnapshotId;
         Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
         Long endSnapshotId = (endSnapshot == null) ? latestSnapshot.id() : endSnapshot.id();
-
-        TimeTravelUtil.checkRescaleBucketForIncrementalQuery(
-                new SchemaManager(
-                        snapshotManager.fileIO(),
-                        snapshotManager.tablePath(),
-                        snapshotManager.branch()),
-                snapshotManager.snapshot(startSnapshotId).schemaId(),
-                snapshotManager.snapshot(endSnapshotId).schemaId());
-
         IncrementalStartingScanner incrementalStartingScanner =
                 new IncrementalStartingScanner(
                         snapshotManager, startSnapshotId, endSnapshotId, scanMode);

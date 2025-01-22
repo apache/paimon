@@ -51,6 +51,14 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
         this.start = start;
         this.end = end;
         this.startingSnapshotId = start.id();
+
+        TimeTravelUtil.checkRescaleBucketForIncrementalTagQuery(
+                new SchemaManager(
+                        snapshotManager.fileIO(),
+                        snapshotManager.tablePath(),
+                        snapshotManager.branch()),
+                start.schemaId(),
+                end.schemaId());
     }
 
     @Override
@@ -95,14 +103,6 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
         }
         LOG.info("Found start tag {} .", periodHandler.timeToTag(previousTags.get(0).getRight()));
         Snapshot start = previousTags.get(0).getLeft().trimToSnapshot();
-
-        TimeTravelUtil.checkRescaleBucketForIncrementalQuery(
-                new SchemaManager(
-                        snapshotManager.fileIO(),
-                        snapshotManager.tablePath(),
-                        snapshotManager.branch()),
-                start.schemaId(),
-                end.schemaId());
 
         return new IncrementalTagStartingScanner(snapshotManager, start, end);
     }

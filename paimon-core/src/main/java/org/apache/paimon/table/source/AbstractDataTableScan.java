@@ -28,7 +28,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartingScanner;
@@ -47,7 +46,6 @@ import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner
 import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
-import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
@@ -251,11 +249,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                         snapshotManager.fileIO(),
                         snapshotManager.tablePath(),
                         snapshotManager.branch());
-        SchemaManager schemaManager =
-                new SchemaManager(
-                        snapshotManager.fileIO(),
-                        snapshotManager.tablePath(),
-                        snapshotManager.branch());
         if (conf.contains(CoreOptions.INCREMENTAL_BETWEEN)) {
             Pair<String, String> incrementalBetween = options.incrementalBetween();
             Optional<Tag> startTag = tagManager.get(incrementalBetween.getLeft());
@@ -279,9 +272,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                                     incrementalBetween.getLeft(),
                                     start.id()));
                 }
-
-                TimeTravelUtil.checkRescaleBucketForIncrementalQuery(
-                        schemaManager, start.schemaId(), end.schemaId());
                 return new IncrementalTagStartingScanner(snapshotManager, start, end);
             } else {
                 long startId, endId;
@@ -295,11 +285,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                                             + "Please set two tags or two snapshot Ids.",
                                     incrementalBetween.getLeft(), incrementalBetween.getRight()));
                 }
-
-                TimeTravelUtil.checkRescaleBucketForIncrementalQuery(
-                        schemaManager,
-                        snapshotManager.snapshot(startId).schemaId(),
-                        snapshotManager.snapshot(endId).schemaId());
                 return new IncrementalStartingScanner(snapshotManager, startId, endId, scanMode);
             }
         } else if (conf.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)) {
