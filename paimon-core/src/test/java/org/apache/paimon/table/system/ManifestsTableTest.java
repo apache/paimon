@@ -180,14 +180,14 @@ public class ManifestsTableTest extends TableTestBase {
                             manifestFileMeta.schemaId(),
                             BinaryString.fromString(
                                     String.format(
-                                            "{%d}",
+                                            "[%d]",
                                             manifestFileMeta
                                                     .partitionStats()
                                                     .minValues()
                                                     .getInt(0))),
                             BinaryString.fromString(
                                     String.format(
-                                            "{%d}",
+                                            "[%d]",
                                             manifestFileMeta
                                                     .partitionStats()
                                                     .maxValues()

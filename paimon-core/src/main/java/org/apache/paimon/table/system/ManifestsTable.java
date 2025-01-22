@@ -20,8 +20,6 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.casting.CastExecutor;
-import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -46,6 +44,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -58,6 +57,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -186,16 +186,17 @@ public class ManifestsTable implements ReadonlyTable {
             }
             List<ManifestFileMeta> manifestFileMetas = allManifests(dataTable);
 
-            @SuppressWarnings("unchecked")
-            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
-                    (CastExecutor<InternalRow, BinaryString>)
-                            CastExecutors.resolveToString(
-                                    dataTable.schema().logicalPartitionType());
+            RowDataToObjectArrayConverter partRowConverter =
+                    new RowDataToObjectArrayConverter(dataTable.schema().logicalPartitionType());
+
+            Function<InternalRow, BinaryString> partConverter =
+                    part ->
+                            BinaryString.fromString(
+                                    Arrays.toString(partRowConverter.convert(part)));
 
             Iterator<InternalRow> rows =
                     Iterators.transform(
-                            manifestFileMetas.iterator(),
-                            meta -> toRow(meta, partitionCastExecutor));
+                            manifestFileMetas.iterator(), meta -> toRow(meta, partConverter));
             if (readType != null) {
                 rows =
                         Iterators.transform(
@@ -209,15 +210,15 @@ public class ManifestsTable implements ReadonlyTable {
 
         private InternalRow toRow(
                 ManifestFileMeta manifestFileMeta,
-                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
+                Function<InternalRow, BinaryString> partitionCastExecutor) {
             return GenericRow.of(
                     BinaryString.fromString(manifestFileMeta.fileName()),
                     manifestFileMeta.fileSize(),
                     manifestFileMeta.numAddedFiles(),
                     manifestFileMeta.numDeletedFiles(),
                     manifestFileMeta.schemaId(),
-                    partitionCastExecutor.cast(manifestFileMeta.partitionStats().minValues()),
-                    partitionCastExecutor.cast(manifestFileMeta.partitionStats().maxValues()));
+                    partitionCastExecutor.apply(manifestFileMeta.partitionStats().minValues()),
+                    partitionCastExecutor.apply(manifestFileMeta.partitionStats().maxValues()));
         }
     }
 
