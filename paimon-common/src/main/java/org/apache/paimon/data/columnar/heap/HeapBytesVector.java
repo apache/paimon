@@ -50,11 +50,6 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
 
     private int bytesAppended;
 
-    /**
-     * Don't call this constructor except for testing purposes.
-     *
-     * @param capacity number of elements in the column vector
-     */
     public HeapBytesVector(int capacity) {
         super(capacity);
         buffer = new byte[capacity * 16];
