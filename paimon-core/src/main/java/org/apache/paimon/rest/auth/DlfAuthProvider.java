@@ -38,7 +38,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.TimeZone;
 
-/** DLF authentication provider. */
+/** Auth provider for DLF. */
 public class DlfAuthProvider implements AuthProvider {
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
@@ -47,21 +47,21 @@ public class DlfAuthProvider implements AuthProvider {
     private final String tokenDirPath;
     private final String tokenFileName;
 
-    protected DlfStSToken token;
+    protected DlfToken token;
     private final boolean keepRefreshed;
     private Long expiresAtMillis;
     private final Long tokenRefreshInMills;
 
     public static DlfAuthProvider buildRefreshToken(
             String tokenDirPath, String tokenFileName, Long tokenRefreshInMills) {
-        DlfStSToken token = readToken(tokenDirPath, tokenFileName);
+        DlfToken token = readToken(tokenDirPath, tokenFileName);
         Long expiresAtMillis = token.getExpiresInMills();
         return new DlfAuthProvider(
                 tokenDirPath, tokenFileName, token, true, expiresAtMillis, tokenRefreshInMills);
     }
 
     public static DlfAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
-        DlfStSToken token = new DlfStSToken(accessKeyId, accessKeySecret, null, null);
+        DlfToken token = new DlfToken(accessKeyId, accessKeySecret, null, null);
         Long expiresInMills = -1L;
         Long expiresAtMillis = -1L;
         return new DlfAuthProvider(null, null, token, false, expiresAtMillis, expiresInMills);
@@ -70,7 +70,7 @@ public class DlfAuthProvider implements AuthProvider {
     public DlfAuthProvider(
             String tokenDirPath,
             String tokenFileName,
-            DlfStSToken token,
+            DlfToken token,
             boolean keepRefreshed,
             Long expiresAtMillis,
             Long tokenRefreshInMills) {
@@ -99,7 +99,7 @@ public class DlfAuthProvider implements AuthProvider {
     @Override
     public boolean refresh() {
         long start = System.currentTimeMillis();
-        DlfStSToken newToken = readToken(tokenDirPath, tokenFileName);
+        DlfToken newToken = readToken(tokenDirPath, tokenFileName);
         if (newToken == null) {
             return false;
         }
@@ -138,12 +138,12 @@ public class DlfAuthProvider implements AuthProvider {
         return Optional.ofNullable(this.tokenRefreshInMills);
     }
 
-    private static DlfStSToken readToken(String tokenDirPath, String tokenFileName) {
+    private static DlfToken readToken(String tokenDirPath, String tokenFileName) {
         try {
             String tokenStr =
                     FileIOUtils.readFileUtf8(
                             new File(tokenDirPath + File.separator + tokenFileName));
-            return OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DlfStSToken.class);
+            return OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DlfToken.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -164,8 +164,9 @@ public class DlfAuthProvider implements AuthProvider {
         //                request.date());
     }
 
+    /** Dlf Token. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class DlfStSToken {
+    public static class DlfToken {
 
         public static final String DEFAULT_DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 
@@ -187,7 +188,7 @@ public class DlfAuthProvider implements AuthProvider {
         private final String expiration;
 
         @JsonCreator
-        public DlfStSToken(
+        public DlfToken(
                 @JsonProperty(ACCESS_KEY_ID_FIELD_NAME) String accessKeyId,
                 @JsonProperty(ACCESS_KEY_SECRET_FIELD_NAME) String accessKeySecret,
                 @JsonProperty(SECURITY_TOKEN_FIELD_NAME) String securityToken,
@@ -236,7 +237,7 @@ public class DlfAuthProvider implements AuthProvider {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            DlfStSToken that = (DlfStSToken) o;
+            DlfToken that = (DlfToken) o;
             return Objects.equals(accessKeyId, that.accessKeyId)
                     && Objects.equals(accessKeySecret, that.accessKeySecret)
                     && Objects.equals(securityToken, that.securityToken)

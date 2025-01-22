@@ -154,8 +154,8 @@ public class AuthSessionTest {
         sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
         String expiration = sdf.format(new Date());
         String secret = UUID.randomUUID().toString();
-        DlfAuthProvider.DlfStSToken token =
-                new DlfAuthProvider.DlfStSToken("accessKeyId", secret, "securityToken", expiration);
+        DlfAuthProvider.DlfToken token =
+                new DlfAuthProvider.DlfToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
         FileUtils.writeStringToFile(tokenFile, tokenStr);
         return Pair.of(tokenFile, tokenStr);
