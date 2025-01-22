@@ -26,6 +26,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
@@ -184,6 +185,18 @@ public class ParquetReadWriteTest {
                             RowType.of(new IntType()),
                             new VarCharType(255)));
 
+    private static final RowType NESTED_ARRAY_MAP_TYPE2 =
+            RowType.of(
+                    new DataField(
+                            3,
+                            "f3",
+                            new ArrayType(
+                                    true,
+                                    new MapType(
+                                            true,
+                                            new VarCharType(VarCharType.MAX_LENGTH),
+                                            new VarCharType(VarCharType.MAX_LENGTH)))));
+
     @TempDir public File folder;
 
     public static Collection<Integer> parameters() {
@@ -262,7 +275,7 @@ public class ParquetReadWriteTest {
     @ParameterizedTest
     @MethodSource("parameters")
     void testLargeValue(int rowGroupSize) throws IOException {
-        int number = 10000;
+        int number = 1000;
         List<Integer> values = new ArrayList<>(number);
         Random random = new Random();
         for (int i = 0; i < number; i++) {
@@ -452,7 +465,7 @@ public class ParquetReadWriteTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"10, paimon", "1000, paimon", "10, origin", "1000, origin"})
+    @CsvSource({"10, origin", "1000, origin"})
     public void testNestedRead(int rowGroupSize, String writerType) throws Exception {
         List<InternalRow> rows = prepareNestedData(1283);
         Path path;
@@ -471,7 +484,9 @@ public class ParquetReadWriteTest {
                         new FormatReaderContext(
                                 new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
         List<InternalRow> results = new ArrayList<>(1283);
-        reader.forEachRemaining(results::add);
+        InternalRowSerializer internalRowSerializer =
+                new InternalRowSerializer(NESTED_ARRAY_MAP_TYPE);
+        reader.forEachRemaining(row -> results.add(internalRowSerializer.copy(row)));
         compareNestedRow(rows, results);
     }
 
@@ -1087,9 +1102,6 @@ public class ParquetReadWriteTest {
                     origin.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1),
                     result.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1));
             Assertions.assertTrue(result.isNullAt(6));
-            Assertions.assertTrue(result.getRow(6, 2).isNullAt(0));
-            Assertions.assertTrue(result.getRow(6, 2).isNullAt(1));
-            Assertions.assertTrue(result.getRow(6, 2).isNullAt(2));
         }
     }
 

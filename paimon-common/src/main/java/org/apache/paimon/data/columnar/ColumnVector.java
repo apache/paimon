@@ -20,5 +20,14 @@ package org.apache.paimon.data.columnar;
 
 /** Nullable column vector. Access data through specific subclasses. */
 public interface ColumnVector {
+
     boolean isNullAt(int i);
+
+    default int getCapacity() {
+        return Integer.MAX_VALUE;
+    }
+
+    default ColumnVector[] getChildren() {
+        return null;
+    }
 }

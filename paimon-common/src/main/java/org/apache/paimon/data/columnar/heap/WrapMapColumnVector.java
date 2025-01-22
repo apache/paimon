@@ -23,25 +23,36 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarMap;
 import org.apache.paimon.data.columnar.MapColumnVector;
 
-/** This class represents a nullable heap map column vector. */
-public class HeapMapVector extends AbstractStructVector implements MapColumnVector {
+/** Wrap for MapColumnVector. */
+public class WrapMapColumnVector implements MapColumnVector {
 
-    public HeapMapVector(int capacity, ColumnVector keys, ColumnVector values) {
-        super(capacity, new ColumnVector[] {keys, values});
-    }
+    private final HeapMapVector heapMapVector;
+    private final ColumnVector[] children;
 
-    public void setKeys(ColumnVector keys) {
-        children[0] = keys;
-    }
-
-    public void setValues(ColumnVector values) {
-        children[1] = values;
+    public WrapMapColumnVector(HeapMapVector heapMapVector, ColumnVector[] children) {
+        this.heapMapVector = heapMapVector;
+        this.children = children;
     }
 
     @Override
     public InternalMap getMap(int i) {
-        long offset = offsets[i];
-        long length = lengths[i];
+        long offset = heapMapVector.offsets[i];
+        long length = heapMapVector.lengths[i];
         return new ColumnarMap(children[0], children[1], (int) offset, (int) length);
+    }
+
+    @Override
+    public boolean isNullAt(int i) {
+        return heapMapVector.isNullAt(i);
+    }
+
+    @Override
+    public int getCapacity() {
+        return heapMapVector.getCapacity();
+    }
+
+    @Override
+    public ColumnVector[] getChildren() {
+        return children;
     }
 }

@@ -18,22 +18,25 @@
 
 package org.apache.paimon.data.columnar.heap;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
-import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 
-/** This class represents a nullable heap row column vector. */
-public class HeapRowVector extends AbstractStructVector
-        implements WritableColumnVector, RowColumnVector {
+/** Wrap for RowColumnVector. */
+public class WrapRowColumnVector implements RowColumnVector {
 
-    public HeapRowVector(int len, ColumnVector... fields) {
-        super(len, fields);
+    private final HeapRowVector heapRowVector;
+    private final ColumnVector[] children;
+
+    public WrapRowColumnVector(HeapRowVector heapRowVector, ColumnVector[] children) {
+        this.heapRowVector = heapRowVector;
+        this.children = children;
     }
 
     @Override
-    public ColumnarRow getRow(int i) {
+    public InternalRow getRow(int i) {
         ColumnarRow columnarRow = new ColumnarRow(new VectorizedColumnBatch(children));
         columnarRow.setRowId(i);
         return columnarRow;
@@ -45,25 +48,17 @@ public class HeapRowVector extends AbstractStructVector
     }
 
     @Override
-    public void reset() {
-        super.reset();
-        for (ColumnVector field : children) {
-            if (field instanceof WritableColumnVector) {
-                ((WritableColumnVector) field).reset();
-            }
-        }
+    public boolean isNullAt(int i) {
+        return heapRowVector.isNullAt(i);
     }
 
     @Override
-    void reserveForHeapVector(int newCapacity) {
-        for (ColumnVector field : children) {
-            if (field instanceof WritableColumnVector) {
-                ((WritableColumnVector) field).reserve(newCapacity);
-            }
-        }
+    public int getCapacity() {
+        return heapRowVector.getCapacity();
     }
 
-    public void setFields(WritableColumnVector[] fields) {
-        System.arraycopy(fields, 0, this.children, 0, fields.length);
+    @Override
+    public ColumnVector[] getChildren() {
+        return children;
     }
 }

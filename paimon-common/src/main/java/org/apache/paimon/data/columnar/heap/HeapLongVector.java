@@ -40,6 +40,13 @@ public class HeapLongVector extends AbstractHeapVector implements WritableLongVe
     }
 
     @Override
+    void reserveForHeapVector(int newCapacity) {
+        if (vector.length < newCapacity) {
+            vector = Arrays.copyOf(vector, newCapacity);
+        }
+    }
+
+    @Override
     public long getLong(int i) {
         if (dictionary == null) {
             return vector[i];
@@ -80,5 +87,15 @@ public class HeapLongVector extends AbstractHeapVector implements WritableLongVe
     @Override
     public void fill(long value) {
         Arrays.fill(vector, value);
+    }
+
+    @Override
+    public void reset() {
+        super.reset();
+        if (vector.length != initialCapacity) {
+            vector = new long[initialCapacity];
+        } else {
+            Arrays.fill(vector, 0L);
+        }
     }
 }

@@ -41,7 +41,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
 
     protected int num;
     protected int nextPos;
-    protected long nextFilePos;
+    protected long[] positions;
 
     public ColumnarRowIterator(Path filePath, ColumnarRow row, @Nullable Runnable recycler) {
         super(recycler);
@@ -51,9 +51,17 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     public void reset(long nextFilePos) {
+        this.positions = new long[row.batch().getNumRows()];
+        for (int i = 0; i < row.batch().getNumRows(); i++) {
+            positions[i] = nextFilePos++;
+        }
+    }
+
+    public void reset(long[] positions) {
+        assert positions.length == row.batch().getNumRows();
+        this.positions = positions;
         this.num = row.batch().getNumRows();
         this.nextPos = 0;
-        this.nextFilePos = nextFilePos;
     }
 
     @Nullable
@@ -61,7 +69,6 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     public InternalRow next() {
         if (nextPos < num) {
             row.setRowId(nextPos++);
-            nextFilePos++;
             return row;
         } else {
             return null;
@@ -70,7 +77,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
 
     @Override
     public long returnedPosition() {
-        return nextFilePos - 1;
+        return positions[nextPos - 1];
     }
 
     @Override
@@ -81,7 +88,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     protected ColumnarRowIterator copy(ColumnVector[] vectors) {
         ColumnarRowIterator newIterator =
                 new ColumnarRowIterator(filePath, row.copy(vectors), recycler);
-        newIterator.reset(nextFilePos);
+        newIterator.reset(positions);
         return newIterator;
     }
 

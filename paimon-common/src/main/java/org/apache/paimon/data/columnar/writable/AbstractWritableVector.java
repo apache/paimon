@@ -31,13 +31,27 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     private static final long serialVersionUID = 1L;
 
+    protected final int initialCapacity;
+
     // If the whole column vector has no nulls, this is true, otherwise false.
     protected boolean noNulls = true;
+
+    protected boolean isAllNull = false;
+
+    /** Current write cursor (row index) when appending data. */
+    protected int elementsAppended;
+
+    protected int capacity;
 
     /**
      * The Dictionary for this column. If it's not null, will be used to decode the value in get().
      */
     protected Dictionary dictionary;
+
+    public AbstractWritableVector(int capacity) {
+        this.capacity = capacity;
+        this.initialCapacity = capacity;
+    }
 
     /** Update the dictionary. */
     @Override
@@ -48,6 +62,64 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
     /** Returns true if this column has a dictionary. */
     @Override
     public boolean hasDictionary() {
-        return this.dictionary != null;
+        return dictionary != null;
     }
+
+    @Override
+    public void setAllNull() {
+        isAllNull = true;
+        noNulls = false;
+    }
+
+    @Override
+    public boolean isAllNull() {
+        return isAllNull;
+    }
+
+    @Override
+    public int getElementsAppended() {
+        return elementsAppended;
+    }
+
+    /** Increment number of elements appended by 'num'. */
+    @Override
+    public final void addElementsAppended(int num) {
+        elementsAppended += num;
+    }
+
+    @Override
+    public int getCapacity() {
+        return this.capacity;
+    }
+
+    @Override
+    public void reset() {
+        noNulls = true;
+        isAllNull = false;
+        elementsAppended = 0;
+        capacity = initialCapacity;
+    }
+
+    @Override
+    public void reserve(int requiredCapacity) {
+        if (requiredCapacity < 0) {
+            throw new IllegalArgumentException("Invalid capacity: " + requiredCapacity);
+        } else if (requiredCapacity > capacity) {
+            int newCapacity = (int) Math.min(Integer.MAX_VALUE, requiredCapacity * 2L);
+            if (requiredCapacity <= newCapacity) {
+                try {
+                    reserveInternal(newCapacity);
+                } catch (OutOfMemoryError outOfMemoryError) {
+                    throw new RuntimeException(
+                            "Failed to allocate memory for vector", outOfMemoryError);
+                }
+            } else {
+                throw new UnsupportedOperationException(
+                        "Cannot allocate :" + newCapacity + " elements");
+            }
+            capacity = newCapacity;
+        }
+    }
+
+    protected abstract void reserveInternal(int newCapacity);
 }

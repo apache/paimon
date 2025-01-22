@@ -23,26 +23,41 @@ import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarArray;
 
-/** This class represents a nullable heap array column vector. */
-public class HeapArrayVector extends AbstractStructVector implements ArrayColumnVector {
+/** Wrap for ArrayColumnVector. */
+public class WrapArrayColumnVector implements ArrayColumnVector {
 
-    public HeapArrayVector(int len, ColumnVector vector) {
-        super(len, new ColumnVector[] {vector});
-    }
+    private final HeapArrayVector heapArrayVector;
+    private final ColumnVector[] children;
 
-    public void setChild(ColumnVector child) {
-        children[0] = child;
+    public WrapArrayColumnVector(HeapArrayVector heapArrayVector, ColumnVector[] children) {
+        this.heapArrayVector = heapArrayVector;
+        this.children = children;
     }
 
     @Override
     public InternalArray getArray(int i) {
-        long offset = offsets[i];
-        long length = lengths[i];
+        long offset = heapArrayVector.offsets[i];
+        long length = heapArrayVector.lengths[i];
         return new ColumnarArray(children[0], (int) offset, (int) length);
     }
 
     @Override
     public ColumnVector getColumnVector() {
         return children[0];
+    }
+
+    @Override
+    public boolean isNullAt(int i) {
+        return heapArrayVector.isNullAt(i);
+    }
+
+    @Override
+    public int getCapacity() {
+        return heapArrayVector.getCapacity();
+    }
+
+    @Override
+    public ColumnVector[] getChildren() {
+        return children;
     }
 }
