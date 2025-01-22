@@ -289,7 +289,7 @@ public enum OrcConf {
             "orc.schema.evolution.case.sensitive",
             "orc.schema.evolution.case.sensitive",
             true,
-            "A boolean flag to determine if the comparision of field names "
+            "A boolean flag to determine if the comparison of field names "
                     + "in schema evolution is case sensitive .\n"),
     ALLOW_SARG_TO_FILTER(
             "orc.sarg.to.filter",
