@@ -128,20 +128,47 @@ public class TimeTravelUtil {
     }
 
     public static void checkRescaleBucketForIncrementalTagQuery(
-            SchemaManager schemaManager, long schemaId1, long schemaId2) {
-        if (schemaId1 != schemaId2) {
-            int bucketNumber1 = bucketNumber(schemaManager, schemaId1);
-            int bucketNumber2 = bucketNumber(schemaManager, schemaId2);
-            checkArgument(
-                    bucketNumber1 == bucketNumber2,
-                    "The bucket number of two tags are different (%s, %s), which is not supported in incremental tag query.",
-                    bucketNumber1,
-                    bucketNumber2);
+            SchemaManager schemaManager, Snapshot start, Snapshot end) {
+        if (start.schemaId() != end.schemaId()) {
+            int startBucketNumber = bucketNumber(schemaManager, start.schemaId());
+            int endBucketNumber = bucketNumber(schemaManager, end.schemaId());
+            if (startBucketNumber != endBucketNumber) {
+                throw new InconsistentTagBucketException(
+                        start.id(),
+                        end.id(),
+                        String.format(
+                                "The bucket number of two tags are different (%s, %s), which is not supported in incremental tag query.",
+                                startBucketNumber, endBucketNumber));
+            }
         }
     }
 
     private static int bucketNumber(SchemaManager schemaManager, long schemaId) {
         TableSchema schema = schemaManager.schema(schemaId);
         return CoreOptions.fromMap(schema.options()).bucket();
+    }
+
+    /**
+     * Exception thrown when the bucket number of two tags are different in incremental tag query.
+     */
+    public static class InconsistentTagBucketException extends RuntimeException {
+
+        private final long startSnapshotId;
+        private final long endSnapshotId;
+
+        public InconsistentTagBucketException(
+                long startSnapshotId, long endSnapshotId, String message) {
+            super(message);
+            this.startSnapshotId = startSnapshotId;
+            this.endSnapshotId = endSnapshotId;
+        }
+
+        public long startSnapshotId() {
+            return startSnapshotId;
+        }
+
+        public long endSnapshotId() {
+            return endSnapshotId;
+        }
     }
 }

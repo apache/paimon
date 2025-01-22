@@ -189,6 +189,33 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
     }
   }
 
+  test("Table Valued Functions: incremental query with inconsistent tag bucket") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (a INT, b INT) USING paimon
+            |TBLPROPERTIES ('primary-key'='a', 'bucket' = '1')
+            |""".stripMargin)
+
+      val table = loadTable("t")
+
+      sql("INSERT INTO t VALUES (1, 11), (2, 22)")
+      sql("ALTER TABLE t SET TBLPROPERTIES ('bucket' = '2')")
+      sql("INSERT OVERWRITE t SELECT * FROM t")
+      sql("INSERT INTO t VALUES (3, 33)")
+
+      table.createTag("2024-01-01", 1)
+      table.createTag("2024-01-02", 3)
+
+      checkAnswer(
+        sql(
+          "SELECT * FROM paimon_incremental_query('t', '2024-01-01', '2024-01-02') ORDER BY a, b"),
+        Seq(Row(3, 33)))
+      checkAnswer(
+        sql("SELECT * FROM paimon_incremental_to_auto_tag('t', '2024-01-02') ORDER BY a, b"),
+        Seq(Row(3, 33)))
+    }
+  }
+
   private def incrementalDF(tableIdent: String, start: Int, end: Int): DataFrame = {
     spark.read
       .format("paimon")
