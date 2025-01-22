@@ -154,8 +154,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         createVectorizedColumnBatch(writableVectors);
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields =
-                buildFieldsList(projectedType.getFields(), projectedType.getFieldNames(), columnIO);
+        List<ParquetField> fields = buildFieldsList(readFields, columnIO);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
