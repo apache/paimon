@@ -30,7 +30,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 
-import java.util.Collections;
+import java.util.Optional;
 
 /** Util class for refreshing object table. */
 public class ObjectRefresh {
@@ -68,12 +68,14 @@ public class ObjectRefresh {
                 Timestamp.fromEpochMillis(file.getModificationTime()),
                 Timestamp.fromEpochMillis(file.getAccessTime()),
                 file.getOwner(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                new GenericMap(Collections.emptyMap()));
+                file.getGeneration(),
+                file.getContentType(),
+                file.getStorageClass(),
+                file.getMd5Hash(),
+                Optional.ofNullable(file.getMetadataModificationTime())
+                        .map(Timestamp::fromEpochMillis)
+                        .orElse(null),
+                Optional.ofNullable(file.getMetadata()).map(GenericMap::new).orElse(null));
     }
 
     public static GenericRow toRow(Object... values) {
