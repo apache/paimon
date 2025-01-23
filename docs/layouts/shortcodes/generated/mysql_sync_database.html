@@ -72,7 +72,7 @@ under the License.
                 <ul>
                     <li>"tinyint1-not-bool": maps MySQL TINYINT(1) to TINYINT instead of BOOLEAN.</li>
                     <li>"to-nullable": ignores all NOT NULL constraints (except for primary keys).
-                        This is used to solve the problem that Flink cannot accept the MySQL 'ALTER TABLE ADD COLUMN column type NOT NULL DEFAULT x' operation.
+                        This is used to solve the problem that Flink cannot accept the MySQL 'ALTER TABLE ADD COLUMN type NOT NULL DEFAULT x' operation.
                     </li>
                     <li>"to-string": maps all MySQL types to STRING.</li>
                     <li>"char-to-string": maps MySQL CHAR(length)/VARCHAR(length) types to STRING.</li>
@@ -94,11 +94,11 @@ under the License.
     </tr>
     <tr>
         <td><h5>--mysql_conf</h5></td>
-        <td>The configuration for Flink CDC MySQL sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name and table-name are required configurations, others are optional. See its <a href="https://nightlies.apache.org/flink/flink-cdc-docs-release-3.0/docs/connectors/legacy-flink-cdc-sources/mysql-cdc/#connector-options">document</a> for a complete list of configurations.</td>
+        <td>The configuration for Flink CDC MySQL sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name and table-name are required configurations, others are optional. See its <a href="https://nightlies.apache.org/flink/flink-cdc-docs-master/docs/connectors/flink-sources/mysql-cdc/#connector-options">document</a> for a complete list of configurations.</td>
     </tr>
     <tr>
         <td><h5>--catalog_conf</h5></td>
-        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of catalog configurations.</td>
+        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}#catalogoptions">here</a> for a complete list of catalog configurations.</td>
     </tr>
     <tr>
         <td><h5>--table_conf</h5></td>
