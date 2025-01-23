@@ -85,23 +85,18 @@ public class TestBitmapFileIndex {
 
     private FileIndexReader createTestReaderOnWriter(
             int writerVersion,
-            Integer secondaryBlockSize,
+            Integer indexBlockSize,
             DataType dataType,
             Consumer<FileIndexWriter> consumer)
             throws Exception {
         Options options = new Options();
-        if (secondaryBlockSize != null) {
-            options.setInteger("secondaryBlockSize", secondaryBlockSize);
+        options.setInteger(BitmapFileIndex.VERSION, writerVersion);
+        if (indexBlockSize != null) {
+            options.setInteger(BitmapFileIndex.INDEX_BLOCK_SIZE, indexBlockSize);
         }
         BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(dataType, options);
         FileIndexWriter writer;
-        if (writerVersion == BitmapFileIndex.VERSION_1) {
-            writer = bitmapFileIndex.createV1Writer();
-        } else if (writerVersion == BitmapFileIndex.VERSION_2) {
-            writer = bitmapFileIndex.createWriter();
-        } else {
-            throw new RuntimeException("not support version: " + writerVersion);
-        }
+        writer = bitmapFileIndex.createWriter();
         consumer.accept(writer);
         folder.create();
         File file = folder.newFile("f1");

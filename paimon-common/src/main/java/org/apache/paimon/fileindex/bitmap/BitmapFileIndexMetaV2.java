@@ -20,11 +20,14 @@ package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
+import java.io.BufferedInputStream;
 import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutput;
+import java.io.InputStream;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -50,7 +53,7 @@ import java.util.function.Function;
  * +-------------------------------------------------+
  * ｜ null value offset (4 bytes if has null value)  ｜       HEAD
  * +-------------------------------------------------+
- * ｜ secondary dictionary size                      ｜
+ * ｜ bitmap index block number (4 bytes int)        ｜
  * +-------------------------------------------------+
  * ｜ value 1 | offset 1                             ｜
  * +-------------------------------------------------+
@@ -58,23 +61,24 @@ import java.util.function.Function;
  * +-------------------------------------------------+
  * ｜ ...                                            ｜
  * +-------------------------------------------------+
- * ｜ bitmap body offset                             ｜
+ * ｜ bitmap blocks offset (4 bytes int)             ｜
  * +-------------------------------------------------+-----------------
- * ｜ serialized secondary dictionary 1              ｜
+ * ｜ bitmap index block 1                           ｜
  * +-------------------------------------------------+
- * ｜ serialized secondary dictionary 2              ｜    SECONDARY
+ * ｜ bitmap index block 2                           ｜  INDEX BLOCKS
  * +-------------------------------------------------+
  * ｜ ...                                            ｜
  * +-------------------------------------------------+-----------------
  * ｜ serialized bitmap 1                            ｜
  * +-------------------------------------------------+
  * ｜ serialized bitmap 2                            ｜
- * +-------------------------------------------------+       BODY
+ * +-------------------------------------------------+  BITMAP BLOCKS
  * ｜ serialized bitmap 3                            ｜
  * +-------------------------------------------------+
  * ｜ ...                                            ｜
  * +-------------------------------------------------+-----------------
- * partial bitmap dictionary format:
+ *
+ * index block format:
  * +-------------------------------------------------+
  * ｜ entry number (4 bytes int)                     ｜
  * +-------------------------------------------------+
@@ -88,31 +92,32 @@ import java.util.function.Function;
  */
 public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
-    private int partialDictionaryBlockSizeLimit = 32 * 1024;
+    private int blockSizeLimit = 32 * 1024;
 
-    private LinkedList<PartialBitmapDictionary> partialBitmapDictionaries;
-    private long partialIndexStart;
+    private LinkedList<BitmapIndexBlock> indexBlocks;
+    private long indexBlockStart;
 
-    public BitmapFileIndexMetaV2(DataType dataType) {
-        super(dataType);
+    public BitmapFileIndexMetaV2(DataType dataType, Options options) {
+        super(dataType, options);
     }
 
     public BitmapFileIndexMetaV2(
             DataType dataType,
+            Options options,
             int rowCount,
             int nonNullBitmapNumber,
             boolean hasNullValue,
             int nullValueOffset,
-            LinkedHashMap<Object, Integer> bitmapOffsets,
-            int partialDictionaryBlockSizeLimit) {
+            LinkedHashMap<Object, Integer> bitmapOffsets) {
         super(
                 dataType,
+                options,
                 rowCount,
                 nonNullBitmapNumber,
                 hasNullValue,
                 nullValueOffset,
                 bitmapOffsets);
-        this.partialDictionaryBlockSizeLimit = partialDictionaryBlockSizeLimit;
+        blockSizeLimit = options.getInteger(BitmapFileIndex.INDEX_BLOCK_SIZE, 16 * 1024);
     }
 
     public static Comparator<Object> getComparator(DataType dataType) {
@@ -160,7 +165,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         if (bitmapId == null) {
             return hasNullValue;
         }
-        PartialBitmapDictionary partial = findPartial(bitmapId);
+        BitmapIndexBlock partial = findPartial(bitmapId);
         return partial != null && partial.contains(bitmapId);
     }
 
@@ -169,14 +174,14 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         if (bitmapId == null) {
             return nullValueOffset;
         }
-        PartialBitmapDictionary partial = findPartial(bitmapId);
+        BitmapIndexBlock partial = findPartial(bitmapId);
         return partial.getOffset(bitmapId);
     }
 
-    private PartialBitmapDictionary findPartial(Object bitmapId) {
+    private BitmapIndexBlock findPartial(Object bitmapId) {
         Comparator<Object> comparator = getComparator(dataType);
-        PartialBitmapDictionary prev = null;
-        for (PartialBitmapDictionary partial : partialBitmapDictionaries) {
+        BitmapIndexBlock prev = null;
+        for (BitmapIndexBlock partial : indexBlocks) {
             int cmp = comparator.compare(bitmapId, partial.key);
             if (cmp < 0) {
                 return prev;
@@ -198,20 +203,20 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             out.writeInt(nullValueOffset);
         }
 
-        partialBitmapDictionaries = new LinkedList<>();
-        partialBitmapDictionaries.add(new PartialBitmapDictionary(dataType, 0));
+        indexBlocks = new LinkedList<>();
+        indexBlocks.add(new BitmapIndexBlock(dataType, 0));
         Comparator<Object> comparator = getComparator(dataType);
         bitmapOffsets.entrySet().stream()
                 .map(it -> new Entry(it.getKey(), it.getValue()))
                 .sorted((e1, e2) -> comparator.compare(e1.key, e2.key))
                 .forEach(
                         e -> {
-                            PartialBitmapDictionary last = partialBitmapDictionaries.peekLast();
+                            BitmapIndexBlock last = indexBlocks.peekLast();
                             if (!last.tryAdd(e)) {
-                                PartialBitmapDictionary next =
-                                        new PartialBitmapDictionary(
+                                BitmapIndexBlock next =
+                                        new BitmapIndexBlock(
                                                 dataType, last.offset + last.serializedBytes);
-                                partialBitmapDictionaries.add(next);
+                                indexBlocks.add(next);
                                 if (!next.tryAdd(e)) {
                                     throw new RuntimeException("index fail");
                                 }
@@ -219,10 +224,10 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                         });
 
         // secondary dictionary size
-        out.writeInt(partialBitmapDictionaries.size());
+        out.writeInt(indexBlocks.size());
 
         int bitmapBodyOffset = 0;
-        for (PartialBitmapDictionary e : partialBitmapDictionaries) {
+        for (BitmapIndexBlock e : indexBlocks) {
             // secondary entry
             valueWriter.accept(e.key);
             out.writeInt(e.offset);
@@ -233,7 +238,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         out.writeInt(bitmapBodyOffset);
 
         // bitmap partial dictionaries
-        for (PartialBitmapDictionary partial : partialBitmapDictionaries) {
+        for (BitmapIndexBlock partial : indexBlocks) {
             out.writeInt(partial.entryList.size());
             for (Entry e : partial.entryList) {
                 valueWriter.accept(e.key);
@@ -245,35 +250,54 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
     @Override
     public void deserialize(SeekableInputStream seekableInputStream) throws Exception {
 
-        DataInput in = new DataInputStream(seekableInputStream);
+        indexBlockStart = seekableInputStream.getPos();
+
+        InputStream inputStream = seekableInputStream;
+        if (options.getBoolean(BitmapFileIndex.ENABLE_BUFFERED_INPUT, true)) {
+            inputStream = new BufferedInputStream(inputStream);
+        }
+        DataInput in = new DataInputStream(inputStream);
         ThrowableSupplier valueReader = getValueReader(in);
+        Function<Object, Integer> measure = getSerializeSizeMeasure();
 
         rowCount = in.readInt();
+        indexBlockStart += Integer.BYTES;
+
         nonNullBitmapNumber = in.readInt();
+        indexBlockStart += Integer.BYTES;
+
         hasNullValue = in.readBoolean();
+        indexBlockStart++;
+
         if (hasNullValue) {
             nullValueOffset = in.readInt();
+            indexBlockStart += Integer.BYTES;
         }
+
         bitmapOffsets = new LinkedHashMap<>();
 
         // secondary dictionary size
         int partialBitmapDictionaryNum = in.readInt();
-        partialBitmapDictionaries = new LinkedList<>();
+        indexBlockStart += Integer.BYTES;
+
+        indexBlocks = new LinkedList<>();
         for (int i = 0; i < partialBitmapDictionaryNum; i++) {
             Object key = valueReader.get();
             int offset = in.readInt();
-            partialBitmapDictionaries.add(
-                    new PartialBitmapDictionary(dataType, key, offset, seekableInputStream));
+            indexBlocks.add(
+                    new BitmapIndexBlock(dataType, options, key, offset, seekableInputStream));
+            indexBlockStart += measure.apply(key) + Integer.BYTES;
         }
 
         // bitmap body offset
         int bitmapBodyOffset = in.readInt();
-        partialIndexStart = seekableInputStream.getPos();
-        bodyStart = seekableInputStream.getPos() + bitmapBodyOffset;
+        indexBlockStart += Integer.BYTES;
+
+        bodyStart = indexBlockStart + bitmapBodyOffset;
     }
 
     /** Split of all bitmap entries. */
-    class PartialBitmapDictionary {
+    class BitmapIndexBlock {
 
         Object key;
         int offset;
@@ -284,13 +308,18 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         Function<Object, Integer> keyBytesMapper;
         DataType dataType;
         SeekableInputStream seekableInputStream;
+        Options options;
 
         void tryDeserialize() {
             if (entryList == null) {
                 entryList = new LinkedList<>();
                 try {
-                    seekableInputStream.seek(partialIndexStart + offset);
-                    DataInputStream in = new DataInputStream(seekableInputStream);
+                    seekableInputStream.seek(indexBlockStart + offset);
+                    InputStream inputStream = seekableInputStream;
+                    if (options.getBoolean(BitmapFileIndex.ENABLE_BUFFERED_INPUT, true)) {
+                        inputStream = new BufferedInputStream(inputStream);
+                    }
+                    DataInputStream in = new DataInputStream(inputStream);
                     ThrowableSupplier valueReader = getValueReader(in);
                     int entryNum = in.readInt();
                     for (int i = 0; i < entryNum; i++) {
@@ -334,7 +363,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                             + (isConstantKeyBytes
                                     ? constantKeyBytes
                                     : keyBytesMapper.apply(entry.key));
-            if (serializedBytes + entryBytes > partialDictionaryBlockSizeLimit) {
+            if (serializedBytes + entryBytes > blockSizeLimit) {
                 return false;
             }
             serializedBytes += entryBytes;
@@ -343,7 +372,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         }
 
         // for build and serialize
-        public PartialBitmapDictionary(DataType dataType, int offset) {
+        public BitmapIndexBlock(DataType dataType, int offset) {
             this.offset = offset;
             this.entryList = new LinkedList<>();
             keyBytesMapper =
@@ -394,12 +423,14 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         }
 
         // for deserialize
-        public PartialBitmapDictionary(
+        public BitmapIndexBlock(
                 DataType dataType,
+                Options options,
                 Object key,
                 int offset,
                 SeekableInputStream seekableInputStream) {
             this.dataType = dataType;
+            this.options = options;
             this.key = key;
             this.offset = offset;
             this.seekableInputStream = seekableInputStream;
