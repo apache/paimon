@@ -24,7 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 
-/** Wrap for RowColumnVector. */
+/** Test for RowColumnVector. */
 public class CastedRowColumnVector implements RowColumnVector {
 
     private final VectorizedColumnBatch vectorizedColumnBatch;
