@@ -38,6 +38,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 
+/** Benchmark for {@link BitmapFileIndex}. */
 public class BitmapIndexBenchmark {
 
     public static final int ROW_COUNT = 1000000;
