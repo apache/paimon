@@ -32,10 +32,11 @@ import org.apache.parquet.io.api.Binary;
 
 import java.nio.ByteBuffer;
 
-/**
- * Interface for value decoding that supports vectorized (aka batched) decoding. TODO: merge this
- * into parquet-mr.
- */
+/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
+/** Interface for value decoding that supports vectorized (aka batched) decoding. */
 public interface VectorizedValuesReader {
     boolean readBoolean();
 

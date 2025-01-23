@@ -62,15 +62,19 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
         super.reset();
         if (start.length != capacity) {
             start = new int[capacity];
+        } else {
+            Arrays.fill(start, 0);
         }
 
         if (length.length != capacity) {
             length = new int[capacity];
+        } else {
+            Arrays.fill(length, 0);
         }
 
-        if (buffer.length != capacity * 16) {
-            buffer = new byte[capacity * 16];
-        }
+        // We don't reset buffer to avoid unnecessary copy.
+        Arrays.fill(buffer, (byte) 0);
+
         this.bytesAppended = 0;
     }
 

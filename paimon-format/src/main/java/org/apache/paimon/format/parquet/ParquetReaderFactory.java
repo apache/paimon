@@ -104,6 +104,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         this.filter = filter;
     }
 
+    // TODO: remove this when new reader is stable
     public FileRecordReader<InternalRow> createReaderOld(FormatReaderFactory.Context context)
             throws IOException {
         ParquetReadOptions.Builder builder =
@@ -151,7 +152,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         MessageType requestedSchema = clipParquetSchema(fileSchema);
         reader.setRequestedSchema(requestedSchema);
         WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
-        createVectorizedColumnBatch(writableVectors);
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
         List<ParquetField> fields = buildFieldsList(readFields, columnIO);

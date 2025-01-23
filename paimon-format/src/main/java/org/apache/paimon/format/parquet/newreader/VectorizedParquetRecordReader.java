@@ -58,6 +58,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 /** Record reader for parquet. */
 public class VectorizedParquetRecordReader implements FileRecordReader<InternalRow> {
 
@@ -137,11 +141,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         for (int i = 0; i < columnVectors.length; i++) {
             columnVectors[i] =
                     new ParquetColumnVector(
-                            fields.get(i),
-                            (WritableColumnVector) vectors[i],
-                            batchSize,
-                            missingColumns,
-                            true);
+                            fields.get(i), vectors[i], batchSize, missingColumns, true);
         }
     }
 
@@ -258,7 +258,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     }
 
     public boolean nextBatch() throws IOException {
-        // Primary key table will use the last reccord, so we can't reset
+        // Primary key table will use the last record, so we can't reset first
         // TODO: remove usage of the last record by primary key table after batch reset
         if (rowsReturned >= totalRowCount) {
             return false;

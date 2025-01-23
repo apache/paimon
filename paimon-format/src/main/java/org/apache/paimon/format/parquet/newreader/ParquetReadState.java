@@ -25,6 +25,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.PrimitiveIterator;
 
+/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 /** Helper class to store intermediate state while reading a Parquet column chunk. */
 public final class ParquetReadState {
     /** A special row range used when there is no row indexes (hence all rows must be included). */

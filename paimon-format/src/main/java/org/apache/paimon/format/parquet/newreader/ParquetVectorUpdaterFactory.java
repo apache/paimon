@@ -72,6 +72,10 @@ import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
+/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 /** Updater Factory to get {@link ParquetVectorUpdater}. */
 public class ParquetVectorUpdaterFactory {
 
