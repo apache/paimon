@@ -92,13 +92,13 @@ public class HttpClient implements RESTClient {
             Class<T> responseType,
             Map<String, String> headers,
             Function<RestAuthParameter, String> authenticationFunction) {
-        Map<String, String> authHeader =
-                getAuthHeader(path, "GET", headers, authenticationFunction);
+        Map<String, String> authHeaders =
+                getAuthHeaders(path, "GET", headers, authenticationFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
                         .get()
-                        .headers(Headers.of(authHeader))
+                        .headers(Headers.of(authHeaders))
                         .build();
         return exec(request, responseType);
     }
@@ -120,14 +120,14 @@ public class HttpClient implements RESTClient {
             Map<String, String> headers,
             Function<RestAuthParameter, String> authenticationFunction) {
         try {
-            Map<String, String> authHeader =
-                    getAuthHeader(path, "POST", headers, authenticationFunction);
+            Map<String, String> authHeaders =
+                    getAuthHeaders(path, "POST", headers, authenticationFunction);
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
                             .url(getRequestUrl(path))
                             .post(requestBody)
-                            .headers(Headers.of(authHeader))
+                            .headers(Headers.of(authHeaders))
                             .build();
             return exec(request, responseType);
         } catch (JsonProcessingException e) {
@@ -140,13 +140,13 @@ public class HttpClient implements RESTClient {
             String path,
             Map<String, String> headers,
             Function<RestAuthParameter, String> authenticationFunction) {
-        Map<String, String> authHeader =
-                getAuthHeader(path, "DELETE", headers, authenticationFunction);
+        Map<String, String> authHeaders =
+                getAuthHeaders(path, "DELETE", headers, authenticationFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
                         .delete()
-                        .headers(Headers.of(authHeader))
+                        .headers(Headers.of(authHeaders))
                         .build();
         return exec(request, null);
     }
@@ -158,14 +158,14 @@ public class HttpClient implements RESTClient {
             Map<String, String> headers,
             Function<RestAuthParameter, String> authenticationFunction) {
         try {
-            Map<String, String> authHeader =
-                    getAuthHeader(path, "DELETE", headers, authenticationFunction);
+            Map<String, String> authHeaders =
+                    getAuthHeaders(path, "DELETE", headers, authenticationFunction);
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
                             .url(getRequestUrl(path))
                             .delete(requestBody)
-                            .headers(Headers.of(authHeader))
+                            .headers(Headers.of(authHeaders))
                             .build();
             return exec(request, null);
         } catch (JsonProcessingException e) {
@@ -224,7 +224,7 @@ public class HttpClient implements RESTClient {
         return URI.create(uri).getHost();
     }
 
-    private Map<String, String> getAuthHeader(
+    private Map<String, String> getAuthHeaders(
             String path,
             String method,
             Map<String, String> headers,
