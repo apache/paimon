@@ -49,7 +49,10 @@ public class BitmapFileIndex implements FileIndexer {
 
     public static final int VERSION_1 = 1;
     public static final int VERSION_2 = 2;
-    public static final int DEFAULT_SECONDARY_BLOCK_SIZE = 16 * 1024;
+
+    public static final String VERSION = "version";
+    public static final String INDEX_BLOCK_SIZE = "index-block-size";
+    public static final String ENABLE_BUFFERED_INPUT = "enable-buffered-input";
 
     private final DataType dataType;
     private final Options options;
@@ -61,20 +64,14 @@ public class BitmapFileIndex implements FileIndexer {
 
     @Override
     public FileIndexWriter createWriter() {
-        return new Writer(dataType, VERSION_2, options);
-    }
-
-    // this method is only used for test version 1 compatibility
-    @Deprecated
-    public FileIndexWriter createV1Writer() {
-        return new Writer(dataType, VERSION_1, options);
+        return new Writer(dataType, options);
     }
 
     @Override
     public FileIndexReader createReader(
             SeekableInputStream seekableInputStream, int start, int length) {
         try {
-            return new Reader(seekableInputStream, start);
+            return new Reader(seekableInputStream, start, options);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -90,8 +87,8 @@ public class BitmapFileIndex implements FileIndexer {
         private int rowNumber;
         private final Options options;
 
-        public Writer(DataType dataType, int version, Options options) {
-            this.version = version;
+        public Writer(DataType dataType, Options options) {
+            this.version = options.getInteger(VERSION, VERSION_2);
             this.dataType = dataType;
             this.valueMapper = getValueMapper(dataType);
             this.options = options;
@@ -150,6 +147,7 @@ public class BitmapFileIndex implements FileIndexer {
                     bitmapFileIndexMeta =
                             new BitmapFileIndexMeta(
                                     dataType,
+                                    options,
                                     rowNumber,
                                     id2bitmap.size(),
                                     !nullBitmap.isEmpty(),
@@ -158,19 +156,17 @@ public class BitmapFileIndex implements FileIndexer {
                                             : 0,
                                     bitmapOffsets);
                 } else if (version == VERSION_2) {
-                    int blockSize =
-                            options.getInteger("secondaryBlockSize", DEFAULT_SECONDARY_BLOCK_SIZE);
                     bitmapFileIndexMeta =
                             new BitmapFileIndexMetaV2(
                                     dataType,
+                                    options,
                                     rowNumber,
                                     id2bitmap.size(),
                                     !nullBitmap.isEmpty(),
                                     nullBitmap.getCardinality() == 1
                                             ? -1 - nullBitmap.iterator().next()
                                             : 0,
-                                    bitmapOffsets,
-                                    blockSize);
+                                    bitmapOffsets);
                 } else {
                     throw new RuntimeException("invalid version: " + version);
                 }
@@ -201,9 +197,12 @@ public class BitmapFileIndex implements FileIndexer {
         private BitmapFileIndexMeta bitmapFileIndexMeta;
         private Function<Object, Object> valueMapper;
 
-        public Reader(SeekableInputStream seekableInputStream, int start) {
+        private final Options options;
+
+        public Reader(SeekableInputStream seekableInputStream, int start, Options options) {
             this.seekableInputStream = seekableInputStream;
             this.headStart = start;
+            this.options = options;
         }
 
         @Override
@@ -283,10 +282,10 @@ public class BitmapFileIndex implements FileIndexer {
                     seekableInputStream.seek(headStart);
                     int version = seekableInputStream.read();
                     if (version == VERSION_1) {
-                        this.bitmapFileIndexMeta = new BitmapFileIndexMeta(dataType);
+                        this.bitmapFileIndexMeta = new BitmapFileIndexMeta(dataType, options);
                         this.bitmapFileIndexMeta.deserialize(seekableInputStream);
                     } else if (version == VERSION_2) {
-                        this.bitmapFileIndexMeta = new BitmapFileIndexMetaV2(dataType);
+                        this.bitmapFileIndexMeta = new BitmapFileIndexMetaV2(dataType, options);
                         this.bitmapFileIndexMeta.deserialize(seekableInputStream);
                     } else if (version > VERSION_2) {
                         throw new RuntimeException(
