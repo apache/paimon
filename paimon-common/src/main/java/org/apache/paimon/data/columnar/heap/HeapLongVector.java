@@ -92,8 +92,8 @@ public class HeapLongVector extends AbstractHeapVector implements WritableLongVe
     @Override
     public void reset() {
         super.reset();
-        if (vector.length != initialCapacity) {
-            vector = new long[initialCapacity];
+        if (vector.length != capacity) {
+            vector = new long[capacity];
         } else {
             Arrays.fill(vector, 0L);
         }

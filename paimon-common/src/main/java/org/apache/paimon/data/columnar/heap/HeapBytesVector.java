@@ -60,16 +60,16 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
     @Override
     public void reset() {
         super.reset();
-        if (start.length != initialCapacity) {
-            start = new int[initialCapacity];
+        if (start.length != capacity) {
+            start = new int[capacity];
         }
 
-        if (length.length != initialCapacity) {
-            length = new int[initialCapacity];
+        if (length.length != capacity) {
+            length = new int[capacity];
         }
 
-        if (buffer.length != initialCapacity * 16) {
-            buffer = new byte[initialCapacity * 16];
+        if (buffer.length != capacity * 16) {
+            buffer = new byte[capacity * 16];
         }
         this.bytesAppended = 0;
     }

@@ -69,13 +69,13 @@ public class HeapTimestampVector extends AbstractHeapVector implements WritableT
     @Override
     public void reset() {
         super.reset();
-        if (milliseconds.length != initialCapacity) {
-            milliseconds = new long[initialCapacity];
+        if (milliseconds.length != capacity) {
+            milliseconds = new long[capacity];
         } else {
             Arrays.fill(milliseconds, 0L);
         }
-        if (nanoOfMilliseconds.length != initialCapacity) {
-            nanoOfMilliseconds = new int[initialCapacity];
+        if (nanoOfMilliseconds.length != capacity) {
+            nanoOfMilliseconds = new int[capacity];
         } else {
             Arrays.fill(nanoOfMilliseconds, 0);
         }

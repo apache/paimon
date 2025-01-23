@@ -89,8 +89,8 @@ public class HeapBooleanVector extends AbstractHeapVector implements WritableBoo
     @Override
     public void reset() {
         super.reset();
-        if (vector.length != initialCapacity) {
-            vector = new boolean[initialCapacity];
+        if (vector.length != capacity) {
+            vector = new boolean[capacity];
         } else {
             Arrays.fill(vector, false);
         }

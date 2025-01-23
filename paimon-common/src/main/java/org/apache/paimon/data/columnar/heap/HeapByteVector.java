@@ -68,8 +68,8 @@ public class HeapByteVector extends AbstractHeapVector implements WritableByteVe
     @Override
     public void reset() {
         super.reset();
-        if (vector.length != initialCapacity) {
-            vector = new byte[initialCapacity];
+        if (vector.length != capacity) {
+            vector = new byte[capacity];
         } else {
             Arrays.fill(vector, (byte) 0);
         }

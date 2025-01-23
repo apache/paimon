@@ -70,13 +70,13 @@ public abstract class AbstractStructVector extends AbstractHeapVector
     @Override
     public void reset() {
         super.reset();
-        if (offsets.length != initialCapacity) {
-            offsets = new long[initialCapacity];
+        if (offsets.length != capacity) {
+            offsets = new long[capacity];
         } else {
             Arrays.fill(offsets, 0);
         }
-        if (lengths.length != initialCapacity) {
-            lengths = new long[initialCapacity];
+        if (lengths.length != capacity) {
+            lengths = new long[capacity];
         } else {
             Arrays.fill(lengths, 0);
         }

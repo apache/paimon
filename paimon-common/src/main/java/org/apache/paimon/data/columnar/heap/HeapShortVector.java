@@ -68,8 +68,8 @@ public class HeapShortVector extends AbstractHeapVector implements WritableShort
     @Override
     public void reset() {
         super.reset();
-        if (vector.length != initialCapacity) {
-            vector = new short[initialCapacity];
+        if (vector.length != capacity) {
+            vector = new short[capacity];
         } else {
             Arrays.fill(vector, (short) 0);
         }

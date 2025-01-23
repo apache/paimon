@@ -97,8 +97,8 @@ public class HeapFloatVector extends AbstractHeapVector implements WritableFloat
     @Override
     public void reset() {
         super.reset();
-        if (vector.length != initialCapacity) {
-            vector = new float[initialCapacity];
+        if (vector.length != capacity) {
+            vector = new float[capacity];
         } else {
             Arrays.fill(vector, 0);
         }

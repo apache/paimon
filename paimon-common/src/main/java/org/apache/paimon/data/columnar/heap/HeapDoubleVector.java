@@ -98,8 +98,8 @@ public class HeapDoubleVector extends AbstractHeapVector implements WritableDoub
     @Override
     public void reset() {
         super.reset();
-        if (vector.length != initialCapacity) {
-            vector = new double[initialCapacity];
+        if (vector.length != capacity) {
+            vector = new double[capacity];
         } else {
             Arrays.fill(vector, 0);
         }

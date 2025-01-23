@@ -125,8 +125,8 @@ public class HeapIntVector extends AbstractHeapVector implements WritableIntVect
     @Override
     public void reset() {
         super.reset();
-        if (vector.length != initialCapacity) {
-            vector = new int[initialCapacity];
+        if (vector.length != capacity) {
+            vector = new int[capacity];
         } else {
             Arrays.fill(vector, 0);
         }

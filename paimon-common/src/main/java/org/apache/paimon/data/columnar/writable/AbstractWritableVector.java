@@ -31,8 +31,6 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     private static final long serialVersionUID = 1L;
 
-    protected final int initialCapacity;
-
     // If the whole column vector has no nulls, this is true, otherwise false.
     protected boolean noNulls = true;
 
@@ -50,7 +48,6 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     public AbstractWritableVector(int capacity) {
         this.capacity = capacity;
-        this.initialCapacity = capacity;
     }
 
     /** Update the dictionary. */
@@ -94,10 +91,11 @@ public abstract class AbstractWritableVector implements WritableColumnVector, Se
 
     @Override
     public void reset() {
+        // To reduce copy, Ww don't result the capacity to initial capacity here. Which means the
+        // capacity will be the same as expand.
         noNulls = true;
         isAllNull = false;
         elementsAppended = 0;
-        capacity = initialCapacity;
     }
 
     @Override
