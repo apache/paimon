@@ -199,20 +199,49 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       val table = loadTable("t")
 
       sql("INSERT INTO t VALUES (1, 11), (2, 22)")
+      table.createTag("2024-01-01", 1)
+
       sql("ALTER TABLE t SET TBLPROPERTIES ('bucket' = '2')")
       sql("INSERT OVERWRITE t SELECT * FROM t")
-      sql("INSERT INTO t VALUES (3, 33)")
 
-      table.createTag("2024-01-01", 1)
-      table.createTag("2024-01-02", 3)
+      sql("INSERT INTO t VALUES (3, 33)")
+      table.createTag("2024-01-03", 3)
+
+      sql("DELETE FROM t WHERE a = 1")
+      table.createTag("2024-01-04", 4)
+
+      sql("UPDATE t SET b = 222 WHERE a = 2")
+      table.createTag("2024-01-05", 5)
 
       checkAnswer(
         sql(
-          "SELECT * FROM paimon_incremental_query('t', '2024-01-01', '2024-01-02') ORDER BY a, b"),
+          "SELECT * FROM paimon_incremental_query('t', '2024-01-01', '2024-01-03') ORDER BY a, b"),
         Seq(Row(3, 33)))
+
       checkAnswer(
-        sql("SELECT * FROM paimon_incremental_to_auto_tag('t', '2024-01-02') ORDER BY a, b"),
+        sql("SELECT * FROM paimon_incremental_to_auto_tag('t', '2024-01-03') ORDER BY a, b"),
         Seq(Row(3, 33)))
+
+      checkAnswer(
+        sql(
+          "SELECT * FROM paimon_incremental_query('t', '2024-01-01', '2024-01-04') ORDER BY a, b"),
+        Seq(Row(3, 33)))
+
+      checkAnswer(
+        sql(
+          "SELECT * FROM paimon_incremental_query('t', '2024-01-01', '2024-01-05') ORDER BY a, b"),
+        Seq(Row(2, 222), Row(3, 33)))
+
+      checkAnswer(
+        sql(
+          "SELECT * FROM paimon_incremental_query('`t$audit_log`', '2024-01-01', '2024-01-04') ORDER BY a, b"),
+        Seq(Row("-D", 1, 11), Row("+I", 3, 33)))
+
+      checkAnswer(
+        sql(
+          "SELECT * FROM paimon_incremental_query('`t$audit_log`', '2024-01-01', '2024-01-05') ORDER BY a, b"),
+        Seq(Row("-D", 1, 11), Row("+U", 2, 222), Row("+I", 3, 33))
+      )
     }
   }
 

@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst.plans.logical
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{DataTable, FileStoreTable}
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil.InconsistentTagBucketException
 
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -106,9 +106,9 @@ object PaimonTableValuedFunctions {
     tvf.fnName match {
       case INCREMENTAL_QUERY | INCREMENTAL_TO_AUTO_TAG =>
         sparkTable match {
-          case SparkTable(fileStoreTable: FileStoreTable) =>
+          case SparkTable(fileStoreTable: DataTable) =>
             try {
-              fileStoreTable.copy(options.asJava).newScan().plan()
+              fileStoreTable.copy(options.asJava).asInstanceOf[DataTable].newScan().plan()
               None
             } catch {
               case e: InconsistentTagBucketException =>
