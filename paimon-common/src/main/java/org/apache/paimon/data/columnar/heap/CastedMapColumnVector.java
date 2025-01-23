@@ -18,42 +18,37 @@
 
 package org.apache.paimon.data.columnar.heap;
 
-import org.apache.paimon.data.InternalArray;
-import org.apache.paimon.data.columnar.ArrayColumnVector;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.columnar.ColumnVector;
-import org.apache.paimon.data.columnar.ColumnarArray;
+import org.apache.paimon.data.columnar.ColumnarMap;
+import org.apache.paimon.data.columnar.MapColumnVector;
 
-/** Wrap for ArrayColumnVector. */
-public class WrapArrayColumnVector implements ArrayColumnVector {
+/** Wrap for MapColumnVector. */
+public class CastedMapColumnVector implements MapColumnVector {
 
-    private final HeapArrayVector heapArrayVector;
+    private final HeapMapVector heapMapVector;
     private final ColumnVector[] children;
 
-    public WrapArrayColumnVector(HeapArrayVector heapArrayVector, ColumnVector[] children) {
-        this.heapArrayVector = heapArrayVector;
+    public CastedMapColumnVector(HeapMapVector heapMapVector, ColumnVector[] children) {
+        this.heapMapVector = heapMapVector;
         this.children = children;
     }
 
     @Override
-    public InternalArray getArray(int i) {
-        long offset = heapArrayVector.offsets[i];
-        long length = heapArrayVector.lengths[i];
-        return new ColumnarArray(children[0], (int) offset, (int) length);
-    }
-
-    @Override
-    public ColumnVector getColumnVector() {
-        return children[0];
+    public InternalMap getMap(int i) {
+        long offset = heapMapVector.offsets[i];
+        long length = heapMapVector.lengths[i];
+        return new ColumnarMap(children[0], children[1], (int) offset, (int) length);
     }
 
     @Override
     public boolean isNullAt(int i) {
-        return heapArrayVector.isNullAt(i);
+        return heapMapVector.isNullAt(i);
     }
 
     @Override
     public int getCapacity() {
-        return heapArrayVector.getCapacity();
+        return heapMapVector.getCapacity();
     }
 
     @Override

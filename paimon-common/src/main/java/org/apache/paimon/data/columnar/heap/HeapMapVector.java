@@ -24,7 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarMap;
 import org.apache.paimon.data.columnar.MapColumnVector;
 
 /** This class represents a nullable heap map column vector. */
-public class HeapMapVector extends AbstractStructVector implements MapColumnVector {
+public class HeapMapVector extends AbstractArrayBasedVector implements MapColumnVector {
 
     public HeapMapVector(int capacity, ColumnVector keys, ColumnVector values) {
         super(capacity, new ColumnVector[] {keys, values});

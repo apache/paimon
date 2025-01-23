@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.parquet.newreader;
 
-import org.apache.paimon.data.columnar.heap.AbstractStructVector;
+import org.apache.paimon.data.columnar.heap.AbstractArrayBasedVector;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
@@ -226,7 +226,7 @@ public class ParquetColumnVector {
         int maxDefinitionLevel = column.getDefinitionLevel();
         int maxElementRepetitionLevel = column.getRepetitionLevel();
 
-        AbstractStructVector arrayVector = (AbstractStructVector) vector;
+        AbstractArrayBasedVector arrayVector = (AbstractArrayBasedVector) vector;
 
         // There are 4 cases when calculating definition levels:
         //   1. definitionLevel == maxDefinitionLevel

@@ -21,65 +21,20 @@ package org.apache.paimon.data.columnar.heap;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 
-import java.util.Arrays;
-
 /** * Abstract class for vectors that have children. */
 public abstract class AbstractStructVector extends AbstractHeapVector
         implements WritableColumnVector {
 
     protected ColumnVector[] children;
-    protected long[] offsets;
-    protected long[] lengths;
 
-    public AbstractStructVector(int len, ColumnVector[] children) {
-        super(len);
-        this.offsets = new long[len];
-        this.lengths = new long[len];
+    public AbstractStructVector(int capacity, ColumnVector[] children) {
+        super(capacity);
         this.children = children;
-    }
-
-    public void putOffsetLength(int index, long offset, long length) {
-        offsets[index] = offset;
-        lengths[index] = length;
-    }
-
-    public long[] getOffsets() {
-        return offsets;
-    }
-
-    public void setOffsets(long[] offsets) {
-        this.offsets = offsets;
-    }
-
-    public long[] getLengths() {
-        return lengths;
-    }
-
-    public void setLengths(long[] lengths) {
-        this.lengths = lengths;
-    }
-
-    @Override
-    void reserveForHeapVector(int newCapacity) {
-        if (offsets.length < newCapacity) {
-            offsets = Arrays.copyOf(offsets, newCapacity);
-            lengths = Arrays.copyOf(lengths, newCapacity);
-        }
     }
 
     @Override
     public void reset() {
         super.reset();
-        if (offsets.length != capacity) {
-            offsets = new long[capacity];
-        } else {
-            Arrays.fill(offsets, 0);
-        }
-        if (lengths.length != capacity) {
-            lengths = new long[capacity];
-        } else {
-            Arrays.fill(lengths, 0);
-        }
         for (ColumnVector child : children) {
             if (child instanceof WritableColumnVector) {
                 ((WritableColumnVector) child).reset();

@@ -25,16 +25,18 @@ import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 
 /** Wrap for RowColumnVector. */
-public class WrapRowColumnVector implements RowColumnVector {
+public class CastedRowColumnVector implements RowColumnVector {
 
+    private final VectorizedColumnBatch vectorizedColumnBatch;
     private final ColumnarRow columnarRow;
     private final HeapRowVector heapRowVector;
     private final ColumnVector[] children;
 
-    public WrapRowColumnVector(HeapRowVector heapRowVector, ColumnVector[] children) {
+    public CastedRowColumnVector(HeapRowVector heapRowVector, ColumnVector[] children) {
         this.heapRowVector = heapRowVector;
         this.children = children;
-        this.columnarRow = new ColumnarRow(new VectorizedColumnBatch(children));
+        this.vectorizedColumnBatch = new VectorizedColumnBatch(children);
+        this.columnarRow = new ColumnarRow(vectorizedColumnBatch);
     }
 
     @Override
@@ -45,7 +47,7 @@ public class WrapRowColumnVector implements RowColumnVector {
 
     @Override
     public VectorizedColumnBatch getBatch() {
-        return new VectorizedColumnBatch(children);
+        return vectorizedColumnBatch;
     }
 
     @Override

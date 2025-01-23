@@ -24,7 +24,7 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarArray;
 
 /** This class represents a nullable heap array column vector. */
-public class HeapArrayVector extends AbstractStructVector implements ArrayColumnVector {
+public class HeapArrayVector extends AbstractArrayBasedVector implements ArrayColumnVector {
 
     public HeapArrayVector(int len, ColumnVector vector) {
         super(len, new ColumnVector[] {vector});

@@ -20,12 +20,12 @@ package org.apache.paimon.format.parquet.newreader;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.heap.CastedArrayColumnVector;
+import org.apache.paimon.data.columnar.heap.CastedMapColumnVector;
+import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
-import org.apache.paimon.data.columnar.heap.WrapArrayColumnVector;
-import org.apache.paimon.data.columnar.heap.WrapMapColumnVector;
-import org.apache.paimon.data.columnar.heap.WrapRowColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
 import org.apache.paimon.format.parquet.reader.ParquetTimestampVector;
@@ -163,7 +163,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                     break;
                 case ARRAY:
                     vectors[i] =
-                            new WrapArrayColumnVector(
+                            new CastedArrayColumnVector(
                                     (HeapArrayVector) writableVectors[i],
                                     createVectorizedColumnBatch(
                                             Collections.singletonList(
@@ -175,7 +175,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                 case MAP:
                     MapType mapType = (MapType) types.get(i);
                     vectors[i] =
-                            new WrapMapColumnVector(
+                            new CastedMapColumnVector(
                                     (HeapMapVector) writableVectors[i],
                                     createVectorizedColumnBatch(
                                             Arrays.asList(
@@ -187,7 +187,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                 case MULTISET:
                     MultisetType multisetType = (MultisetType) types.get(i);
                     vectors[i] =
-                            new WrapMapColumnVector(
+                            new CastedMapColumnVector(
                                     (HeapMapVector) writableVectors[i],
                                     createVectorizedColumnBatch(
                                             Arrays.asList(
@@ -200,7 +200,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                 case ROW:
                     RowType rowType = (RowType) types.get(i);
                     vectors[i] =
-                            new WrapRowColumnVector(
+                            new CastedRowColumnVector(
                                     (HeapRowVector) writableVectors[i],
                                     createVectorizedColumnBatch(
                                             rowType.getFieldTypes(),
