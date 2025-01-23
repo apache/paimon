@@ -18,15 +18,12 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.rest.RESTRequest;
-
-import java.util.Map;
 import java.util.Optional;
 
 /** Authentication provider. */
 public interface AuthProvider {
 
-    Map<String, String> authHeader(RESTRequest request);
+    String generateAuthorization(RestAuthParameter restAuthParameter);
 
     String token();
 

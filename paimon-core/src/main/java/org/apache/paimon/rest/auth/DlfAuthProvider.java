@@ -18,30 +18,23 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.rest.RESTRequest;
 import org.apache.paimon.utils.FileIOUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
-import java.util.Map;
-import java.util.Objects;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.Optional;
-import java.util.TimeZone;
 
 /** Auth provider for DLF. */
 public class DlfAuthProvider implements AuthProvider {
-    private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
+    private static final DateTimeFormatter DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd");
     public static final double EXPIRED_FACTOR = 0.4;
 
     private final String tokenDirPath;
@@ -83,8 +76,23 @@ public class DlfAuthProvider implements AuthProvider {
     }
 
     @Override
-    public Map<String, String> authHeader(RESTRequest request) {
-        return ImmutableMap.of(AUTHORIZATION_HEADER, generateAuthValue(request));
+    public String generateAuthorization(RestAuthParameter restAuthParameter) {
+        String date = getDate();
+        String region = getRegion(restAuthParameter.host());
+        try {
+            return DlfAuthSignature.getAuthorization(
+                    restAuthParameter.path(),
+                    restAuthParameter.method(),
+                    restAuthParameter.query(),
+                    restAuthParameter.headers(),
+                    token.getAccessKeySecret(),
+                    token.getSecurityToken(),
+                    token.getAccessKeyId(),
+                    region,
+                    date);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -149,104 +157,18 @@ public class DlfAuthProvider implements AuthProvider {
         }
     }
 
-    public String generateAuthValue(RESTRequest request) {
-        // todo: use DlfAuthUtil
-        return "";
-        //        return DlfAuthUtil.getAuthorization(
-        //                request.pathname(),
-        //                request.method(),
-        //                request.query(),
-        //                request.headers(),
-        //                token.getAccessKeySecret(),
-        //                token.getSecurityToken(),
-        //                token.getAccessKeyId(),
-        //                request.region(),
-        //                request.date());
+    private static String getRegion(String host) {
+        try {
+            return host.split("\\.")[1];
+        } catch (Exception ignore) {
+
+        }
+        // fixme
+        return "cn-hangzhou";
     }
 
-    /** Dlf Token. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class DlfToken {
-
-        public static final String DEFAULT_DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'";
-
-        private static final String ACCESS_KEY_ID_FIELD_NAME = "AccessKeyId";
-        private static final String ACCESS_KEY_SECRET_FIELD_NAME = "AccessKeySecret";
-        private static final String SECURITY_TOKEN_FIELD_NAME = "SecurityToken";
-        private static final String EXPIRATION_FIELD_NAME = "Expiration";
-
-        @JsonProperty(ACCESS_KEY_ID_FIELD_NAME)
-        private final String accessKeyId;
-
-        @JsonProperty(ACCESS_KEY_SECRET_FIELD_NAME)
-        private final String accessKeySecret;
-
-        @JsonProperty(SECURITY_TOKEN_FIELD_NAME)
-        private final String securityToken;
-
-        @JsonProperty(EXPIRATION_FIELD_NAME)
-        private final String expiration;
-
-        @JsonCreator
-        public DlfToken(
-                @JsonProperty(ACCESS_KEY_ID_FIELD_NAME) String accessKeyId,
-                @JsonProperty(ACCESS_KEY_SECRET_FIELD_NAME) String accessKeySecret,
-                @JsonProperty(SECURITY_TOKEN_FIELD_NAME) String securityToken,
-                @JsonProperty(EXPIRATION_FIELD_NAME) String expiration) {
-            this.accessKeyId = accessKeyId;
-            this.accessKeySecret = accessKeySecret;
-            this.securityToken = securityToken;
-            this.expiration = expiration;
-        }
-
-        public String getAccessKeyId() {
-            return accessKeyId;
-        }
-
-        public String getAccessKeySecret() {
-            return accessKeySecret;
-        }
-
-        public String getSecurityToken() {
-            return securityToken;
-        }
-
-        public String getExpiration() {
-            return expiration;
-        }
-
-        public Long getExpiresInMills() {
-            try {
-                return getExpirationInMills(expiration);
-            } catch (ParseException e) {
-                return null;
-            }
-        }
-
-        public static Long getExpirationInMills(String dateStr) throws ParseException {
-            if (dateStr == null) {
-                return null;
-            }
-            SimpleDateFormat sdf = new SimpleDateFormat(DEFAULT_DATE_FORMAT);
-            sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
-            return sdf.parse(dateStr).getTime();
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            DlfToken that = (DlfToken) o;
-            return Objects.equals(accessKeyId, that.accessKeyId)
-                    && Objects.equals(accessKeySecret, that.accessKeySecret)
-                    && Objects.equals(securityToken, that.securityToken)
-                    && Objects.equals(expiration, that.expiration);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(accessKeyId, accessKeySecret, securityToken, expiration);
-        }
+    private static String getDate() {
+        LocalDate currentDate = LocalDate.now();
+        return currentDate.format(DATE_FORMATTER);
     }
 }

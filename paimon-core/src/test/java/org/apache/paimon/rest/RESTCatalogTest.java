@@ -61,6 +61,7 @@ class RESTCatalogTest extends CatalogTestBase {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         this.catalog = new RESTCatalog(CatalogContext.create(options));
     }
@@ -74,6 +75,7 @@ class RESTCatalogTest extends CatalogTestBase {
     void testInitFailWhenDefineWarehouse() {
         Options options = new Options();
         options.set(CatalogOptions.WAREHOUSE, warehouse);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
@@ -83,6 +85,7 @@ class RESTCatalogTest extends CatalogTestBase {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, "aaaaa");
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
@@ -115,6 +118,7 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, "bear");
         this.catalog = new RESTCatalog(CatalogContext.create(options));
         List<Identifier> identifiers =
                 Lists.newArrayList(

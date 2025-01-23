@@ -68,8 +68,8 @@ public class AuthSessionTest {
         options.set(TOKEN.key(), token);
         AuthProvider authProvider = AuthProviderFactory.createAuthProvider("bear", options);
         AuthSession session = new AuthSession(authProvider);
-        Map<String, String> authHeader = session.getAuthProvider().authHeader(null);
-        assertEquals(authHeader.get("Authorization"), "Bearer " + token);
+        String authorization = session.getAuthProvider().generateAuthorization(null);
+        assertEquals(authorization, "Bearer " + token);
     }
 
     @Test
@@ -154,8 +154,7 @@ public class AuthSessionTest {
         sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
         String expiration = sdf.format(new Date());
         String secret = UUID.randomUUID().toString();
-        DlfAuthProvider.DlfToken token =
-                new DlfAuthProvider.DlfToken("accessKeyId", secret, "securityToken", expiration);
+        DlfToken token = new DlfToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
         FileUtils.writeStringToFile(tokenFile, tokenStr);
         return Pair.of(tokenFile, tokenStr);

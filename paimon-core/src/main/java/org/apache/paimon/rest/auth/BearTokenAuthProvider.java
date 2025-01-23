@@ -18,16 +18,9 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.rest.RESTRequest;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-
-import java.util.Map;
-
 /** Auth provider for bear token. */
 public class BearTokenAuthProvider implements AuthProvider {
 
-    private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
 
     protected String token;
@@ -42,16 +35,12 @@ public class BearTokenAuthProvider implements AuthProvider {
     }
 
     @Override
-    public Map<String, String> authHeader(RESTRequest request) {
-        return ImmutableMap.of(AUTHORIZATION_HEADER, generateAuthValueUtil());
+    public String generateAuthorization(RestAuthParameter restAuthParameter) {
+        return BEARER_PREFIX + token;
     }
 
     @Override
     public boolean refresh() {
         return true;
-    }
-
-    private String generateAuthValueUtil() {
-        return BEARER_PREFIX + token;
     }
 }

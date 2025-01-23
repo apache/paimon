@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.auth.RestAuthParameter;
+
 import java.io.Closeable;
 import java.util.Map;
 import java.util.function.Function;
@@ -25,20 +27,33 @@ import java.util.function.Function;
 /** Interface for a basic HTTP Client for interfacing with the REST catalog. */
 public interface RESTClient extends Closeable {
 
-    <T extends RESTResponse> T get(String path, Class<T> responseType, Map<String, String> headers);
-
-    <T extends RESTResponse> T post(String path, RESTRequest body, Map<String, String> headers);
-
-    <T extends RESTResponse> T post(
-            String path, RESTRequest body, Class<T> responseType, Map<String, String> headers);
+    <T extends RESTResponse> T get(
+            String path,
+            Class<T> responseType,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction);
 
     <T extends RESTResponse> T post(
             String path,
             RESTRequest body,
             Map<String, String> headers,
-            Function<RESTRequest, String> authenticationFunction);
+            Function<RestAuthParameter, String> authenticationFunction);
 
-    <T extends RESTResponse> T delete(String path, Map<String, String> headers);
+    <T extends RESTResponse> T post(
+            String path,
+            RESTRequest body,
+            Class<T> responseType,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction);
 
-    <T extends RESTResponse> T delete(String path, RESTRequest body, Map<String, String> headers);
+    <T extends RESTResponse> T delete(
+            String path,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction);
+
+    <T extends RESTResponse> T delete(
+            String path,
+            RESTRequest body,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction);
 }

@@ -20,10 +20,12 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.auth.RestAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import okhttp3.ConnectionPool;
@@ -36,7 +38,9 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -55,6 +59,7 @@ public class HttpClient implements RESTClient {
 
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+    private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final int CONNECTION_KEEP_ALIVE_DURATION_MS = 300_000;
 
     private final OkHttpClient okHttpClient;
@@ -83,20 +88,19 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T get(
-            String path, Class<T> responseType, Map<String, String> headers) {
+            String path,
+            Class<T> responseType,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction) {
+        Map<String, String> authHeader =
+                getAuthHeader(path, "GET", headers, authenticationFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
                         .get()
-                        .headers(Headers.of(headers))
+                        .headers(Headers.of(authHeader))
                         .build();
         return exec(request, responseType);
-    }
-
-    @Override
-    public <T extends RESTResponse> T post(
-            String path, RESTRequest body, Map<String, String> headers) {
-        return post(path, body, null, headers);
     }
 
     @Override
@@ -104,22 +108,26 @@ public class HttpClient implements RESTClient {
             String path,
             RESTRequest body,
             Map<String, String> headers,
-            Function<RESTRequest, String> authenticationFunction) {
-        String auth = authenticationFunction.apply(body);
-        headers.put("Authorization", auth);
-        return post(path, body, null, headers);
+            Function<RestAuthParameter, String> authenticationFunction) {
+        return post(path, body, null, headers, authenticationFunction);
     }
 
     @Override
     public <T extends RESTResponse> T post(
-            String path, RESTRequest body, Class<T> responseType, Map<String, String> headers) {
+            String path,
+            RESTRequest body,
+            Class<T> responseType,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction) {
         try {
+            Map<String, String> authHeader =
+                    getAuthHeader(path, "POST", headers, authenticationFunction);
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
                             .url(getRequestUrl(path))
                             .post(requestBody)
-                            .headers(Headers.of(headers))
+                            .headers(Headers.of(authHeader))
                             .build();
             return exec(request, responseType);
         } catch (JsonProcessingException e) {
@@ -128,26 +136,36 @@ public class HttpClient implements RESTClient {
     }
 
     @Override
-    public <T extends RESTResponse> T delete(String path, Map<String, String> headers) {
+    public <T extends RESTResponse> T delete(
+            String path,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction) {
+        Map<String, String> authHeader =
+                getAuthHeader(path, "DELETE", headers, authenticationFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
                         .delete()
-                        .headers(Headers.of(headers))
+                        .headers(Headers.of(authHeader))
                         .build();
         return exec(request, null);
     }
 
     @Override
     public <T extends RESTResponse> T delete(
-            String path, RESTRequest body, Map<String, String> headers) {
+            String path,
+            RESTRequest body,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction) {
         try {
+            Map<String, String> authHeader =
+                    getAuthHeader(path, "DELETE", headers, authenticationFunction);
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
                             .url(getRequestUrl(path))
                             .delete(requestBody)
-                            .headers(Headers.of(headers))
+                            .headers(Headers.of(authHeader))
                             .build();
             return exec(request, null);
         } catch (JsonProcessingException e) {
@@ -200,6 +218,24 @@ public class HttpClient implements RESTClient {
 
     private String getRequestUrl(String path) {
         return StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
+    }
+
+    private String getHost() {
+        return URI.create(uri).getHost();
+    }
+
+    private Map<String, String> getAuthHeader(
+            String path,
+            String method,
+            Map<String, String> headers,
+            Function<RestAuthParameter, String> authenticationFunction) {
+        RestAuthParameter restAuthParameter =
+                new RestAuthParameter(getHost(), path, method, ImmutableMap.of(), headers);
+        String auth = authenticationFunction.apply(restAuthParameter);
+        Map<String, String> authHeader = new HashMap<>();
+        authHeader.putAll(headers);
+        authHeader.put(AUTHORIZATION_HEADER, auth);
+        return authHeader;
     }
 
     private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {

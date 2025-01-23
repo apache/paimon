@@ -36,7 +36,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /** generate authorization for dlf. */
-public class DlfAuthUtil {
+public class DlfAuthSignature {
     private static final String SIGNATURE_ALGORITHM = "DLF4-HMAC-SHA256";
     private static final String PAYLOAD = "UNSIGNED-PAYLOAD";
     private static final String PRODUCT = "DlfNext";
