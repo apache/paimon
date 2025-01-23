@@ -114,7 +114,9 @@ object PaimonTableValuedFunctions {
               case e: InconsistentTagBucketException =>
                 Some((e.startSnapshotId, e.endSnapshotId))
             }
+          case _ => None
         }
+      case _ => None
     }
   }
 
