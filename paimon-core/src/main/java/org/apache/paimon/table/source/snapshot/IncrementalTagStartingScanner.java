@@ -57,8 +57,8 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
                         snapshotManager.fileIO(),
                         snapshotManager.tablePath(),
                         snapshotManager.branch()),
-                start.schemaId(),
-                end.schemaId());
+                start,
+                end);
     }
 
     @Override
