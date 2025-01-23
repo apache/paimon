@@ -20,8 +20,9 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.TagManager;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** The util class of resolve snapshot from scan params for time travel. */
 public class TimeTravelUtil {
@@ -58,7 +60,7 @@ public class TimeTravelUtil {
             return snapshotManager.latestSnapshot();
         }
 
-        Preconditions.checkArgument(
+        checkArgument(
                 scanHandleKey.size() == 1,
                 String.format(
                         "Only one of the following parameters may be set : [%s, %s, %s, %s]",
@@ -123,5 +125,23 @@ public class TimeTravelUtil {
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         return tagManager.getOrThrow(tagName).trimToSnapshot();
+    }
+
+    public static void checkRescaleBucketForIncrementalTagQuery(
+            SchemaManager schemaManager, long schemaId1, long schemaId2) {
+        if (schemaId1 != schemaId2) {
+            int bucketNumber1 = bucketNumber(schemaManager, schemaId1);
+            int bucketNumber2 = bucketNumber(schemaManager, schemaId2);
+            checkArgument(
+                    bucketNumber1 == bucketNumber2,
+                    "The bucket number of two tags are different (%s, %s), which is not supported in incremental tag query.",
+                    bucketNumber1,
+                    bucketNumber2);
+        }
+    }
+
+    private static int bucketNumber(SchemaManager schemaManager, long schemaId) {
+        TableSchema schema = schemaManager.schema(schemaId);
+        return CoreOptions.fromMap(schema.options()).bucket();
     }
 }
