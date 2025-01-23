@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SnapshotNotExistException;
@@ -676,7 +677,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
             assertThatThrownBy(() -> sql("SELECT * FROM test /*+ OPTIONS (%s) */", option))
                     .satisfies(
                             anyCauseMatches(
-                                    IllegalArgumentException.class,
+                                    TimeTravelUtil.InconsistentTagBucketException.class,
                                     "The bucket number of two tags are different (1, 2), which is not supported in incremental tag query."));
         }
     }
