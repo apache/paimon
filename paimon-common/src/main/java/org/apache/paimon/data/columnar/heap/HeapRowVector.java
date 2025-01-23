@@ -44,7 +44,7 @@ public class HeapRowVector extends AbstractStructVector
 
     @Override
     public VectorizedColumnBatch getBatch() {
-        return new VectorizedColumnBatch(children);
+        return vectorizedColumnBatch;
     }
 
     @Override

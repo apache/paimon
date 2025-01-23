@@ -107,19 +107,18 @@ public class HeapIntVector extends AbstractHeapVector implements WritableIntVect
     }
 
     @Override
-    public int appendInt(int v) {
+    public void appendInt(int v) {
         reserve(elementsAppended + 1);
         setInt(elementsAppended, v);
-        return elementsAppended++;
+        elementsAppended++;
     }
 
     @Override
-    public int appendInts(int count, int v) {
+    public void appendInts(int count, int v) {
         reserve(elementsAppended + count);
         int result = elementsAppended;
         setInts(elementsAppended, count, v);
         elementsAppended += count;
-        return result;
     }
 
     @Override

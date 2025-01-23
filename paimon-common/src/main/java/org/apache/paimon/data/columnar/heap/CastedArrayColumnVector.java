@@ -23,7 +23,10 @@ import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarArray;
 
-/** Wrap for ArrayColumnVector. */
+/**
+ * Cast internal Vector to paimon readable vector(cast for Timestamp type and Decimal type) for
+ * array type.
+ */
 public class CastedArrayColumnVector implements ArrayColumnVector {
 
     private final HeapArrayVector heapArrayVector;

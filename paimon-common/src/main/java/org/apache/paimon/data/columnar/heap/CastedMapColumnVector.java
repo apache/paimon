@@ -23,7 +23,10 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarMap;
 import org.apache.paimon.data.columnar.MapColumnVector;
 
-/** Wrap for MapColumnVector. */
+/**
+ * Cast internal Vector to paimon readable vector(cast for Timestamp type and Decimal type) for map
+ * type.
+ */
 public class CastedMapColumnVector implements MapColumnVector {
 
     private final HeapMapVector heapMapVector;

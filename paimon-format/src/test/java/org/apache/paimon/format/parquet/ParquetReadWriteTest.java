@@ -185,18 +185,6 @@ public class ParquetReadWriteTest {
                             RowType.of(new IntType()),
                             new VarCharType(255)));
 
-    private static final RowType NESTED_ARRAY_MAP_TYPE2 =
-            RowType.of(
-                    new DataField(
-                            3,
-                            "f3",
-                            new ArrayType(
-                                    true,
-                                    new MapType(
-                                            true,
-                                            new VarCharType(VarCharType.MAX_LENGTH),
-                                            new VarCharType(VarCharType.MAX_LENGTH)))));
-
     @TempDir public File folder;
 
     public static Collection<Integer> parameters() {
@@ -275,7 +263,7 @@ public class ParquetReadWriteTest {
     @ParameterizedTest
     @MethodSource("parameters")
     void testLargeValue(int rowGroupSize) throws IOException {
-        int number = 1000;
+        int number = 10000;
         List<Integer> values = new ArrayList<>(number);
         Random random = new Random();
         for (int i = 0; i < number; i++) {
@@ -465,7 +453,7 @@ public class ParquetReadWriteTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"10, origin", "1000, origin"})
+    @CsvSource({"10, paimon", "1000, paimon", "10, origin", "1000, origin"})
     public void testNestedRead(int rowGroupSize, String writerType) throws Exception {
         List<InternalRow> rows = prepareNestedData(1283);
         Path path;

@@ -24,7 +24,10 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 
-/** Test for RowColumnVector. */
+/**
+ * Cast internal Vector to paimon readable vector(cast for Timestamp type and Decimal type) for row
+ * type.
+ */
 public class CastedRowColumnVector implements RowColumnVector {
 
     private final VectorizedColumnBatch vectorizedColumnBatch;

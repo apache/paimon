@@ -214,13 +214,17 @@ public class ParquetDecimalVector
     }
 
     @Override
-    public int appendInt(int v) {
-        return 0;
+    public void appendInt(int v) {
+        if (vector instanceof WritableIntVector) {
+            ((WritableIntVector) vector).appendInt(v);
+        }
     }
 
     @Override
-    public int appendInts(int count, int v) {
-        return 0;
+    public void appendInts(int count, int v) {
+        if (vector instanceof WritableIntVector) {
+            ((WritableIntVector) vector).appendInts(count, v);
+        }
     }
 
     @Override
