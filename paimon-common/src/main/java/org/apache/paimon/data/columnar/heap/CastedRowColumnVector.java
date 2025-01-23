@@ -28,7 +28,6 @@ import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 public class CastedRowColumnVector implements RowColumnVector {
 
     private final VectorizedColumnBatch vectorizedColumnBatch;
-    private final ColumnarRow columnarRow;
     private final HeapRowVector heapRowVector;
     private final ColumnVector[] children;
 
@@ -36,11 +35,11 @@ public class CastedRowColumnVector implements RowColumnVector {
         this.heapRowVector = heapRowVector;
         this.children = children;
         this.vectorizedColumnBatch = new VectorizedColumnBatch(children);
-        this.columnarRow = new ColumnarRow(vectorizedColumnBatch);
     }
 
     @Override
     public InternalRow getRow(int i) {
+        ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatch);
         columnarRow.setRowId(i);
         return columnarRow;
     }

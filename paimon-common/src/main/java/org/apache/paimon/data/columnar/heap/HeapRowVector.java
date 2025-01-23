@@ -28,15 +28,16 @@ import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 public class HeapRowVector extends AbstractStructVector
         implements WritableColumnVector, RowColumnVector {
 
-    private ColumnarRow columnarRow;
+    private VectorizedColumnBatch vectorizedColumnBatch;
 
     public HeapRowVector(int len, ColumnVector... fields) {
         super(len, fields);
-        columnarRow = new ColumnarRow(new VectorizedColumnBatch(children));
+        vectorizedColumnBatch = new VectorizedColumnBatch(children);
     }
 
     @Override
     public ColumnarRow getRow(int i) {
+        ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatch);
         columnarRow.setRowId(i);
         return columnarRow;
     }
@@ -63,6 +64,6 @@ public class HeapRowVector extends AbstractStructVector
 
     public void setFields(WritableColumnVector[] fields) {
         System.arraycopy(fields, 0, this.children, 0, fields.length);
-        this.columnarRow = new ColumnarRow(new VectorizedColumnBatch(children));
+        this.vectorizedColumnBatch = new VectorizedColumnBatch(children);
     }
 }
