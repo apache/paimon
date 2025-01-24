@@ -16,13 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.data.calumnar.heap;
+package org.apache.paimon.data.columnar.heap;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
-import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
-import org.apache.paimon.data.columnar.heap.HeapIntVector;
-import org.apache.paimon.data.columnar.heap.HeapRowVector;
 
 import org.junit.jupiter.api.Test;
 
