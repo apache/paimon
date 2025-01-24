@@ -59,8 +59,7 @@ public class ColumnarRowIteratorTest {
             for (int j = 0; j < random.nextInt(9); j++) {
                 rowIterator.next();
             }
-            assertThat(rowIterator.returnedPosition())
-                    .isEqualTo(positions[rowIterator.index - 1]);
+            assertThat(rowIterator.returnedPosition()).isEqualTo(positions[rowIterator.index - 1]);
         }
     }
 }
