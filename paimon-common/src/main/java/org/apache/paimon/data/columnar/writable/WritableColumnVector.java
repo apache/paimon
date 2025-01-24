@@ -51,4 +51,20 @@ public interface WritableColumnVector extends ColumnVector {
 
     /** Get reserved dictionary ids. */
     WritableIntVector getDictionaryIds();
+
+    /** Set all values to null. */
+    void setAllNull();
+
+    /** Check if all values are null. */
+    boolean isAllNull();
+
+    void reserve(int capacity);
+
+    int getElementsAppended();
+
+    void addElementsAppended(int num);
+
+    default void reserveAdditional(int additionalCapacity) {
+        reserve(getElementsAppended() + additionalCapacity);
+    }
 }

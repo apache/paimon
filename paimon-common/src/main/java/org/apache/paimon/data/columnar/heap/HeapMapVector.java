@@ -22,64 +22,26 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarMap;
 import org.apache.paimon.data.columnar.MapColumnVector;
-import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 
 /** This class represents a nullable heap map column vector. */
-public class HeapMapVector extends AbstractHeapVector
-        implements WritableColumnVector, MapColumnVector {
+public class HeapMapVector extends AbstractArrayBasedVector implements MapColumnVector {
 
-    private long[] offsets;
-    private long[] lengths;
-    private int size;
-    private ColumnVector keys;
-    private ColumnVector values;
-
-    public HeapMapVector(int len, ColumnVector keys, ColumnVector values) {
-        super(len);
-        this.offsets = new long[len];
-        this.lengths = new long[len];
-        this.keys = keys;
-        this.values = values;
-    }
-
-    public void setOffsets(long[] offsets) {
-        this.offsets = offsets;
-    }
-
-    public void setLengths(long[] lengths) {
-        this.lengths = lengths;
-    }
-
-    public int getSize() {
-        return size;
-    }
-
-    public void setSize(int size) {
-        this.size = size;
+    public HeapMapVector(int capacity, ColumnVector keys, ColumnVector values) {
+        super(capacity, new ColumnVector[] {keys, values});
     }
 
     public void setKeys(ColumnVector keys) {
-        this.keys = keys;
+        children[0] = keys;
     }
 
     public void setValues(ColumnVector values) {
-        this.values = values;
+        children[1] = values;
     }
 
     @Override
     public InternalMap getMap(int i) {
         long offset = offsets[i];
         long length = lengths[i];
-        return new ColumnarMap(keys, values, (int) offset, (int) length);
-    }
-
-    @Override
-    public ColumnVector getKeyColumnVector() {
-        return keys;
-    }
-
-    @Override
-    public ColumnVector getValueColumnVector() {
-        return values;
+        return new ColumnarMap(children[0], children[1], (int) offset, (int) length);
     }
 }
