@@ -52,7 +52,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     public void reset(long nextFilePos) {
-        reset(LongIterator.fromRange(nextFilePos, nextFilePos + positions.length));
+        reset(LongIterator.fromRange(nextFilePos, nextFilePos + row.batch().getNumRows()));
     }
 
     public void reset(LongIterator positions) {
