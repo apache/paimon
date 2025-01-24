@@ -53,7 +53,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.types.VariantType;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Dictionary;
@@ -218,11 +217,6 @@ public class ParquetVectorUpdaterFactory {
                 }
                 return new TimestampUpdater();
             };
-        }
-
-        @Override
-        public UpdaterFactory visit(VariantType variantType) {
-            throw new RuntimeException("Variant type is not supported");
         }
 
         @Override

@@ -154,7 +154,7 @@ public class ParquetColumnVector {
                 child.assemble();
             }
             assembleCollection();
-        } else if (type == DataTypeRoot.ROW || type == DataTypeRoot.VARIANT) {
+        } else if (type == DataTypeRoot.ROW) {
             for (ParquetColumnVector child : children) {
                 child.assemble();
             }
