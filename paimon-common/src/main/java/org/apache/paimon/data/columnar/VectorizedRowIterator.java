@@ -20,9 +20,10 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.VectorizedRecordIterator;
-import org.apache.paimon.utils.LongIterator;
 
 import javax.annotation.Nullable;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link ColumnarRowIterator} with {@link VectorizedRecordIterator}. */
 public class VectorizedRowIterator extends ColumnarRowIterator implements VectorizedRecordIterator {
@@ -38,9 +39,10 @@ public class VectorizedRowIterator extends ColumnarRowIterator implements Vector
 
     @Override
     protected VectorizedRowIterator copy(ColumnVector[] vectors) {
+        checkArgument(returnedPositionIndex == 0, "copy() should not be called after next()");
         VectorizedRowIterator newIterator =
                 new VectorizedRowIterator(filePath, row.copy(vectors), recycler);
-        newIterator.reset(LongIterator.fromArray(positions));
+        newIterator.reset(positionIterator);
         return newIterator;
     }
 }
