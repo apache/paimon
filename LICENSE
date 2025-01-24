@@ -273,6 +273,20 @@ from https://parquet.apache.org/ version 1.14.0
 paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariant.java
 paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariantBuilder.java
 paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariantUtil.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/ParquetColumnVector.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/ParquetReadState.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/ParquetVectorUpdater.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/ParquetVectorUpdaterFactory.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/RowIndexGenerator.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedColumnReader.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedDeltaBinaryPackedReader.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedDeltaByteArrayReader.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedDeltaLengthByteArrayReader.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedParquetRecordReader.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedPlainValuesReader.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedReaderBase.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedRleValuesReader.java
+paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedValuesReader.java
 from https://spark.apache.org/ version 4.0.0-preview2
 
 MIT License

@@ -31,12 +31,13 @@ public class ParquetPrimitiveField extends ParquetField {
     private final int id;
 
     public ParquetPrimitiveField(
-            DataType type, boolean required, ColumnDescriptor descriptor, int id) {
+            DataType type, boolean required, ColumnDescriptor descriptor, int id, String[] path) {
         super(
                 type,
                 descriptor.getMaxRepetitionLevel(),
                 descriptor.getMaxDefinitionLevel(),
-                required);
+                required,
+                path);
         this.descriptor = requireNonNull(descriptor, "descriptor is required");
         this.id = id;
     }
@@ -47,5 +48,10 @@ public class ParquetPrimitiveField extends ParquetField {
 
     public int getId() {
         return id;
+    }
+
+    @Override
+    public boolean isPrimitive() {
+        return true;
     }
 }

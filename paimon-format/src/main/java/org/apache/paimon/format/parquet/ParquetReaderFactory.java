@@ -27,9 +27,9 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
-import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.parquet.newreader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
 import org.apache.paimon.format.parquet.reader.ParquetReadState;
@@ -109,8 +109,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         this.filter = filter;
     }
 
-    @Override
-    public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
+    // TODO: remove this when new reader is stable
+    public FileRecordReader<InternalRow> createReaderOld(FormatReaderFactory.Context context)
             throws IOException {
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(0, context.fileSize());
@@ -136,6 +136,34 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         return new ParquetReader(
                 reader, requestedSchema, reader.getFilteredRecordCount(), poolOfBatches, fields);
+    }
+
+    @Override
+    public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
+            throws IOException {
+        if (Boolean.parseBoolean(conf.getString("parquet.use-old-reader", "false"))) {
+            return createReaderOld(context);
+        }
+
+        ParquetReadOptions.Builder builder =
+                ParquetReadOptions.builder().withRange(0, context.fileSize());
+        setReadOptions(builder);
+
+        ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        builder.build(),
+                        context.selection());
+        MessageType fileSchema = reader.getFileMetaData().getSchema();
+        MessageType requestedSchema = clipParquetSchema(fileSchema);
+        reader.setRequestedSchema(requestedSchema);
+        WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
+
+        MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
+        List<ParquetField> fields = buildFieldsList(readFields, columnIO);
+
+        return new VectorizedParquetRecordReader(
+                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -299,10 +327,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         for (int i = 0; i < writableVectors.length; i++) {
             switch (projectedFields[i].type().getTypeRoot()) {
                 case DECIMAL:
-                    vectors[i] =
-                            new ParquetDecimalVector(
-                                    writableVectors[i],
-                                    ((ElementCountable) writableVectors[i]).getLen());
+                    vectors[i] = new ParquetDecimalVector(writableVectors[i]);
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
