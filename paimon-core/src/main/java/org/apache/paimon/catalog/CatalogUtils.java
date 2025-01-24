@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGCY_NAME;
@@ -171,6 +172,8 @@ public class CatalogUtils {
     public static Table loadTable(
             Catalog catalog,
             Identifier identifier,
+            Function<Path, FileIO> dataFileIO,
+            Function<Path, FileIO> objectFileIO,
             TableMetadata.Loader metadataLoader,
             SnapshotCommit.Factory commitFactory)
             throws Catalog.TableNotExistException {
@@ -190,10 +193,10 @@ public class CatalogUtils {
                         identifier, metadata.uuid(), catalog.catalogLoader(), commitFactory);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
-                FileStoreTableFactory.create(catalog.fileIO(), path, schema, catalogEnv);
+                FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
 
         if (options.type() == TableType.OBJECT_TABLE) {
-            table = toObjectTable(catalog, table);
+            table = toObjectTable(objectFileIO, table);
         }
 
         if (identifier.isSystemTable()) {
@@ -265,10 +268,11 @@ public class CatalogUtils {
                 .build();
     }
 
-    private static ObjectTable toObjectTable(Catalog catalog, FileStoreTable underlyingTable) {
+    private static ObjectTable toObjectTable(
+            Function<Path, FileIO> fileIOLoader, FileStoreTable underlyingTable) {
         CoreOptions options = underlyingTable.coreOptions();
         String objectLocation = options.objectLocation();
-        FileIO objectFileIO = catalog.fileIO(new Path(objectLocation));
+        FileIO objectFileIO = fileIOLoader.apply(new Path(objectLocation));
         return ObjectTable.builder()
                 .underlyingTable(underlyingTable)
                 .objectLocation(objectLocation)

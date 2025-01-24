@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldPrimaryKeyAggFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -54,6 +55,7 @@ import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE;
 import static org.apache.paimon.CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
@@ -352,10 +354,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             this.fieldAggregators =
                     createFieldAggregators(
                             rowType, primaryKeys, allSequenceFields, new CoreOptions(options));
-            if (!fieldAggregators.isEmpty() && fieldSeqComparators.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Must use sequence group for aggregation functions.");
-            }
 
             removeRecordOnDelete = options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
 
@@ -526,41 +524,47 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             List<String> fieldNames = rowType.getFieldNames();
             List<DataType> fieldTypes = rowType.getFieldTypes();
             Map<Integer, Supplier<FieldAggregator>> fieldAggregators = new HashMap<>();
-            String defaultAggFunc = options.fieldsDefaultFunc();
             for (int i = 0; i < fieldNames.size(); i++) {
                 String fieldName = fieldNames.get(i);
                 DataType fieldType = fieldTypes.get(i);
-                // aggregate by primary keys, so they do not aggregate
-                boolean isPrimaryKey = primaryKeys.contains(fieldName);
-                String strAggFunc = options.fieldAggFunc(fieldName);
-                boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
 
-                if (strAggFunc != null) {
-                    fieldAggregators.put(
-                            i,
-                            () ->
-                                    FieldAggregatorFactory.create(
-                                            fieldType,
-                                            strAggFunc,
-                                            ignoreRetract,
-                                            isPrimaryKey,
-                                            options,
-                                            fieldName));
-                } else if (defaultAggFunc != null && !allSequenceFields.contains(fieldName)) {
+                if (allSequenceFields.contains(fieldName)) {
                     // no agg for sequence fields
+                    continue;
+                }
+
+                if (primaryKeys.contains(fieldName)) {
+                    // aggregate by primary keys, so they do not aggregate
                     fieldAggregators.put(
                             i,
                             () ->
                                     FieldAggregatorFactory.create(
                                             fieldType,
-                                            defaultAggFunc,
-                                            ignoreRetract,
-                                            isPrimaryKey,
-                                            options,
-                                            fieldName));
+                                            fieldName,
+                                            FieldPrimaryKeyAggFactory.NAME,
+                                            options));
+                    continue;
+                }
+
+                String aggFuncName = getAggFuncName(options, fieldName);
+                if (aggFuncName != null) {
+                    checkArgument(
+                            !fieldSeqComparators.isEmpty(),
+                            "Must use sequence group for aggregation functions.");
+                    fieldAggregators.put(
+                            i,
+                            () ->
+                                    FieldAggregatorFactory.create(
+                                            fieldType, fieldName, aggFuncName, options));
                 }
             }
             return fieldAggregators;
+        }
+
+        @Nullable
+        private String getAggFuncName(CoreOptions options, String fieldName) {
+            String aggFunc = options.fieldAggFunc(fieldName);
+            return aggFunc == null ? options.fieldsDefaultFunc() : aggFunc;
         }
     }
 }

@@ -16,10 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.auth;
+package org.apache.paimon.spark.sql
 
-/** Credentials provider type. */
-public enum CredentialsProviderType {
-    BEAR_TOKEN,
-    BEAR_TOKEN_FILE
-}
+class SparkV2FilterConverterTest extends SparkV2FilterConverterTestBase {}

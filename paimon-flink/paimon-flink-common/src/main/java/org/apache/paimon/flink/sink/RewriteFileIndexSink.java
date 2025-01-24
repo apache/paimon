@@ -42,8 +42,8 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
@@ -161,7 +161,7 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
         private final FileIndexOptions fileIndexOptions;
         private final FileIO fileIO;
         private final FileStorePathFactory pathFactory;
-        private final Map<Pair<BinaryRow, Integer>, DataFilePathFactory> dataFilePathFactoryMap;
+        private final DataFilePathFactories pathFactories;
         private final SchemaCache schemaInfoCache;
         private final long sizeInMeta;
 
@@ -170,7 +170,7 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
             this.fileIndexOptions = table.coreOptions().indexColumnsOptions();
             this.fileIO = table.fileIO();
             this.pathFactory = table.store().pathFactory();
-            this.dataFilePathFactoryMap = new HashMap<>();
+            this.pathFactories = new DataFilePathFactories(pathFactory);
             this.schemaInfoCache =
                     new SchemaCache(fileIndexOptions, new SchemaManager(fileIO, table.location()));
             this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
@@ -178,11 +178,7 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
 
         public DataFileMeta process(BinaryRow partition, int bucket, DataFileMeta dataFileMeta)
                 throws IOException {
-            DataFilePathFactory dataFilePathFactory =
-                    dataFilePathFactoryMap.computeIfAbsent(
-                            Pair.of(partition, bucket),
-                            p -> pathFactory.createDataFilePathFactory(partition, bucket));
-
+            DataFilePathFactory dataFilePathFactory = pathFactories.get(partition, bucket);
             SchemaInfo schemaInfo = schemaInfoCache.schemaInfo(dataFileMeta.schemaId());
             List<String> extras = new ArrayList<>(dataFileMeta.extraFiles());
             List<String> indexFiles =

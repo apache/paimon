@@ -16,12 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.exceptions;
+package org.apache.paimon.spark.sql
 
-/** Exception thrown on HTTP 501 - UnsupportedOperationException. */
-public class UnsupportedOperationException extends RESTException {
-
-    public UnsupportedOperationException(String message, Object... args) {
-        super(String.format(message, args));
-    }
-}
+class SparkV2FilterConverterTest extends SparkV2FilterConverterTestBase {}

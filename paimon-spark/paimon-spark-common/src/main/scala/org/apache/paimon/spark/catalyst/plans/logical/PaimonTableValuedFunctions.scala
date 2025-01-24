@@ -19,15 +19,19 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
+import org.apache.paimon.table.{DataTable, FileStoreTable}
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil.InconsistentTagBucketException
 
+import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.analysis.TableFunctionRegistry.TableFunctionBuilder
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, ExpressionInfo}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan}
-import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
+import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -83,11 +87,65 @@ object PaimonTableValuedFunctions {
     val sparkTable = sparkCatalog.loadTable(ident)
     val options = tvf.parseArgs(args.tail)
 
-    DataSourceV2Relation.create(
-      sparkTable,
-      Some(sparkCatalog),
-      Some(ident),
-      new CaseInsensitiveStringMap(options.asJava))
+    usingSparkIncrementQuery(tvf, sparkTable, options) match {
+      case Some(snapshotIdPair: (Long, Long)) =>
+        sparkIncrementQuery(spark, sparkTable, sparkCatalog, ident, options, snapshotIdPair)
+      case _ =>
+        DataSourceV2Relation.create(
+          sparkTable,
+          Some(sparkCatalog),
+          Some(ident),
+          new CaseInsensitiveStringMap(options.asJava))
+    }
+  }
+
+  private def usingSparkIncrementQuery(
+      tvf: PaimonTableValueFunction,
+      sparkTable: Table,
+      options: Map[String, String]): Option[(Long, Long)] = {
+    tvf.fnName match {
+      case INCREMENTAL_QUERY | INCREMENTAL_TO_AUTO_TAG =>
+        sparkTable match {
+          case SparkTable(fileStoreTable: DataTable) =>
+            try {
+              fileStoreTable.copy(options.asJava).asInstanceOf[DataTable].newScan().plan()
+              None
+            } catch {
+              case e: InconsistentTagBucketException =>
+                Some((e.startSnapshotId, e.endSnapshotId))
+            }
+          case _ => None
+        }
+      case _ => None
+    }
+  }
+
+  private def sparkIncrementQuery(
+      spark: SparkSession,
+      sparkTable: Table,
+      sparkCatalog: TableCatalog,
+      ident: Identifier,
+      options: Map[String, String],
+      snapshotIdPair: (Long, Long)): LogicalPlan = {
+    val filteredOptions =
+      options - CoreOptions.INCREMENTAL_BETWEEN.key - CoreOptions.INCREMENTAL_TO_AUTO_TAG.key
+
+    def datasetOfSnapshot(snapshotId: Long) = {
+      val updatedOptions = filteredOptions + (CoreOptions.SCAN_VERSION.key() -> snapshotId.toString)
+      createDataset(
+        spark,
+        DataSourceV2Relation.create(
+          sparkTable,
+          Some(sparkCatalog),
+          Some(ident),
+          new CaseInsensitiveStringMap(updatedOptions.asJava)
+        ))
+    }
+
+    datasetOfSnapshot(snapshotIdPair._2)
+      .except(datasetOfSnapshot(snapshotIdPair._1))
+      .queryExecution
+      .logical
   }
 }
 

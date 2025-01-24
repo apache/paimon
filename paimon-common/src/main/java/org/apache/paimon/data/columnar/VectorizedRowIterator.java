@@ -39,7 +39,7 @@ public class VectorizedRowIterator extends ColumnarRowIterator implements Vector
     protected VectorizedRowIterator copy(ColumnVector[] vectors) {
         VectorizedRowIterator newIterator =
                 new VectorizedRowIterator(filePath, row.copy(vectors), recycler);
-        newIterator.reset(nextFilePos);
+        newIterator.reset(positions);
         return newIterator;
     }
 }

@@ -27,12 +27,19 @@ public abstract class ParquetField {
     private final int repetitionLevel;
     private final int definitionLevel;
     private final boolean required;
+    private final String[] path;
 
-    public ParquetField(DataType type, int repetitionLevel, int definitionLevel, boolean required) {
+    public ParquetField(
+            DataType type,
+            int repetitionLevel,
+            int definitionLevel,
+            boolean required,
+            String[] path) {
         this.type = type;
         this.repetitionLevel = repetitionLevel;
         this.definitionLevel = definitionLevel;
         this.required = required;
+        this.path = path;
     }
 
     public DataType getType() {
@@ -50,6 +57,12 @@ public abstract class ParquetField {
     public boolean isRequired() {
         return required;
     }
+
+    public String[] path() {
+        return path;
+    }
+
+    public abstract boolean isPrimitive();
 
     @Override
     public String toString() {

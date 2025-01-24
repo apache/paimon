@@ -46,4 +46,8 @@ public interface WritableIntVector extends WritableColumnVector, IntColumnVector
 
     /** Fill the column vector with the provided value. */
     void fill(int value);
+
+    void appendInt(int v);
+
+    void appendInts(int count, int v);
 }

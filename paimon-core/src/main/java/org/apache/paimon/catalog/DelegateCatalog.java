@@ -18,8 +18,6 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -48,23 +46,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public String warehouse() {
-        return wrapped.warehouse();
-    }
-
-    @Override
     public Map<String, String> options() {
         return wrapped.options();
-    }
-
-    @Override
-    public FileIO fileIO() {
-        return wrapped.fileIO();
-    }
-
-    @Override
-    public FileIO fileIO(Path path) {
-        return wrapped.fileIO(path);
     }
 
     @Override
@@ -205,5 +188,12 @@ public abstract class DelegateCatalog implements Catalog {
     @Override
     public void close() throws Exception {
         wrapped.close();
+    }
+
+    public static Catalog rootCatalog(Catalog catalog) {
+        while (catalog instanceof DelegateCatalog) {
+            catalog = ((DelegateCatalog) catalog).wrapped();
+        }
+        return catalog;
     }
 }

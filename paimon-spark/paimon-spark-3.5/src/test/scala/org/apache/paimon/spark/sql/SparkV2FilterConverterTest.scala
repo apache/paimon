@@ -16,35 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.auth;
+package org.apache.paimon.spark.sql
 
-import java.util.Map;
-import java.util.Optional;
-
-/** Credentials provider. */
-public interface CredentialsProvider {
-
-    Map<String, String> authHeader();
-
-    boolean refresh();
-
-    default boolean supportRefresh() {
-        return false;
-    }
-
-    default boolean keepRefreshed() {
-        return false;
-    }
-
-    default boolean willSoonExpire() {
-        return false;
-    }
-
-    default Optional<Long> expiresAtMillis() {
-        return Optional.empty();
-    }
-
-    default Optional<Long> expiresInMills() {
-        return Optional.empty();
-    }
-}
+class SparkV2FilterConverterTest extends SparkV2FilterConverterTestBase {}

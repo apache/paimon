@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.Update
 
+import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
 abstract class UpdateTableTestBase extends PaimonSparkTestBase {
@@ -348,5 +349,12 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
     assertThatThrownBy(
       () => spark.sql("UPDATE T SET s.c2 = 'a_new', s = struct(11, 'a_new') WHERE s.c1 = 1"))
       .hasMessageContaining("Conflicting update/insert on attrs: s.c2, s")
+  }
+
+  test("Paimon update: update table with char type") {
+    sql("CREATE TABLE T (id INT, s STRING, c CHAR(1))")
+    sql("INSERT INTO T VALUES (1, 's', 'a')")
+    sql("UPDATE T SET c = 'b' WHERE id = 1")
+    checkAnswer(sql("SELECT * FROM T"), Seq(Row(1, "s", "b")))
   }
 }

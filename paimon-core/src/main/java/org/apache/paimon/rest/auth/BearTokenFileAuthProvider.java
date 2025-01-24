@@ -26,23 +26,23 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Optional;
 
-/** credentials provider for get bear token from file. */
-public class BearTokenFileCredentialsProvider extends BaseBearTokenCredentialsProvider {
+/** Auth provider for get bear token from file. */
+public class BearTokenFileAuthProvider extends BearTokenAuthProvider {
 
     public static final double EXPIRED_FACTOR = 0.4;
 
     private final String tokenFilePath;
-    private String token;
+
     private boolean keepRefreshed = false;
     private Long expiresAtMillis = null;
     private Long expiresInMills = null;
 
-    public BearTokenFileCredentialsProvider(String tokenFilePath) {
+    public BearTokenFileAuthProvider(String tokenFilePath) {
+        super(readToken(tokenFilePath));
         this.tokenFilePath = tokenFilePath;
-        this.token = getTokenFromFile();
     }
 
-    public BearTokenFileCredentialsProvider(String tokenFilePath, Long expiresInMills) {
+    public BearTokenFileAuthProvider(String tokenFilePath, Long expiresInMills) {
         this(tokenFilePath);
         this.keepRefreshed = true;
         this.expiresAtMillis = -1L;
@@ -50,14 +50,9 @@ public class BearTokenFileCredentialsProvider extends BaseBearTokenCredentialsPr
     }
 
     @Override
-    String token() {
-        return this.token;
-    }
-
-    @Override
     public boolean refresh() {
         long start = System.currentTimeMillis();
-        String newToken = getTokenFromFile();
+        String newToken = readToken(tokenFilePath);
         if (StringUtils.isNullOrWhitespaceOnly(newToken)) {
             return false;
         }
@@ -96,9 +91,9 @@ public class BearTokenFileCredentialsProvider extends BaseBearTokenCredentialsPr
         return Optional.ofNullable(this.expiresInMills);
     }
 
-    private String getTokenFromFile() {
+    private static String readToken(String filePath) {
         try {
-            return FileIOUtils.readFileUtf8(new File(tokenFilePath));
+            return FileIOUtils.readFileUtf8(new File(filePath));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

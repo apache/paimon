@@ -21,9 +21,13 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SnapshotNotExistException;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.types.Row;
@@ -35,6 +39,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -634,6 +639,47 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM parquet_row_timestamp"))
                 .containsExactly(
                         Row.of(Row.of(DateTimeUtils.toLocalDateTime("2024-11-13 18:00:00", 0))));
+    }
+
+    @Test
+    public void testScanBounded() {
+        sql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+        List<Row> result;
+        try (CloseableIterator<Row> iter =
+                sEnv.executeSql("SELECT * FROM T /*+ OPTIONS('scan.bounded'='true') */")
+                        .collect()) {
+            result = ImmutableList.copyOf(iter);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+    }
+
+    @Test
+    public void testIncrementTagQueryWithRescaleBucket() throws Exception {
+        sql("CREATE TABLE test (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('bucket' = '1')");
+        Table table = paimonTable("test");
+
+        sql("INSERT INTO test VALUES (1, 11), (2, 22)");
+        sql("ALTER TABLE test SET ('bucket' = '2')");
+        sql("INSERT OVERWRITE test SELECT * FROM test");
+        sql("INSERT INTO test VALUES (3, 33)");
+
+        table.createTag("2024-01-01", 1);
+        table.createTag("2024-01-02", 3);
+
+        List<String> incrementalOptions =
+                Arrays.asList(
+                        "'incremental-between'='2024-01-01,2024-01-02'",
+                        "'incremental-to-auto-tag'='2024-01-02'");
+
+        for (String option : incrementalOptions) {
+            assertThatThrownBy(() -> sql("SELECT * FROM test /*+ OPTIONS (%s) */", option))
+                    .satisfies(
+                            anyCauseMatches(
+                                    TimeTravelUtil.InconsistentTagBucketException.class,
+                                    "The bucket number of two tags are different (1, 2), which is not supported in incremental tag query."));
+        }
     }
 
     private void validateCount1PushDown(String sql) {

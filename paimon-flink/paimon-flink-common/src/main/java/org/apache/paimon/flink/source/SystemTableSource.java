@@ -42,15 +42,14 @@ import javax.annotation.Nullable;
 /** A {@link FlinkTableSource} for system table. */
 public class SystemTableSource extends FlinkTableSource {
 
-    private final boolean isStreamingMode;
+    private final boolean unbounded;
     private final int splitBatchSize;
     private final FlinkConnectorOptions.SplitAssignMode splitAssignMode;
     private final ObjectIdentifier tableIdentifier;
 
-    public SystemTableSource(
-            Table table, boolean isStreamingMode, ObjectIdentifier tableIdentifier) {
+    public SystemTableSource(Table table, boolean unbounded, ObjectIdentifier tableIdentifier) {
         super(table);
-        this.isStreamingMode = isStreamingMode;
+        this.unbounded = unbounded;
         Options options = Options.fromMap(table.options());
         this.splitBatchSize = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE);
         this.splitAssignMode = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE);
@@ -59,7 +58,7 @@ public class SystemTableSource extends FlinkTableSource {
 
     public SystemTableSource(
             Table table,
-            boolean isStreamingMode,
+            boolean unbounded,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
@@ -67,7 +66,7 @@ public class SystemTableSource extends FlinkTableSource {
             FlinkConnectorOptions.SplitAssignMode splitAssignMode,
             ObjectIdentifier tableIdentifier) {
         super(table, predicate, projectFields, limit);
-        this.isStreamingMode = isStreamingMode;
+        this.unbounded = unbounded;
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
         this.tableIdentifier = tableIdentifier;
@@ -96,7 +95,7 @@ public class SystemTableSource extends FlinkTableSource {
         }
         readBuilder.withFilter(predicate);
 
-        if (isStreamingMode && table instanceof DataTable) {
+        if (unbounded && table instanceof DataTable) {
             source =
                     new ContinuousFileStoreSource(
                             readBuilder, table.options(), limit, BucketMode.HASH_FIXED, rowData);
@@ -125,7 +124,7 @@ public class SystemTableSource extends FlinkTableSource {
     public SystemTableSource copy() {
         return new SystemTableSource(
                 table,
-                isStreamingMode,
+                unbounded,
                 predicate,
                 projectFields,
                 limit,
@@ -140,7 +139,7 @@ public class SystemTableSource extends FlinkTableSource {
     }
 
     @Override
-    public boolean isStreaming() {
-        return isStreamingMode;
+    public boolean isUnbounded() {
+        return unbounded;
     }
 }

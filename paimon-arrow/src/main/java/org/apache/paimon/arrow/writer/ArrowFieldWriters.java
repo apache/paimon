@@ -620,12 +620,12 @@ public class ArrowFieldWriters {
             ArrayChildWriteInfo arrayChildWriteInfo =
                     getArrayChildWriteInfo(pickedInColumn, startIndex, lengths);
             keyWriter.write(
-                    mapColumnVector.getKeyColumnVector(),
+                    mapColumnVector.getChildren()[0],
                     arrayChildWriteInfo.pickedInColumn,
                     arrayChildWriteInfo.startIndex,
                     arrayChildWriteInfo.batchRows);
             valueWriter.write(
-                    mapColumnVector.getValueColumnVector(),
+                    mapColumnVector.getChildren()[1],
                     arrayChildWriteInfo.pickedInColumn,
                     arrayChildWriteInfo.startIndex,
                     arrayChildWriteInfo.batchRows);

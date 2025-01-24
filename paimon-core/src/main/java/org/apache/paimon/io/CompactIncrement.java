@@ -78,16 +78,10 @@ public class CompactIncrement {
     @Override
     public String toString() {
         return String.format(
-                "CompactIncrement {compactBefore = [\n%s\n], compactAfter = [\n%s\n], changelogFiles = [\n%s\n]}",
-                compactBefore.stream()
-                        .map(DataFileMeta::fileName)
-                        .collect(Collectors.joining(",\n")),
-                compactAfter.stream()
-                        .map(DataFileMeta::fileName)
-                        .collect(Collectors.joining(",\n")),
-                changelogFiles.stream()
-                        .map(DataFileMeta::fileName)
-                        .collect(Collectors.joining(",\n")));
+                "CompactIncrement {compactBefore = %s, compactAfter = %s, changelogFiles = %s}",
+                compactBefore.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
+                compactAfter.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
+                changelogFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()));
     }
 
     public static CompactIncrement emptyIncrement() {

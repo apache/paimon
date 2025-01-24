@@ -40,6 +40,18 @@ public class HeapIntVector extends AbstractHeapVector implements WritableIntVect
     }
 
     @Override
+    public void setNullAt(int i) {
+        super.setNullAt(i);
+    }
+
+    @Override
+    void reserveForHeapVector(int newCapacity) {
+        if (vector.length < newCapacity) {
+            vector = Arrays.copyOf(vector, newCapacity);
+        }
+    }
+
+    @Override
     public int getInt(int i) {
         if (dictionary == null) {
             return vector[i];
@@ -92,5 +104,30 @@ public class HeapIntVector extends AbstractHeapVector implements WritableIntVect
     @Override
     public void fill(int value) {
         Arrays.fill(vector, value);
+    }
+
+    @Override
+    public void appendInt(int v) {
+        reserve(elementsAppended + 1);
+        setInt(elementsAppended, v);
+        elementsAppended++;
+    }
+
+    @Override
+    public void appendInts(int count, int v) {
+        reserve(elementsAppended + count);
+        int result = elementsAppended;
+        setInts(elementsAppended, count, v);
+        elementsAppended += count;
+    }
+
+    @Override
+    public void reset() {
+        super.reset();
+        if (vector.length != capacity) {
+            vector = new int[capacity];
+        } else {
+            Arrays.fill(vector, 0);
+        }
     }
 }

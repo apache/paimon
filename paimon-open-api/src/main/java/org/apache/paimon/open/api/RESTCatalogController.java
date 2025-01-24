@@ -38,6 +38,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
@@ -49,6 +50,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -353,6 +355,32 @@ public class RESTCatalogController {
             @PathVariable String database,
             @RequestBody CommitTableRequest request) {
         return new CommitTableResponse(true);
+    }
+
+    @Operation(
+            summary = "Get table token",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = GetTableTokenResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/token")
+    public GetTableTokenResponse getTableToken(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table) {
+        return new GetTableTokenResponse(
+                ImmutableMap.of("key", "value"), System.currentTimeMillis());
     }
 
     @Operation(

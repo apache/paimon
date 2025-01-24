@@ -267,8 +267,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         SnapshotManager snapshotManager = snapshotManager();
         SnapshotCommit snapshotCommit = catalogEnvironment.snapshotCommit(snapshotManager);
         if (snapshotCommit == null) {
-            snapshotCommit =
-                    new RenamingSnapshotCommit(snapshotManager, Lock.emptyFactory().create());
+            snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
         }
         return new FileStoreCommitImpl(
                 snapshotCommit,

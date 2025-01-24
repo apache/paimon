@@ -122,7 +122,7 @@ public class RollbackHelper {
             // Ignore the non-existent snapshots
             if (snapshotManager.snapshotExists(i)) {
                 toBeCleaned.add(snapshotManager.snapshot(i));
-                fileIO.deleteQuietly(snapshotManager.snapshotPath(i));
+                snapshotManager.deleteSnapshot(i);
             }
         }
 

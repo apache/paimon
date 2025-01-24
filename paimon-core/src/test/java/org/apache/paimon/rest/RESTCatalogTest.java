@@ -26,6 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -49,12 +50,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class RESTCatalogTest extends CatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
+    private String initToken = "init_token";
 
     @BeforeEach
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        String initToken = "init_token";
         restCatalogServer = new RESTCatalogServer(warehouse, initToken);
         restCatalogServer.start();
         Options options = new Options();
@@ -105,6 +106,26 @@ class RESTCatalogTest extends CatalogTestBase {
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);
         assertEquals(0, result.size());
+    }
+
+    @Test
+    void testRefreshFileIO() throws Exception {
+        Options options = new Options();
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
+        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
+        this.catalog = new RESTCatalog(CatalogContext.create(options));
+        List<Identifier> identifiers =
+                Lists.newArrayList(
+                        Identifier.create("test_db_a", "test_table_a"),
+                        Identifier.create("test_db_b", "test_table_b"),
+                        Identifier.create("test_db_c", "test_table_c"));
+        for (Identifier identifier : identifiers) {
+            createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+            FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            assertEquals(true, fileStoreTable.fileIO().exists(fileStoreTable.location()));
+        }
     }
 
     @Override

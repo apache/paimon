@@ -16,24 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.auth;
+package org.apache.paimon.spark.sql
 
-/** credentials provider for bear token. */
-public class BearTokenCredentialsProvider extends BaseBearTokenCredentialsProvider {
-
-    private final String token;
-
-    public BearTokenCredentialsProvider(String token) {
-        this.token = token;
-    }
-
-    @Override
-    String token() {
-        return this.token;
-    }
-
-    @Override
-    public boolean refresh() {
-        return true;
-    }
-}
+class SparkV2FilterConverterTest extends SparkV2FilterConverterTestBase {}
