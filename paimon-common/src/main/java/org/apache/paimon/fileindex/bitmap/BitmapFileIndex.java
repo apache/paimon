@@ -35,6 +35,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -53,6 +54,7 @@ public class BitmapFileIndex implements FileIndexer {
     public static final String VERSION = "version";
     public static final String INDEX_BLOCK_SIZE = "index-block-size";
     public static final String ENABLE_BUFFERED_INPUT = "enable-buffered-input";
+    public static final String ENABLE_NEXT_OFFSET_TO_SIZE = "enable-next-offset-to-size";
 
     private final DataType dataType;
     private final Options options;
@@ -166,7 +168,9 @@ public class BitmapFileIndex implements FileIndexer {
                                     nullBitmap.getCardinality() == 1
                                             ? -1 - nullBitmap.iterator().next()
                                             : 0,
-                                    bitmapOffsets);
+                                    nullBitmapBytes.length,
+                                    bitmapOffsets,
+                                    offsetRef[0]);
                 } else {
                     throw new RuntimeException("invalid version: " + version);
                 }
@@ -196,6 +200,7 @@ public class BitmapFileIndex implements FileIndexer {
 
         private BitmapFileIndexMeta bitmapFileIndexMeta;
         private Function<Object, Object> valueMapper;
+        private boolean enableNextOffsetToSize;
 
         private final Options options;
 
@@ -203,6 +208,8 @@ public class BitmapFileIndex implements FileIndexer {
             this.seekableInputStream = seekableInputStream;
             this.headStart = start;
             this.options = options;
+            enableNextOffsetToSize =
+                    options.getBoolean(BitmapFileIndex.ENABLE_NEXT_OFFSET_TO_SIZE, true);
         }
 
         @Override
@@ -266,6 +273,16 @@ public class BitmapFileIndex implements FileIndexer {
                     } else {
                         seekableInputStream.seek(bitmapFileIndexMeta.getBodyStart() + offset);
                         RoaringBitmap32 bitmap = new RoaringBitmap32();
+                        if (enableNextOffsetToSize) {
+                            int length = bitmapFileIndexMeta.getLength(bitmapId);
+                            if (length != -1) {
+                                DataInputStream input = new DataInputStream(seekableInputStream);
+                                byte[] bytes = new byte[length];
+                                input.readFully(bytes);
+                                bitmap.deserialize(ByteBuffer.wrap(bytes));
+                                return bitmap;
+                            }
+                        }
                         bitmap.deserialize(new DataInputStream(seekableInputStream));
                         return bitmap;
                     }

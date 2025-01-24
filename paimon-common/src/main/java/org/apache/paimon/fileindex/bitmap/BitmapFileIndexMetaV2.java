@@ -29,9 +29,11 @@ import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.InputStream;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 /**
@@ -96,9 +98,11 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
     private LinkedList<BitmapIndexBlock> indexBlocks;
     private long indexBlockStart;
+    private int nullBitmapLength;
 
     public BitmapFileIndexMetaV2(DataType dataType, Options options) {
         super(dataType, options);
+        this.nullBitmapLength = -1;
     }
 
     public BitmapFileIndexMetaV2(
@@ -108,7 +112,9 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             int nonNullBitmapNumber,
             boolean hasNullValue,
             int nullValueOffset,
-            LinkedHashMap<Object, Integer> bitmapOffsets) {
+            int nullBitmapLength,
+            LinkedHashMap<Object, Integer> bitmapOffsets,
+            int finalOffset) {
         super(
                 dataType,
                 options,
@@ -117,7 +123,25 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                 hasNullValue,
                 nullValueOffset,
                 bitmapOffsets);
+        this.nullBitmapLength = nullBitmapLength;
         blockSizeLimit = options.getInteger(BitmapFileIndex.INDEX_BLOCK_SIZE, 16 * 1024);
+        if (enableNextOffsetToSize) {
+            bitmapLengths = new HashMap<>();
+            Object lastValue = null;
+            int lastOffset = nullValueOffset;
+            for (Map.Entry<Object, Integer> entry : bitmapOffsets.entrySet()) {
+                Object value = entry.getKey();
+                Integer offset = entry.getValue();
+                if (offset >= 0) {
+                    if (lastOffset >= 0) {
+                        bitmapLengths.put(lastValue, offset - lastOffset);
+                    }
+                    lastValue = value;
+                    lastOffset = offset;
+                }
+            }
+            bitmapLengths.put(lastValue, finalOffset - lastOffset);
+        }
     }
 
     public static Comparator<Object> getComparator(DataType dataType) {
@@ -165,7 +189,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         if (bitmapId == null) {
             return hasNullValue;
         }
-        BitmapIndexBlock partial = findPartial(bitmapId);
+        BitmapIndexBlock partial = findBlock(bitmapId);
         return partial != null && partial.contains(bitmapId);
     }
 
@@ -174,11 +198,20 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         if (bitmapId == null) {
             return nullValueOffset;
         }
-        BitmapIndexBlock partial = findPartial(bitmapId);
-        return partial.getOffset(bitmapId);
+        BitmapIndexBlock block = findBlock(bitmapId);
+        return block.getOffset(bitmapId);
     }
 
-    private BitmapIndexBlock findPartial(Object bitmapId) {
+    @Override
+    public int getLength(Object bitmapId) {
+        if (bitmapId == null) {
+            return nullBitmapLength;
+        }
+        BitmapIndexBlock block = findBlock(bitmapId);
+        return block.getLength(bitmapId);
+    }
+
+    private BitmapIndexBlock findBlock(Object bitmapId) {
         Comparator<Object> comparator = getComparator(dataType);
         BitmapIndexBlock prev = null;
         for (BitmapIndexBlock partial : indexBlocks) {
@@ -201,21 +234,28 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         out.writeBoolean(hasNullValue);
         if (hasNullValue) {
             out.writeInt(nullValueOffset);
+            out.writeInt(nullBitmapLength);
         }
 
         indexBlocks = new LinkedList<>();
-        indexBlocks.add(new BitmapIndexBlock(dataType, 0));
+        indexBlocks.add(new BitmapIndexBlock(0));
         Comparator<Object> comparator = getComparator(dataType);
         bitmapOffsets.entrySet().stream()
-                .map(it -> new Entry(it.getKey(), it.getValue()))
+                .map(
+                        it ->
+                                new Entry(
+                                        it.getKey(),
+                                        it.getValue(),
+                                        bitmapLengths == null
+                                                ? -1
+                                                : bitmapLengths.getOrDefault(it.getKey(), -1)))
                 .sorted((e1, e2) -> comparator.compare(e1.key, e2.key))
                 .forEach(
                         e -> {
                             BitmapIndexBlock last = indexBlocks.peekLast();
                             if (!last.tryAdd(e)) {
                                 BitmapIndexBlock next =
-                                        new BitmapIndexBlock(
-                                                dataType, last.offset + last.serializedBytes);
+                                        new BitmapIndexBlock(last.offset + last.serializedBytes);
                                 indexBlocks.add(next);
                                 if (!next.tryAdd(e)) {
                                     throw new RuntimeException("index fail");
@@ -237,12 +277,13 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         // bitmap body offset
         out.writeInt(bitmapBodyOffset);
 
-        // bitmap partial dictionaries
-        for (BitmapIndexBlock partial : indexBlocks) {
-            out.writeInt(partial.entryList.size());
-            for (Entry e : partial.entryList) {
+        // bitmap index blocks
+        for (BitmapIndexBlock indexBlock : indexBlocks) {
+            out.writeInt(indexBlock.entryList.size());
+            for (Entry e : indexBlock.entryList) {
                 valueWriter.accept(e.key);
                 out.writeInt(e.offset);
+                out.writeInt(e.length);
             }
         }
     }
@@ -271,7 +312,8 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
         if (hasNullValue) {
             nullValueOffset = in.readInt();
-            indexBlockStart += Integer.BYTES;
+            nullBitmapLength = in.readInt();
+            indexBlockStart += 2 * Integer.BYTES;
         }
 
         bitmapOffsets = new LinkedHashMap<>();
@@ -321,7 +363,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                     ThrowableSupplier valueReader = getValueReader(in);
                     int entryNum = in.readInt();
                     for (int i = 0; i < entryNum; i++) {
-                        entryList.add(new Entry(valueReader.get(), in.readInt()));
+                        entryList.add(new Entry(valueReader.get(), in.readInt(), in.readInt()));
                     }
                 } catch (Exception e) {
                     throw new RuntimeException(e);
@@ -352,11 +394,21 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             throw new RuntimeException("not exist");
         }
 
+        int getLength(Object bitmapId) {
+            tryDeserialize();
+            for (Entry entry : entryList) {
+                if (entry.key.equals(bitmapId)) {
+                    return entry.length;
+                }
+            }
+            throw new RuntimeException("not exist");
+        }
+
         boolean tryAdd(Entry entry) {
             if (key == null) {
                 key = entry.key;
             }
-            int entryBytes = Integer.BYTES + keyBytesMapper.apply(entry.key);
+            int entryBytes = 2 * Integer.BYTES + keyBytesMapper.apply(entry.key);
             if (serializedBytes + entryBytes > blockSizeLimit) {
                 return false;
             }
@@ -366,7 +418,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         }
 
         // for build and serialize
-        public BitmapIndexBlock(DataType dataType, int offset) {
+        public BitmapIndexBlock(int offset) {
             this.offset = offset;
             this.entryList = new LinkedList<>();
             keyBytesMapper = getSerializeSizeMeasure();
@@ -392,10 +444,12 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
         Object key;
         int offset;
+        int length;
 
-        public Entry(Object key, int offset) {
+        public Entry(Object key, int offset, int length) {
             this.key = key;
             this.offset = offset;
+            this.length = length;
         }
     }
 }

@@ -74,6 +74,7 @@ public class TestBitmapFileIndex {
     public void testV1() throws Exception {
         testIntType(BitmapFileIndex.VERSION_1);
         testStringType(BitmapFileIndex.VERSION_1);
+        testHighCardinality(BitmapFileIndex.VERSION_1, 1000000, 100000, null);
     }
 
     @Test
