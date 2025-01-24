@@ -27,6 +27,7 @@ import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.LongIterator;
 
 import java.util.Arrays;
 
@@ -55,7 +56,7 @@ public class ColumnarBatch {
     }
 
     /** Reset next record position and return self. */
-    public void resetPositions(long[] positions) {
+    public void resetPositions(LongIterator positions) {
         vectorizedRowIterator.reset(positions);
     }
 
