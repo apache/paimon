@@ -18,10 +18,11 @@
 
 package org.apache.paimon.format.parquet.newreader;
 
+import org.apache.paimon.utils.LongIterator;
+
 import org.apache.parquet.column.page.PageReadStore;
 
-import java.util.Iterator;
-import java.util.stream.Stream;
+import java.util.PrimitiveIterator;
 
 /* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -30,37 +31,32 @@ import java.util.stream.Stream;
 /** Generate row index for columnar batch. */
 public class RowIndexGenerator {
 
-    Iterator<Long> rowIndexIterator;
+    private LongIterator rowIndexIterator;
 
     public void initFromPageReadStore(PageReadStore pageReadStore) {
         long startingRowIdx = pageReadStore.getRowIndexOffset().orElse(0L);
-
-        if (pageReadStore.getRowIndexes().isPresent()) {
-            final Iterator<Long> rowIndexes = pageReadStore.getRowIndexes().get();
+        PrimitiveIterator.OfLong rowIndexes = pageReadStore.getRowIndexes().orElse(null);
+        if (rowIndexes != null) {
             rowIndexIterator =
-                    new Iterator<Long>() {
+                    new LongIterator() {
                         @Override
                         public boolean hasNext() {
                             return rowIndexes.hasNext();
                         }
 
                         @Override
-                        public Long next() {
-                            return rowIndexes.next() + startingRowIdx;
+                        public long next() {
+                            return rowIndexes.nextLong() + startingRowIdx;
                         }
                     };
         } else {
             long numRowsInRowGroup = pageReadStore.getRowCount();
             rowIndexIterator =
-                    Stream.iterate(startingRowIdx, i -> i + 1).limit(numRowsInRowGroup).iterator();
+                    LongIterator.fromRange(startingRowIdx, startingRowIdx + numRowsInRowGroup);
         }
     }
 
-    public void populateRowIndex(ColumnarBatch columnarBatch, int numRows) {
-        long[] rowIndexes = new long[numRows];
-        for (int i = 0; i < numRows; i++) {
-            rowIndexes[i] = rowIndexIterator.next();
-        }
-        columnarBatch.resetPositions(rowIndexes);
+    public void populateRowIndex(ColumnarBatch columnarBatch) {
+        columnarBatch.resetPositions(rowIndexIterator);
     }
 }

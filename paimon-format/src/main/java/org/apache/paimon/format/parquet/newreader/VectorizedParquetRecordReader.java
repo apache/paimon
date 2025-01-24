@@ -286,7 +286,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         }
         rowsReturned += num;
         columnarBatch.setNumRows(num);
-        rowIndexGenerator.populateRowIndex(columnarBatch, num);
+        rowIndexGenerator.populateRowIndex(columnarBatch);
         return true;
     }
 
