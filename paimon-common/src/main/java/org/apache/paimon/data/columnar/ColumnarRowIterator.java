@@ -23,6 +23,7 @@ import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.LongIterator;
 import org.apache.paimon.utils.RecyclableIterator;
 import org.apache.paimon.utils.VectorMappingUtils;
 
@@ -51,17 +52,15 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     public void reset(long nextFilePos) {
-        long[] positions = new long[row.batch().getNumRows()];
-        for (int i = 0; i < row.batch().getNumRows(); i++) {
-            positions[i] = nextFilePos++;
-        }
-        reset(positions);
+        reset(LongIterator.fromRange(nextFilePos, nextFilePos + positions.length));
     }
 
-    public void reset(long[] positions) {
-        assert positions.length == row.batch().getNumRows();
-        this.positions = positions;
+    public void reset(LongIterator positions) {
         this.num = row.batch().getNumRows();
+        this.positions = new long[num];
+        for (int i = 0; i < num; i++) {
+            this.positions[i] = positions.next();
+        }
         this.nextPos = 0;
     }
 
@@ -92,7 +91,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     protected ColumnarRowIterator copy(ColumnVector[] vectors) {
         ColumnarRowIterator newIterator =
                 new ColumnarRowIterator(filePath, row.copy(vectors), recycler);
-        newIterator.reset(positions);
+        newIterator.reset(LongIterator.fromArray(positions));
         return newIterator;
     }
 

@@ -20,6 +20,7 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.VectorizedRecordIterator;
+import org.apache.paimon.utils.LongIterator;
 
 import javax.annotation.Nullable;
 
@@ -39,7 +40,7 @@ public class VectorizedRowIterator extends ColumnarRowIterator implements Vector
     protected VectorizedRowIterator copy(ColumnVector[] vectors) {
         VectorizedRowIterator newIterator =
                 new VectorizedRowIterator(filePath, row.copy(vectors), recycler);
-        newIterator.reset(positions);
+        newIterator.reset(LongIterator.fromArray(positions));
         return newIterator;
     }
 }
