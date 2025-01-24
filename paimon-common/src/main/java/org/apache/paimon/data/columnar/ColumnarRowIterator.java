@@ -42,7 +42,9 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
 
     protected int num;
     protected int nextPos;
-    protected long[] positions;
+    protected int callReturnedPositionTimes;
+    protected long returnedPosition;
+    protected LongIterator positionIterator;
 
     public ColumnarRowIterator(Path filePath, ColumnarRow row, @Nullable Runnable recycler) {
         super(recycler);
@@ -56,12 +58,11 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     public void reset(LongIterator positions) {
+        this.positionIterator = positions;
         this.num = row.batch().getNumRows();
-        this.positions = new long[num];
-        for (int i = 0; i < num; i++) {
-            this.positions[i] = positions.next();
-        }
         this.nextPos = 0;
+        this.callReturnedPositionTimes = 0;
+        this.returnedPosition = -1;
     }
 
     @Nullable
@@ -77,10 +78,15 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
 
     @Override
     public long returnedPosition() {
-        if (nextPos == 0) {
-            return positions[0] - 1;
+        for (int i = 0; i < nextPos - callReturnedPositionTimes; i++) {
+            returnedPosition = positionIterator.next();
         }
-        return positions[nextPos - 1];
+        callReturnedPositionTimes = nextPos;
+        if (returnedPosition == -1) {
+            throw new IllegalStateException("returnedPosition() is called before next()");
+        }
+
+        return returnedPosition;
     }
 
     @Override
@@ -89,9 +95,11 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     protected ColumnarRowIterator copy(ColumnVector[] vectors) {
+        // We should call copy only when the iterator is at the beginning of the file.
+        assert nextPos == 0;
         ColumnarRowIterator newIterator =
                 new ColumnarRowIterator(filePath, row.copy(vectors), recycler);
-        newIterator.reset(LongIterator.fromArray(positions));
+        newIterator.reset(positionIterator);
         return newIterator;
     }
 
