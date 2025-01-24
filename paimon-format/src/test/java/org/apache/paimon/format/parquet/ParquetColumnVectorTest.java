@@ -25,7 +25,6 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.columnar.BytesColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.format.FormatReaderContext;
@@ -54,7 +53,6 @@ import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -67,11 +65,6 @@ public class ParquetColumnVectorTest {
     private @TempDir java.nio.file.Path tempDir;
 
     private static final Random RND = ThreadLocalRandom.current();
-    private static final BiFunction<ColumnVector, Integer, String> BYTES_COLUMN_VECTOR_STRING_FUNC =
-            (cv, i) ->
-                    cv.isNullAt(i)
-                            ? "null"
-                            : new String(((BytesColumnVector) cv).getBytes(i).getBytes());
 
     @Test
     public void testNormalStrings() throws IOException {

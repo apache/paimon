@@ -18,24 +18,40 @@
 
 package org.apache.paimon.format.parquet.newreader;
 
+import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
+import org.apache.paimon.data.columnar.MapColumnVector;
+import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.fs.Path;
+
+import java.util.Arrays;
 
 /** A batch of rows in columnar format. */
 public class ColumnarBatch {
     protected final ColumnVector[] columns;
 
     protected final VectorizedColumnBatch vectorizedColumnBatch;
-    protected final VectorizedRowIterator vectorizedRowIterator;
+    protected final ColumnarRowIterator vectorizedRowIterator;
 
     public ColumnarBatch(Path filePath, ColumnVector[] columns) {
         this.columns = columns;
         this.vectorizedColumnBatch = new VectorizedColumnBatch(columns);
+        boolean containsNestedColumn =
+                Arrays.stream(columns)
+                        .anyMatch(
+                                vector ->
+                                        vector instanceof MapColumnVector
+                                                || vector instanceof RowColumnVector
+                                                || vector instanceof ArrayColumnVector);
+        ColumnarRow row = new ColumnarRow(vectorizedColumnBatch);
         this.vectorizedRowIterator =
-                new VectorizedRowIterator(filePath, new ColumnarRow(vectorizedColumnBatch), null);
+                containsNestedColumn
+                        ? new ColumnarRowIterator(filePath, row, null)
+                        : new VectorizedRowIterator(filePath, row, null);
     }
 
     /** Reset next record position and return self. */
