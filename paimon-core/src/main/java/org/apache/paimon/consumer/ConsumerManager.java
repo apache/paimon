@@ -113,22 +113,23 @@ public class ConsumerManager implements Serializable {
         try {
             listVersionedFileStatus(fileIO, consumerDirectory(), CONSUMER_PREFIX)
                     .forEach(
-                            status -> {
+                            fileStatus -> {
                                 String consumerName =
-                                        status.getPath()
+                                        fileStatus
+                                                .getPath()
                                                 .getName()
                                                 .substring(CONSUMER_PREFIX.length());
-                                boolean shouldCompaction =
+                                boolean shouldClear =
                                         includingPattern.matcher(consumerName).matches();
                                 if (excludingPattern != null) {
-                                    shouldCompaction =
-                                            shouldCompaction
+                                    shouldClear =
+                                            shouldClear
                                                     && !excludingPattern
                                                             .matcher(consumerName)
                                                             .matches();
                                 }
-                                if (shouldCompaction) {
-                                    fileIO.deleteQuietly(status.getPath());
+                                if (shouldClear) {
+                                    fileIO.deleteQuietly(fileStatus.getPath());
                                 }
                             });
         } catch (IOException e) {
