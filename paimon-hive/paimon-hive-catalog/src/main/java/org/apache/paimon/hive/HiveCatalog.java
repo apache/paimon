@@ -694,7 +694,7 @@ public class HiveCatalog extends AbstractCatalog {
             return tableSchemaInFileSystem(
                             getTableLocation(identifier, table),
                             identifier.getBranchNameOrDefault())
-                    .orElseThrow(() -> new HmsTableNotExistInFsException(identifier));
+                    .orElseThrow(() -> new TableNotExistException(identifier));
         }
 
         if (!formatTableDisabled()) {
@@ -705,7 +705,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
-        throw new HmsTableNotExistInFsException(identifier);
+        throw new TableNotExistException(identifier);
     }
 
     @Override
@@ -886,31 +886,6 @@ public class HiveCatalog extends AbstractCatalog {
                         tableOptions.get(HIVE_EXTERNAL_TABLE_PROP.toUpperCase()));
         return CatalogTableType.EXTERNAL.equals(tableType)
                 || "TRUE".equalsIgnoreCase(externalPropValue);
-    }
-
-    @Override
-    public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
-            throws TableNotExistException {
-        checkNotBranch(identifier, "dropTable");
-        checkNotSystemTable(identifier, "dropTable");
-
-        try {
-            getTable(identifier);
-        } catch (TableNotExistException e) {
-            if (e instanceof HmsTableNotExistInFsException) {
-                LOG.warn(
-                        "Table {}.{} exists in Hive metastore, but not exist in file system. will try to drop it in Hive metastore only.",
-                        identifier.getDatabaseName(),
-                        identifier.getTableName());
-                dropHmsTableQuietly(identifier);
-            }
-            if (ignoreIfNotExists) {
-                return;
-            }
-            throw new TableNotExistException(identifier);
-        }
-
-        dropTableImpl(identifier);
     }
 
     @Override
@@ -1671,49 +1646,6 @@ public class HiveCatalog extends AbstractCatalog {
                     this.hiveConf.get(HiveConf.ConfVars.METASTORE_BATCH_RETRIEVE_MAX.varname),
                     e);
             return DEFAULT_TABLE_BATCH_SIZE;
-        }
-    }
-
-    private void dropHmsTableQuietly(Identifier identifier) throws TableNotExistException {
-        try {
-            boolean externalTable = isExternalTable(getHmsTable(identifier));
-            clients.execute(
-                    client ->
-                            client.dropTable(
-                                    identifier.getDatabaseName(),
-                                    identifier.getTableName(),
-                                    !externalTable,
-                                    false,
-                                    true));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.warn(
-                    "Interrupted in call to drop hms table {} which does not exist in file system",
-                    identifier.getFullName(),
-                    e);
-        } catch (Exception e) {
-            LOG.warn(
-                    "Failed to drop hms table {} which does not exist in file system",
-                    identifier.getFullName(),
-                    e);
-        }
-    }
-
-    /**
-     * Exception for trying to operate on a table which exists in Hive metastore but doesn't exist
-     * in file system.
-     */
-    public static class HmsTableNotExistInFsException extends TableNotExistException {
-
-        protected static final String MSG =
-                "Table %s exists in Hive metastore but does not exist in file system.";
-
-        public HmsTableNotExistInFsException(Identifier identifier) {
-            this(identifier, null);
-        }
-
-        public HmsTableNotExistInFsException(Identifier identifier, Throwable cause) {
-            super(MSG, identifier, cause);
         }
     }
 }

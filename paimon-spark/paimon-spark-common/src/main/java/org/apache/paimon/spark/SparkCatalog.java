@@ -23,11 +23,9 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.spark.analysis.SparkTableNotExistInFsException;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.catalog.SupportFunction;
 import org.apache.paimon.spark.catalog.SupportView;
@@ -248,21 +246,6 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         }
     }
 
-    @Override
-    public boolean tableExists(Identifier ident) {
-        try {
-            return this.loadTable(ident) != null;
-        } catch (SparkTableNotExistInFsException e) {
-            LOG.warn(
-                    "Table {}.{} exists in Hive metastore, but not in file system, we think table exists in this case",
-                    ident.namespace(),
-                    ident.name());
-            return true;
-        } catch (NoSuchTableException e) {
-            return false;
-        }
-    }
-
     /**
      * Do not annotate with <code>@override</code> here to maintain compatibility with Spark 3.2-.
      *
@@ -465,12 +448,6 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
                         copyWithSQLConf(
                                 paimonTable, catalogName, toIdentifier(ident), extraOptions));
             }
-        } catch (HiveCatalog.HmsTableNotExistInFsException e) {
-            LOG.warn(
-                    "Table {}.{} exists in Hive metastore, but not exist in file system.",
-                    ident.namespace(),
-                    ident.name());
-            throw new SparkTableNotExistInFsException(ident);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }

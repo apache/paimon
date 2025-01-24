@@ -45,8 +45,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -63,7 +61,6 @@ import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -399,37 +396,6 @@ public class HiveCatalogTest extends CatalogTestBase {
         for (int i = 0; i < defaultBatchTables.size(); i++) {
             assertEquals(defaultBatchTables.get(i), invalidBatchSizeTables.get(i));
         }
-
-        catalog.dropDatabase(databaseName, true, true);
-    }
-
-    @Test
-    public void testDropTable() throws Exception {
-        String databaseName = "drop_table_test_db";
-        String tableName = "drop_table_test_table";
-        catalog.dropDatabase(databaseName, true, true);
-        catalog.createDatabase(databaseName, true);
-        Identifier identifier = Identifier.create(databaseName, tableName);
-
-        // test ignore if exists
-        catalog.createTable(
-                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
-        Path path = Paths.get(catalog.warehouse(), databaseName.concat(".db"), tableName);
-        catalog.fileIO().delete(new org.apache.paimon.fs.Path(path.toString()), true);
-        List<String> tables = catalog.listTables(databaseName);
-        assertEquals(1, tables.size());
-        catalog.dropTable(identifier, true);
-        List<String> newTables = catalog.listTables(databaseName);
-        assertEquals(0, newTables.size());
-
-        // test not ignore if exists
-        catalog.createTable(
-                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
-        catalog.fileIO().delete(new org.apache.paimon.fs.Path(path.toString()), true);
-        tables = catalog.listTables(databaseName);
-        assertEquals(1, tables.size());
-        assertThrows(
-                Catalog.TableNotExistException.class, () -> catalog.dropTable(identifier, false));
 
         catalog.dropDatabase(databaseName, true, true);
     }

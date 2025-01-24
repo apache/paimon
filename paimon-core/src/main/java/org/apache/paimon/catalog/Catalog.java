@@ -523,12 +523,6 @@ public interface Catalog extends AutoCloseable {
             this.identifier = identifier;
         }
 
-        protected TableNotExistException(
-                String customFormat, Identifier identifier, Throwable cause) {
-            super(String.format(customFormat, identifier.getFullName()), cause);
-            this.identifier = identifier;
-        }
-
         public Identifier identifier() {
             return identifier;
         }
