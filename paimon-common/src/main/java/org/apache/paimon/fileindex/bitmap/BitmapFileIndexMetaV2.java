@@ -303,8 +303,6 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         int offset;
         int serializedBytes = Integer.BYTES;
         List<Entry> entryList;
-        boolean isConstantKeyBytes;
-        int constantKeyBytes;
         Function<Object, Integer> keyBytesMapper;
         DataType dataType;
         SeekableInputStream seekableInputStream;
@@ -358,11 +356,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             if (key == null) {
                 key = entry.key;
             }
-            int entryBytes =
-                    Integer.BYTES
-                            + (isConstantKeyBytes
-                                    ? constantKeyBytes
-                                    : keyBytesMapper.apply(entry.key));
+            int entryBytes = Integer.BYTES + keyBytesMapper.apply(entry.key);
             if (serializedBytes + entryBytes > blockSizeLimit) {
                 return false;
             }
@@ -375,51 +369,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         public BitmapIndexBlock(DataType dataType, int offset) {
             this.offset = offset;
             this.entryList = new LinkedList<>();
-            keyBytesMapper =
-                    dataType.accept(
-                            new DataTypeVisitorAdapter<Function<Object, Integer>>() {
-
-                                @Override
-                                public Function<Object, Integer> visitBinaryString() {
-                                    return o -> Integer.BYTES + ((BinaryString) o).getSizeInBytes();
-                                }
-
-                                @Override
-                                public Function<Object, Integer> visitByte() {
-                                    return visitFixLength(Byte.BYTES);
-                                }
-
-                                @Override
-                                public Function<Object, Integer> visitShort() {
-                                    return visitFixLength(Short.BYTES);
-                                }
-
-                                @Override
-                                public Function<Object, Integer> visitInt() {
-                                    return visitFixLength(Integer.BYTES);
-                                }
-
-                                @Override
-                                public Function<Object, Integer> visitLong() {
-                                    return visitFixLength(Long.BYTES);
-                                }
-
-                                @Override
-                                public Function<Object, Integer> visitFloat() {
-                                    return visitFixLength(Float.BYTES);
-                                }
-
-                                @Override
-                                public Function<Object, Integer> visitDouble() {
-                                    return visitFixLength(Double.BYTES);
-                                }
-
-                                private Function<Object, Integer> visitFixLength(int bytes) {
-                                    isConstantKeyBytes = true;
-                                    constantKeyBytes = bytes;
-                                    return null;
-                                }
-                            });
+            keyBytesMapper = getSerializeSizeMeasure();
         }
 
         // for deserialize
