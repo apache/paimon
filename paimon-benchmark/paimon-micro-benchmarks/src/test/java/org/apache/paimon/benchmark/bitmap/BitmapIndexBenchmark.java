@@ -37,13 +37,26 @@ import org.junit.jupiter.api.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 
 /** Benchmark for {@link BitmapFileIndex}. */
 public class BitmapIndexBenchmark {
 
     public static final int ROW_COUNT = 1000000;
 
+    private static final String prefix = "asdfghjkl";
+
     @Rule public TemporaryFolder folder = new TemporaryFolder();
+
+    @Test
+    public void testQuery10() throws Exception {
+        testQuery(10);
+    }
+
+    @Test
+    public void testQuery100() throws Exception {
+        testQuery(100);
+    }
 
     @Test
     public void testQuery1000() throws Exception {
@@ -77,9 +90,7 @@ public class BitmapIndexBenchmark {
 
     private void testQuery(int approxCardinality) throws Exception {
 
-        FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
         RoaringBitmap32 middleBm = new RoaringBitmap32();
-        String prefix = "asdfghjkl";
 
         Options writeOptions1 = new Options();
         writeOptions1.setInteger(BitmapFileIndex.VERSION, BitmapFileIndex.VERSION_1);
@@ -114,98 +125,64 @@ public class BitmapIndexBenchmark {
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
 
-        benchmark.addCase(
-                "format-v1",
-                10,
-                () -> {
-                    try {
-                        Options options = new Options();
-                        options.set(BitmapFileIndex.ENABLE_BUFFERED_INPUT, "false");
-                        LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
-                                new LocalFileIO.LocalSeekableInputStream(file1);
-                        FileIndexReader reader =
-                                new BitmapFileIndex(DataTypes.STRING(), options)
-                                        .createReader(localSeekableInputStream, 0, 0);
-                        FileIndexResult result =
-                                reader.visitEqual(
-                                        fieldRef,
-                                        BinaryString.fromString(prefix + (approxCardinality / 2)));
-                        RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
-                        assert resultBm.equals(middleBm);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+        benchmark.addCase("formatV1", 10, () -> query(approxCardinality, file1, "false", "false"));
 
         benchmark.addCase(
-                "format-v1-buffered-input",
+                "formatV1-bitmapByteBuffer",
                 10,
-                () -> {
-                    try {
-                        Options options = new Options();
-                        options.set(BitmapFileIndex.ENABLE_BUFFERED_INPUT, "true");
-                        LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
-                                new LocalFileIO.LocalSeekableInputStream(file1);
-                        FileIndexReader reader =
-                                new BitmapFileIndex(DataTypes.STRING(), options)
-                                        .createReader(localSeekableInputStream, 0, 0);
-                        FileIndexResult result =
-                                reader.visitEqual(
-                                        fieldRef,
-                                        BinaryString.fromString(prefix + (approxCardinality / 2)));
-                        RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
-                        assert resultBm.equals(middleBm);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+                () -> query(approxCardinality, file1, "false", "true"));
 
         benchmark.addCase(
-                "format-v2",
+                "formatV1-bufferedInput",
                 10,
-                () -> {
-                    try {
-                        Options options = new Options();
-                        options.set(BitmapFileIndex.ENABLE_BUFFERED_INPUT, "false");
-                        LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
-                                new LocalFileIO.LocalSeekableInputStream(file2);
-                        FileIndexReader reader =
-                                new BitmapFileIndex(DataTypes.STRING(), options)
-                                        .createReader(localSeekableInputStream, 0, 0);
-                        FileIndexResult result =
-                                reader.visitEqual(
-                                        fieldRef,
-                                        BinaryString.fromString(prefix + (approxCardinality / 2)));
-                        RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
-                        assert resultBm.equals(middleBm);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+                () -> query(approxCardinality, file1, "true", "false"));
 
         benchmark.addCase(
-                "format-v2-buffered-input",
+                "formatV1-bufferedInput-bitmapByteBuffer",
                 10,
-                () -> {
-                    try {
-                        Options options = new Options();
-                        options.set(BitmapFileIndex.ENABLE_BUFFERED_INPUT, "true");
-                        LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
-                                new LocalFileIO.LocalSeekableInputStream(file2);
-                        FileIndexReader reader =
-                                new BitmapFileIndex(DataTypes.STRING(), options)
-                                        .createReader(localSeekableInputStream, 0, 0);
-                        FileIndexResult result =
-                                reader.visitEqual(
-                                        fieldRef,
-                                        BinaryString.fromString(prefix + (approxCardinality / 2)));
-                        RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
-                        assert resultBm.equals(middleBm);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+                () -> query(approxCardinality, file1, "true", "true"));
+
+        benchmark.addCase("format-v2", 10, () -> query(approxCardinality, file2, "false", "false"));
+
+        benchmark.addCase(
+                "format-v2-bitmapByteBuffer",
+                10,
+                () -> query(approxCardinality, file2, "false", "true"));
+
+        benchmark.addCase(
+                "format-v2-bufferedInput",
+                10,
+                () -> query(approxCardinality, file2, "true", "false"));
+
+        benchmark.addCase(
+                "format-v2-bufferedInput-bitmapByteBuffer",
+                10,
+                () -> query(approxCardinality, file2, "true", "true"));
 
         benchmark.run();
+    }
+
+    private static void query(
+            int approxCardinality,
+            File file1,
+            String enableBufferedInput,
+            String enableNextOffsetToSize) {
+        try {
+            FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
+            Options options = new Options();
+            options.set(BitmapFileIndex.ENABLE_BUFFERED_INPUT, enableBufferedInput);
+            options.set(BitmapFileIndex.ENABLE_NEXT_OFFSET_TO_SIZE, enableNextOffsetToSize);
+            LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
+                    new LocalFileIO.LocalSeekableInputStream(file1);
+            FileIndexReader reader =
+                    new BitmapFileIndex(DataTypes.STRING(), options)
+                            .createReader(localSeekableInputStream, 0, 0);
+            FileIndexResult result =
+                    reader.visitEqual(
+                            fieldRef, BinaryString.fromString(prefix + (approxCardinality / 2)));
+            ((BitmapIndexResult) result).get();
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
