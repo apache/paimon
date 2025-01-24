@@ -42,12 +42,40 @@ import java.io.File;
 public class BitmapIndexBenchmark {
 
     public static final int ROW_COUNT = 1000000;
-    public static final int APPROX_CARDINALITY = 100000;
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Test
-    public void testQuery() throws Exception {
+    public void testQuery1000() throws Exception {
+        testQuery(1000);
+    }
+
+    @Test
+    public void testQuery10000() throws Exception {
+        testQuery(10000);
+    }
+
+    @Test
+    public void testQuery30000() throws Exception {
+        testQuery(30000);
+    }
+
+    @Test
+    public void testQuery50000() throws Exception {
+        testQuery(50000);
+    }
+
+    @Test
+    public void testQuery80000() throws Exception {
+        testQuery(80000);
+    }
+
+    @Test
+    public void testQuery100000() throws Exception {
+        testQuery(100000);
+    }
+
+    private void testQuery(int approxCardinality) throws Exception {
 
         FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
         RoaringBitmap32 middleBm = new RoaringBitmap32();
@@ -64,8 +92,8 @@ public class BitmapIndexBenchmark {
                 new BitmapFileIndex(DataTypes.STRING(), writeOptions2).createWriter();
 
         for (int i = 0; i < ROW_COUNT; i++) {
-            int sid = (int) (Math.random() * APPROX_CARDINALITY);
-            if (sid == APPROX_CARDINALITY / 2) {
+            int sid = (int) (Math.random() * approxCardinality);
+            if (sid == approxCardinality / 2) {
                 middleBm.add(i);
             }
             writer1.write(BinaryString.fromString(prefix + sid));
@@ -80,7 +108,9 @@ public class BitmapIndexBenchmark {
         FileUtils.writeByteArrayToFile(file2, writer2.serializedBytes());
 
         Benchmark benchmark =
-                new Benchmark("bitmap-index-query-benchmark", 100)
+                new Benchmark(
+                                String.format("bitmap-index-query-benchmark-%d", approxCardinality),
+                                100)
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
 
@@ -99,7 +129,7 @@ public class BitmapIndexBenchmark {
                         FileIndexResult result =
                                 reader.visitEqual(
                                         fieldRef,
-                                        BinaryString.fromString(prefix + (APPROX_CARDINALITY / 2)));
+                                        BinaryString.fromString(prefix + (approxCardinality / 2)));
                         RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
                         assert resultBm.equals(middleBm);
                     } catch (Exception e) {
@@ -122,7 +152,7 @@ public class BitmapIndexBenchmark {
                         FileIndexResult result =
                                 reader.visitEqual(
                                         fieldRef,
-                                        BinaryString.fromString(prefix + (APPROX_CARDINALITY / 2)));
+                                        BinaryString.fromString(prefix + (approxCardinality / 2)));
                         RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
                         assert resultBm.equals(middleBm);
                     } catch (Exception e) {
@@ -145,7 +175,7 @@ public class BitmapIndexBenchmark {
                         FileIndexResult result =
                                 reader.visitEqual(
                                         fieldRef,
-                                        BinaryString.fromString(prefix + (APPROX_CARDINALITY / 2)));
+                                        BinaryString.fromString(prefix + (approxCardinality / 2)));
                         RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
                         assert resultBm.equals(middleBm);
                     } catch (Exception e) {
@@ -168,7 +198,7 @@ public class BitmapIndexBenchmark {
                         FileIndexResult result =
                                 reader.visitEqual(
                                         fieldRef,
-                                        BinaryString.fromString(prefix + (APPROX_CARDINALITY / 2)));
+                                        BinaryString.fromString(prefix + (approxCardinality / 2)));
                         RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
                         assert resultBm.equals(middleBm);
                     } catch (Exception e) {
