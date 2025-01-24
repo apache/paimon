@@ -36,12 +36,18 @@ public class ParquetGroupField extends ParquetField {
             int repetitionLevel,
             int definitionLevel,
             boolean required,
-            List<ParquetField> children) {
-        super(type, repetitionLevel, definitionLevel, required);
+            List<ParquetField> children,
+            String[] path) {
+        super(type, repetitionLevel, definitionLevel, required, path);
         this.children = ImmutableList.copyOf(requireNonNull(children, "children is null"));
     }
 
     public List<ParquetField> getChildren() {
         return children;
+    }
+
+    @Override
+    public boolean isPrimitive() {
+        return false;
     }
 }

@@ -360,18 +360,6 @@ public class VectorMappingUtils {
                 public boolean isNullAt(int i) {
                     return partition.isNullAt(index);
                 }
-
-                @Override
-                public ColumnVector getKeyColumnVector() {
-                    throw new UnsupportedOperationException(
-                            "Doesn't support getting key ColumnVector.");
-                }
-
-                @Override
-                public ColumnVector getValueColumnVector() {
-                    throw new UnsupportedOperationException(
-                            "Doesn't support getting value ColumnVector.");
-                }
             };
         }
 
@@ -386,18 +374,6 @@ public class VectorMappingUtils {
                 @Override
                 public boolean isNullAt(int i) {
                     return partition.isNullAt(index);
-                }
-
-                @Override
-                public ColumnVector getKeyColumnVector() {
-                    throw new UnsupportedOperationException(
-                            "Doesn't support getting key ColumnVector.");
-                }
-
-                @Override
-                public ColumnVector getValueColumnVector() {
-                    throw new UnsupportedOperationException(
-                            "Doesn't support getting value ColumnVector.");
                 }
             };
         }

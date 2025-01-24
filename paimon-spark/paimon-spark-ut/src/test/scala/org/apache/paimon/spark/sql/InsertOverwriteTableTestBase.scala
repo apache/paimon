@@ -569,15 +569,9 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
             s"CREATE TABLE t (i INT, s STRUCT<f1: INT, f2: INT>) TBLPROPERTIES ('file.format' = '$format')")
           sql(
             "INSERT INTO t VALUES (1, STRUCT(1, 1)), (2, null), (3, STRUCT(1, null)), (4, STRUCT(null, null))")
-          if (format.equals("parquet")) {
-            checkAnswer(
-              sql("SELECT * FROM t ORDER BY i"),
-              Seq(Row(1, Row(1, 1)), Row(2, null), Row(3, Row(1, null)), Row(4, null)))
-          } else {
-            checkAnswer(
-              sql("SELECT * FROM t ORDER BY i"),
-              Seq(Row(1, Row(1, 1)), Row(2, null), Row(3, Row(1, null)), Row(4, Row(null, null))))
-          }
+          checkAnswer(
+            sql("SELECT * FROM t ORDER BY i"),
+            Seq(Row(1, Row(1, 1)), Row(2, null), Row(3, Row(1, null)), Row(4, Row(null, null))))
         }
     }
   }
