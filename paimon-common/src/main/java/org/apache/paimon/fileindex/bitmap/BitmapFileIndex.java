@@ -197,10 +197,10 @@ public class BitmapFileIndex implements FileIndexer {
         private final SeekableInputStream seekableInputStream;
         private final int headStart;
         private final Map<Object, RoaringBitmap32> bitmaps = new LinkedHashMap<>();
+        private final boolean enableNextOffsetToSize;
 
         private BitmapFileIndexMeta bitmapFileIndexMeta;
         private Function<Object, Object> valueMapper;
-        private boolean enableNextOffsetToSize;
 
         private final Options options;
 
