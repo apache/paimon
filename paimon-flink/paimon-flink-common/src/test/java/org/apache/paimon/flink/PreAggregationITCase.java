@@ -1526,6 +1526,42 @@ public class PreAggregationITCase {
         }
 
         @Test
+        public void testAggWithDistinctFirstDuplicate() {
+            sql(
+                    "CREATE TABLE test_collect("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 ARRAY<STRING>"
+                            + ") WITH ("
+                            + "  'merge-engine' = 'aggregation',"
+                            + "  'fields.f0.aggregate-function' = 'collect',"
+                            + "  'fields.f0.distinct' = 'true'"
+                            + ")");
+
+            sql(
+                    "INSERT INTO test_collect VALUES "
+                            + "(1, CAST (NULL AS ARRAY<STRING>)), "
+                            + "(2, ARRAY['A', 'B', 'A', 'A']), "
+                            + "(3, ARRAY['car', 'car', 'car', 'watch'])");
+
+            List<Row> result = queryAndSort("SELECT * FROM test_collect");
+
+            checkOneRecord(result.get(0), 1);
+            checkOneRecord(result.get(1), 2, "A", "B");
+            checkOneRecord(result.get(2), 3, "car", "watch");
+
+            sql(
+                    "INSERT INTO test_collect VALUES "
+                            + "(1, ARRAY['paimon', 'paimon']), "
+                            + "(2, ARRAY['A', 'B', 'C']), "
+                            + "(3, CAST (NULL AS ARRAY<STRING>))");
+
+            result = queryAndSort("SELECT * FROM test_collect");
+            checkOneRecord(result.get(0), 1, "paimon");
+            checkOneRecord(result.get(1), 2, "A", "B", "C");
+            checkOneRecord(result.get(2), 3, "car", "watch");
+        }
+
+        @Test
         public void testAggWithDistinct() {
             sql(
                     "CREATE TABLE test_collect("
