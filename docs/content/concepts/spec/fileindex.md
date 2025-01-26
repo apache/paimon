@@ -114,6 +114,8 @@ Bitmap file index format (V2)
 +-------------------------------------------------+
 ｜ null value offset (4 bytes if has null value)  ｜       HEAD
 +-------------------------------------------------+
+｜ null bitmap length (4 bytes if has null value) ｜
++-------------------------------------------------+
 ｜ bitmap index block number (4 bytes int)        ｜
 +-------------------------------------------------+
 ｜ value 1 | offset 1                             ｜
@@ -143,15 +145,17 @@ index block format:
 +-------------------------------------------------+
 ｜ entry number (4 bytes int)                     ｜
 +-------------------------------------------------+
-｜ value 1 | offset 1                             ｜
+｜ value 1 | offset 1 | length 1                  ｜
 +-------------------------------------------------+
-｜ value 2 | offset 2                             ｜
+｜ value 2 | offset 2 | length 2                  ｜
 +-------------------------------------------------+
 ｜ ...                                            ｜
 +-------------------------------------------------+
 
 value x:                       var bytes for any data type (as bitmap identifier)
 offset:                        4 bytes int (when it is negative, it represents that there is only one value
+                                 and its position is the inverse of the negative value)
+length:                        4 bytes int
   
 </pre>
 
@@ -193,7 +197,7 @@ offset:                        4 bytes int (when it is negative, it represents t
                                  and its position is the inverse of the negative value)
 </pre>
 
-Integer are all BIG_ENDIAN.
+Integer are all BIG_ENDIAN. In the paimon version that supports v2, the bitmap index version defaults to v2.
 
 Bitmap only support the following data type:
 

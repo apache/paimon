@@ -55,6 +55,8 @@ import java.util.function.Function;
  * +-------------------------------------------------+
  * ｜ null value offset (4 bytes if has null value)  ｜       HEAD
  * +-------------------------------------------------+
+ * ｜ null bitmap length (4 bytes if has null value) ｜
+ * +-------------------------------------------------+
  * ｜ bitmap index block number (4 bytes int)        ｜
  * +-------------------------------------------------+
  * ｜ value 1 | offset 1                             ｜
@@ -84,9 +86,9 @@ import java.util.function.Function;
  * +-------------------------------------------------+
  * ｜ entry number (4 bytes int)                     ｜
  * +-------------------------------------------------+
- * ｜ value 1 | offset 1                             ｜
+ * ｜ value 1 | offset 1 | length 1                  ｜
  * +-------------------------------------------------+
- * ｜ value 2 | offset 2                             ｜
+ * ｜ value 2 | offset 2 | length 2                  ｜
  * +-------------------------------------------------+
  * ｜ ...                                            ｜
  * +-------------------------------------------------+
@@ -189,8 +191,8 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         if (bitmapId == null) {
             return hasNullValue;
         }
-        BitmapIndexBlock partial = findBlock(bitmapId);
-        return partial != null && partial.contains(bitmapId);
+        BitmapIndexBlock block = findBlock(bitmapId);
+        return block != null && block.contains(bitmapId);
     }
 
     @Override
@@ -214,12 +216,12 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
     private BitmapIndexBlock findBlock(Object bitmapId) {
         Comparator<Object> comparator = getComparator(dataType);
         BitmapIndexBlock prev = null;
-        for (BitmapIndexBlock partial : indexBlocks) {
-            int cmp = comparator.compare(bitmapId, partial.key);
+        for (BitmapIndexBlock block : indexBlocks) {
+            int cmp = comparator.compare(bitmapId, block.key);
             if (cmp < 0) {
                 return prev;
             }
-            prev = partial;
+            prev = block;
         }
         return prev;
     }
@@ -263,7 +265,6 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                             }
                         });
 
-        // secondary dictionary size
         out.writeInt(indexBlocks.size());
 
         int bitmapBodyOffset = 0;
@@ -318,12 +319,11 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
         bitmapOffsets = new LinkedHashMap<>();
 
-        // secondary dictionary size
-        int partialBitmapDictionaryNum = in.readInt();
+        int bitmapBlockNumber = in.readInt();
         indexBlockStart += Integer.BYTES;
 
         indexBlocks = new LinkedList<>();
-        for (int i = 0; i < partialBitmapDictionaryNum; i++) {
+        for (int i = 0; i < bitmapBlockNumber; i++) {
             Object key = valueReader.get();
             int offset = in.readInt();
             indexBlocks.add(
