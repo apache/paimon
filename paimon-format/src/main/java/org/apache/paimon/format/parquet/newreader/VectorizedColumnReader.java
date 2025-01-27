@@ -120,7 +120,7 @@ public class VectorizedColumnReader {
     }
 
     private boolean isLazyDecodingSupported(
-            PrimitiveType.PrimitiveTypeName typeName, DataType sparkType) {
+            PrimitiveType.PrimitiveTypeName typeName, DataType paimonType) {
         return true;
     }
 

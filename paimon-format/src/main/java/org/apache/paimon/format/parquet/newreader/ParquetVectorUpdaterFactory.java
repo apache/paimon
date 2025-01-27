@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.newreader;
 
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
+import org.apache.paimon.data.columnar.heap.HeapLongVector;
 import org.apache.paimon.data.columnar.writable.WritableBooleanVector;
 import org.apache.paimon.data.columnar.writable.WritableByteVector;
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
@@ -614,10 +615,10 @@ public class ParquetVectorUpdaterFactory {
     private abstract static class DecimalUpdater<T extends WritableColumnVector>
             implements ParquetVectorUpdater<T> {
 
-        private final DecimalType sparkType;
+        protected final DecimalType paimonType;
 
-        DecimalUpdater(DecimalType sparkType) {
-            this.sparkType = sparkType;
+        DecimalUpdater(DecimalType paimonType) {
+            this.paimonType = paimonType;
         }
 
         @Override
@@ -625,22 +626,6 @@ public class ParquetVectorUpdaterFactory {
                 int total, int offset, T values, VectorizedValuesReader valuesReader) {
             for (int i = 0; i < total; i++) {
                 readValue(offset + i, values, valuesReader);
-            }
-        }
-
-        protected void writeDecimal(int offset, WritableColumnVector values, BigDecimal decimal) {
-            BigDecimal scaledDecimal =
-                    decimal.setScale(sparkType.getScale(), RoundingMode.UNNECESSARY);
-            int precision = decimal.precision();
-            if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-                ((WritableIntVector) values)
-                        .setInt(offset, scaledDecimal.unscaledValue().intValue());
-            } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-                ((WritableLongVector) values)
-                        .setLong(offset, scaledDecimal.unscaledValue().longValue());
-            } else {
-                byte[] bytes = scaledDecimal.unscaledValue().toByteArray();
-                ((WritableBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
             }
         }
     }
@@ -687,8 +672,8 @@ public class ParquetVectorUpdaterFactory {
     private static class LongToDecimalUpdater extends DecimalUpdater<WritableLongVector> {
         private final int parquetScale;
 
-        LongToDecimalUpdater(ColumnDescriptor descriptor, DecimalType sparkType) {
-            super(sparkType);
+        LongToDecimalUpdater(ColumnDescriptor descriptor, DecimalType paimonType) {
+            super(paimonType);
             LogicalTypeAnnotation typeAnnotation =
                     descriptor.getPrimitiveType().getLogicalTypeAnnotation();
             if (typeAnnotation instanceof DecimalLogicalTypeAnnotation) {
@@ -726,8 +711,8 @@ public class ParquetVectorUpdaterFactory {
     private static class BinaryToDecimalUpdater extends DecimalUpdater<WritableBytesVector> {
         private final int parquetScale;
 
-        BinaryToDecimalUpdater(ColumnDescriptor descriptor, DecimalType sparkType) {
-            super(sparkType);
+        BinaryToDecimalUpdater(ColumnDescriptor descriptor, DecimalType paimonType) {
+            super(paimonType);
             LogicalTypeAnnotation typeAnnotation =
                     descriptor.getPrimitiveType().getLogicalTypeAnnotation();
             this.parquetScale = ((DecimalLogicalTypeAnnotation) typeAnnotation).getScale();
@@ -767,14 +752,14 @@ public class ParquetVectorUpdaterFactory {
 
     private static class FixedLenByteArrayToDecimalUpdater
             extends DecimalUpdater<WritableBytesVector> {
-        private final int parquetScale;
         private final int arrayLen;
 
-        FixedLenByteArrayToDecimalUpdater(ColumnDescriptor descriptor, DecimalType sparkType) {
-            super(sparkType);
+        FixedLenByteArrayToDecimalUpdater(ColumnDescriptor descriptor, DecimalType paimonType) {
+            super(paimonType);
             LogicalTypeAnnotation typeAnnotation =
                     descriptor.getPrimitiveType().getLogicalTypeAnnotation();
-            this.parquetScale = ((DecimalLogicalTypeAnnotation) typeAnnotation).getScale();
+            int parquetScale = ((DecimalLogicalTypeAnnotation) typeAnnotation).getScale();
+            checkArgument(parquetScale == paimonType.getScale(), "Scale should be match between paimon decimal type and parquet decimal type in file");
             this.arrayLen = descriptor.getPrimitiveType().getTypeLength();
         }
 
@@ -786,10 +771,34 @@ public class ParquetVectorUpdaterFactory {
         @Override
         public void readValue(
                 int offset, WritableBytesVector values, VectorizedValuesReader valuesReader) {
-            BigInteger value = new BigInteger(valuesReader.readBinary(arrayLen).getBytesUnsafe());
-            BigDecimal decimal = new BigDecimal(value, this.parquetScale);
-            byte[] bytes = decimal.unscaledValue().toByteArray();
-            values.putByteArray(offset, bytes, 0, bytes.length);
+            Binary binary = valuesReader.readBinary(arrayLen);
+
+            int precision = paimonType.getPrecision();
+            if (ParquetSchemaConverter.is32BitDecimal(precision)) {
+                ((HeapIntVector) values).setInt(
+                        offset, (int) heapBinaryToLong(binary));
+            } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
+                ((HeapLongVector) values).setLong(offset, heapBinaryToLong(binary));
+            } else {
+                byte[] bytes = binary.getBytesUnsafe();
+                values.putByteArray(offset, bytes, 0, bytes.length);
+            }
+        }
+
+        private long heapBinaryToLong(Binary binary) {
+            ByteBuffer buffer = binary.toByteBuffer();
+            byte[] bytes = buffer.array();
+            int start = buffer.arrayOffset() + buffer.position();
+            int end = buffer.arrayOffset() + buffer.limit();
+
+            long unscaled = 0L;
+
+            for (int i = start; i < end; i++) {
+                unscaled = (unscaled << 8) | (bytes[i] & 0xff);
+            }
+
+            int bits = 8 * (end - start);
+            return (unscaled << (64 - bits)) >> (64 - bits);
         }
 
         @Override
@@ -798,14 +807,17 @@ public class ParquetVectorUpdaterFactory {
                 WritableBytesVector values,
                 WritableIntVector dictionaryIds,
                 Dictionary dictionary) {
-            BigInteger value =
-                    new BigInteger(
-                            dictionary
-                                    .decodeToBinary(dictionaryIds.getInt(offset))
-                                    .getBytesUnsafe());
-            BigDecimal decimal = new BigDecimal(value, this.parquetScale);
-            byte[] bytes = decimal.unscaledValue().toByteArray();
-            values.putByteArray(offset, bytes, 0, bytes.length);
+            Binary binary = dictionary.decodeToBinary(dictionaryIds.getInt(offset));
+            int precision = paimonType.getPrecision();
+            if (ParquetSchemaConverter.is32BitDecimal(precision)) {
+                ((HeapIntVector) values).setInt(
+                        offset, (int) heapBinaryToLong(binary));
+            } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
+                ((HeapLongVector) values).setLong(offset, heapBinaryToLong(binary));
+            } else {
+                byte[] bytes = binary.getBytesUnsafe();
+                values.putByteArray(offset, bytes, 0, bytes.length);
+            }
         }
     }
 }
