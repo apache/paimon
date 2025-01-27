@@ -65,7 +65,6 @@ import org.apache.parquet.schema.PrimitiveType;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.TimeUnit;
@@ -759,7 +758,9 @@ public class ParquetVectorUpdaterFactory {
             LogicalTypeAnnotation typeAnnotation =
                     descriptor.getPrimitiveType().getLogicalTypeAnnotation();
             int parquetScale = ((DecimalLogicalTypeAnnotation) typeAnnotation).getScale();
-            checkArgument(parquetScale == paimonType.getScale(), "Scale should be match between paimon decimal type and parquet decimal type in file");
+            checkArgument(
+                    parquetScale == paimonType.getScale(),
+                    "Scale should be match between paimon decimal type and parquet decimal type in file");
             this.arrayLen = descriptor.getPrimitiveType().getTypeLength();
         }
 
@@ -775,8 +776,7 @@ public class ParquetVectorUpdaterFactory {
 
             int precision = paimonType.getPrecision();
             if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-                ((HeapIntVector) values).setInt(
-                        offset, (int) heapBinaryToLong(binary));
+                ((HeapIntVector) values).setInt(offset, (int) heapBinaryToLong(binary));
             } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
                 ((HeapLongVector) values).setLong(offset, heapBinaryToLong(binary));
             } else {
@@ -810,8 +810,7 @@ public class ParquetVectorUpdaterFactory {
             Binary binary = dictionary.decodeToBinary(dictionaryIds.getInt(offset));
             int precision = paimonType.getPrecision();
             if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-                ((HeapIntVector) values).setInt(
-                        offset, (int) heapBinaryToLong(binary));
+                ((HeapIntVector) values).setInt(offset, (int) heapBinaryToLong(binary));
             } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
                 ((HeapLongVector) values).setLong(offset, heapBinaryToLong(binary));
             } else {
