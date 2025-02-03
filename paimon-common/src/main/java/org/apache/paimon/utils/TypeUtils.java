@@ -223,14 +223,17 @@ public class TypeUtils {
                                         Object value = null;
                                         if (!entry.getValue().isNull()) {
                                             if (entry.getValue().isTextual()) {
-                                                value = entry.getValue().asText();
-                                            }
-                                            else {
                                                 value =
-                                                    castFromStringInternal(
-                                                            entry.getValue().toString(),
-                                                            valueType,
-                                                            isCdcValue);
+                                                        castFromStringInternal(
+                                                                entry.getValue().asText(),
+                                                                valueType,
+                                                                isCdcValue);
+                                            } else {
+                                                value =
+                                                        castFromStringInternal(
+                                                                entry.getValue().toString(),
+                                                                valueType,
+                                                                isCdcValue);
                                             }
                                         }
                                         resultMap.put(key, value);
