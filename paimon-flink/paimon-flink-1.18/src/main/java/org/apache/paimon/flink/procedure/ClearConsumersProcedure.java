@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -61,14 +62,14 @@ public class ClearConsumersProcedure extends ProcedureBase {
                         fileStoreTable.location(),
                         fileStoreTable.snapshotManager().branch());
 
-        includingConsumers = nullable(includingConsumers);
-        excludingConsumers = nullable(excludingConsumers);
         Pattern includingPattern =
-                includingConsumers == null
+                StringUtils.isNullOrWhitespaceOnly(includingConsumers)
                         ? Pattern.compile(".*")
                         : Pattern.compile(includingConsumers);
         Pattern excludingPattern =
-                excludingConsumers == null ? null : Pattern.compile(excludingConsumers);
+                StringUtils.isNullOrWhitespaceOnly(excludingConsumers)
+                        ? null
+                        : Pattern.compile(excludingConsumers);
         consumerManager.clearConsumers(includingPattern, excludingPattern);
 
         return new String[] {"Success"};

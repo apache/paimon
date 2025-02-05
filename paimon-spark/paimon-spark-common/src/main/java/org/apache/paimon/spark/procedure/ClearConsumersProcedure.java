@@ -83,17 +83,15 @@ public class ClearConsumersProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String includingConsumers = args.isNullAt(1) ? null : args.getString(1);
-        includingConsumers =
-                StringUtils.isNullOrWhitespaceOnly(includingConsumers) ? null : includingConsumers;
         String excludingConsumers = args.isNullAt(2) ? null : args.getString(2);
-        excludingConsumers =
-                StringUtils.isNullOrWhitespaceOnly(excludingConsumers) ? null : excludingConsumers;
         Pattern includingPattern =
-                includingConsumers == null
+                StringUtils.isNullOrWhitespaceOnly(includingConsumers)
                         ? Pattern.compile(".*")
                         : Pattern.compile(includingConsumers);
         Pattern excludingPattern =
-                excludingConsumers == null ? null : Pattern.compile(excludingConsumers);
+                StringUtils.isNullOrWhitespaceOnly(excludingConsumers)
+                        ? null
+                        : Pattern.compile(excludingConsumers);
 
         return modifyPaimonTable(
                 tableIdent,

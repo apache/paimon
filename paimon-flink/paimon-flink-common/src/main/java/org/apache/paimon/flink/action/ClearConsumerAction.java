@@ -57,16 +57,14 @@ public class ClearConsumerAction extends TableActionBase {
                         dataTable.location(),
                         dataTable.snapshotManager().branch());
 
-        includingConsumers =
-                StringUtils.isNullOrWhitespaceOnly(includingConsumers) ? null : includingConsumers;
-        excludingConsumers =
-                StringUtils.isNullOrWhitespaceOnly(excludingConsumers) ? null : excludingConsumers;
         Pattern includingPattern =
-                includingConsumers == null
+                StringUtils.isNullOrWhitespaceOnly(includingConsumers)
                         ? Pattern.compile(".*")
                         : Pattern.compile(includingConsumers);
         Pattern excludingPattern =
-                excludingConsumers == null ? null : Pattern.compile(excludingConsumers);
+                StringUtils.isNullOrWhitespaceOnly(excludingConsumers)
+                        ? null
+                        : Pattern.compile(excludingConsumers);
         consumerManager.clearConsumers(includingPattern, excludingPattern);
     }
 }
