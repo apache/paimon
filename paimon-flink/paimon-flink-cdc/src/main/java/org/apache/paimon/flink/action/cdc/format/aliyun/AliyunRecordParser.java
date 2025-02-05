@@ -66,7 +66,7 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
 
     private static final Logger LOG = LoggerFactory.getLogger(AliyunRecordParser.class);
 
-    private static final String FIELD_IS_DDL = "isDdl";
+    private static final String FIELD_IS_DDL = "ddl";
     private static final String FIELD_TYPE = "op";
 
     private static final String OP_UPDATE_BEFORE = "UPDATE_BEFORE";
