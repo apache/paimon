@@ -119,7 +119,7 @@ class DataTableSourceTest {
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         DataStream<RowData> sourceStream1 =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), sEnv1);
-        assertThat(sourceStream1.getParallelism()).isEqualTo(12);
+        assertThat(sourceStream1.getParallelism()).isEqualTo(sEnv1.getParallelism());
     }
 
     @Test
