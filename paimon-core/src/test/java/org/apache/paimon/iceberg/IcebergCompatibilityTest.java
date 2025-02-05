@@ -53,6 +53,11 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
+import org.apache.avro.file.DataFileReader;
+import org.apache.avro.file.SeekableFileInput;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
@@ -63,7 +68,10 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -593,6 +601,103 @@ public class IcebergCompatibilityTest {
                 .containsExactlyInAnyOrder(
                         "Record(1, {10=[Record(apple, 100), Record(banana, 101)]})",
                         "Record(2, {20=[Record(cherry, 200), Record(pear, 201)]})");
+    }
+
+    @Test
+    public void testStringPartitionNullPadding() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.VARCHAR(20)},
+                        new String[] {"k", "country"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.singletonList("country"),
+                        Collections.singletonList("k"),
+                        -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, BinaryString.fromString("Switzerland")), 1);
+        write.write(GenericRow.of(2, BinaryString.fromString("Australia")), 1);
+        write.write(GenericRow.of(3, BinaryString.fromString("Brazil")), 1);
+        write.write(GenericRow.of(4, BinaryString.fromString("Grand Duchy of Luxembourg")), 1);
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, Switzerland)",
+                        "Record(2, Australia)",
+                        "Record(3, Brazil)",
+                        "Record(4, Grand Duchy of Luxembourg)");
+
+        FileIO fileIO = table.fileIO();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(table.location(), "metadata/v1.metadata.json"));
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
+        String currentSnapshotManifest = metadata.currentSnapshot().manifestList();
+
+        File snapShotAvroFile = new File(currentSnapshotManifest);
+        String expectedPartitionSummary =
+                "[{\"contains_null\": false, \"contains_nan\": false, \"lower_bound\": \"Australia\", \"upper_bound\": \"Switzerland\"}]";
+        try (DataFileReader<GenericRecord> dataFileReader =
+                new DataFileReader<>(
+                        new SeekableFileInput(snapShotAvroFile), new GenericDatumReader<>())) {
+            while (dataFileReader.hasNext()) {
+                GenericRecord record = dataFileReader.next();
+                String partitionSummary = record.get("partitions").toString();
+                assertThat(partitionSummary).doesNotContain("\\u0000");
+                assertThat(partitionSummary).isEqualTo(expectedPartitionSummary);
+            }
+        }
+
+        String tableManifest = manifestList.read(snapShotAvroFile.getName()).get(0).manifestPath();
+
+        try (DataFileReader<GenericRecord> dataFileReader =
+                new DataFileReader<>(
+                        new SeekableFileInput(new File(tableManifest)),
+                        new GenericDatumReader<>())) {
+
+            while (dataFileReader.hasNext()) {
+                GenericRecord record = dataFileReader.next();
+                GenericRecord dataFile = (GenericRecord) record.get("data_file");
+
+                // Check lower bounds
+                GenericData.Array<?> lowerBounds =
+                        (GenericData.Array<?>) dataFile.get("lower_bounds");
+                if (lowerBounds != null) {
+                    for (Object bound : lowerBounds) {
+                        GenericRecord boundRecord = (GenericRecord) bound;
+                        int key = (Integer) boundRecord.get("key");
+                        if (key == 1) { // key = 1 is the partition key
+                            ByteBuffer value = (ByteBuffer) boundRecord.get("value");
+                            String boundValue = new String(value.array(), StandardCharsets.UTF_8);
+                            assertThat(boundValue).doesNotContain("\u0000");
+                        }
+                    }
+                }
+
+                // Check upper bounds
+                GenericData.Array<?> upperBounds =
+                        (GenericData.Array<?>) dataFile.get("upper_bounds");
+                if (upperBounds != null) {
+                    for (Object bound : upperBounds) {
+                        GenericRecord boundRecord = (GenericRecord) bound;
+                        int key = (Integer) boundRecord.get("key");
+                        if (key == 1) { // key = 1 is the partition key
+                            ByteBuffer value = (ByteBuffer) boundRecord.get("value");
+                            String boundValue = new String(value.array(), StandardCharsets.UTF_8);
+                            assertThat(boundValue).doesNotContain("\u0000");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------------
