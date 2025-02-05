@@ -200,4 +200,12 @@ public abstract class DelegateCatalog implements Catalog {
     public void close() throws Exception {
         wrapped.close();
     }
+
+    public static Catalog rootCatalog(Catalog catalog) {
+        while (catalog instanceof DelegateCatalog) {
+            catalog = ((DelegateCatalog) catalog).wrapped();
+        }
+
+        return catalog;
+    }
 }

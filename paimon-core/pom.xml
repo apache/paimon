@@ -70,6 +70,16 @@ under the License.
             <artifactId>okhttp</artifactId>
             <version>${okhttp.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib-jdk8</artifactId>
+            <version>1.8.21</version>
+        </dependency>
+        <dependency>
+            <groupId>com.squareup.okio</groupId>
+            <artifactId>okio</artifactId>
+            <version>${okio.version}</version>
+        </dependency>
 
         <!-- test dependencies -->
 
@@ -270,6 +280,8 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>com.squareup.okhttp3:okhttp</include>
+                                    <include>com.squareup.okio:okio-jvm</include>
+                                    <include>com.squareup.okio:okio</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
@@ -277,6 +289,22 @@ under the License.
                                     <pattern>okhttp3</pattern>
                                     <shadedPattern>org.apache.paimon.shade.okhttp3</shadedPattern>
                                 </relocation>
+                                <relocation>
+                                    <pattern>okhttp3.internal</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.okhttp3.internal</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>okio</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>okio.internal</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.okio.internal</shadedPattern>
+                                </relocation>
+<!--                                <relocation>-->
+<!--                                    <pattern>okio</pattern>-->
+<!--                                    <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>-->
+<!--                                </relocation>-->
                             </relocations>
                         </configuration>
                     </execution>
