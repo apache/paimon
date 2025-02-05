@@ -18,10 +18,11 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.ExpireSnapshots;
-import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -30,8 +31,7 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
-import java.time.Duration;
-import java.util.TimeZone;
+import java.util.HashMap;
 
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -45,7 +45,8 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
                 ProcedureParameter.optional("retain_max", IntegerType),
                 ProcedureParameter.optional("retain_min", IntegerType),
                 ProcedureParameter.optional("older_than", StringType),
-                ProcedureParameter.optional("max_deletes", IntegerType)
+                ProcedureParameter.optional("max_deletes", IntegerType),
+                ProcedureParameter.optional("options", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -76,29 +77,20 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
         Integer retainMin = args.isNullAt(2) ? null : args.getInt(2);
         String olderThanStr = args.isNullAt(3) ? null : args.getString(3);
         Integer maxDeletes = args.isNullAt(4) ? null : args.getInt(4);
+        String options = args.isNullAt(5) ? null : args.getString(5);
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
+                    HashMap<String, String> dynamicOptions = new HashMap<>();
+                    ProcedureUtils.putAllOptions(dynamicOptions, options);
+                    table = table.copy(dynamicOptions);
                     ExpireSnapshots expireSnapshots = table.newExpireSnapshots();
-                    ExpireConfig.Builder builder = ExpireConfig.builder();
-                    if (retainMax != null) {
-                        builder.snapshotRetainMax(retainMax);
-                    }
-                    if (retainMin != null) {
-                        builder.snapshotRetainMin(retainMin);
-                    }
-                    if (!StringUtils.isNullOrWhitespaceOnly(olderThanStr)) {
-                        long olderThanMills =
-                                DateTimeUtils.parseTimestampData(
-                                                olderThanStr, 3, TimeZone.getDefault())
-                                        .getMillisecond();
-                        builder.snapshotTimeRetain(
-                                Duration.ofMillis(System.currentTimeMillis() - olderThanMills));
-                    }
-                    if (maxDeletes != null) {
-                        builder.snapshotMaxDeletes(maxDeletes);
-                    }
+
+                    CoreOptions tableOptions = ((FileStoreTable) table).store().options();
+                    ExpireConfig.Builder builder =
+                            ProcedureUtils.fillInSnapshotOptions(
+                                    tableOptions, retainMax, retainMin, olderThanStr, maxDeletes);
                     int deleted = expireSnapshots.config(builder.build()).expire();
                     return new InternalRow[] {newInternalRow(deleted)};
                 });
