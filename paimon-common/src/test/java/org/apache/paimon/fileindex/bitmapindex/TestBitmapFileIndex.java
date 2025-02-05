@@ -25,10 +25,12 @@ import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -137,5 +139,30 @@ public class TestBitmapFileIndex {
         // test read singleton bitmap
         BitmapIndexResult result2 = (BitmapIndexResult) reader.visitIsNull(fieldRef);
         assert result2.get().equals(RoaringBitmap32.bitmapOf(6));
+    }
+
+    @Test
+    void testBitmapIndexForBooleanType() {
+
+        BooleanType booleanType = new BooleanType();
+        FieldRef fieldRef = new FieldRef(0, "", booleanType);
+        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(booleanType, null);
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+
+        Object[] arr = {Boolean.TRUE, Boolean.FALSE, Boolean.TRUE, Boolean.FALSE, null};
+
+        for (Object o : arr) {
+            writer.write(o);
+        }
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
+
+        BitmapIndexResult searchTrueResult =
+                (BitmapIndexResult) reader.visitEqual(fieldRef, Boolean.TRUE);
+        Assertions.assertThat(searchTrueResult.get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 2));
+
+        BitmapIndexResult searchNullResult = (BitmapIndexResult) reader.visitIsNull(fieldRef);
+        Assertions.assertThat(searchNullResult.get()).isEqualTo(RoaringBitmap32.bitmapOf(4));
     }
 }
