@@ -18,10 +18,10 @@
 
 package org.apache.paimon.rest.exceptions;
 
-/** Exception thrown on HTTP 501 - UnsupportedOperationException. */
-public class UnsupportedOperationException extends RESTException {
+/** Exception thrown on HTTP 501 - NotImplementedException. */
+public class NotImplementedException extends RESTException {
 
-    public UnsupportedOperationException(String message, Object... args) {
+    public NotImplementedException(String message, Object... args) {
         super(String.format(message, args));
     }
 }

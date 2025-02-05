@@ -37,6 +37,7 @@ import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
@@ -86,7 +87,6 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 
-import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
@@ -151,11 +151,6 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public String warehouse() {
-        return context.options().get(WAREHOUSE);
-    }
-
-    @Override
     public Map<String, String> options() {
         return context.options().toMap();
     }
@@ -163,15 +158,6 @@ public class RESTCatalog implements Catalog {
     @Override
     public RESTCatalogLoader catalogLoader() {
         return new RESTCatalogLoader(context);
-    }
-
-    @Override
-    public FileIO fileIO() {
-        // TODO remove Catalog.fileIO
-        if (dataTokenEnabled) {
-            throw new UnsupportedOperationException();
-        }
-        return fileIO;
     }
 
     @Override
@@ -438,7 +424,7 @@ public class RESTCatalog implements Catalog {
             throw new ColumnAlreadyExistException(identifier, e.resourceName());
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
-        } catch (org.apache.paimon.rest.exceptions.UnsupportedOperationException e) {
+        } catch (NotImplementedException e) {
             throw new UnsupportedOperationException(e.getMessage());
         } catch (ServiceFailureException e) {
             throw new IllegalStateException(e.getMessage());
@@ -469,40 +455,37 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        Table table = getTable(identifier);
-        if (isMetaStorePartitionedTable(table)) {
-            try {
-                CreatePartitionsRequest request = new CreatePartitionsRequest(partitions);
-                client.post(
-                        resourcePaths.partitions(
-                                identifier.getDatabaseName(), identifier.getTableName()),
-                        request,
-                        headers(),
-                        authenticationFunction);
-            } catch (NoSuchResourceException e) {
-                throw new TableNotExistException(identifier);
-            }
+        try {
+            CreatePartitionsRequest request = new CreatePartitionsRequest(partitions);
+            client.post(
+                    resourcePaths.partitions(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    headers(),
+                    authenticationFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (NotImplementedException ignored) {
+            // not a metastore partitioned table
         }
     }
 
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        Table table = getTable(identifier);
-        if (isMetaStorePartitionedTable(table)) {
-            try {
-                DropPartitionsRequest request = new DropPartitionsRequest(partitions);
-                client.post(
-                        resourcePaths.dropPartitions(
-                                identifier.getDatabaseName(), identifier.getTableName()),
-                        request,
-                        headers(),
-                        authenticationFunction);
-            } catch (NoSuchResourceException e) {
-                throw new TableNotExistException(identifier);
-            }
-        } else {
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
+        try {
+            DropPartitionsRequest request = new DropPartitionsRequest(partitions);
+            client.post(
+                    resourcePaths.dropPartitions(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    headers(),
+                    authenticationFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (NotImplementedException ignored) {
+            // not a metastore partitioned table
+            FileStoreTable fileStoreTable = (FileStoreTable) getTable(identifier);
             try (FileStoreCommit commit =
                     fileStoreTable
                             .store()
@@ -517,68 +500,61 @@ public class RESTCatalog implements Catalog {
     @Override
     public void alterPartitions(Identifier identifier, List<Partition> partitions)
             throws TableNotExistException {
-        Table table = getTable(identifier);
-        if (isMetaStorePartitionedTable(table)) {
-            try {
-                AlterPartitionsRequest request = new AlterPartitionsRequest(partitions);
-                client.post(
-                        resourcePaths.alterPartitions(
-                                identifier.getDatabaseName(), identifier.getTableName()),
-                        request,
-                        headers(),
-                        authenticationFunction);
-            } catch (NoSuchResourceException e) {
-                throw new TableNotExistException(identifier);
-            }
+        try {
+            AlterPartitionsRequest request = new AlterPartitionsRequest(partitions);
+            client.post(
+                    resourcePaths.alterPartitions(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    headers(),
+                    authenticationFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (NotImplementedException ignored) {
+            // not a metastore partitioned table
         }
     }
 
     @Override
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        Table table = getTable(identifier);
-        if (isMetaStorePartitionedTable(table)) {
-            try {
-                MarkDonePartitionsRequest request = new MarkDonePartitionsRequest(partitions);
-                client.post(
-                        resourcePaths.markDonePartitions(
-                                identifier.getDatabaseName(), identifier.getTableName()),
-                        request,
-                        headers(),
-                        authenticationFunction);
-            } catch (NoSuchResourceException e) {
-                throw new TableNotExistException(identifier);
-            }
+        try {
+            MarkDonePartitionsRequest request = new MarkDonePartitionsRequest(partitions);
+            client.post(
+                    resourcePaths.markDonePartitions(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    headers(),
+                    authenticationFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (NotImplementedException ignored) {
+            // not a metastore partitioned table
         }
     }
 
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
-        Table table = getTable(identifier);
-        if (!isMetaStorePartitionedTable(table)) {
-            return listPartitionsFromFileSystem(table);
-        }
-
-        ListPartitionsResponse response;
         try {
-            response =
+            ListPartitionsResponse response =
                     client.get(
                             resourcePaths.partitions(
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             ListPartitionsResponse.class,
                             headers(),
                             authenticationFunction);
+            if (response == null || response.getPartitions() == null) {
+                return Collections.emptyList();
+            }
+            return response.getPartitions();
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            // not a metastore partitioned table
+            return listPartitionsFromFileSystem(getTable(identifier));
         }
-
-        if (response == null || response.getPartitions() == null) {
-            return Collections.emptyList();
-        }
-
-        return response.getPartitions();
     }
 
     @Override
@@ -689,11 +665,6 @@ public class RESTCatalog implements Catalog {
         if (client != null) {
             client.close();
         }
-    }
-
-    private boolean isMetaStorePartitionedTable(Table table) {
-        Options options = Options.fromMap(table.options());
-        return Boolean.TRUE.equals(options.get(METASTORE_PARTITIONED_TABLE));
     }
 
     private Map<String, String> headers() {

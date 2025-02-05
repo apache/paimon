@@ -86,7 +86,8 @@ public abstract class AbstractCatalog implements Catalog {
         return catalogOptions.toMap();
     }
 
-    @Override
+    public abstract String warehouse();
+
     public FileIO fileIO() {
         return fileIO;
     }

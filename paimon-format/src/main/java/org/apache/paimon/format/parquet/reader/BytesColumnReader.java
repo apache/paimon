@@ -111,7 +111,7 @@ public class BytesColumnReader extends AbstractColumnReader<WritableBytesVector>
         for (int i = rowId; i < rowId + num; ++i) {
             if (!column.isNullAt(i)) {
                 byte[] bytes = dictionary.decodeToBinary(dictionaryIds.getInt(i)).getBytesUnsafe();
-                column.appendBytes(i, bytes, 0, bytes.length);
+                column.putByteArray(i, bytes, 0, bytes.length);
             }
         }
     }
@@ -121,12 +121,12 @@ public class BytesColumnReader extends AbstractColumnReader<WritableBytesVector>
             int len = readDataBuffer(4).getInt();
             ByteBuffer buffer = readDataBuffer(len);
             if (buffer.hasArray()) {
-                v.appendBytes(
+                v.putByteArray(
                         rowId + i, buffer.array(), buffer.arrayOffset() + buffer.position(), len);
             } else {
                 byte[] bytes = new byte[len];
                 buffer.get(bytes);
-                v.appendBytes(rowId + i, bytes, 0, bytes.length);
+                v.putByteArray(rowId + i, bytes, 0, bytes.length);
             }
         }
     }

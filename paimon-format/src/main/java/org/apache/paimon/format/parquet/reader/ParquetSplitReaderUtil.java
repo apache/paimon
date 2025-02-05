@@ -409,7 +409,12 @@ public class ParquetSplitReaderUtil {
             }
 
             return new ParquetGroupField(
-                    type, repetitionLevel, definitionLevel, required, fieldsBuilder.build());
+                    type,
+                    repetitionLevel,
+                    definitionLevel,
+                    required,
+                    fieldsBuilder.build(),
+                    groupColumnIO.getFieldPath());
         }
 
         if (type instanceof VariantType) {
@@ -422,7 +427,8 @@ public class ParquetSplitReaderUtil {
                             new BinaryType(),
                             required,
                             value.getColumnDescriptor(),
-                            value.getId()));
+                            value.getId(),
+                            value.getFieldPath()));
             PrimitiveColumnIO metadata =
                     (PrimitiveColumnIO) lookupColumnByName(groupColumnIO, Variant.METADATA);
             fieldsBuilder.add(
@@ -430,9 +436,15 @@ public class ParquetSplitReaderUtil {
                             new BinaryType(),
                             required,
                             metadata.getColumnDescriptor(),
-                            metadata.getId()));
+                            metadata.getId(),
+                            metadata.getFieldPath()));
             return new ParquetGroupField(
-                    type, repetitionLevel, definitionLevel, required, fieldsBuilder.build());
+                    type,
+                    repetitionLevel,
+                    definitionLevel,
+                    required,
+                    fieldsBuilder.build(),
+                    groupColumnIO.getFieldPath());
         }
 
         if (type instanceof MapType) {
@@ -452,7 +464,8 @@ public class ParquetSplitReaderUtil {
                     repetitionLevel,
                     definitionLevel,
                     required,
-                    ImmutableList.of(keyField, valueField));
+                    ImmutableList.of(keyField, valueField),
+                    groupColumnIO.getFieldPath());
         }
 
         if (type instanceof MultisetType) {
@@ -471,7 +484,8 @@ public class ParquetSplitReaderUtil {
                     repetitionLevel,
                     definitionLevel,
                     required,
-                    ImmutableList.of(keyField, valueField));
+                    ImmutableList.of(keyField, valueField),
+                    groupColumnIO.getFieldPath());
         }
 
         if (type instanceof ArrayType) {
@@ -505,12 +519,21 @@ public class ParquetSplitReaderUtil {
                 repetitionLevel = columnIO.getParent().getRepetitionLevel();
             }
             return new ParquetGroupField(
-                    type, repetitionLevel, definitionLevel, required, ImmutableList.of(field));
+                    type,
+                    repetitionLevel,
+                    definitionLevel,
+                    required,
+                    ImmutableList.of(field),
+                    columnIO.getFieldPath());
         }
 
         PrimitiveColumnIO primitiveColumnIO = (PrimitiveColumnIO) columnIO;
         return new ParquetPrimitiveField(
-                type, required, primitiveColumnIO.getColumnDescriptor(), primitiveColumnIO.getId());
+                type,
+                required,
+                primitiveColumnIO.getColumnDescriptor(),
+                primitiveColumnIO.getId(),
+                primitiveColumnIO.getFieldPath());
     }
 
     /**

@@ -291,7 +291,7 @@ public class RollbackTo {
 Run the following sql:
 
 ```sql
-CALL rollback(table => 'test.T', version => '2');
+CALL sys.rollback(table => 'database_name.table_name', snapshot => snasphot_id);
 ```
 
 {{< /tab >}}

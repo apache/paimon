@@ -26,6 +26,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
@@ -471,7 +472,9 @@ public class ParquetReadWriteTest {
                         new FormatReaderContext(
                                 new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
         List<InternalRow> results = new ArrayList<>(1283);
-        reader.forEachRemaining(results::add);
+        InternalRowSerializer internalRowSerializer =
+                new InternalRowSerializer(NESTED_ARRAY_MAP_TYPE);
+        reader.forEachRemaining(row -> results.add(internalRowSerializer.copy(row)));
         compareNestedRow(rows, results);
     }
 
@@ -1087,9 +1090,6 @@ public class ParquetReadWriteTest {
                     origin.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1),
                     result.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1));
             Assertions.assertTrue(result.isNullAt(6));
-            Assertions.assertTrue(result.getRow(6, 2).isNullAt(0));
-            Assertions.assertTrue(result.getRow(6, 2).isNullAt(1));
-            Assertions.assertTrue(result.getRow(6, 2).isNullAt(2));
         }
     }
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
@@ -68,6 +69,7 @@ import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
@@ -88,7 +90,7 @@ public class RESTCatalogServer {
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
         this.catalog = TestRESTCatalog.create(CatalogContext.create(conf));
-        this.dispatcher = initDispatcher(catalog, authToken);
+        this.dispatcher = initDispatcher(catalog, warehouse, authToken);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
         server = mockWebServer;
@@ -106,7 +108,7 @@ public class RESTCatalogServer {
         server.shutdown();
     }
 
-    public static Dispatcher initDispatcher(Catalog catalog, String authToken) {
+    public static Dispatcher initDispatcher(Catalog catalog, String warehouse, String authToken) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
@@ -119,7 +121,7 @@ public class RESTCatalogServer {
                     if ("/v1/config".equals(request.getPath())) {
                         return new MockResponse()
                                 .setResponseCode(200)
-                                .setBody(getConfigBody(catalog.warehouse()));
+                                .setBody(getConfigBody(warehouse));
                     } else if (DATABASE_URI.equals(request.getPath())) {
                         return databasesApiHandler(catalog, request);
                     } else if (request.getPath().startsWith(DATABASE_URI)) {
@@ -178,6 +180,11 @@ public class RESTCatalogServer {
                         if (isDropPartitions) {
                             String tableName = resources[2];
                             Identifier identifier = Identifier.create(databaseName, tableName);
+                            Optional<MockResponse> error =
+                                    checkTablePartitioned(catalog, identifier);
+                            if (error.isPresent()) {
+                                return error.get();
+                            }
                             DropPartitionsRequest dropPartitionsRequest =
                                     OBJECT_MAPPER.readValue(
                                             request.getBody().readUtf8(),
@@ -188,6 +195,11 @@ public class RESTCatalogServer {
                         } else if (isAlterPartitions) {
                             String tableName = resources[2];
                             Identifier identifier = Identifier.create(databaseName, tableName);
+                            Optional<MockResponse> error =
+                                    checkTablePartitioned(catalog, identifier);
+                            if (error.isPresent()) {
+                                return error.get();
+                            }
                             AlterPartitionsRequest alterPartitionsRequest =
                                     OBJECT_MAPPER.readValue(
                                             request.getBody().readUtf8(),
@@ -198,6 +210,11 @@ public class RESTCatalogServer {
                         } else if (isMarkDonePartitions) {
                             String tableName = resources[2];
                             Identifier identifier = Identifier.create(databaseName, tableName);
+                            Optional<MockResponse> error =
+                                    checkTablePartitioned(catalog, identifier);
+                            if (error.isPresent()) {
+                                return error.get();
+                            }
                             MarkDonePartitionsRequest markDonePartitionsRequest =
                                     OBJECT_MAPPER.readValue(
                                             request.getBody().readUtf8(),
@@ -207,6 +224,12 @@ public class RESTCatalogServer {
                             return new MockResponse().setResponseCode(200);
                         } else if (isPartitions) {
                             String tableName = resources[2];
+                            Optional<MockResponse> error =
+                                    checkTablePartitioned(
+                                            catalog, Identifier.create(databaseName, tableName));
+                            if (error.isPresent()) {
+                                return error.get();
+                            }
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTableToken) {
                             GetTableTokenResponse getTableTokenResponse =
@@ -324,6 +347,24 @@ public class RESTCatalogServer {
                 }
             }
         };
+    }
+
+    private static Optional<MockResponse> checkTablePartitioned(
+            Catalog catalog, Identifier identifier) {
+        Table table;
+        try {
+            table = catalog.getTable(identifier);
+        } catch (Catalog.TableNotExistException e) {
+            return Optional.of(
+                    mockResponse(
+                            new ErrorResponse(ErrorResponseResourceType.TABLE, null, "", 404),
+                            404));
+        }
+        boolean partitioned = CoreOptions.fromMap(table.options()).partitionedTableInMetastore();
+        if (!partitioned) {
+            return Optional.of(mockResponse(new ErrorResponse(null, null, "", 501), 501));
+        }
+        return Optional.empty();
     }
 
     private static MockResponse commitTableApiHandler(

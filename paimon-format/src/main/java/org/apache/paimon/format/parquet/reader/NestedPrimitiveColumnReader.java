@@ -387,7 +387,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                     if (src == null) {
                         heapBytesVector.setNullAt(i);
                     } else {
-                        heapBytesVector.appendBytes(i, src, 0, src.length);
+                        heapBytesVector.putByteArray(i, src, 0, src.length);
                     }
                 }
                 return heapBytesVector;
@@ -489,7 +489,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                                 phiv.vector[i] = ((List<Integer>) valueList).get(i);
                             }
                         }
-                        return new ParquetDecimalVector(phiv, total);
+                        return new ParquetDecimalVector(phiv);
                     case INT64:
                         HeapLongVector phlv = new HeapLongVector(total);
                         for (int i = 0; i < valueList.size(); i++) {
@@ -499,10 +499,10 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
                                 phlv.vector[i] = ((List<Long>) valueList).get(i);
                             }
                         }
-                        return new ParquetDecimalVector(phlv, total);
+                        return new ParquetDecimalVector(phlv);
                     default:
                         HeapBytesVector phbv = getHeapBytesVector(total, valueList);
-                        return new ParquetDecimalVector(phbv, total);
+                        return new ParquetDecimalVector(phbv);
                 }
             default:
                 throw new RuntimeException("Unsupported type in the list: " + type);
@@ -516,7 +516,7 @@ public class NestedPrimitiveColumnReader implements ColumnReader<WritableColumnV
             if (valueList.get(i) == null) {
                 phbv.setNullAt(i);
             } else {
-                phbv.appendBytes(i, src, 0, src.length);
+                phbv.putByteArray(i, src, 0, src.length);
             }
         }
         return phbv;

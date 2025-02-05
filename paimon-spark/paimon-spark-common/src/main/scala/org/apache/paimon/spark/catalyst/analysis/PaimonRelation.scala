@@ -22,7 +22,7 @@ import org.apache.paimon.spark.SparkTable
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.analysis.{EliminateSubqueryAliases, ResolvedTable}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
 import scala.util.control.NonFatal
@@ -32,6 +32,7 @@ object PaimonRelation extends Logging {
 
   def unapply(plan: LogicalPlan): Option[SparkTable] =
     EliminateSubqueryAliases(plan) match {
+      case Project(_, DataSourceV2Relation(table: SparkTable, _, _, _, _)) => Some(table)
       case DataSourceV2Relation(table: SparkTable, _, _, _, _) => Some(table)
       case ResolvedTable(_, _, table: SparkTable, _) => Some(table)
       case _ => None
@@ -49,6 +50,7 @@ object PaimonRelation extends Logging {
 
   def getPaimonRelation(plan: LogicalPlan): DataSourceV2Relation = {
     EliminateSubqueryAliases(plan) match {
+      case Project(_, d @ DataSourceV2Relation(_: SparkTable, _, _, _, _)) => d
       case d @ DataSourceV2Relation(_: SparkTable, _, _, _, _) => d
       case _ => throw new RuntimeException(s"It's not a paimon table, $plan")
     }

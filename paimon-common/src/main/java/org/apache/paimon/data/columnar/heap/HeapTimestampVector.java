@@ -28,13 +28,21 @@ public class HeapTimestampVector extends AbstractHeapVector implements WritableT
 
     private static final long serialVersionUID = 1L;
 
-    private final long[] milliseconds;
-    private final int[] nanoOfMilliseconds;
+    private long[] milliseconds;
+    private int[] nanoOfMilliseconds;
 
     public HeapTimestampVector(int len) {
         super(len);
         this.milliseconds = new long[len];
         this.nanoOfMilliseconds = new int[len];
+    }
+
+    @Override
+    void reserveForHeapVector(int newCapacity) {
+        if (milliseconds.length < newCapacity) {
+            milliseconds = Arrays.copyOf(milliseconds, newCapacity);
+            nanoOfMilliseconds = Arrays.copyOf(nanoOfMilliseconds, newCapacity);
+        }
     }
 
     @Override
@@ -56,5 +64,20 @@ public class HeapTimestampVector extends AbstractHeapVector implements WritableT
     public void fill(Timestamp value) {
         Arrays.fill(milliseconds, value.getMillisecond());
         Arrays.fill(nanoOfMilliseconds, value.getNanoOfMillisecond());
+    }
+
+    @Override
+    public void reset() {
+        super.reset();
+        if (milliseconds.length != capacity) {
+            milliseconds = new long[capacity];
+        } else {
+            Arrays.fill(milliseconds, 0L);
+        }
+        if (nanoOfMilliseconds.length != capacity) {
+            nanoOfMilliseconds = new int[capacity];
+        } else {
+            Arrays.fill(nanoOfMilliseconds, 0);
+        }
     }
 }
