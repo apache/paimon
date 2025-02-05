@@ -79,13 +79,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Updater Factory to get {@link ParquetVectorUpdater}. */
 public class ParquetVectorUpdaterFactory {
 
-    private final LogicalTypeAnnotation logicalTypeAnnotation;
-
-    ParquetVectorUpdaterFactory(LogicalTypeAnnotation logicalTypeAnnotation) {
-        this.logicalTypeAnnotation = logicalTypeAnnotation;
-    }
-
-    public ParquetVectorUpdater getUpdater(ColumnDescriptor descriptor, DataType paimonType) {
+    public static ParquetVectorUpdater getUpdater(
+            ColumnDescriptor descriptor, DataType paimonType) {
         return paimonType.accept(UpdaterFactoryVisitor.INSTANCE).apply(descriptor);
     }
 

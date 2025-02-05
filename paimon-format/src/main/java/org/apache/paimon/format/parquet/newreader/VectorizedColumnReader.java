@@ -39,7 +39,6 @@ import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.column.values.RequiresPreviousReader;
 import org.apache.parquet.column.values.ValuesReader;
-import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -67,9 +66,6 @@ public class VectorizedColumnReader {
     /** Vectorized RLE decoder for repetition levels. */
     private VectorizedRleValuesReader repColumn;
 
-    /** Factory to get type-specific vector updater. */
-    private final ParquetVectorUpdaterFactory updaterFactory;
-
     /**
      * Helper struct to track intermediate states while reading Parquet pages in the column chunk.
      */
@@ -83,7 +79,6 @@ public class VectorizedColumnReader {
 
     private final PageReader pageReader;
     private final ColumnDescriptor descriptor;
-    private final LogicalTypeAnnotation logicalTypeAnnotation;
     private final ParsedVersion writerVersion;
 
     public VectorizedColumnReader(
@@ -97,8 +92,6 @@ public class VectorizedColumnReader {
         this.readState =
                 new ParquetReadState(
                         descriptor, isRequired, pageReadStore.getRowIndexes().orElse(null));
-        this.logicalTypeAnnotation = descriptor.getPrimitiveType().getLogicalTypeAnnotation();
-        this.updaterFactory = new ParquetVectorUpdaterFactory(logicalTypeAnnotation);
 
         DictionaryPage dictionaryPage = pageReader.readDictionaryPage();
         if (dictionaryPage != null) {
@@ -133,7 +126,7 @@ public class VectorizedColumnReader {
             WritableIntVector definitionLevels)
             throws IOException {
         WritableIntVector dictionaryIds = null;
-        ParquetVectorUpdater updater = updaterFactory.getUpdater(descriptor, type);
+        ParquetVectorUpdater updater = ParquetVectorUpdaterFactory.getUpdater(descriptor, type);
 
         if (dictionary != null) {
             // SPARK-16334: We only maintain a single dictionary per row batch, so that it can be
