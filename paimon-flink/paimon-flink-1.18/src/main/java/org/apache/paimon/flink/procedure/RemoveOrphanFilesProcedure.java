@@ -27,7 +27,6 @@ import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Locale;
 
-import static org.apache.paimon.operation.OrphanFilesClean.createFileCleaner;
 import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /**
@@ -97,7 +96,7 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     procedureContext.getExecutionEnvironment(),
                                     catalog,
                                     olderThanMillis(olderThan),
-                                    createFileCleaner(catalog, dryRun),
+                                    dryRun,
                                     parallelism,
                                     databaseName,
                                     tableName);
@@ -109,8 +108,8 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     databaseName,
                                     tableName,
                                     olderThanMillis(olderThan),
-                                    createFileCleaner(catalog, dryRun),
-                                    parallelism);
+                                    parallelism,
+                                    dryRun);
                     break;
                 default:
                     throw new IllegalArgumentException(

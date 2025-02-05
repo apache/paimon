@@ -164,6 +164,10 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             }
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
+            LOG.debug(
+                    "Starting snapshot is {}, next snapshot will be {}.",
+                    scannedResult.plan().snapshotId(),
+                    nextSnapshotId);
             return scannedResult.plan();
         } else if (result instanceof StartingScanner.NextSnapshot) {
             nextSnapshotId = ((StartingScanner.NextSnapshot) result).nextSnapshotId();
@@ -171,6 +175,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                     snapshotManager.snapshotExists(nextSnapshotId - 1)
                             && boundedChecker.shouldEndInput(
                                     snapshotManager.snapshot(nextSnapshotId - 1));
+            LOG.debug("There is no starting snapshot. Next snapshot will be {}.", nextSnapshotId);
+        } else if (result instanceof StartingScanner.NoSnapshot) {
+            LOG.debug("There is no starting snapshot and currently there is no next snapshot.");
         }
         return SnapshotNotExistPlan.INSTANCE;
     }

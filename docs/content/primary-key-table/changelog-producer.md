@@ -138,6 +138,6 @@ For `input`, `lookup`, `full-compaction` 'changelog-producer'.
 If Flink's checkpoint interval is short (for example, 30 seconds) and the number of buckets is large, each snapshot may
 produce lots of small changelog files. Too many files may put a burden on the distributed storage cluster.
 
-In order to compact small changelog files into large ones, you can set the table option `changelog.precommit-compact = true`.
+In order to compact small changelog files into large ones, you can set the table option `precommit-compact = true`.
 Default value of this option is false, if true, it will add a compact coordinator and worker operator after the writer
 operator, which copies changelog files into large ones.

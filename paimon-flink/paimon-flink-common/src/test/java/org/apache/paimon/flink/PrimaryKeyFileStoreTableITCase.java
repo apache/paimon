@@ -28,6 +28,8 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableEnvironment;
@@ -37,11 +39,12 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -63,6 +66,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     private static final int TIMEOUT = 180;
+    private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeyFileStoreTableITCase.class);
 
     // ------------------------------------------------------------------------
     //  Test Utilities
@@ -784,7 +788,6 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
     }
 
-    @Disabled // TODO: fix this unstable test
     @Test
     @Timeout(TIMEOUT)
     public void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
@@ -857,20 +860,17 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
             // Deletion vectors mode not support concurrent write
             numProducers = 1;
         }
-        List<TableResult> results =
-                testRandom(
-                        tEnv,
-                        numProducers,
-                        enableFailure,
-                        "'bucket' = '4',"
-                                + String.format(
-                                        "'deletion-vectors.enabled' = '%s'",
-                                        enableDeletionVectors));
 
-        for (TableResult result : results) {
-            result.await();
-        }
-        checkBatchResult(numProducers);
+        testRandom(
+                tEnv,
+                numProducers,
+                enableFailure,
+                "'bucket' = '4',"
+                        + String.format(
+                                "'deletion-vectors.enabled' = '%s'", enableDeletionVectors));
+
+        // changelog is produced by Flink normalize operator
+        checkChangelogTestResult(numProducers);
     }
 
     private void testFullCompactionChangelogProducerRandom(
@@ -1031,6 +1031,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         try (CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T"))) {
             while (it.hasNext()) {
                 Row row = it.next();
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Changelog get {}", row);
+                }
                 checker.addChangelog(row);
                 if (((long) row.getField(2)) >= LIMIT) {
                     endCnt++;
@@ -1053,7 +1056,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
      * <p>All jobs will modify the same set of partitions to emulate conflicting writes. Each job
      * will write its own set of keys for easy result checking.
      */
-    private List<TableResult> testRandom(
+    private void testRandom(
             TableEnvironment tEnv, int numProducers, boolean enableFailure, String tableProperties)
             throws Exception {
         // producers will very quickly produce snapshots,
@@ -1082,6 +1085,29 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         tEnv.getConfig()
                 .getConfiguration()
                 .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+
+        // We use a large number of rows to mimic unbounded streams because there is a known
+        // consistency issue in bounded streams.
+        //
+        // For bounded streams, if COMPACT snapshot fails to commit when the stream ends (due to
+        // conflict or whatever reasons), we have no chance to modify the compaction result, so the
+        // changelogs produced by compaction will not be committed.
+        //
+        // If it happens in production, users can run another job to compact the table, or run
+        // another job to write more data into the table. These remaining changelogs will be
+        // produced again.
+        int factor;
+        RuntimeExecutionMode mode =
+                tEnv.getConfig().getConfiguration().get(ExecutionOptions.RUNTIME_MODE);
+        if (mode == RuntimeExecutionMode.BATCH) {
+            factor = 1;
+        } else if (mode == RuntimeExecutionMode.STREAMING) {
+            factor = 10;
+        } else {
+            throw new UnsupportedOperationException(
+                    "Unknown runtime execution mode " + mode.name());
+        }
+        int usefulNumRows = LIMIT + NUM_PARTS * NUM_KEYS;
         tEnv.executeSql(
                         "CREATE TABLE `default_catalog`.`default_database`.`S` ("
                                 + "  i INT"
@@ -1090,18 +1116,16 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 + "  'fields.i.kind' = 'sequence',"
                                 + "  'fields.i.start' = '0',"
                                 + "  'fields.i.end' = '"
-                                + (LIMIT + NUM_PARTS * NUM_KEYS - 1)
+                                + (usefulNumRows - 1) * factor
                                 + "',"
                                 + "  'number-of-rows' = '"
-                                + (LIMIT + NUM_PARTS * NUM_KEYS)
+                                + usefulNumRows * factor
                                 + "',"
                                 + "  'rows-per-second' = '"
                                 + (LIMIT / 20 + ThreadLocalRandom.current().nextInt(LIMIT / 20))
                                 + "'"
                                 + ")")
                 .await();
-
-        List<TableResult> results = new ArrayList<>();
 
         if (enableFailure) {
             FailingFileIO.reset(failingName, 2, 10000);
@@ -1123,21 +1147,19 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
             String v2Sql = "CAST(i AS STRING) || '.str' AS v2";
             tEnv.executeSql(
                     String.format(
-                            "CREATE TEMPORARY VIEW myView%d AS SELECT %s, %s, %s, %s FROM `default_catalog`.`default_database`.`S`",
+                            "CREATE TEMPORARY VIEW myView%d AS SELECT %s, %s, %s, %s, i FROM `default_catalog`.`default_database`.`S`",
                             i, ptSql, kSql, v1Sql, v2Sql));
 
             // run test SQL
             int idx = i;
-            TableResult result =
-                    FailingFileIO.retryArtificialException(
-                            () ->
-                                    tEnv.executeSql(
-                                            "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '2') */ SELECT * FROM myView"
-                                                    + idx));
-            results.add(result);
+            FailingFileIO.retryArtificialException(
+                    () ->
+                            tEnv.executeSql(
+                                    "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '2') */ SELECT pt, k, v1, v2 FROM myView"
+                                            + idx
+                                            + " WHERE i < "
+                                            + usefulNumRows));
         }
-
-        return results;
     }
 
     private void checkBatchResult(int numProducers) throws Exception {

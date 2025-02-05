@@ -25,6 +25,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,6 +85,43 @@ public abstract class FileIOBehaviorTestBase {
     @Test
     void testFileDoesNotExist() throws IOException {
         assertThat(fs.exists(new Path(basePath, randomName()))).isFalse();
+    }
+
+    // --- list files
+
+    @Test
+    void testListFilesIterativeNonRecursive() throws IOException {
+        Path fileA = createRandomFileInDirectory(basePath);
+        Path dirB = new Path(basePath, randomName());
+        fs.mkdirs(dirB);
+        Path fileBC = createRandomFileInDirectory(dirB);
+
+        List<FileStatus> allFiles = new ArrayList<>();
+        try (RemoteIterator<FileStatus> iter = fs.listFilesIterative(basePath, false)) {
+            while (iter.hasNext()) {
+                allFiles.add(iter.next());
+            }
+        }
+        assertThat(allFiles.size()).isEqualTo(1);
+        assertThat(allFiles.get(0).getPath()).isEqualTo(fileA);
+    }
+
+    @Test
+    void testListFilesIterativeRecursive() throws IOException {
+        Path fileA = createRandomFileInDirectory(basePath);
+        Path dirB = new Path(basePath, randomName());
+        fs.mkdirs(dirB);
+        Path fileBC = createRandomFileInDirectory(dirB);
+
+        List<FileStatus> allFiles = new ArrayList<>();
+        try (RemoteIterator<FileStatus> iter = fs.listFilesIterative(basePath, true)) {
+            while (iter.hasNext()) {
+                allFiles.add(iter.next());
+            }
+        }
+        assertThat(allFiles.size()).isEqualTo(2);
+        assertThat(allFiles.stream().filter(f -> f.getPath().equals(fileA)).count()).isEqualTo(1);
+        assertThat(allFiles.stream().filter(f -> f.getPath().equals(fileBC)).count()).isEqualTo(1);
     }
 
     // --- delete

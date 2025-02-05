@@ -414,13 +414,16 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Optional endInput watermark used in case of batch mode or bounded stream.");
 
-    public static final ConfigOption<Boolean> CHANGELOG_PRECOMMIT_COMPACT =
-            key("changelog.precommit-compact")
+    public static final ConfigOption<Boolean> PRECOMMIT_COMPACT =
+            key("precommit-compact")
                     .booleanType()
                     .defaultValue(false)
+                    .withFallbackKeys("changelog.precommit-compact")
                     .withDescription(
-                            "If true, it will add a changelog compact coordinator and worker operator after the writer operator,"
-                                    + "in order to compact several changelog files from the same partition into large ones, "
+                            "If true, it will add a compact coordinator and worker operator after the writer operator,"
+                                    + "in order to compact several changelog files (for primary key tables) "
+                                    + "or newly created data files (for unaware bucket tables) "
+                                    + "from the same partition into large ones, "
                                     + "which can decrease the number of small files. ");
 
     public static final ConfigOption<String> SOURCE_OPERATOR_UID_SUFFIX =
@@ -440,6 +443,14 @@ public class FlinkConnectorOptions {
                             "Set the uid suffix for the writer, dynamic bucket assigner and committer operators. The uid format is "
                                     + "${UID_PREFIX}_${TABLE_NAME}_${USER_UID_SUFFIX}. If the uid suffix is not set, flink will "
                                     + "automatically generate the operator uid, which may be incompatible when the topology changes.");
+
+    public static final ConfigOption<Boolean> SCAN_BOUNDED =
+            key("scan.bounded")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Bounded mode for Paimon consumer. "
+                                    + "By default, Paimon automatically selects bounded mode based on the mode of the Flink job.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

@@ -191,7 +191,7 @@ public class PostgresRecordParser
                     if (StringUtils.isNullOrWhitespaceOnly(stringifyLength)) {
                         return DataTypes.BOOLEAN();
                     }
-                    Integer length = Integer.valueOf(stringifyLength);
+                    int length = Integer.parseInt(stringifyLength);
                     if (length == 1) {
                         return DataTypes.BOOLEAN();
                     } else {
@@ -295,7 +295,6 @@ public class PostgresRecordParser
                 newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
             } else if (Timestamp.SCHEMA_NAME.equals(className)) {
                 // timestamp (precision 0-3)
-
                 LocalDateTime localDateTime =
                         DateTimeUtils.toLocalDateTime(Long.parseLong(oldValue), ZoneOffset.UTC);
                 newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
@@ -314,7 +313,6 @@ public class PostgresRecordParser
                 newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
             } else if (ZonedTimestamp.SCHEMA_NAME.equals(className)) {
                 // timestamptz
-
                 LocalDateTime localDateTime =
                         Instant.parse(oldValue).atZone(serverTimeZone).toLocalDateTime();
                 newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);

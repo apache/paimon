@@ -183,6 +183,14 @@ public class SnapshotManager implements Serializable {
         }
     }
 
+    public void deleteSnapshot(long snapshotId) {
+        Path path = snapshotPath(snapshotId);
+        if (cache != null) {
+            cache.invalidate(path);
+        }
+        fileIO().deleteQuietly(path);
+    }
+
     public boolean longLivedChangelogExists(long snapshotId) {
         Path path = longLivedChangelogPath(snapshotId);
         try {

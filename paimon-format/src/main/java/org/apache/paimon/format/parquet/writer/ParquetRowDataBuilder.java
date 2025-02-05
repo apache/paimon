@@ -55,7 +55,7 @@ public class ParquetRowDataBuilder
 
     private class ParquetWriteSupport extends WriteSupport<InternalRow> {
 
-        private final MessageType schema = convertToParquetMessageType("paimon_schema", rowType);
+        private final MessageType schema = convertToParquetMessageType(rowType);
 
         private ParquetRowDataWriter writer;
 

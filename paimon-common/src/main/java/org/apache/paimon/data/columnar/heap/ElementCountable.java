@@ -21,5 +21,5 @@ package org.apache.paimon.data.columnar.heap;
 /** Container with a known number of elements. */
 public interface ElementCountable {
 
-    int getLen();
+    int getCapacity();
 }

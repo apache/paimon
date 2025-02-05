@@ -25,8 +25,6 @@ import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldIgnoreRetractAgg;
 import org.apache.paimon.types.DataType;
 
-import javax.annotation.Nullable;
-
 /** Factory for {@link FieldAggregator}. */
 public interface FieldAggregatorFactory extends Factory {
 
@@ -35,37 +33,23 @@ public interface FieldAggregatorFactory extends Factory {
     String identifier();
 
     static FieldAggregator create(
-            DataType fieldType,
-            @Nullable String strAgg,
-            boolean ignoreRetract,
-            boolean isPrimaryKey,
-            CoreOptions options,
-            String field) {
-        FieldAggregator fieldAggregator;
-        if (isPrimaryKey) {
-            strAgg = FieldPrimaryKeyAggFactory.NAME;
-        } else if (strAgg == null) {
-            strAgg = FieldLastNonNullValueAggFactory.NAME;
-        }
-
+            DataType fieldType, String fieldName, String aggFuncName, CoreOptions options) {
         FieldAggregatorFactory fieldAggregatorFactory =
                 FactoryUtil.discoverFactory(
                         FieldAggregator.class.getClassLoader(),
                         FieldAggregatorFactory.class,
-                        strAgg);
+                        aggFuncName);
         if (fieldAggregatorFactory == null) {
             throw new RuntimeException(
                     String.format(
                             "Use unsupported aggregation: %s or spell aggregate function incorrectly!",
-                            strAgg));
+                            aggFuncName));
         }
 
-        fieldAggregator = fieldAggregatorFactory.create(fieldType, options, field);
-
-        if (ignoreRetract) {
-            fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
-        }
-
-        return fieldAggregator;
+        FieldAggregator fieldAggregator =
+                fieldAggregatorFactory.create(fieldType, options, fieldName);
+        return options.fieldAggIgnoreRetract(fieldName)
+                ? new FieldIgnoreRetractAgg(fieldAggregator)
+                : fieldAggregator;
     }
 }

@@ -81,6 +81,7 @@ class PaimonSparkTestBase
     super.beforeAll()
     spark.sql(s"USE paimon")
     spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon.$dbName0")
+    spark.sql(s"USE paimon.$dbName0")
   }
 
   override protected def afterAll(): Unit = {

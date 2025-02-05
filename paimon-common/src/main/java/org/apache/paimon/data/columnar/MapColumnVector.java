@@ -23,8 +23,4 @@ import org.apache.paimon.data.InternalMap;
 /** Map column vector. */
 public interface MapColumnVector extends ColumnVector {
     InternalMap getMap(int i);
-
-    ColumnVector getKeyColumnVector();
-
-    ColumnVector getValueColumnVector();
 }

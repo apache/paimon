@@ -23,6 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -43,12 +44,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -57,6 +61,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -404,7 +409,7 @@ public abstract class CatalogTestBase {
                                 catalog.getTable(
                                         Identifier.create(
                                                 "test_db", "non_existing_table$snapshots")))
-                .withMessage("Table test_db.non_existing_table does not exist.");
+                .withMessage("Table test_db.non_existing_table$snapshots does not exist.");
 
         // Get system table throws TableNotExistException when system table type does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -412,7 +417,7 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.getTable(
                                         Identifier.create("test_db", "non_existing_table$schema1")))
-                .withMessage("Table test_db.non_existing_table does not exist.");
+                .withMessage("Table test_db.non_existing_table$schema1 does not exist.");
 
         // Get data table throws TableNotExistException when table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -965,7 +970,6 @@ public abstract class CatalogTestBase {
                 .isInstanceOf(Catalog.ViewNotExistException.class);
         catalog.renameView(identifier, newIdentifier, false);
 
-        catalog.dropView(newIdentifier, false);
         catalog.dropView(newIdentifier, true);
         assertThatThrownBy(() -> catalog.dropView(newIdentifier, false))
                 .isInstanceOf(Catalog.ViewNotExistException.class);
@@ -1025,6 +1029,102 @@ public abstract class CatalogTestBase {
                 .isGreaterThan(0);
     }
 
+    @Test
+    public void testPartitions() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+        String databaseName = "testPartitionTable";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102"));
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        catalog.createPartitions(identifier, partitionSpecs);
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrder(partitionSpecs.get(0), partitionSpecs.get(1));
+
+        assertDoesNotThrow(() -> catalog.markDonePartitions(identifier, partitionSpecs));
+
+        catalog.dropPartitions(identifier, partitionSpecs);
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+
+        // Test when table does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.createPartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        partitionSpecs));
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listPartitions(
+                                        Identifier.create(databaseName, "non_existing_table")));
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.markDonePartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        partitionSpecs));
+    }
+
+    @Test
+    public void testAlterPartitions() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+        String databaseName = "testAlterPartitionTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier alterIdentifier = Identifier.create(databaseName, "alert_partitions");
+        catalog.createTable(
+                alterIdentifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+        catalog.createPartitions(
+                alterIdentifier, Arrays.asList(Collections.singletonMap("dt", "20250101")));
+        assertThat(catalog.listPartitions(alterIdentifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrder(Collections.singletonMap("dt", "20250101"));
+        Partition partition =
+                new Partition(
+                        Collections.singletonMap("dt", "20250101"),
+                        1,
+                        2,
+                        3,
+                        System.currentTimeMillis());
+        catalog.alterPartitions(alterIdentifier, Arrays.asList(partition));
+        Partition partitionFromServer = catalog.listPartitions(alterIdentifier).get(0);
+        checkPartition(partition, partitionFromServer);
+
+        // Test when table does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.alterPartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        Arrays.asList(partition)));
+    }
+
     protected boolean supportsAlterDatabase() {
         return false;
     }
@@ -1034,6 +1134,14 @@ public abstract class CatalogTestBase {
     }
 
     protected boolean supportsView() {
+        return false;
+    }
+
+    protected void checkPartition(Partition expected, Partition actual) {
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    protected boolean supportPartitions() {
         return false;
     }
 }

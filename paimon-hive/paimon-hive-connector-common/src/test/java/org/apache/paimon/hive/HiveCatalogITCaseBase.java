@@ -21,6 +21,7 @@ package org.apache.paimon.hive;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
@@ -1098,8 +1099,11 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("CREATE TABLE t (a INT)");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        FileStoreTable table = (FileStoreTable) catalog.getTable(new Identifier("test_db", "t"));
+        Identifier identifier = new Identifier("test_db", "t");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         CatalogEnvironment catalogEnv = table.catalogEnvironment();
+        RenamingSnapshotCommit.Factory factory =
+                (RenamingSnapshotCommit.Factory) catalogEnv.commitFactory();
 
         AtomicInteger count = new AtomicInteger(0);
         List<Thread> threads = new ArrayList<>();
@@ -1114,7 +1118,11 @@ public abstract class HiveCatalogITCaseBase {
             Thread thread =
                     new Thread(
                             () -> {
-                                Lock lock = catalogEnv.lockFactory().create();
+                                Lock lock =
+                                        Lock.fromCatalog(
+                                                factory.lockFactory()
+                                                        .createLock(factory.lockContext()),
+                                                identifier);
                                 for (int j = 0; j < 10; j++) {
                                     try {
                                         lock.runWithLock(unsafeIncrement);

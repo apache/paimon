@@ -261,11 +261,13 @@ CREATE TABLE my_partitioned_table (
     'partition.time-interval'='1 d',
     'partition.idle-time-to-done'='15 m',
     'partition.mark-done-action'='done-partition'
-    -- You can also customize a PartitionMarkDoneAction to mark the partition completed.
-    -- 'partition.mark-done-action'='done-partition,custom',
-    -- 'partition.mark-done-action.custom.class'='org.apache.paimon.CustomPartitionMarkDoneAction'
 );
 ```
+
+You can also customize a PartitionMarkDoneAction to mark the partition completed.
+- partition.mark-done-action: custom
+- partition.mark-done-action.custom.class: The partition mark done class for implement PartitionMarkDoneAction interface (e.g. org.apache.paimon.CustomPartitionMarkDoneAction).
+
 Define a class CustomPartitionMarkDoneAction to implement the PartitionMarkDoneAction interface.
 ```java
 package org.apache.paimon;
@@ -279,6 +281,28 @@ public class CustomPartitionMarkDoneAction implements PartitionMarkDoneAction {
 
     @Override
     public void close() {}
+}
+```
+
+Paimon also support http-report partition mark done action, this action will report the partition to the remote http server.
+- partition.mark-done-action: http-report
+- partition.mark-done-action.http.url : Action will report the partition to the remote http server.
+- partition.mark-done-action.http.timeout : Http client connection timeout and default is 5s.
+- partition.mark-done-action.http.params : Http client request params in the request body json.
+
+Http Post request body :
+```json
+{
+    "table": "table fullName",
+    "path": "table location path",
+    "partition": "mark done partition",
+    "params" : "custom params"
+}
+```
+Http Response body :
+```json
+{
+    "result": "success"
 }
 ```
 

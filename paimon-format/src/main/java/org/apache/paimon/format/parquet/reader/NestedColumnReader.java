@@ -112,7 +112,8 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
         HeapRowVector heapRowVector = (HeapRowVector) vector;
         LevelDelegation levelDelegation = null;
         List<ParquetField> children = field.getChildren();
-        WritableColumnVector[] childrenVectors = heapRowVector.getFields();
+        WritableColumnVector[] childrenVectors =
+                (WritableColumnVector[]) heapRowVector.getChildren();
         WritableColumnVector[] finalChildrenVectors =
                 new WritableColumnVector[childrenVectors.length];
 
@@ -128,7 +129,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
 
             WritableColumnVector writableColumnVector = tuple.getRight();
             if (len == -1) {
-                len = ((ElementCountable) writableColumnVector).getLen();
+                len = ((ElementCountable) writableColumnVector).getCapacity();
                 isNull = new boolean[len];
                 Arrays.fill(isNull, true);
             }
@@ -177,9 +178,9 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
                 "Maps must have two type parameters, found %s",
                 children.size());
         Pair<LevelDelegation, WritableColumnVector> keyTuple =
-                readData(children.get(0), readNumber, mapVector.getKeyColumnVector(), true);
+                readData(children.get(0), readNumber, mapVector.getChildren()[0], true);
         Pair<LevelDelegation, WritableColumnVector> valueTuple =
-                readData(children.get(1), readNumber, mapVector.getValueColumnVector(), true);
+                readData(children.get(1), readNumber, mapVector.getChildren()[1], true);
 
         LevelDelegation levelDelegation = keyTuple.getLeft();
 
@@ -223,7 +224,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
                 "Arrays must have a single type parameter, found %s",
                 children.size());
         Pair<LevelDelegation, WritableColumnVector> tuple =
-                readData(children.get(0), readNumber, arrayVector.getChild(), true);
+                readData(children.get(0), readNumber, arrayVector.getChildren()[0], true);
 
         LevelDelegation levelDelegation = tuple.getLeft();
         CollectionPosition collectionPosition =
@@ -268,7 +269,7 @@ public class NestedColumnReader implements ColumnReader<WritableColumnVector> {
     }
 
     private static void setFieldNullFlag(boolean[] nullFlags, AbstractHeapVector vector) {
-        for (int index = 0; index < vector.getLen() && index < nullFlags.length; index++) {
+        for (int index = 0; index < vector.getCapacity() && index < nullFlags.length; index++) {
             if (nullFlags[index]) {
                 vector.setNullAt(index);
             }

@@ -25,6 +25,7 @@ import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
 
@@ -49,7 +50,8 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     private transient Catalog sourceCatalog;
     private transient Catalog targetCatalog;
 
-    private transient Map<String, Path> srcLocations;
+    private transient Map<String, FileIO> srcFileIOs;
+    private transient Map<String, FileIO> targetFileIOs;
     private transient Map<String, Path> targetLocations;
 
     public CopyFileOperator(
@@ -64,7 +66,8 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
                 FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
         targetCatalog =
                 FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(targetCatalogConfig));
-        srcLocations = new HashMap<>();
+        srcFileIOs = new HashMap<>();
+        targetFileIOs = new HashMap<>();
         targetLocations = new HashMap<>();
     }
 
@@ -72,20 +75,32 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     public void processElement(StreamRecord<CloneFileInfo> streamRecord) throws Exception {
         CloneFileInfo cloneFileInfo = streamRecord.getValue();
 
-        FileIO sourceTableFileIO = sourceCatalog.fileIO();
-        FileIO targetTableFileIO = targetCatalog.fileIO();
-
-        Path sourceTableRootPath =
-                srcLocations.computeIfAbsent(
+        FileIO sourceTableFileIO =
+                srcFileIOs.computeIfAbsent(
                         cloneFileInfo.getSourceIdentifier(),
                         key -> {
                             try {
-                                return pathOfTable(
-                                        sourceCatalog.getTable(Identifier.fromString(key)));
+                                return ((FileStoreTable)
+                                                sourceCatalog.getTable(Identifier.fromString(key)))
+                                        .fileIO();
                             } catch (Catalog.TableNotExistException e) {
                                 throw new RuntimeException(e);
                             }
                         });
+
+        FileIO targetTableFileIO =
+                targetFileIOs.computeIfAbsent(
+                        cloneFileInfo.getTargetIdentifier(),
+                        key -> {
+                            try {
+                                return ((FileStoreTable)
+                                                targetCatalog.getTable(Identifier.fromString(key)))
+                                        .fileIO();
+                            } catch (Catalog.TableNotExistException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+
         Path targetTableRootPath =
                 targetLocations.computeIfAbsent(
                         cloneFileInfo.getTargetIdentifier(),
