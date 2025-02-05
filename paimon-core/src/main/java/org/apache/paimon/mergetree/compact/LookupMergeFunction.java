@@ -37,12 +37,16 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     private final MergeFunction<KeyValue> mergeFunction;
     private final LinkedList<KeyValue> candidates = new LinkedList<>();
+    private final RowType keyType;
+    private final RowType valueType;
     private final InternalRowSerializer keySerializer;
     private final InternalRowSerializer valueSerializer;
 
     public LookupMergeFunction(
             MergeFunction<KeyValue> mergeFunction, RowType keyType, RowType valueType) {
         this.mergeFunction = mergeFunction;
+        this.keyType = keyType;
+        this.valueType = valueType;
         this.keySerializer = new InternalRowSerializer(keyType);
         this.valueSerializer = new InternalRowSerializer(valueType);
     }
@@ -55,6 +59,10 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void add(KeyValue kv) {
         candidates.add(kv.copy(keySerializer, valueSerializer));
+    }
+
+    public KeyValue.KeyValueCopier keyValueCopier() {
+        return new KeyValue.KeyValueCopier(keyType, valueType);
     }
 
     @Override
@@ -77,10 +85,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         mergeFunction.reset();
         candidates.forEach(mergeFunction::add);
         return mergeFunction.getResult();
-    }
-
-    LinkedList<KeyValue> candidates() {
-        return candidates;
     }
 
     public static MergeFunctionFactory<KeyValue> wrap(

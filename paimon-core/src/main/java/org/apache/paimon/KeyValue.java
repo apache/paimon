@@ -176,6 +176,16 @@ public class KeyValue {
                 .setLevel(level);
     }
 
+    public KeyValue copy(KeyValueCopier keyValueCopier) {
+        return new KeyValue()
+                .replace(
+                        keyValueCopier.copyKey(key),
+                        sequenceNumber,
+                        valueKind,
+                        keyValueCopier.copyValue(value))
+                .setLevel(level);
+    }
+
     @VisibleForTesting
     public String toString(RowType keyType, RowType valueType) {
         String keyString = rowDataToString(key, keyType);
@@ -194,5 +204,23 @@ public class KeyValue {
                                                         type.getTypeAt(i), i)
                                                 .getFieldOrNull(row)))
                 .collect(Collectors.joining(", "));
+    }
+
+    public static class KeyValueCopier {
+        private final InternalRowSerializer keySerializer;
+        private final InternalRowSerializer valueSerializer;
+
+        public KeyValueCopier(RowType keyType, RowType valueType) {
+            this.keySerializer = new InternalRowSerializer(keyType);
+            this.valueSerializer = new InternalRowSerializer(valueType);
+        }
+
+        public InternalRow copyKey(InternalRow key) {
+            return keySerializer.copy(key);
+        }
+
+        public InternalRow copyValue(InternalRow value) {
+            return valueSerializer.copy(value);
+        }
     }
 }
