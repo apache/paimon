@@ -149,4 +149,13 @@ public class CatalogOptions {
                             "Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. "
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
+
+    public static final ConfigOption<Boolean> RESOLVING_FILEIO_ENABLED =
+            ConfigOptions.key("resolving-fileio.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable resolving fileio, when this option is enabled, in conjunction with the table's property data-file.external-paths, "
+                                    + "Paimon can read and write to external storage paths, such as OSS or S3. "
+                                    + "In order to access these external paths correctly, you also need to configure the corresponding access key and secret key.");
 }

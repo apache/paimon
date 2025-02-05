@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.CatalogOptions;
 
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
@@ -419,6 +420,16 @@ public interface FileIO extends Serializable, Closeable {
      * by the given path.
      */
     static FileIO get(Path path, CatalogContext config) throws IOException {
+        boolean resolvingFileIOEnabled =
+                config.options().get(CatalogOptions.RESOLVING_FILEIO_ENABLED);
+        if (resolvingFileIOEnabled) {
+            FileIO fileIO = new ResolvingFileIO();
+            // set to false to avoid infinite loop
+            config.options().set(CatalogOptions.RESOLVING_FILEIO_ENABLED, false);
+            fileIO.configure(config);
+            return fileIO;
+        }
+
         URI uri = path.toUri();
         if (LOG.isDebugEnabled()) {
             LOG.debug("Getting FileIO by scheme {}.", uri.getScheme());
