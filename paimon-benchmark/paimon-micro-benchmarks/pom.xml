@@ -63,12 +63,6 @@ under the License.
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-hdfs-client</artifactId>
             <version>${hadoop.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.squareup.okhttp</groupId>
-                    <artifactId>okhttp</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
