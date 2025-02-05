@@ -23,61 +23,66 @@ import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
 
-import org.apache.flink.table.annotation.ArgumentHint;
-import org.apache.flink.table.annotation.DataTypeHint;
-import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Migrate procedure to migrate hive table to paimon table. */
-public class MigrateTableProcedure extends ProcedureBase {
+/** Migrate procedure to migrate iceberg table to paimon table. */
+public class MigrateIcebergTableProcedure extends ProcedureBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MigrateTableProcedure.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MigrateIcebergTableProcedure.class);
 
     private static final String PAIMON_SUFFIX = "_paimon_";
 
     @Override
     public String identifier() {
-        return "migrate_table";
+        return "migrate_iceberg_table";
     }
 
-    @ProcedureHint(
-            argument = {
-                @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "source_table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
-                @ArgumentHint(
-                        name = "parallelism",
-                        type = @DataTypeHint("Integer"),
-                        isOptional = true)
-            })
+    public String[] call(
+            ProcedureContext procedureContext, String sourceTablePath, String icebergProperties)
+            throws Exception {
+
+        return call(procedureContext, sourceTablePath, icebergProperties, "");
+    }
+
     public String[] call(
             ProcedureContext procedureContext,
-            String connector,
             String sourceTablePath,
+            String icebergProperties,
+            String properties)
+            throws Exception {
+
+        return call(
+                procedureContext,
+                sourceTablePath,
+                icebergProperties,
+                properties,
+                Runtime.getRuntime().availableProcessors());
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String sourceTablePath,
+            String icebergProperties,
             String properties,
             Integer parallelism)
             throws Exception {
-        properties = notnull(properties);
-
-        String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
+        String targetTablePath = sourceTablePath + PAIMON_SUFFIX;
 
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
-        Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
-
-        Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
+        Identifier targetTableId = Identifier.fromString(targetTablePath);
 
         Migrator migrator =
-                TableMigrationUtils.getImporter(
-                        connector,
+                TableMigrationUtils.getIcebergImporter(
                         catalog,
                         sourceTableId.getDatabaseName(),
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
-                        p,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties));
+                        parallelism,
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties),
+                        ParameterUtils.parseCommaSeparatedKeyValues(icebergProperties));
         LOG.info("create migrator success.");
         migrator.executeMigrate();
 
