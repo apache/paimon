@@ -206,6 +206,7 @@ public class KeyValue {
                 .collect(Collectors.joining(", "));
     }
 
+    /** Copier for KeyValue. */
     public static class KeyValueCopier {
         private final InternalRowSerializer keySerializer;
         private final InternalRowSerializer valueSerializer;
