@@ -350,7 +350,6 @@ public class HiveCatalog extends AbstractCatalog {
         Identifier tableIdentifier =
                 Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
         Table hmsTable = getHmsTable(tableIdentifier);
-        Path location = getTableLocation(tableIdentifier, hmsTable);
         TableSchema schema = loadTableSchema(tableIdentifier, hmsTable);
 
         if (!metastorePartitioned(schema)) {
@@ -358,13 +357,14 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         int currentTime = (int) (System.currentTimeMillis() / 1000);
+        String tableLocation = getTableLocation(tableIdentifier, hmsTable).toUri().toString();
         StorageDescriptor sd = hmsTable.getSd();
         String dataFilePath =
                 hmsTable.getParameters().containsKey(DATA_FILE_PATH_DIRECTORY.key())
-                        ? sd.getLocation()
+                        ? tableLocation
                                 + "/"
                                 + hmsTable.getParameters().get(DATA_FILE_PATH_DIRECTORY.key())
-                        : sd.getLocation();
+                        : tableLocation;
         List<Partition> hivePartitions = new ArrayList<>();
         for (Map<String, String> partitionSpec : partitions) {
             Partition hivePartition = new Partition();
