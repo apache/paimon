@@ -259,6 +259,11 @@ public class BitmapFileIndexMeta {
                     public Function<Object, Integer> visitDouble() {
                         return o -> Double.BYTES;
                     }
+
+                    @Override
+                    public Function<Object, Integer> visitBoolean() {
+                        return o -> 1;
+                    }
                 });
     }
 

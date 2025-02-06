@@ -84,6 +84,7 @@ public class TestBitmapFileIndex {
     public void testV1() throws Exception {
         testIntType(BitmapFileIndex.VERSION_1);
         testStringType(BitmapFileIndex.VERSION_1);
+        testBooleanType(BitmapFileIndex.VERSION_1);
         testHighCardinality(BitmapFileIndex.VERSION_1, 1000000, 100000, null);
     }
 
@@ -91,6 +92,7 @@ public class TestBitmapFileIndex {
     public void testV2() throws Exception {
         testIntType(BitmapFileIndex.VERSION_2);
         testStringType(BitmapFileIndex.VERSION_2);
+        testBooleanType(BitmapFileIndex.VERSION_2);
         testHighCardinality(BitmapFileIndex.VERSION_2, 1000000, 100000, null);
     }
 
@@ -174,6 +176,27 @@ public class TestBitmapFileIndex {
                 .equals(RoaringBitmap32.bitmapOf(0, 1));
     }
 
+    void testBooleanType(int version) throws Exception {
+        FieldRef fieldRef = new FieldRef(0, "", DataTypes.BOOLEAN());
+        Object[] dataColumn = {Boolean.TRUE, Boolean.FALSE, Boolean.TRUE, Boolean.FALSE, null};
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        version,
+                        null,
+                        DataTypes.BOOLEAN(),
+                        writer -> {
+                            for (Object o : dataColumn) {
+                                writer.write(o);
+                            }
+                        });
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, Boolean.TRUE))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0, 2));
+        assert ((BitmapIndexResult) reader.visitIsNull(fieldRef))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(4));
+    }
+
     private void testHighCardinality(
             int version, int rowCount, int approxCardinality, Integer secondaryBlockSize)
             throws Exception {
@@ -214,30 +237,5 @@ public class TestBitmapFileIndex {
         RoaringBitmap32 resultNullBm = ((BitmapIndexResult) resultNull).get();
         System.out.println("read null bitmap time: " + (System.currentTimeMillis() - time3));
         assert resultNullBm.equals(nullBm);
-    }
-
-    @Test
-    void testBitmapIndexForBooleanType() {
-
-        BooleanType booleanType = new BooleanType();
-        FieldRef fieldRef = new FieldRef(0, "", booleanType);
-        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(booleanType, null);
-        FileIndexWriter writer = bitmapFileIndex.createWriter();
-
-        Object[] arr = {Boolean.TRUE, Boolean.FALSE, Boolean.TRUE, Boolean.FALSE, null};
-
-        for (Object o : arr) {
-            writer.write(o);
-        }
-        byte[] bytes = writer.serializedBytes();
-        ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
-        FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
-
-        BitmapIndexResult searchTrueResult =
-                (BitmapIndexResult) reader.visitEqual(fieldRef, Boolean.TRUE);
-        Assertions.assertThat(searchTrueResult.get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 2));
-
-        BitmapIndexResult searchNullResult = (BitmapIndexResult) reader.visitIsNull(fieldRef);
-        Assertions.assertThat(searchNullResult.get()).isEqualTo(RoaringBitmap32.bitmapOf(4));
     }
 }

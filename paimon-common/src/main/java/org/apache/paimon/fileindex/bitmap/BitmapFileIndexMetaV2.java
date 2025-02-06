@@ -188,6 +188,11 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                     public Comparator<Object> visitDouble() {
                         return Comparator.comparing(o -> ((Double) o));
                     }
+
+                    @Override
+                    public Comparator<Object> visitBoolean() {
+                        return Comparator.comparing(o -> ((Boolean) o));
+                    }
                 });
     }
 
