@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -25,7 +26,6 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
-import org.apache.paimon.flink.sorter.TableSorter.OrderType;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -51,14 +51,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.OrderType.HILBERT;
+import static org.apache.paimon.CoreOptions.OrderType.ORDER;
+import static org.apache.paimon.CoreOptions.OrderType.ZORDER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.sink.FlinkSink.isStreaming;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
-import static org.apache.paimon.flink.sorter.TableSorter.OrderType.HILBERT;
-import static org.apache.paimon.flink.sorter.TableSorter.OrderType.ORDER;
-import static org.apache.paimon.flink.sorter.TableSorter.OrderType.ZORDER;
 import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;

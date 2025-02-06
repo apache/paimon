@@ -19,11 +19,11 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.SortCompactSinkBuilder;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
-import org.apache.paimon.flink.sorter.TableSorter.OrderType;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
