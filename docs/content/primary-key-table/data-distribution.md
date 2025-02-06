@@ -48,6 +48,7 @@ Paimon will automatically expand the number of buckets.
 
 - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
 - Option2: `'dynamic-bucket.initial-buckets'`: controls the number of initialized bucket.
+- Option3: `'dynamic-bucket.max-buckets'`: controls the number of max buckets.
 
 {{< hint info >}}
 Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition

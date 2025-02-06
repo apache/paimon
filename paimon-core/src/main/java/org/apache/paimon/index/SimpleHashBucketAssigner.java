@@ -20,11 +20,15 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.utils.Int2ShortHashMap;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+
+import static org.apache.paimon.index.PartitionIndex.cacheBucketAndGet;
 
 /** When we need to overwrite the table, we should use this to avoid loading index. */
 public class SimpleHashBucketAssigner implements BucketAssigner {
@@ -32,14 +36,17 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
     private final int numAssigners;
     private final int assignId;
     private final long targetBucketRowNumber;
+    private final int maxBucketsNum;
 
     private final Map<BinaryRow, SimplePartitionIndex> partitionIndex;
 
-    public SimpleHashBucketAssigner(int numAssigners, int assignId, long targetBucketRowNumber) {
+    public SimpleHashBucketAssigner(
+            int numAssigners, int assignId, long targetBucketRowNumber, int maxBucketsNum) {
         this.numAssigners = numAssigners;
         this.assignId = assignId;
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.partitionIndex = new HashMap<>();
+        this.maxBucketsNum = maxBucketsNum;
     }
 
     @Override
@@ -71,7 +78,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
         private int currentBucket;
 
         private SimplePartitionIndex() {
-            bucketInformation = new HashMap<>();
+            bucketInformation = new LinkedHashMap<>();
             loadNewBucket();
         }
 
@@ -83,7 +90,15 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
 
             Long num = bucketInformation.computeIfAbsent(currentBucket, i -> 0L);
             if (num >= targetBucketRowNumber) {
-                loadNewBucket();
+                if (-1 != maxBucketsNum && bucketInformation.size() >= maxBucketsNum) {
+                    return cacheBucketAndGet(
+                            hash2Bucket,
+                            hash,
+                            KeyAndBucketExtractor.bucketWithUpperBound(
+                                    bucketInformation.keySet(), hash, maxBucketsNum));
+                } else {
+                    loadNewBucket();
+                }
             }
             bucketInformation.compute(currentBucket, (i, l) -> l == null ? 1L : l + 1);
             hash2Bucket.put(hash, (short) currentBucket);
