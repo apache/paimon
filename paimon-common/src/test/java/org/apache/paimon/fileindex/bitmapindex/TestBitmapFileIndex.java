@@ -26,6 +26,7 @@ import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexMetaV2;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
@@ -68,6 +69,15 @@ public class TestBitmapFileIndex {
                 > 0;
         assert BitmapFileIndexMetaV2.getComparator(new IntType()).compare(1, 2) < 0;
         assert BitmapFileIndexMetaV2.getComparator(new IntType()).compare(2, 1) > 0;
+    }
+
+    @Test
+    public void testMemorySize() {
+        assert MemorySize.parse("16kb").getBytes() == 16 * 1024;
+        assert MemorySize.parse("16KB").getBytes() == 16 * 1024;
+        assert MemorySize.parse("16 kb").getBytes() == 16 * 1024;
+        assert MemorySize.parse("16 KB").getBytes() == 16 * 1024;
+        assert MemorySize.parse("16384").getBytes() == 16 * 1024;
     }
 
     @Test
