@@ -156,4 +156,8 @@ public class DefaultValueAssigner {
         Map<String, String> defaultValues = coreOptions.getFieldDefaultValues();
         return new DefaultValueAssigner(defaultValues, schema.logicalRowType());
     }
+
+    public Map<String, String> getDefaultValues() {
+        return defaultValues;
+    }
 }
