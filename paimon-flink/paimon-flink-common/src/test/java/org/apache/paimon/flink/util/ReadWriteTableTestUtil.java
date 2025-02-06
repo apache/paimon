@@ -81,6 +81,8 @@ public class ReadWriteTableTestUtil {
         sEnv = StreamTableEnvironment.create(sExeEnv);
 
         bExeEnv = buildBatchEnv(parallelism, "none");
+        // set no default parallelism
+        bExeEnv.setParallelism(-1);
         bEnv = StreamTableEnvironment.create(bExeEnv, EnvironmentSettings.inBatchMode());
 
         ReadWriteTableTestUtil.warehouse = warehouse;
