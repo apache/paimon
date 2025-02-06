@@ -28,6 +28,7 @@ import org.apache.spark.sql.connector.expressions.FieldReference
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy.translateFilterV2WithMapping
+import org.apache.spark.sql.internal.connector.PredicateUtils
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.PartitioningUtils
@@ -72,6 +73,10 @@ object PaimonUtils {
 
   def translateFilterV2(predicate: Expression): Option[Predicate] = {
     translateFilterV2WithMapping(predicate, None)
+  }
+
+  def filterV2ToV1(predicate: Predicate): Option[Filter] = {
+    PredicateUtils.toV1(predicate)
   }
 
   def fieldReference(name: String): FieldReference = {

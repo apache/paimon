@@ -18,27 +18,12 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.Predicate
-import org.apache.paimon.table.Table
+import org.apache.paimon.table.KnownSplitsTable
 
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.connector.read.LocalScan
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.connector.read.Scan
 
-/** A scan does not require [[RDD]] to execute */
-case class PaimonLocalScan(
-    rows: Array[InternalRow],
-    readSchema: StructType,
-    table: Table,
-    filters: Array[Predicate])
-  extends LocalScan {
-
-  override def description(): String = {
-    val pushedFiltersStr = if (filters.nonEmpty) {
-      ", PushedFilters: [" + filters.mkString(",") + "]"
-    } else {
-      ""
-    }
-    s"PaimonLocalScan: [${table.name}]" + pushedFiltersStr
+class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonScanBuilder(table) {
+  override def build(): Scan = {
+    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPaimonPredicates)
   }
 }
