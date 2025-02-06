@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
 import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
@@ -100,6 +101,7 @@ public class SparkProcedures {
         procedureBuilders.put("mark_partition_done", MarkPartitionDoneProcedure::builder);
         procedureBuilders.put("compact_manifest", CompactManifestProcedure::builder);
         procedureBuilders.put("refresh_object_table", RefreshObjectTableProcedure::builder);
+        procedureBuilders.put("clear_consumers", ClearConsumersProcedure::builder);
         return procedureBuilders.build();
     }
 }
