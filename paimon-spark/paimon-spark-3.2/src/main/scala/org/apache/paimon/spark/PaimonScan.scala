@@ -35,6 +35,7 @@ case class PaimonScan(
     filters: Seq[Predicate],
     reservedFilters: Seq[Filter],
     override val pushDownLimit: Option[Int],
+    // no usage, just for compile compatibility
     bucketedScanDisabled: Boolean = true)
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
   with SupportsRuntimeFiltering {
