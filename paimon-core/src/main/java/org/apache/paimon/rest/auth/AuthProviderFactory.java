@@ -18,34 +18,22 @@
 
 package org.apache.paimon.rest.auth;
 
-import java.util.Optional;
+import org.apache.paimon.factories.Factory;
+import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.options.Options;
 
-/** Authentication provider. */
-public interface AuthProvider {
+/** Factory for {@link AuthProvider}. */
+public interface AuthProviderFactory extends Factory {
+    String identifier();
 
-    String generateAuthorization(RestAuthParameter restAuthParameter);
+    AuthProvider create(Options options);
 
-    String token();
-
-    boolean refresh();
-
-    default boolean supportRefresh() {
-        return false;
-    }
-
-    default boolean keepRefreshed() {
-        return false;
-    }
-
-    default boolean willSoonExpire() {
-        return false;
-    }
-
-    default Optional<Long> expiresAtMillis() {
-        return Optional.empty();
-    }
-
-    default Optional<Long> tokenRefreshInMills() {
-        return Optional.empty();
+    static AuthProvider createAuthProvider(String name, Options options) {
+        AuthProviderFactory factory =
+                FactoryUtil.discoverFactory(
+                        AuthProviderFactory.class.getClassLoader(),
+                        AuthProviderFactory.class,
+                        name);
+        return factory.create(options);
     }
 }
