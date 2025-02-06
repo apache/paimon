@@ -91,7 +91,7 @@ public class MongoDBSyncDatabaseActionFactory
                         + "It can't be a regular expression.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://github.com/apache/flink-cdc/blob/master/docs/content/docs/connectors/flink-sources/mongodb-cdc.md#connector-options");
+                        + "see https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/mongodb-cdc/#connector-options");
         System.out.println();
 
         System.out.println("Paimon catalog and table sink conf syntax:");
