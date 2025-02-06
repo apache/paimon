@@ -44,6 +44,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -100,6 +101,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
         spark.sql(
                 "CREATE TABLE T(a int) TBLPROPERTIES ("
                         + "'file-index.bitmap.columns'='a',"
+                        + "'file-index.bitmap.a.index-block-size'='32kb',"
                         + "'file-index.in-manifest-threshold'='1B');");
         spark.sql("INSERT INTO T VALUES (0),(1),(2),(3),(4),(5);");
 
@@ -112,9 +114,27 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
 
         // check index reader
         foreachIndexReader(
+                "T",
                 fileIndexReader -> {
                     FileIndexResult fileIndexResult =
                             fileIndexReader.visitEqual(new FieldRef(0, "", new IntType()), 3);
+                    assert fileIndexResult instanceof BitmapIndexResult;
+                    RoaringBitmap32 roaringBitmap32 = ((BitmapIndexResult) fileIndexResult).get();
+                    assert roaringBitmap32.equals(RoaringBitmap32.bitmapOf(3));
+                });
+
+        // test string type with null bitmap
+        spark.sql(
+                "CREATE TABLE T2(a string) TBLPROPERTIES ("
+                        + "'file-index.bitmap.columns'='a',"
+                        + "'file-index.in-manifest-threshold'='1B');");
+        spark.sql("INSERT INTO T2 VALUES ('0'),('1'),('1'),(null),('0'),('1');");
+        foreachIndexReader(
+                "T2",
+                fileIndexReader -> {
+                    FileIndexResult fileIndexResult =
+                            fileIndexReader.visitEqual(
+                                    new FieldRef(0, "", new VarCharType()), null);
                     assert fileIndexResult instanceof BitmapIndexResult;
                     RoaringBitmap32 roaringBitmap32 = ((BitmapIndexResult) fileIndexResult).get();
                     assert roaringBitmap32.equals(RoaringBitmap32.bitmapOf(3));
@@ -136,6 +156,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
 
         // check index reader
         foreachIndexReader(
+                "T",
                 fileIndexReader -> {
                     FileIndexResult fileIndexResult =
                             fileIndexReader.visitGreaterOrEqual(
@@ -146,9 +167,9 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                 });
     }
 
-    protected void foreachIndexReader(Consumer<FileIndexReader> consumer)
+    protected void foreachIndexReader(String tableName, Consumer<FileIndexReader> consumer)
             throws Catalog.TableNotExistException {
-        Path tableRoot = fileSystemCatalog.getTableLocation(Identifier.create("db", "T"));
+        Path tableRoot = fileSystemCatalog.getTableLocation(Identifier.create("db", tableName));
         SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
@@ -164,7 +185,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         null,
                         null);
 
-        Table table = fileSystemCatalog.getTable(Identifier.create("db", "T"));
+        Table table = fileSystemCatalog.getTable(Identifier.create("db", tableName));
         ReadBuilder readBuilder = table.newReadBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
         for (Split split : splits) {
