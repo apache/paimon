@@ -572,4 +572,18 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         }
     }
   }
+
+  test("Paimon DDL: rename table with catalog name") {
+    sql("USE default")
+    withTable("t1", "t2") {
+      sql("CREATE TABLE t1 (id INT) USING paimon")
+      sql("INSERT INTO t1 VALUES 1")
+      sql("ALTER TABLE paimon.default.t1 RENAME TO paimon.default.t2")
+      checkAnswer(sql("SELECT * FROM t2"), Row(1))
+
+      assert(intercept[Exception] {
+        sql("ALTER TABLE paimon.default.t2 RENAME TO spark_catalog.default.t2")
+      }.getMessage.contains("Only supports operations within the same catalog"))
+    }
+  }
 }

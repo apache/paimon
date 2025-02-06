@@ -73,6 +73,7 @@ import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
+import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 
 /** Spark {@link TableCatalog} for paimon. */
@@ -427,7 +428,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     public void renameTable(Identifier oldIdent, Identifier newIdent)
             throws NoSuchTableException, TableAlreadyExistsException {
         try {
-            catalog.renameTable(toIdentifier(oldIdent), toIdentifier(newIdent), false);
+            catalog.renameTable(
+                    toIdentifier(oldIdent),
+                    toIdentifier(removeCatalogName(newIdent, catalogName)),
+                    false);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(oldIdent);
         } catch (Catalog.TableAlreadyExistException e) {
