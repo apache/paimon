@@ -409,8 +409,8 @@ All available procedures are listed below.
       </td>
       <td>CALL sys.clear_consumers(`table` => 'default.T')<br/><br/>
           CALL sys.clear_consumers(`table` => 'default.T', including_consumers => 'myid.*')<br/><br/>
-          CALL sys.reset_consumer(table => 'default.T', including_consumers => '', excluding_consumers => 'myid1.*')<br/><br/>
-          CALL sys.reset_consumer(table => 'default.T', including_consumers => 'myid.*', excluding_consumers => 'myid1.*')
+          CALL sys.clear_consumers(table => 'default.T', including_consumers => '', excluding_consumers => 'myid1.*')<br/><br/>
+          CALL sys.clear_consumers(table => 'default.T', including_consumers => 'myid.*', excluding_consumers => 'myid1.*')
      </td>
    </tr>
    <tr>

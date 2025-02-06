@@ -351,11 +351,11 @@ This section introduce all available spark procedures about paimon.
          -- clear all consumers in the table<br/>
          CALL sys.clear_consumers(table => 'default.T')<br/><br/>
          -- clear some consumers in the table (accept regular expression)<br/>
-         CALL sys.reset_consumer(table => 'default.T', includingConsumers => 'myid.*')<br/><br/>
+         CALL sys.clear_consumers(table => 'default.T', includingConsumers => 'myid.*')<br/><br/>
          -- clear all consumers except excludingConsumers in the table (accept regular expression)<br/>
-         CALL sys.reset_consumer(table => 'default.T', includingConsumers => '', excludingConsumers => 'myid1.*')<br/><br/>
+         CALL sys.clear_consumers(table => 'default.T', includingConsumers => '', excludingConsumers => 'myid1.*')<br/><br/>
          -- clear all consumers with includingConsumers and excludingConsumers (accept regular expression)<br/>
-         CALL sys.reset_consumer(table => 'default.T', includingConsumers => 'myid.*', excludingConsumers => 'myid1.*')
+         CALL sys.clear_consumers(table => 'default.T', includingConsumers => 'myid.*', excludingConsumers => 'myid1.*')
       </td>
    </tr>
     <tr>
