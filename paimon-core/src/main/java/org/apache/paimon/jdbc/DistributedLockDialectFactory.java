@@ -26,6 +26,8 @@ class DistributedLockDialectFactory {
                 return new SqlLiteDistributedLockDialect();
             case MYSQL:
                 return new MysqlDistributedLockDialect();
+            case POSTGRESQL:
+                return new PostgresqlDistributedLockDialect();
             default:
                 throw new UnsupportedOperationException(
                         String.format("Distributed locks based on %s are not supported", protocol));
@@ -36,6 +38,7 @@ class DistributedLockDialectFactory {
     enum JdbcProtocol {
         SQLITE,
         MARIADB,
-        MYSQL
+        MYSQL,
+        POSTGRESQL
     }
 }
