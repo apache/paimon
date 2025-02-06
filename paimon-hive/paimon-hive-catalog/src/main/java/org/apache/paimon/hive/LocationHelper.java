@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
 import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
 
 import java.io.IOException;
@@ -40,4 +41,8 @@ public interface LocationHelper {
     void specifyDatabaseLocation(Path path, Database database);
 
     String getDatabaseLocation(Database database);
+
+    void specifyPartitionLocation(Partition partition, String location);
+
+    String getPartitionLocation(Partition partition);
 }

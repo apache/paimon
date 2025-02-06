@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
 import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
 
 import java.io.IOException;
@@ -81,5 +82,21 @@ public final class TBPropertiesLocationHelper implements LocationHelper {
         }
 
         return database.getLocationUri();
+    }
+
+    @Override
+    public void specifyPartitionLocation(Partition partition, String location) {
+        partition.putToParameters(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY, location);
+    }
+
+    @Override
+    public String getPartitionLocation(Partition partition) {
+        String location =
+                partition.getParameters().get(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY);
+        if (location != null) {
+            return location;
+        }
+
+        return partition.getSd().getLocation();
     }
 }
