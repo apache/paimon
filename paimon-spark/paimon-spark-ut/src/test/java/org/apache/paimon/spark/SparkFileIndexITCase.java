@@ -101,6 +101,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
         spark.sql(
                 "CREATE TABLE T(a int) TBLPROPERTIES ("
                         + "'file-index.bitmap.columns'='a',"
+                        + "'file-index.bitmap.a.index-block-size'='32kb',"
                         + "'file-index.in-manifest-threshold'='1B');");
         spark.sql("INSERT INTO T VALUES (0),(1),(2),(3),(4),(5);");
 

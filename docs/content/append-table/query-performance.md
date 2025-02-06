@@ -64,6 +64,7 @@ scenario. Using a bitmap may consume more space but can result in greater accura
 
 `Bitmap`:
 * `file-index.bitmap.columns`: specify the columns that need bitmap index.
+* `file-index.bitmap.<column_name>.index-block-size`: to config secondary index block size, default value is 16kb.
 
 `Bit-Slice Index Bitmap`
 * `file-index.bsi.columns`: specify the columns that need bsi index.

@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
@@ -28,6 +29,8 @@ import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -96,9 +99,9 @@ import java.util.function.Function;
  */
 public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
-    private int blockSizeLimit = 32 * 1024;
+    private long blockSizeLimit;
 
-    private LinkedList<BitmapIndexBlock> indexBlocks;
+    private List<BitmapIndexBlock> indexBlocks;
     private long indexBlockStart;
     private int nullBitmapLength;
 
@@ -126,7 +129,9 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                 nullValueOffset,
                 bitmapOffsets);
         this.nullBitmapLength = nullBitmapLength;
-        blockSizeLimit = options.getInteger(BitmapFileIndex.INDEX_BLOCK_SIZE, 16 * 1024);
+        blockSizeLimit =
+                MemorySize.parse(options.getString(BitmapFileIndex.INDEX_BLOCK_SIZE, "16kb"))
+                        .getBytes();
         if (enableNextOffsetToSize) {
             bitmapLengths = new HashMap<>();
             Object lastValue = null;
@@ -239,7 +244,8 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             out.writeInt(nullBitmapLength);
         }
 
-        indexBlocks = new LinkedList<>();
+        LinkedList<BitmapIndexBlock> indexBlocks = new LinkedList<>();
+        this.indexBlocks = indexBlocks;
         indexBlocks.add(new BitmapIndexBlock(0));
         Comparator<Object> comparator = getComparator(dataType);
         bitmapOffsets.entrySet().stream()
@@ -322,7 +328,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         int bitmapBlockNumber = in.readInt();
         indexBlockStart += Integer.BYTES;
 
-        indexBlocks = new LinkedList<>();
+        indexBlocks = new ArrayList<>(bitmapBlockNumber);
         for (int i = 0; i < bitmapBlockNumber; i++) {
             Object key = valueReader.get();
             int offset = in.readInt();
@@ -352,7 +358,6 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
         void tryDeserialize() {
             if (entryList == null) {
-                entryList = new LinkedList<>();
                 try {
                     seekableInputStream.seek(indexBlockStart + offset);
                     InputStream inputStream = seekableInputStream;
@@ -362,6 +367,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                     DataInputStream in = new DataInputStream(inputStream);
                     ThrowableSupplier valueReader = getValueReader(in);
                     int entryNum = in.readInt();
+                    entryList = new ArrayList<>(entryNum);
                     for (int i = 0; i < entryNum; i++) {
                         entryList.add(new Entry(valueReader.get(), in.readInt(), in.readInt()));
                     }
@@ -376,32 +382,35 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                 return true;
             }
             tryDeserialize();
-            for (Entry entry : entryList) {
-                if (entry.key.equals(bitmapId)) {
-                    return true;
-                }
-            }
-            return false;
+            Comparator<Object> comparator = getComparator(dataType);
+            int idx =
+                    Collections.binarySearch(
+                            entryList,
+                            new Entry(bitmapId, 0, 0),
+                            (e1, e2) -> comparator.compare(e1.key, e2.key));
+            return idx >= 0;
         }
 
         int getOffset(Object bitmapId) {
             tryDeserialize();
-            for (Entry entry : entryList) {
-                if (entry.key.equals(bitmapId)) {
-                    return entry.offset;
-                }
-            }
-            throw new RuntimeException("not exist");
+            Comparator<Object> comparator = getComparator(dataType);
+            int idx =
+                    Collections.binarySearch(
+                            entryList,
+                            new Entry(bitmapId, 0, 0),
+                            (e1, e2) -> comparator.compare(e1.key, e2.key));
+            return entryList.get(idx).offset;
         }
 
         int getLength(Object bitmapId) {
             tryDeserialize();
-            for (Entry entry : entryList) {
-                if (entry.key.equals(bitmapId)) {
-                    return entry.length;
-                }
-            }
-            throw new RuntimeException("not exist");
+            Comparator<Object> comparator = getComparator(dataType);
+            int idx =
+                    Collections.binarySearch(
+                            entryList,
+                            new Entry(bitmapId, 0, 0),
+                            (e1, e2) -> comparator.compare(e1.key, e2.key));
+            return entryList.get(idx).length;
         }
 
         boolean tryAdd(Entry entry) {
