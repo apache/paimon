@@ -56,8 +56,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class LookupChangelogMergeFunctionWrapper<T>
         implements MergeFunctionWrapper<ChangelogResult> {
 
-    private final LookupMergeFunction mergeFunction;
-    private final MergeFunction<KeyValue> mergeFunction2;
+    private final MergeFunction<KeyValue> mergeFunction;
     private final Function<InternalRow, T> lookup;
 
     private final ChangelogResult reusedResult = new ChangelogResult();
@@ -67,6 +66,9 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final LookupStrategy lookupStrategy;
     private final @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;
+
+    private final LinkedList<KeyValue> candidates = new LinkedList<>();
+    private final KeyValue.KeyValueCopier keyValueCopier;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
@@ -85,8 +87,8 @@ public class LookupChangelogMergeFunctionWrapper<T>
                     deletionVectorsMaintainer != null,
                     "deletionVectorsMaintainer should not be null, there is a bug.");
         }
-        this.mergeFunction = (LookupMergeFunction) mergeFunction;
-        this.mergeFunction2 = mergeFunctionFactory.create();
+        this.keyValueCopier = ((LookupMergeFunction) mergeFunction).keyValueCopier();
+        this.mergeFunction = mergeFunctionFactory.create();
         this.lookup = lookup;
         this.valueEqualiser = valueEqualiser;
         this.lookupStrategy = lookupStrategy;
@@ -96,18 +98,17 @@ public class LookupChangelogMergeFunctionWrapper<T>
 
     @Override
     public void reset() {
-        mergeFunction.reset();
+        candidates.clear();
     }
 
     @Override
     public void add(KeyValue kv) {
-        mergeFunction.add(kv);
+        candidates.add(kv.copy(keyValueCopier));
     }
 
     @Override
     public ChangelogResult getResult() {
         // 1. Compute the latest high level record and containLevel0 of candidates
-        LinkedList<KeyValue> candidates = mergeFunction.candidates();
         Iterator<KeyValue> descending = candidates.descendingIterator();
         KeyValue highLevel = null;
         boolean containLevel0 = false;
@@ -152,20 +153,20 @@ public class LookupChangelogMergeFunctionWrapper<T>
     }
 
     private KeyValue calculateResult(List<KeyValue> candidates, @Nullable KeyValue highLevel) {
-        mergeFunction2.reset();
+        mergeFunction.reset();
         for (KeyValue candidate : candidates) {
             if (highLevel != null && comparator.compare(highLevel, candidate) < 0) {
-                mergeFunction2.add(highLevel);
-                mergeFunction2.add(candidate);
+                mergeFunction.add(highLevel);
+                mergeFunction.add(candidate);
                 highLevel = null;
             } else {
-                mergeFunction2.add(candidate);
+                mergeFunction.add(candidate);
             }
         }
         if (highLevel != null) {
-            mergeFunction2.add(highLevel);
+            mergeFunction.add(highLevel);
         }
-        return mergeFunction2.getResult();
+        return mergeFunction.getResult();
     }
 
     private void setChangelog(@Nullable KeyValue before, KeyValue after) {
