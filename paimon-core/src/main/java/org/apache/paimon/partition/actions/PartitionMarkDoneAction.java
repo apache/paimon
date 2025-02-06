@@ -37,6 +37,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Action to mark partitions done. */
 public interface PartitionMarkDoneAction extends Closeable {
 
+    default void open(FileStoreTable fileStoreTable, CoreOptions options) {}
+
     void markDone(String partition) throws Exception;
 
     static List<PartitionMarkDoneAction> createActions(
@@ -55,13 +57,14 @@ public interface PartitionMarkDoneAction extends Closeable {
                                     return new MarkPartitionDoneEventAction(
                                             createPartitionHandler(fileStoreTable, options));
                                 case HTTP_REPORT:
-                                    return new HttpReportMarkDoneAction(fileStoreTable, options);
+                                    return new HttpReportMarkDoneAction();
                                 case CUSTOM:
                                     return generateCustomMarkDoneAction(cl, options);
                                 default:
                                     throw new UnsupportedOperationException(action.toString());
                             }
                         })
+                .peek(action -> action.open(fileStoreTable, options))
                 .collect(Collectors.toList());
     }
 

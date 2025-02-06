@@ -167,6 +167,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
     @MethodSource("testArguments")
     public void testCustomPartitionMarkDoneAction(boolean hasPk, String invoker) throws Exception {
 
+        MockCustomPartitionMarkDoneAction.getMarkedDonePartitions().clear();
         Map<String, String> options = new HashMap<>(2);
         options.put(PARTITION_MARK_DONE_ACTION.key(), SUCCESS_FILE + "," + CUSTOM);
         options.put(
@@ -174,6 +175,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                 MockCustomPartitionMarkDoneAction.class.getName());
 
         FileStoreTable table = prepareTable(hasPk, options);
+        String fullTableName = table.fullName();
 
         switch (invoker) {
             case "action":
@@ -217,7 +219,9 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
         assertThat(successFile2).isNotNull();
 
         assertThat(MockCustomPartitionMarkDoneAction.getMarkedDonePartitions())
-                .containsExactlyInAnyOrder("partKey0=0/partKey1=1/", "partKey0=1/partKey1=0/");
+                .containsExactlyInAnyOrder(
+                        "table=" + fullTableName + ",partition=partKey0=0/partKey1=1/",
+                        "table=" + fullTableName + ",partition=partKey0=1/partKey1=0/");
     }
 
     @ParameterizedTest

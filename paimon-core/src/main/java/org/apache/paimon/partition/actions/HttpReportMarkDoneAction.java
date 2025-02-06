@@ -55,20 +55,22 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 /** Report partition submission information to remote http server. */
 public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
 
-    private final OkHttpClient client;
-    private final String url;
-    private final ObjectMapper mapper;
+    private OkHttpClient client;
+    private String url;
+    private ObjectMapper mapper;
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
-    private final FileStoreTable fileStoreTable;
+    private String tableName;
+    private String location;
 
-    private final String params;
+    private String params;
 
     private static final String RESPONSE_SUCCESS = "SUCCESS";
 
     private static final String THREAD_NAME = "PAIMON-HTTP-REPORT-MARK-DONE-ACTION-THREAD";
 
-    public HttpReportMarkDoneAction(FileStoreTable fileStoreTable, CoreOptions options) {
+    @Override
+    public void open(FileStoreTable fileStoreTable, CoreOptions options) {
 
         Preconditions.checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(options.httpReportMarkDoneActionUrl()),
@@ -76,9 +78,11 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
                         "Parameter %s must be non-empty when you use `http-report` partition mark done action.",
                         PARTITION_MARK_DONE_ACTION_URL.key()));
 
-        this.fileStoreTable = fileStoreTable;
         this.params = options.httpReportMarkDoneActionParams();
         this.url = options.httpReportMarkDoneActionUrl();
+        this.tableName = fileStoreTable.fullName();
+        this.location = fileStoreTable.location().toString();
+
         this.mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
@@ -102,10 +106,7 @@ public class HttpReportMarkDoneAction implements PartitionMarkDoneAction {
         HttpReportMarkDoneResponse response =
                 post(
                         new HttpReportMarkDoneRequest(
-                                params,
-                                fileStoreTable.fullName(),
-                                fileStoreTable.location().toString(),
-                                partition),
+                                params, this.tableName, this.location, partition),
                         Collections.emptyMap());
         Preconditions.checkState(
                 reportIsSuccess(response),

@@ -80,7 +80,8 @@ public class HttpReportMarkDoneActionTest {
 
     @Test
     public void testHttpReportMarkDoneActionSuccessResponse() throws Exception {
-        HttpReportMarkDoneAction httpReportMarkDoneAction = createHttpReportMarkDoneAction();
+        HttpReportMarkDoneAction httpReportMarkDoneAction = new HttpReportMarkDoneAction();
+        httpReportMarkDoneAction.open(fileStoreTable, createCoreOptions());
 
         server.enqueueResponse(successResponse, 200);
 
@@ -97,7 +98,9 @@ public class HttpReportMarkDoneActionTest {
 
         // test params is null.
         params = null;
-        HttpReportMarkDoneAction httpReportMarkDoneAction3 = createHttpReportMarkDoneAction();
+        HttpReportMarkDoneAction httpReportMarkDoneAction3 = new HttpReportMarkDoneAction();
+        httpReportMarkDoneAction3.open(fileStoreTable, createCoreOptions());
+
         server.enqueueResponse(successResponse, 200);
         httpReportMarkDoneAction3.markDone(partition);
         RecordedRequest request3 = server.takeRequest(10, TimeUnit.SECONDS);
@@ -105,8 +108,9 @@ public class HttpReportMarkDoneActionTest {
     }
 
     @Test
-    public void testHttpReportMarkDoneActionFailedResponse() throws Exception {
-        HttpReportMarkDoneAction markDoneAction = createHttpReportMarkDoneAction();
+    public void testHttpReportMarkDoneActionFailedResponse() {
+        HttpReportMarkDoneAction markDoneAction = new HttpReportMarkDoneAction();
+        markDoneAction.open(fileStoreTable, createCoreOptions());
 
         // status failed.
         server.enqueueResponse(failedResponse, 200);
@@ -158,10 +162,6 @@ public class HttpReportMarkDoneActionTest {
             httpOptions.put(PARTITION_MARK_DONE_ACTION_PARAMS.key(), params);
         }
         return new CoreOptions(httpOptions);
-    }
-
-    public HttpReportMarkDoneAction createHttpReportMarkDoneAction() {
-        return new HttpReportMarkDoneAction(fileStoreTable, createCoreOptions());
     }
 
     public FileStoreTable createFileStoreTable() throws Exception {

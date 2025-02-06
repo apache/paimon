@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
+import org.apache.paimon.table.FileStoreTable;
 
 import java.io.IOException;
 import java.util.HashSet;
@@ -29,9 +31,17 @@ public class MockCustomPartitionMarkDoneAction implements PartitionMarkDoneActio
 
     private static final Set<String> markedDonePartitions = new HashSet<>();
 
+    private String tableName;
+
+    @Override
+    public void open(FileStoreTable fileStoreTable, CoreOptions options) {
+        this.tableName = fileStoreTable.fullName();
+    }
+
     @Override
     public void markDone(String partition) {
-        MockCustomPartitionMarkDoneAction.markedDonePartitions.add(partition);
+        MockCustomPartitionMarkDoneAction.markedDonePartitions.add(
+                String.format("table=%s,partition=%s", tableName, partition));
     }
 
     public static Set<String> getMarkedDonePartitions() {
