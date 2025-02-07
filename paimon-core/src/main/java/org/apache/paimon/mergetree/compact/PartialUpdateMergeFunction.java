@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastNonNullValueAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldPrimaryKeyAggFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
@@ -548,8 +549,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
                 String aggFuncName = getAggFuncName(options, fieldName);
                 if (aggFuncName != null) {
+                    // last_non_null_value doesn't require sequence group
                     checkArgument(
-                            fieldSeqComparators.containsKey(fieldNames.indexOf(fieldName)),
+                            aggFuncName.equals(FieldLastNonNullValueAggFactory.NAME)
+                                    || fieldSeqComparators.containsKey(
+                                            fieldNames.indexOf(fieldName)),
                             "Must use sequence group for aggregation functions but not found for field %s.",
                             fieldName);
                     fieldAggregators.put(
