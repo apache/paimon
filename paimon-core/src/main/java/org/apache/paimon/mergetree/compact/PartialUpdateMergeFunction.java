@@ -549,8 +549,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 String aggFuncName = getAggFuncName(options, fieldName);
                 if (aggFuncName != null) {
                     checkArgument(
-                            !fieldSeqComparators.isEmpty(),
-                            "Must use sequence group for aggregation functions.");
+                            fieldSeqComparators.containsKey(fieldNames.indexOf(fieldName)),
+                            "Must use sequence group for aggregation functions but not found for field %s.",
+                            fieldName);
                     fieldAggregators.put(
                             i,
                             () ->
