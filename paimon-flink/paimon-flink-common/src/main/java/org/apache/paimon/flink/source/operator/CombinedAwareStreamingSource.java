@@ -129,6 +129,9 @@ public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2
                 .partitionCustom(
                         (key, numPartitions) -> key % numPartitions,
                         split -> ((DataSplit) split.f0).bucket())
-                .transform(name, typeInfo, new MultiTablesReadOperator(catalogLoader, true));
+                .transform(
+                        name + "-transform",
+                        typeInfo,
+                        new MultiTablesReadOperator(catalogLoader, true));
     }
 }
