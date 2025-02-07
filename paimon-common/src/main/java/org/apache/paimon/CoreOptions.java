@@ -35,6 +35,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Pair;
@@ -2245,7 +2246,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean writeOnly() {
-        return options.get(WRITE_ONLY);
+        return options.get(WRITE_ONLY) || options.get(BUCKET) == BucketMode.POSTPONE_BUCKET;
     }
 
     public boolean streamingReadOverwrite() {

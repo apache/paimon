@@ -112,7 +112,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreScan newScan() {
-        return newScan(false);
+        return newScan(ScanType.FOR_READ);
     }
 
     @Override
@@ -182,7 +182,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
-                newScan(true).withManifestCacheFilter(manifestFilter),
+                newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 deletionVectorsMaintainerFactory,
                 options,
@@ -198,7 +198,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return pathFactoryMap;
     }
 
-    private KeyValueFileStoreScan newScan(boolean forWrite) {
+    @Override
+    protected KeyValueFileStoreScan newScan(ScanType scanType) {
         BucketSelectConverter bucketSelectConverter =
                 keyFilter -> {
                     if (bucketMode() != BucketMode.HASH_FIXED) {
@@ -210,24 +211,29 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                                     splitAnd(keyFilter),
                                     keyType.getFieldNames(),
                                     bucketKeyType.getFieldNames());
-                    if (bucketFilters.size() > 0) {
+                    if (!bucketFilters.isEmpty()) {
                         return BucketSelectConverter.create(and(bucketFilters), bucketKeyType);
                     }
                     return Optional.empty();
                 };
+
+        boolean onlyReadRealBuckets =
+                options.bucket() == BucketMode.POSTPONE_BUCKET && scanType == ScanType.FOR_READ;
+
         return new KeyValueFileStoreScan(
-                newManifestsReader(forWrite),
+                newManifestsReader(scanType == ScanType.FOR_WRITE),
                 bucketSelectConverter,
                 snapshotManager(),
                 schemaManager,
                 schema,
                 keyValueFieldsExtractor,
-                manifestFileFactory(forWrite),
+                manifestFileFactory(scanType == ScanType.FOR_WRITE),
                 options.scanManifestParallelism(),
                 options.deletionVectorsEnabled(),
                 options.mergeEngine(),
                 options.changelogProducer(),
-                options.fileIndexReadEnabled() && options.deletionVectorsEnabled());
+                options.fileIndexReadEnabled() && options.deletionVectorsEnabled(),
+                onlyReadRealBuckets);
     }
 
     @Override
