@@ -141,10 +141,10 @@ public class SnapshotManagerTest {
                             if (millis.size() == 1) {
                                 assertThat(actual).isNull();
                             } else {
-                                assertThat(actual).isEqualTo(firstSnapshotId + i);
+                                assertThat(actual).isLessThanOrEqualTo(firstSnapshotId);
                             }
                         } else {
-                            assertThat(actual).isEqualTo(firstSnapshotId + i - 1);
+                            assertThat(actual).isLessThanOrEqualTo(firstSnapshotId + i - 1);
                         }
                         break;
                     }

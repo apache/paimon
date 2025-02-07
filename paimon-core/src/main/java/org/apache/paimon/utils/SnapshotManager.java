@@ -164,11 +164,17 @@ public class SnapshotManager implements Serializable {
     }
 
     private @Nullable Snapshot tryGetEarliestSnapshotLaterThanOrEqualTo(
-            long snapshotId, long stopSnapshotId) {
+            long snapshotId, long stopSnapshotId, boolean includeChangelog) {
+        FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction =
+                includeChangelog ? this::tryGetChangelogOrSnapshot : this::tryGetSnapshot;
         while (snapshotId <= stopSnapshotId) {
             try {
-                return tryGetSnapshot(snapshotId);
+                return snapshotFunction.apply(snapshotId);
             } catch (FileNotFoundException e) {
+                LOG.warn(
+                        "The earliest snapshot or changelog was once identified but disappeared. "
+                                + "It might have been expired by other jobs operating on this table. "
+                                + "Searching for the second earliest snapshot or changelog instead. ");
                 snapshotId++;
             }
         }
@@ -230,23 +236,7 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Long latestSnapshotId = null;
-        do {
-            try {
-                return tryGetSnapshot(snapshotId);
-            } catch (FileNotFoundException e) {
-                LOG.warn(
-                        "The earliest snapshot was once identified but disappeared. "
-                                + "It might have been expired by other jobs operating on this table. "
-                                + "Searching for the second earliest snapshot instead. ");
-                snapshotId++;
-                if (latestSnapshotId == null) {
-                    latestSnapshotId = latestSnapshotId();
-                }
-            }
-        } while (latestSnapshotId != null && snapshotId <= latestSnapshotId);
-
-        return null;
+        return tryGetEarliestSnapshotLaterThanOrEqualTo(snapshotId, snapshotId + 1, false);
     }
 
     public @Nullable Long earliestSnapshotId() {
@@ -331,19 +321,8 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Snapshot earliestSnapshot = null;
-        while (earliest <= latest) {
-            try {
-                earliestSnapshot = tryGetChangelogOrSnapshot(earliest);
-                break;
-            } catch (FileNotFoundException e) {
-                LOG.warn(
-                        "The earliest snapshot or changelog was once identified but disappeared. "
-                                + "It might have been expired by other jobs operating on this table. "
-                                + "Searching for the second earliest snapshot or changelog instead. ");
-                earliest++;
-            }
-        }
+        Snapshot earliestSnapshot =
+                tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest, true);
 
         if (earliestSnapshot == null || earliestSnapshot.timeMillis() >= timestampMills) {
             return earliest - 1;
@@ -371,7 +350,8 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Snapshot earliestSnapShot = tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest);
+        Snapshot earliestSnapShot =
+                tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest, false);
 
         if (earliestSnapShot == null || earliestSnapShot.timeMillis() > timestampMills) {
             return earliestSnapShot;
@@ -436,7 +416,8 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Snapshot earliestSnapShot = tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest);
+        Snapshot earliestSnapShot =
+                tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest, false);
 
         if (earliestSnapShot == null) {
             return null;
@@ -447,7 +428,8 @@ public class SnapshotManager implements Serializable {
         if ((earliestWatermark = earliestSnapShot.watermark()) == null) {
             while (earliest < latest) {
                 earliest++;
-                Snapshot snapshot = tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest);
+                Snapshot snapshot =
+                        tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest, false);
                 if (snapshot == null) {
                     continue;
                 }
@@ -462,7 +444,7 @@ public class SnapshotManager implements Serializable {
         }
 
         if (earliestWatermark >= watermark) {
-            return tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest);
+            return tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest, false);
         }
         Snapshot finalSnapshot = null;
 
@@ -506,7 +488,8 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Snapshot earliestSnapShot = tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest);
+        Snapshot earliestSnapShot =
+                tryGetEarliestSnapshotLaterThanOrEqualTo(earliest, latest, false);
 
         if (earliestSnapShot == null) {
             return null;
