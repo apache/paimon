@@ -130,7 +130,7 @@ public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2
                         (key, numPartitions) -> key % numPartitions,
                         split -> ((DataSplit) split.f0).bucket())
                 .transform(
-                        name + "-toRow",
+                        "BucketsTableReader",
                         typeInfo,
                         new MultiTablesReadOperator(catalogLoader, true));
     }
