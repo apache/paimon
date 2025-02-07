@@ -264,17 +264,18 @@ public class BitmapFileIndex implements FileIndexer {
 
         private RoaringBitmap32 readBitmap(Object bitmapId) {
             try {
-                if (!bitmapFileIndexMeta.contains(bitmapId)) {
+                BitmapFileIndexMeta.Entry entry = bitmapFileIndexMeta.findEntry(bitmapId);
+                if (entry == null) {
                     return new RoaringBitmap32();
                 } else {
-                    int offset = bitmapFileIndexMeta.getOffset(bitmapId);
+                    int offset = entry.offset;
                     if (offset < 0) {
                         return RoaringBitmap32.bitmapOf(-1 - offset);
                     } else {
                         seekableInputStream.seek(bitmapFileIndexMeta.getBodyStart() + offset);
                         RoaringBitmap32 bitmap = new RoaringBitmap32();
                         if (enableNextOffsetToSize) {
-                            int length = bitmapFileIndexMeta.getLength(bitmapId);
+                            int length = entry.length;
                             if (length != -1) {
                                 DataInputStream input = new DataInputStream(seekableInputStream);
                                 byte[] bytes = new byte[length];

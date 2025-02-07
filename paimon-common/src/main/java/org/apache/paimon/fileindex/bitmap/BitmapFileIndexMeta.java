@@ -137,25 +137,25 @@ public class BitmapFileIndexMeta {
         return bodyStart;
     }
 
-    public boolean contains(Object bitmapId) {
+    /**
+     * Find entry for bitmap.
+     *
+     * @param bitmapId the bitmap identifier to be searched.
+     * @return an {@link Entry} which contains offset and length of bitmap if it is contained in the
+     *     index meta; otherwise `null`.
+     */
+    public Entry findEntry(Object bitmapId) {
+        int length = bitmapLengths == null ? -1 : bitmapLengths.getOrDefault(bitmapId, -1);
         if (bitmapId == null) {
-            return hasNullValue;
+            if (hasNullValue) {
+                return new Entry(null, nullValueOffset, length);
+            }
+        } else {
+            if (bitmapOffsets.containsKey(bitmapId)) {
+                return new Entry(bitmapId, bitmapOffsets.get(bitmapId), length);
+            }
         }
-        return bitmapOffsets.containsKey(bitmapId);
-    }
-
-    public int getOffset(Object bitmapId) {
-        if (bitmapId == null) {
-            return nullValueOffset;
-        }
-        return bitmapOffsets.get(bitmapId);
-    }
-
-    public int getLength(Object bitmapId) {
-        if (bitmapLengths == null) {
-            return -1;
-        }
-        return bitmapLengths.getOrDefault(bitmapId, -1);
+        return null;
     }
 
     public void serialize(DataOutput out) throws Exception {
@@ -502,6 +502,20 @@ public class BitmapFileIndexMeta {
         @Override
         public final R visit(VariantType rowType) {
             throw new UnsupportedOperationException("Does not support type variant");
+        }
+    }
+
+    /** Bitmap entry. */
+    public static class Entry {
+
+        Object key;
+        int offset;
+        int length;
+
+        public Entry(Object key, int offset, int length) {
+            this.key = key;
+            this.offset = offset;
+            this.length = length;
         }
     }
 }

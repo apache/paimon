@@ -197,30 +197,18 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
     }
 
     @Override
-    public boolean contains(Object bitmapId) {
+    public Entry findEntry(Object bitmapId) {
         if (bitmapId == null) {
-            return hasNullValue;
+            if (hasNullValue) {
+                return new Entry(null, nullValueOffset, nullBitmapLength);
+            }
+        } else {
+            BitmapIndexBlock block = findBlock(bitmapId);
+            if (block != null) {
+                return block.findEntry(bitmapId);
+            }
         }
-        BitmapIndexBlock block = findBlock(bitmapId);
-        return block != null && block.contains(bitmapId);
-    }
-
-    @Override
-    public int getOffset(Object bitmapId) {
-        if (bitmapId == null) {
-            return nullValueOffset;
-        }
-        BitmapIndexBlock block = findBlock(bitmapId);
-        return block.getOffset(bitmapId);
-    }
-
-    @Override
-    public int getLength(Object bitmapId) {
-        if (bitmapId == null) {
-            return nullBitmapLength;
-        }
-        BitmapIndexBlock block = findBlock(bitmapId);
-        return block.getLength(bitmapId);
+        return null;
     }
 
     private BitmapIndexBlock findBlock(Object bitmapId) {
@@ -378,34 +366,16 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             }
         }
 
-        boolean contains(Object bitmapId) {
-            if (key.equals(bitmapId)) {
-                return true;
+        Entry findEntry(Object bitmapId) {
+            tryDeserialize();
+            Comparator<Object> comparator = getComparator(dataType);
+            int idx =
+                    Collections.binarySearch(
+                            entryList, null, (e1, ignore) -> comparator.compare(e1.key, bitmapId));
+            if (idx >= 0) {
+                return entryList.get(idx);
             }
-            tryDeserialize();
-            Comparator<Object> comparator = getComparator(dataType);
-            int idx =
-                    Collections.binarySearch(
-                            entryList, null, (e1, ignore) -> comparator.compare(e1.key, bitmapId));
-            return idx >= 0;
-        }
-
-        int getOffset(Object bitmapId) {
-            tryDeserialize();
-            Comparator<Object> comparator = getComparator(dataType);
-            int idx =
-                    Collections.binarySearch(
-                            entryList, null, (e1, ignore) -> comparator.compare(e1.key, bitmapId));
-            return entryList.get(idx).offset;
-        }
-
-        int getLength(Object bitmapId) {
-            tryDeserialize();
-            Comparator<Object> comparator = getComparator(dataType);
-            int idx =
-                    Collections.binarySearch(
-                            entryList, null, (e1, ignore) -> comparator.compare(e1.key, bitmapId));
-            return entryList.get(idx).length;
+            return null;
         }
 
         boolean tryAdd(Entry entry) {
@@ -440,20 +410,6 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             this.key = key;
             this.offset = offset;
             this.seekableInputStream = seekableInputStream;
-        }
-    }
-
-    /** Bitmap entry. */
-    static class Entry {
-
-        Object key;
-        int offset;
-        int length;
-
-        public Entry(Object key, int offset, int length) {
-            this.key = key;
-            this.offset = offset;
-            this.length = length;
         }
     }
 }
