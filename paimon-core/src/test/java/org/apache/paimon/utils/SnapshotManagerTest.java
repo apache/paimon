@@ -221,7 +221,7 @@ public class SnapshotManagerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testlaterOrEqualWatermark(boolean isRaceCondition) throws IOException {
+    public void testLaterOrEqualWatermark(boolean isRaceCondition) throws IOException {
         long millis = Long.MIN_VALUE;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
