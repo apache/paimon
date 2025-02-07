@@ -55,13 +55,15 @@ public class MongoDBSyncDatabaseActionFactory
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mongodb_sync_database --warehouse <warehouse_path> --database <database_name> "
-                        + "[--table_prefix <paimon_table_prefix>] "
-                        + "[--table_suffix <paimon_table_suffix>] "
-                        + "[--including_tables <mongodb_table_name|name_regular_expr>] "
-                        + "[--excluding_tables <mongodb_table_name|name_regular_expr>] "
-                        + "[--mongodb_conf <mongodb_cdc_source_conf> [--mongodb_conf <mongodb_cdc_source_conf> ...]] "
-                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                "  mongodb_sync_database \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "[--table_prefix <paimon_table_prefix>] \\\n"
+                        + "[--table_suffix <paimon_table_suffix>] \\\n"
+                        + "[--including_tables <mongodb_table_name|name_regular_expr>] \\\n"
+                        + "[--excluding_tables <mongodb_table_name|name_regular_expr>] \\\n"
+                        + "[--mongodb_conf <mongodb_cdc_source_conf> [--mongodb_conf <mongodb_cdc_source_conf> ...]] \\\n"
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
