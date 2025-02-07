@@ -357,8 +357,8 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         int currentTime = (int) (System.currentTimeMillis() / 1000);
-        String dataFilePath = getDataFilePath(tableIdentifier, hmsTable);
         StorageDescriptor sd = hmsTable.getSd();
+        String dataFilePath = getDataFilePath(tableIdentifier, hmsTable);
         List<Partition> hivePartitions = new ArrayList<>();
         for (Map<String, String> partitionSpec : partitions) {
             Partition hivePartition = new Partition();
@@ -391,18 +391,12 @@ public class HiveCatalog extends AbstractCatalog {
                     tagToPart
                             ? partitions
                             : removePartitionsExistsInOtherBranches(identifier, partitions);
+            Table hmsTable = getHmsTable(identifier);
+            boolean externalTable = isExternalTable(hmsTable);
+            String dataFilePath = getDataFilePath(identifier, hmsTable);
             for (Map<String, String> part : metaPartitions) {
                 List<String> partitionValues = new ArrayList<>(part.values());
                 try {
-                    Partition partition =
-                            clients.run(
-                                    client ->
-                                            client.getPartition(
-                                                    identifier.getDatabaseName(),
-                                                    identifier.getTableName(),
-                                                    partitionValues));
-                    String partitionLocation = locationHelper.getPartitionLocation(partition);
-                    locationHelper.dropPathIfRequired(new Path(partitionLocation), fileIO);
                     clients.execute(
                             client ->
                                     client.dropPartition(
@@ -410,6 +404,11 @@ public class HiveCatalog extends AbstractCatalog {
                                             identifier.getTableName(),
                                             partitionValues,
                                             false));
+
+                    if (!externalTable) {
+                        String partitionLocation = getPartitionLocation(dataFilePath, part);
+                        locationHelper.dropPathIfRequired(new Path(partitionLocation), fileIO);
+                    }
                 } catch (NoSuchObjectException e) {
                     // do nothing if the partition not exists
                 } catch (Exception e) {
