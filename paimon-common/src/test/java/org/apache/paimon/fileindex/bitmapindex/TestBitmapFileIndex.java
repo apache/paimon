@@ -147,6 +147,7 @@ public class TestBitmapFileIndex {
         assert ((BitmapIndexResult) reader.visitIn(fieldRef, Arrays.asList(a, b)))
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 2, 4));
+        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c")).remain();
     }
 
     private void testIntType(int version) throws Exception {
@@ -174,6 +175,7 @@ public class TestBitmapFileIndex {
         assert ((BitmapIndexResult) reader.visitIn(fieldRef, Arrays.asList(0, 1, 2)))
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 1));
+        assert !reader.visitEqual(fieldRef, 2).remain();
     }
 
     void testBooleanType(int version) throws Exception {

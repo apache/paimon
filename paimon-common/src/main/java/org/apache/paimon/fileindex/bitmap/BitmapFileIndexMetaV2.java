@@ -225,15 +225,11 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
     private BitmapIndexBlock findBlock(Object bitmapId) {
         Comparator<Object> comparator = getComparator(dataType);
-        BitmapIndexBlock prev = null;
-        for (BitmapIndexBlock block : indexBlocks) {
-            int cmp = comparator.compare(bitmapId, block.key);
-            if (cmp < 0) {
-                return prev;
-            }
-            prev = block;
-        }
-        return prev;
+        int idx =
+                Collections.binarySearch(
+                        indexBlocks, null, (b1, ignore) -> comparator.compare(b1.key, bitmapId));
+        idx = idx < 0 ? -2 - idx : idx;
+        return idx < 0 ? null : indexBlocks.get(idx);
     }
 
     @Override
@@ -390,9 +386,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             Comparator<Object> comparator = getComparator(dataType);
             int idx =
                     Collections.binarySearch(
-                            entryList,
-                            new Entry(bitmapId, 0, 0),
-                            (e1, e2) -> comparator.compare(e1.key, e2.key));
+                            entryList, null, (e1, ignore) -> comparator.compare(e1.key, bitmapId));
             return idx >= 0;
         }
 
@@ -401,9 +395,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             Comparator<Object> comparator = getComparator(dataType);
             int idx =
                     Collections.binarySearch(
-                            entryList,
-                            new Entry(bitmapId, 0, 0),
-                            (e1, e2) -> comparator.compare(e1.key, e2.key));
+                            entryList, null, (e1, ignore) -> comparator.compare(e1.key, bitmapId));
             return entryList.get(idx).offset;
         }
 
@@ -412,9 +404,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             Comparator<Object> comparator = getComparator(dataType);
             int idx =
                     Collections.binarySearch(
-                            entryList,
-                            new Entry(bitmapId, 0, 0),
-                            (e1, e2) -> comparator.compare(e1.key, e2.key));
+                            entryList, null, (e1, ignore) -> comparator.compare(e1.key, bitmapId));
             return entryList.get(idx).length;
         }
 
