@@ -132,7 +132,10 @@ public class DynamicBloomFilterFileIndex implements FileIndexer {
         @Override
         public void write(Object key) {
             if (key != null) {
-                filter.addHash(hashFunction.hash(key));
+                long hash = hashFunction.hash(key);
+                if (!filter.testHash(hash)) {
+                    filter.addHash(hash);
+                }
             }
         }
 

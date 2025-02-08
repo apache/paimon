@@ -1365,7 +1365,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1422,13 +1422,13 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.INT(),
-                                DataTypes.INT(),
-                                DataTypes.INT(),
-                                DataTypes.INT(),
-                                DataTypes.INT(),
-                                DataTypes.INT(),
-                                DataTypes.INT()
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "seq1", "c", "d", "seq2"});
         FileStoreTable table =
@@ -1506,7 +1506,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1557,7 +1557,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1602,7 +1602,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1628,7 +1628,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
                         },
                         new String[] {"pt", "a", "b", "c"});
         FileStoreTable table =
@@ -1656,10 +1656,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 + "|"
                                 + getField.apply(row, 3);
         assertThat(
-                getResult(
-                        readBuilder.newRead(),
-                        readBuilder.newScan().plan().splits(),
-                        toString))
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                toString))
                 .containsExactly("1|1|3|null");
     }
 
@@ -1680,10 +1680,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         ReadBuilder readBuilder = table.newReadBuilder();
         assertThat(
-                getResult(
-                        readBuilder.newRead(),
-                        readBuilder.newScan().plan().splits(),
-                        BATCH_ROW_TO_STRING))
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                BATCH_ROW_TO_STRING))
                 .containsExactly("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
 
         write.write(rowData(1, 10, 200L));
@@ -1700,10 +1700,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.close();
 
         assertThat(
-                getResult(
-                        readBuilder.newRead(),
-                        readBuilder.newScan().plan().splits(),
-                        BATCH_ROW_TO_STRING))
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                BATCH_ROW_TO_STRING))
                 .containsExactly("1|10|200|binary|varbinary|mapKey:mapVal|multiset");
     }
 
@@ -2071,12 +2071,12 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(latestSnapshot.totalRecordCount()).isEqualTo(1);
 
         assertThat(
-                getResult(
-                        table.newRead(),
-                        toSplits(table.newSnapshotReader().read().dataSplits()),
-                        binaryRow(1),
-                        0,
-                        BATCH_ROW_TO_STRING))
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                binaryRow(1),
+                                0,
+                                BATCH_ROW_TO_STRING))
                 .isEqualTo(
                         Collections.singletonList(
                                 "1|2|200|binary|varbinary|mapKey:mapVal|multiset"));
