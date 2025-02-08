@@ -111,7 +111,8 @@ public class RangeShuffle {
                         "ABSTRACT KEY AND SIZE",
                         new StreamMap<>(new KeyAndSizeExtractor<>(valueRowType, isSortBySize)),
                         new TupleTypeInfo<>(keyTypeInformation, BasicTypeInfo.INT_TYPE_INFO),
-                        input.getParallelism());
+                        input.getParallelism(),
+                        input.isParallelismConfigured());
 
         // 1. Fixed size sample in each partitions.
         OneInputTransformation<Tuple2<T, Integer>, Tuple3<Double, T, Integer>> localSample =
@@ -123,7 +124,8 @@ public class RangeShuffle {
                                 BasicTypeInfo.DOUBLE_TYPE_INFO,
                                 keyTypeInformation,
                                 BasicTypeInfo.INT_TYPE_INFO),
-                        keyInput.getParallelism());
+                        keyInput.getParallelism(),
+                        keyInput.isParallelismConfigured());
 
         // 2. Collect all the samples and gather them into a sorted key range.
         OneInputTransformation<Tuple3<Double, T, Integer>, List<T>> sampleAndHistogram =
@@ -132,7 +134,8 @@ public class RangeShuffle {
                         "GLOBAL SAMPLE",
                         new GlobalSampleOperator<>(globalSampleSize, keyComparator, rangeNum),
                         new ListTypeInfo<>(keyTypeInformation),
-                        1);
+                        1,
+                        true);
 
         // 3. Take range boundaries as broadcast input and take the tuple of partition id and
         // record as output.
@@ -153,7 +156,8 @@ public class RangeShuffle {
                                 new AssignRangeIndexOperator<>(keyComparator),
                                 new TupleTypeInfo<>(
                                         BasicTypeInfo.INT_TYPE_INFO, input.getOutputType()),
-                                input.getParallelism());
+                                input.getParallelism(),
+                                input.isParallelismConfigured());
 
         // 4. Remove the partition id. (shuffle according range partition)
         return new DataStream<>(
@@ -168,7 +172,8 @@ public class RangeShuffle {
                         "REMOVE RANGE INDEX",
                         new RemoveRangeIndexOperator<>(),
                         input.getOutputType(),
-                        outParallelism));
+                        outParallelism,
+                        true));
     }
 
     /** KeyAndSizeExtractor is responsible for extracting the sort key and row size. */

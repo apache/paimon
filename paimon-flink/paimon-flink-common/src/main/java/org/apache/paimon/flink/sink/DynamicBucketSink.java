@@ -41,6 +41,7 @@ import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /** Sink for dynamic bucket table. */
 public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Integer>> {
@@ -95,10 +96,9 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(partitionByKeyHash.getType(), BasicTypeInfo.INT_TYPE_INFO);
         SingleOutputStreamOperator<Tuple2<T, Integer>> bucketAssigned =
-                partitionByKeyHash
-                        .transform(
-                                DYNAMIC_BUCKET_ASSIGNER_NAME, rowWithBucketType, assignerOperator)
-                        .setParallelism(partitionByKeyHash.getParallelism());
+                partitionByKeyHash.transform(
+                        DYNAMIC_BUCKET_ASSIGNER_NAME, rowWithBucketType, assignerOperator);
+        forwardParallelism(bucketAssigned, partitionByKeyHash);
 
         String uidSuffix = table.options().get(SINK_OPERATOR_UID_SUFFIX.key());
         if (!StringUtils.isNullOrWhitespaceOnly(uidSuffix)) {

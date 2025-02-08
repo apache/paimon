@@ -33,6 +33,7 @@ import org.apache.paimon.table.Table;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.DataFormatConverters;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -59,6 +60,8 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.sink.FlinkSink.isStreaming;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
+import static org.apache.paimon.flink.utils.ParallelismUtils.setParallelism;
 import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -102,13 +105,14 @@ public class FlinkSinkBuilder {
 
         DataFormatConverters.RowConverter converter =
                 new DataFormatConverters.RowConverter(fieldDataTypes);
-        this.input =
+        SingleOutputStreamOperator<RowData> newInput =
                 input.transform(
-                                "Map",
-                                InternalTypeInfo.of(rowType),
-                                new StreamMapWithForwardingRecordAttributes<>(
-                                        (MapFunction<Row, RowData>) converter::toInternal))
-                        .setParallelism(input.getParallelism());
+                        "Map",
+                        InternalTypeInfo.of(rowType),
+                        new StreamMapWithForwardingRecordAttributes<>(
+                                (MapFunction<Row, RowData>) converter::toInternal));
+        setParallelism(newInput, input.getParallelism(), false);
+        this.input = newInput;
         return this;
     }
 
@@ -217,13 +221,14 @@ public class FlinkSinkBuilder {
         input = trySortInput(input);
         DataStream<InternalRow> input = mapToInternalRow(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
-            input =
+            SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
                             .transform(
                                     "local merge",
                                     input.getType(),
-                                    new LocalMergeOperator.Factory(table.schema()))
-                            .setParallelism(input.getParallelism());
+                                    new LocalMergeOperator.Factory(table.schema()));
+            forwardParallelism(newInput, input);
+            input = newInput;
         }
 
         BucketMode bucketMode = table.bucketMode();
@@ -243,12 +248,14 @@ public class FlinkSinkBuilder {
 
     protected DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
-        return input.transform(
+        SingleOutputStreamOperator<InternalRow> result =
+                input.transform(
                         "Map",
                         org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(rowType),
                         new StreamMapWithForwardingRecordAttributes<>(
-                                (MapFunction<RowData, InternalRow>) FlinkRowWrapper::new))
-                .setParallelism(input.getParallelism());
+                                (MapFunction<RowData, InternalRow>) FlinkRowWrapper::new));
+        forwardParallelism(result, input);
+        return result;
     }
 
     protected DataStreamSink<?> buildDynamicBucketSink(

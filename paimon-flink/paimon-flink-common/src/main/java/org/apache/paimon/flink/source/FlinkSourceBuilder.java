@@ -46,6 +46,7 @@ import org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
@@ -67,6 +68,7 @@ import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -272,9 +274,11 @@ public class FlinkSourceBuilder {
         DataFormatConverters.RowConverter converter =
                 new DataFormatConverters.RowConverter(fieldDataTypes);
         DataStream<RowData> source = build();
-        return source.map((MapFunction<RowData, Row>) converter::toExternal)
-                .setParallelism(source.getParallelism())
-                .returns(ExternalTypeInfo.of(rowType));
+        SingleOutputStreamOperator<Row> result =
+                source.map((MapFunction<RowData, Row>) converter::toExternal)
+                        .returns(ExternalTypeInfo.of(rowType));
+        forwardParallelism(result, source);
+        return result;
     }
 
     /** Build source {@link DataStream} with {@link RowData}. */
