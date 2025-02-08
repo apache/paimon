@@ -216,10 +216,10 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        build();
         if (!env.getCheckpointConfig().isCheckpointingEnabled()) {
             env.enableCheckpointing(DEFAULT_CHECKPOINT_INTERVAL);
         }
+        build();
         execute(syncJobHandler.provideDefaultJobName());
     }
 }
