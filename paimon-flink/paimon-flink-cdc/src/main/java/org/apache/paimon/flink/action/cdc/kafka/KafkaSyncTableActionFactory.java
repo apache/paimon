@@ -52,16 +52,16 @@ public class KafkaSyncTableActionFactory extends SyncTableActionFactoryBase {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  kafka_sync_table \\\n"
-                        + "--warehouse <warehouse_path> \\\n"
-                        + "--database <database_name> \\\n"
-                        + "--table <table_name> \\\n"
-                        + "[--partition_keys <partition_keys>] \\\n"
-                        + "[--primary_keys <primary_keys>] \\\n"
-                        + "[--type_mapping <option1,option2...>] \\\n"
-                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] \\\n"
-                        + "[--kafka_conf <kafka_source_conf> [--kafka_conf <kafka_source_conf> ...]] \\\n"
-                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
+                "  kafka_sync_table \n"
+                        + "--warehouse <warehouse_path> \n"
+                        + "--database <database_name> \n"
+                        + "--table <table_name> \n"
+                        + "[--partition_keys <partition_keys>] \n"
+                        + "[--primary_keys <primary_keys>] \n"
+                        + "[--type_mapping <option1,option2...>] \n"
+                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] \n"
+                        + "[--kafka_conf <kafka_source_conf> [--kafka_conf <kafka_source_conf> ...]] \n"
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \n"
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
