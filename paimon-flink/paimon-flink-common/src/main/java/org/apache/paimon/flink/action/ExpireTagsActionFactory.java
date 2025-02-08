@@ -50,9 +50,9 @@ public class ExpireTagsActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  expire_tags --warehouse <warehouse_path> "
-                        + "--database <database>"
-                        + "--table <table> "
+                "  expire_tags --warehouse <warehouse_path> \n"
+                        + "--database <database> \n"
+                        + "--table <table> \n"
                         + "[--older_than <older_than>]");
     }
 }
