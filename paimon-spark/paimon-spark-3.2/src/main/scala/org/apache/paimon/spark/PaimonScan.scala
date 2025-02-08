@@ -35,7 +35,8 @@ case class PaimonScan(
     filters: Seq[Predicate],
     reservedFilters: Seq[Filter],
     override val pushDownLimit: Option[Int],
-    disableBucketedScan: Boolean = false)
+    // no usage, just for compile compatibility
+    bucketedScanDisabled: Boolean = true)
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
   with SupportsRuntimeFiltering {
 
@@ -57,11 +58,9 @@ case class PaimonScan(
       case _ => None
     }
     if (partitionFilter.nonEmpty) {
-      this.runtimeFilters = filters
       readBuilder.withFilter(partitionFilter.head)
       // set inputPartitions null to trigger to get the new splits.
       inputPartitions = null
     }
   }
-
 }
