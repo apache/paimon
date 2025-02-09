@@ -141,6 +141,8 @@ public class AppendOnlyWriterTest {
         assertThat(meta.minSequenceNumber()).isEqualTo(0);
         assertThat(meta.maxSequenceNumber()).isEqualTo(0);
         assertThat(meta.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
+        assertThat(meta.fileName().substring(meta.fileName().lastIndexOf(".") + 1))
+                .isEqualTo(CoreOptions.FILE_FORMAT_AVRO);
     }
 
     @Test
@@ -519,7 +521,7 @@ public class AppendOnlyWriterTest {
     private DataFilePathFactory createPathFactory() {
         return new DataFilePathFactory(
                 new Path(tempDir + "/dt=" + PART + "/bucket-0"),
-                CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                CoreOptions.FILE_FORMAT_AVRO,
                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                 CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
