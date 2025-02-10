@@ -67,7 +67,7 @@ public class FixedLenBytesDecimalColumnReader<VECTOR extends WritableColumnVecto
             for (int i = 0; i < num; i++) {
                 if (runLenDecoder.readInteger() == maxDefLevel) {
                     byte[] bytes = readDataBinary(bytesLen).getBytesUnsafe();
-                    bytesVector.appendBytes(rowId + i, bytes, 0, bytes.length);
+                    bytesVector.putByteArray(rowId + i, bytes, 0, bytes.length);
                 } else {
                     bytesVector.setNullAt(rowId + i);
                 }
@@ -124,7 +124,7 @@ public class FixedLenBytesDecimalColumnReader<VECTOR extends WritableColumnVecto
             for (int i = rowId; i < rowId + num; ++i) {
                 if (!bytesVector.isNullAt(i)) {
                     byte[] v = dictionary.decodeToBinary(dictionaryIds.getInt(i)).getBytesUnsafe();
-                    bytesVector.appendBytes(i, v, 0, v.length);
+                    bytesVector.putByteArray(i, v, 0, v.length);
                 }
             }
         }

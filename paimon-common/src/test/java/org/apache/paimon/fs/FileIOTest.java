@@ -35,6 +35,8 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -134,7 +136,39 @@ public class FileIOTest {
         assertThat(exception.get()).isNull();
     }
 
-    /** A {@link FileIO} on local filesystem to test the default copy implementation. */
+    @Test
+    public void testListFiles() throws Exception {
+        Path fileA = new Path(tempDir.resolve("a").toUri());
+        Path dirB = new Path(tempDir.resolve("b").toUri());
+        Path fileBC = new Path(tempDir.resolve("b/c").toUri());
+
+        FileIO fileIO = new LocalFileIO();
+        fileIO.writeFile(fileA, "fileA", false);
+        fileIO.mkdirs(dirB);
+        fileIO.writeFile(fileBC, "fileBC", false);
+
+        {
+            // if listing non-recursively, file "a" is the only file in the top level directory
+            FileStatus[] statuses = fileIO.listFiles(new Path(tempDir.toUri()), false);
+            assertThat(statuses.length).isEqualTo(1);
+            assertThat(statuses[0].getPath()).isEqualTo(fileA);
+        }
+
+        {
+            // if listing recursively, file "a" and "b/c" should be listed, directory "b" should be
+            // omitted
+            FileStatus[] statuses = fileIO.listFiles(new Path(tempDir.toUri()), true);
+            assertThat(statuses.length).isEqualTo(2);
+            statuses =
+                    Arrays.stream(statuses)
+                            .sorted(Comparator.comparing(FileStatus::getPath))
+                            .toArray(FileStatus[]::new);
+            assertThat(statuses[0].getPath()).isEqualTo(fileA);
+            assertThat(statuses[1].getPath()).isEqualTo(fileBC);
+        }
+    }
+
+    /** A {@link FileIO} on local filesystem to test various default implementations. */
     private static class DummyFileIO implements FileIO {
         private static final ReentrantLock RENAME_LOCK = new ReentrantLock();
 
@@ -169,13 +203,13 @@ public class FileIOTest {
         }
 
         @Override
-        public FileStatus getFileStatus(Path path) {
-            throw new UnsupportedOperationException();
+        public FileStatus getFileStatus(Path path) throws IOException {
+            return new LocalFileIO().getFileStatus(path);
         }
 
         @Override
-        public FileStatus[] listStatus(Path path) {
-            throw new UnsupportedOperationException();
+        public FileStatus[] listStatus(Path path) throws IOException {
+            return new LocalFileIO().listStatus(path);
         }
 
         @Override

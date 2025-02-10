@@ -52,6 +52,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
@@ -570,14 +571,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public void abort(List<CommitMessage> commitMessages) {
-        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> factoryMap = new HashMap<>();
+        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
         for (CommitMessage message : commitMessages) {
-            DataFilePathFactory pathFactory =
-                    factoryMap.computeIfAbsent(
-                            Pair.of(message.partition(), message.bucket()),
-                            k ->
-                                    this.pathFactory.createDataFilePathFactory(
-                                            k.getKey(), k.getValue()));
+            DataFilePathFactory pathFactory = factories.get(message.partition(), message.bucket());
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
             List<DataFileMeta> toDelete = new ArrayList<>();
             toDelete.addAll(commitMessage.newFilesIncrement().newFiles());

@@ -67,6 +67,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static java.lang.Boolean.parseBoolean;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
@@ -75,6 +76,7 @@ import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT_FULL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_BOUNDED;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreTableFactory.discoverLogStoreFactory;
 
@@ -93,19 +95,25 @@ public abstract class AbstractFlinkTableFactory
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
         CatalogTable origin = context.getCatalogTable().getOrigin();
-        boolean isStreamingMode =
+        Table table =
+                origin instanceof SystemCatalogTable
+                        ? ((SystemCatalogTable) origin).table()
+                        : buildPaimonTable(context);
+        boolean unbounded =
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
+        Map<String, String> options = table.options();
+        if (options.containsKey(SCAN_BOUNDED.key())
+                && parseBoolean(options.get(SCAN_BOUNDED.key()))) {
+            unbounded = false;
+        }
         if (origin instanceof SystemCatalogTable) {
-            return new SystemTableSource(
-                    ((SystemCatalogTable) origin).table(),
-                    isStreamingMode,
-                    context.getObjectIdentifier());
+            return new SystemTableSource(table, unbounded, context.getObjectIdentifier());
         } else {
             return new DataTableSource(
                     context.getObjectIdentifier(),
-                    buildPaimonTable(context),
-                    isStreamingMode,
+                    table,
+                    unbounded,
                     context,
                     createOptionalLogStoreFactory(context).orElse(null));
         }

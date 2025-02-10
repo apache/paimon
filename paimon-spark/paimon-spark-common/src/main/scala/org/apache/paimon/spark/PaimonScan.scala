@@ -23,10 +23,11 @@ import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
-import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference, SortDirection, SortOrder, Transform}
-import org.apache.spark.sql.connector.read.{SupportsReportOrdering, SupportsReportPartitioning, SupportsRuntimeFiltering}
+import org.apache.spark.sql.connector.expressions._
+import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
+import org.apache.spark.sql.connector.read.{SupportsReportOrdering, SupportsReportPartitioning, SupportsRuntimeV2Filtering}
 import org.apache.spark.sql.connector.read.partitioning.{KeyGroupedPartitioning, Partitioning, UnknownPartitioning}
-import org.apache.spark.sql.sources.{Filter, In}
+import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -39,7 +40,7 @@ case class PaimonScan(
     override val pushDownLimit: Option[Int],
     bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
-  with SupportsRuntimeFiltering
+  with SupportsRuntimeV2Filtering
   with SupportsReportPartitioning
   with SupportsReportOrdering {
 
@@ -156,19 +157,18 @@ case class PaimonScan(
       .map(fieldReference)
   }
 
-  override def filter(filters: Array[Filter]): Unit = {
-    val converter = new SparkFilterConverter(table.rowType())
-    val partitionFilter = filters.flatMap {
-      case in @ In(attr, _) if table.partitionKeys().contains(attr) =>
-        Some(converter.convert(in))
+  override def filter(predicates: Array[SparkPredicate]): Unit = {
+    val converter = SparkV2FilterConverter(table.rowType())
+    val partitionKeys = table.partitionKeys().asScala.toSeq
+    val partitionFilter = predicates.flatMap {
+      case p if SparkV2FilterConverter.isSupportedRuntimeFilter(p, partitionKeys) =>
+        converter.convert(p)
       case _ => None
     }
     if (partitionFilter.nonEmpty) {
-      this.runtimeFilters = filters
-      readBuilder.withFilter(partitionFilter.head)
+      readBuilder.withFilter(partitionFilter.toList.asJava)
       // set inputPartitions null to trigger to get the new splits.
       inputPartitions = null
     }
   }
-
 }

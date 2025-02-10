@@ -20,8 +20,9 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.TagManager;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** The util class of resolve snapshot from scan params for time travel. */
 public class TimeTravelUtil {
@@ -58,7 +60,7 @@ public class TimeTravelUtil {
             return snapshotManager.latestSnapshot();
         }
 
-        Preconditions.checkArgument(
+        checkArgument(
                 scanHandleKey.size() == 1,
                 String.format(
                         "Only one of the following parameters may be set : [%s, %s, %s, %s]",
@@ -123,5 +125,50 @@ public class TimeTravelUtil {
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         return tagManager.getOrThrow(tagName).trimToSnapshot();
+    }
+
+    public static void checkRescaleBucketForIncrementalTagQuery(
+            SchemaManager schemaManager, Snapshot start, Snapshot end) {
+        if (start.schemaId() != end.schemaId()) {
+            int startBucketNumber = bucketNumber(schemaManager, start.schemaId());
+            int endBucketNumber = bucketNumber(schemaManager, end.schemaId());
+            if (startBucketNumber != endBucketNumber) {
+                throw new InconsistentTagBucketException(
+                        start.id(),
+                        end.id(),
+                        String.format(
+                                "The bucket number of two tags are different (%s, %s), which is not supported in incremental tag query.",
+                                startBucketNumber, endBucketNumber));
+            }
+        }
+    }
+
+    private static int bucketNumber(SchemaManager schemaManager, long schemaId) {
+        TableSchema schema = schemaManager.schema(schemaId);
+        return CoreOptions.fromMap(schema.options()).bucket();
+    }
+
+    /**
+     * Exception thrown when the bucket number of two tags are different in incremental tag query.
+     */
+    public static class InconsistentTagBucketException extends RuntimeException {
+
+        private final long startSnapshotId;
+        private final long endSnapshotId;
+
+        public InconsistentTagBucketException(
+                long startSnapshotId, long endSnapshotId, String message) {
+            super(message);
+            this.startSnapshotId = startSnapshotId;
+            this.endSnapshotId = endSnapshotId;
+        }
+
+        public long startSnapshotId() {
+            return startSnapshotId;
+        }
+
+        public long endSnapshotId() {
+            return endSnapshotId;
+        }
     }
 }

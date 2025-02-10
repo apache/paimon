@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
@@ -33,6 +34,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileDeletionThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -216,9 +218,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             List<ExpireFileEntry> dataFileEntries) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
+        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
         for (ExpireFileEntry entry : dataFileEntries) {
-            Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-            Path dataFilePath = new Path(bucketPath, entry.fileName());
+            DataFilePathFactory dataFilePathFactory =
+                    factories.get(entry.partition(), entry.bucket());
+            Path dataFilePath = dataFilePathFactory.toPath(entry);
             switch (entry.kind()) {
                 case ADD:
                     dataFileToDelete.remove(dataFilePath);
@@ -226,7 +230,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                 case DELETE:
                     List<Path> extraFiles = new ArrayList<>(entry.extraFiles().size());
                     for (String file : entry.extraFiles()) {
-                        extraFiles.add(new Path(bucketPath, file));
+                        extraFiles.add(dataFilePathFactory.toAlignedPath(file, entry));
                     }
                     dataFileToDelete.put(dataFilePath, Pair.of(entry, extraFiles));
                     break;
@@ -259,12 +263,12 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     private void deleteAddedDataFiles(List<ExpireFileEntry> manifestEntries) {
         List<Path> dataFileToDelete = new ArrayList<>();
+        DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
         for (ExpireFileEntry entry : manifestEntries) {
+            DataFilePathFactory dataFilePathFactory =
+                    factories.get(entry.partition(), entry.bucket());
             if (entry.kind() == FileKind.ADD) {
-                dataFileToDelete.add(
-                        new Path(
-                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
-                                entry.fileName()));
+                dataFileToDelete.add(dataFilePathFactory.toPath(entry));
                 recordDeletionBuckets(entry);
             }
         }

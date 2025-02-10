@@ -936,10 +936,8 @@ public class FieldAggregatorTest {
                 FieldAggregatorFactory.create(
                         DataTypes.STRING(),
                         "custom",
-                        false,
-                        false,
-                        CoreOptions.fromMap(new HashMap<>()),
-                        "custom");
+                        "custom",
+                        CoreOptions.fromMap(new HashMap<>()));
 
         Object agg = fieldAggregator.agg("test", "test");
         assertThat(agg).isEqualTo("test");

@@ -83,13 +83,6 @@ trait PaimonMergeIntoBase
       merge: MergeIntoTable,
       targetOutput: Seq[AttributeReference]): Seq[MergeAction]
 
-  def buildMergeIntoPaimonTable(
-      v2Table: SparkTable,
-      merge: MergeIntoTable,
-      alignedMatchedActions: Seq[MergeAction],
-      alignedNotMatchedActions: Seq[MergeAction],
-      alignedNotMatchedBySourceActions: Seq[MergeAction]): MergeIntoPaimonTable
-
   protected def checkAndAlignActionAssignment(
       action: MergeAction,
       targetOutput: Seq[AttributeReference]): MergeAction = {

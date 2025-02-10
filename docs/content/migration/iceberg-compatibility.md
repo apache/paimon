@@ -389,6 +389,12 @@ you also need to set some (or all) of the following table options when creating 
       <td>String</td>
       <td>Hive client class name for Iceberg Hive Catalog.</td>
     </tr>
+    <tr>
+      <td><h5>metadata.iceberg.glue.skip-archive</h5></td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Skip archive for AWS Glue catalog.</td>
+    </tr>
     </tbody>
 </table>
 

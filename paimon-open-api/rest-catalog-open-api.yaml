@@ -432,6 +432,43 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/token:
+    get:
+      tags:
+        - table
+      summary: Get table token
+      operationId: getTableToken
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableDataTokenResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}/partitions:
     get:
       tags:
@@ -1166,6 +1203,16 @@ components:
       properties:
         success:
           type: boolean
+    GetTableDataTokenResponse:
+      type: object
+      properties:
+        token:
+          type: object
+          additionalProperties:
+            type: string
+        expiresAt:
+          type: integer
+          format: int64
     AlterDatabaseRequest:
       type: object
       properties:

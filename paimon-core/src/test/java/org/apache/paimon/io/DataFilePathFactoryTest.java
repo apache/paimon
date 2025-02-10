@@ -36,7 +36,7 @@ public class DataFilePathFactoryTest {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
                         new Path(tempDir + "/bucket-123"),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
@@ -66,7 +66,7 @@ public class DataFilePathFactoryTest {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
                         new Path(tempDir + "/dt=20211224/bucket-123"),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),

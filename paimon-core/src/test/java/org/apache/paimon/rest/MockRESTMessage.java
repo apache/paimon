@@ -33,6 +33,7 @@ import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
@@ -48,6 +49,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import java.util.ArrayList;
@@ -58,7 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.rest.RESTCatalogInternalOptions.DATABASE_COMMENT;
+import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 
 /** Mock REST message. */
 public class MockRESTMessage {
@@ -82,7 +84,7 @@ public class MockRESTMessage {
     public static GetDatabaseResponse getDatabaseResponse(String name) {
         Map<String, String> options = new HashMap<>();
         options.put("a", "b");
-        options.put(DATABASE_COMMENT.key(), "comment");
+        options.put(COMMENT_PROP, "comment");
         return new GetDatabaseResponse(UUID.randomUUID().toString(), name, options);
     }
 
@@ -246,6 +248,11 @@ public class MockRESTMessage {
 
     public static ListViewsResponse listViewsResponse() {
         return new ListViewsResponse(ImmutableList.of("view"));
+    }
+
+    public static GetTableTokenResponse getTableCredentialsResponse() {
+        return new GetTableTokenResponse(
+                ImmutableMap.of("key", "value"), System.currentTimeMillis());
     }
 
     private static ViewSchema viewSchema() {

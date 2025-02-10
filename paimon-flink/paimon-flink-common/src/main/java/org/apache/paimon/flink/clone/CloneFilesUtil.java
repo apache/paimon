@@ -18,8 +18,12 @@
 
 package org.apache.paimon.flink.clone;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -28,6 +32,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -41,6 +46,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -278,5 +284,35 @@ public class CloneFilesUtil {
                         + sourceTableRootPath);
 
         return new Path(fileAbsolutePath.substring(sourceTableRootPath.length()));
+    }
+
+    public static FileIO getFileIO(
+            Map<String, FileIO> fileIOs, String identifier, Catalog catalog) {
+        return fileIOs.computeIfAbsent(
+                identifier,
+                key -> {
+                    try {
+                        return ((FileStoreTable) catalog.getTable(Identifier.fromString(key)))
+                                .fileIO();
+                    } catch (Catalog.TableNotExistException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
+    public static Path getPath(Map<String, Path> locations, String identifier, Catalog catalog) {
+        return locations.computeIfAbsent(
+                identifier,
+                key -> {
+                    try {
+                        return pathOfTable(catalog.getTable(Identifier.fromString(key)));
+                    } catch (Catalog.TableNotExistException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
+    public static Path pathOfTable(Table table) {
+        return new Path(table.options().get(CoreOptions.PATH.key()));
     }
 }

@@ -19,12 +19,12 @@
 package org.apache.paimon.spark.catalyst.analysis.expressions
 
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.SparkFilterConverter
+import org.apache.paimon.spark.SparkV2FilterConverter
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.{Column, SparkSession}
-import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilter}
+import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilterV2}
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}
@@ -33,7 +33,40 @@ import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{DataType, NullType}
 
 /** An expression helper. */
-trait ExpressionHelper extends PredicateHelper {
+trait ExpressionHelper extends ExpressionHelperBase {
+
+  def convertConditionToPaimonPredicate(
+      condition: Expression,
+      output: Seq[Attribute],
+      rowType: RowType,
+      ignorePartialFailure: Boolean = false): Option[Predicate] = {
+    val converter = SparkV2FilterConverter(rowType)
+    val sparkPredicates = normalizeExprs(Seq(condition), output)
+      .flatMap(splitConjunctivePredicates(_).flatMap {
+        f =>
+          val predicate =
+            try {
+              translateFilterV2(f)
+            } catch {
+              case _: Throwable =>
+                None
+            }
+          if (predicate.isEmpty && !ignorePartialFailure) {
+            throw new RuntimeException(s"Cannot translate expression to predicate: $f")
+          }
+          predicate
+      })
+
+    val predicates = sparkPredicates.flatMap(converter.convert(_, ignorePartialFailure))
+    if (predicates.isEmpty) {
+      None
+    } else {
+      Some(PredicateBuilder.and(predicates: _*))
+    }
+  }
+}
+
+trait ExpressionHelperBase extends PredicateHelper {
 
   import ExpressionHelper._
 
@@ -161,32 +194,6 @@ trait ExpressionHelper extends PredicateHelper {
       e =>
         isPredicatePartitionColumnsOnly(e, partitionCols, resolver) &&
           !SubqueryExpression.hasSubquery(expr))
-  }
-
-  def convertConditionToPaimonPredicate(
-      condition: Expression,
-      output: Seq[Attribute],
-      rowType: RowType,
-      ignorePartialFailure: Boolean = false): Option[Predicate] = {
-    val converter = new SparkFilterConverter(rowType)
-    val filters = normalizeExprs(Seq(condition), output)
-      .flatMap(splitConjunctivePredicates(_).flatMap {
-        f =>
-          val filter = translateFilter(f, supportNestedPredicatePushdown = true)
-          if (filter.isEmpty && !ignorePartialFailure) {
-            throw new RuntimeException(
-              "Exec update failed:" +
-                s" cannot translate expression to source filter: $f")
-          }
-          filter
-      })
-
-    val predicates = filters.map(converter.convert(_, ignorePartialFailure)).filter(_ != null)
-    if (predicates.isEmpty) {
-      None
-    } else {
-      Some(PredicateBuilder.and(predicates: _*))
-    }
   }
 }
 

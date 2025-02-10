@@ -23,6 +23,7 @@ import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
@@ -70,7 +71,7 @@ public class DefaultErrorHandlerTest {
                 ServiceFailureException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(500)));
         assertThrows(
-                org.apache.paimon.rest.exceptions.UnsupportedOperationException.class,
+                NotImplementedException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(501)));
         assertThrows(
                 RESTException.class, () -> defaultErrorHandler.accept(generateErrorResponse(502)));

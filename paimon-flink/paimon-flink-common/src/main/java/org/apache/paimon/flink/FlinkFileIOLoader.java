@@ -25,6 +25,8 @@ import org.apache.paimon.fs.Path;
 /** Flink {@link FileIOLoader} for {@link FlinkFileIO}. */
 public class FlinkFileIOLoader implements FileIOLoader {
 
+    private static final long serialVersionUID = 1L;
+
     @Override
     public String getScheme() {
         throw new UnsupportedOperationException();

@@ -48,42 +48,48 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
     /** buffer to use when actually copying in data. */
     public byte[] buffer;
 
-    /** Hang onto a byte array for holding smaller byte values. */
-    private int elementsAppended = 0;
+    private int bytesAppended;
 
-    private int capacity;
-
-    /**
-     * Don't call this constructor except for testing purposes.
-     *
-     * @param size number of elements in the column vector
-     */
-    public HeapBytesVector(int size) {
-        super(size);
-        capacity = size;
-        buffer = new byte[capacity];
-        start = new int[size];
-        length = new int[size];
+    public HeapBytesVector(int capacity) {
+        super(capacity);
+        buffer = new byte[capacity * 16];
+        start = new int[capacity];
+        length = new int[capacity];
     }
 
     @Override
     public void reset() {
         super.reset();
-        elementsAppended = 0;
+        if (start.length != capacity) {
+            start = new int[capacity];
+        } else {
+            Arrays.fill(start, 0);
+        }
+
+        if (length.length != capacity) {
+            length = new int[capacity];
+        } else {
+            Arrays.fill(length, 0);
+        }
+
+        // We don't reset buffer to avoid unnecessary copy.
+        Arrays.fill(buffer, (byte) 0);
+
+        this.bytesAppended = 0;
     }
 
     @Override
-    public void appendBytes(int elementNum, byte[] sourceBuf, int start, int length) {
-        reserve(elementsAppended + length);
-        System.arraycopy(sourceBuf, start, buffer, elementsAppended, length);
-        this.start[elementNum] = elementsAppended;
+    public void putByteArray(int elementNum, byte[] sourceBuf, int start, int length) {
+        reserveBytes(bytesAppended + length);
+        System.arraycopy(sourceBuf, start, buffer, bytesAppended, length);
+        this.start[elementNum] = bytesAppended;
         this.length[elementNum] = length;
-        elementsAppended += length;
+        bytesAppended += length;
     }
 
     @Override
     public void fill(byte[] value) {
-        reserve(start.length * value.length);
+        reserveBytes(start.length * value.length);
         for (int i = 0; i < start.length; i++) {
             System.arraycopy(value, 0, buffer, i * value.length, value.length);
         }
@@ -93,18 +99,19 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
         Arrays.fill(this.length, value.length);
     }
 
-    private void reserve(int requiredCapacity) {
-        if (requiredCapacity > capacity) {
-            int newCapacity = requiredCapacity * 2;
-            try {
-                byte[] newData = new byte[newCapacity];
-                System.arraycopy(buffer, 0, newData, 0, elementsAppended);
-                buffer = newData;
-                capacity = newCapacity;
-            } catch (OutOfMemoryError outOfMemoryError) {
-                throw new UnsupportedOperationException(
-                        requiredCapacity + " cannot be satisfied.", outOfMemoryError);
-            }
+    private void reserveBytes(int newCapacity) {
+        if (newCapacity > buffer.length) {
+            int newBytesCapacity = newCapacity * 2;
+            buffer = Arrays.copyOf(buffer, newBytesCapacity);
+        }
+    }
+
+    @Override
+    void reserveForHeapVector(int newCapacity) {
+        if (newCapacity > capacity) {
+            capacity = newCapacity;
+            start = Arrays.copyOf(start, newCapacity);
+            length = Arrays.copyOf(length, newCapacity);
         }
     }
 

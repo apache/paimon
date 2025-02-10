@@ -44,11 +44,10 @@ import scala.collection.mutable.ArrayBuffer
 case class SparkOrphanFilesClean(
     specifiedTable: FileStoreTable,
     specifiedOlderThanMillis: Long,
-    specifiedFileCleaner: SerializableConsumer[Path],
     parallelism: Int,
-    dryRun: Boolean,
+    dryRunPara: Boolean,
     @transient spark: SparkSession)
-  extends OrphanFilesClean(specifiedTable, specifiedOlderThanMillis, specifiedFileCleaner)
+  extends OrphanFilesClean(specifiedTable, specifiedOlderThanMillis, dryRunPara)
   with SQLConfHelper
   with Logging {
 
@@ -150,7 +149,7 @@ case class SparkOrphanFilesClean(
             val pathToClean = fileInfo.getString(1)
             val deletedPath = new Path(pathToClean)
             deletedFilesLenInBytes += fileInfo.getLong(2)
-            specifiedFileCleaner.accept(deletedPath)
+            cleanFile(deletedPath)
             logInfo(s"Cleaned file: $pathToClean")
             dataDirs.add(fileInfo.getString(3))
             deletedFilesCount += 1
@@ -198,7 +197,6 @@ object SparkOrphanFilesClean extends SQLConfHelper {
       databaseName: String,
       tableName: String,
       olderThanMillis: Long,
-      fileCleaner: SerializableConsumer[Path],
       parallelismOpt: Integer,
       dryRun: Boolean): CleanOrphanFilesResult = {
     val spark = SparkSession.active
@@ -230,7 +228,6 @@ object SparkOrphanFilesClean extends SQLConfHelper {
         new SparkOrphanFilesClean(
           table,
           olderThanMillis,
-          fileCleaner,
           parallelism,
           dryRun,
           spark

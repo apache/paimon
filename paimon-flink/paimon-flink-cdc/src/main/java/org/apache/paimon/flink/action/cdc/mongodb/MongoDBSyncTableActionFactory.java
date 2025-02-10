@@ -101,7 +101,7 @@ public class MongoDBSyncTableActionFactory extends SyncTableActionFactoryBase {
                         + "This can be done by configuring 'field.name' to specify the synchronization fields and 'parser.path' to specify the JSON parsing path for those fields.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/mysql-cdc/#connector-options");
+                        + "see https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/mongodb-cdc/#connector-options");
         System.out.println();
 
         System.out.println("Paimon catalog and table sink conf syntax:");

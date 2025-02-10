@@ -45,6 +45,13 @@ public class HeapFloatVector extends AbstractHeapVector implements WritableFloat
     }
 
     @Override
+    void reserveForHeapVector(int newCapacity) {
+        if (vector.length < newCapacity) {
+            vector = Arrays.copyOf(vector, newCapacity);
+        }
+    }
+
+    @Override
     public float getFloat(int i) {
         if (dictionary == null) {
             return vector[i];
@@ -85,5 +92,15 @@ public class HeapFloatVector extends AbstractHeapVector implements WritableFloat
     @Override
     public void fill(float value) {
         Arrays.fill(vector, value);
+    }
+
+    @Override
+    public void reset() {
+        super.reset();
+        if (vector.length != capacity) {
+            vector = new float[capacity];
+        } else {
+            Arrays.fill(vector, 0);
+        }
     }
 }

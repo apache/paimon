@@ -86,13 +86,13 @@ public abstract class AbstractCatalog implements Catalog {
         return catalogOptions.toMap();
     }
 
-    @Override
+    public abstract String warehouse();
+
     public FileIO fileIO() {
         return fileIO;
     }
 
-    @Override
-    public FileIO fileIO(Path path) {
+    protected FileIO fileIO(Path path) {
         return fileIO;
     }
 
@@ -369,7 +369,13 @@ public abstract class AbstractCatalog implements Catalog {
         SnapshotCommit.Factory commitFactory =
                 new RenamingSnapshotCommit.Factory(
                         lockFactory().orElse(null), lockContext().orElse(null));
-        return CatalogUtils.loadTable(this, identifier, this::loadTableMetadata, commitFactory);
+        return CatalogUtils.loadTable(
+                this,
+                identifier,
+                p -> fileIO(),
+                this::fileIO,
+                this::loadTableMetadata,
+                commitFactory);
     }
 
     /**

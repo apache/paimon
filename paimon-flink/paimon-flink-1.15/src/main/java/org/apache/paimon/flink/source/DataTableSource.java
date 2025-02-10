@@ -38,13 +38,13 @@ public class DataTableSource extends BaseDataTableSource {
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
             Table table,
-            boolean streaming,
+            boolean unbounded,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this(
                 tableIdentifier,
                 table,
-                streaming,
+                unbounded,
                 context,
                 logStoreTableFactory,
                 null,
@@ -57,7 +57,7 @@ public class DataTableSource extends BaseDataTableSource {
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
             Table table,
-            boolean streaming,
+            boolean unbounded,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
@@ -68,7 +68,7 @@ public class DataTableSource extends BaseDataTableSource {
         super(
                 tableIdentifier,
                 table,
-                streaming,
+                unbounded,
                 context,
                 logStoreTableFactory,
                 predicate,
@@ -83,7 +83,7 @@ public class DataTableSource extends BaseDataTableSource {
         return new DataTableSource(
                 tableIdentifier,
                 table,
-                streaming,
+                unbounded,
                 context,
                 logStoreTableFactory,
                 predicate,

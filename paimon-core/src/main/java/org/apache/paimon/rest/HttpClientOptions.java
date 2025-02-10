@@ -30,26 +30,30 @@ public class HttpClientOptions {
 
     private final String uri;
     @Nullable private final Duration connectTimeout;
-    @Nullable private final Duration readTimeout;
     private final int threadPoolSize;
+    private final int maxConnections;
+    private final int maxRetries;
 
     public HttpClientOptions(
             String uri,
             @Nullable Duration connectTimeout,
-            @Nullable Duration readTimeout,
-            int threadPoolSize) {
+            int threadPoolSize,
+            int maxConnections,
+            int maxRetries) {
         this.uri = uri;
         this.connectTimeout = connectTimeout;
-        this.readTimeout = readTimeout;
         this.threadPoolSize = threadPoolSize;
+        this.maxConnections = maxConnections;
+        this.maxRetries = maxRetries;
     }
 
     public static HttpClientOptions create(Options options) {
         return new HttpClientOptions(
                 options.get(RESTCatalogOptions.URI),
                 options.get(RESTCatalogOptions.CONNECTION_TIMEOUT),
-                options.get(RESTCatalogOptions.READ_TIMEOUT),
-                options.get(RESTCatalogOptions.THREAD_POOL_SIZE));
+                options.get(RESTCatalogOptions.THREAD_POOL_SIZE),
+                options.get(RESTCatalogOptions.MAX_CONNECTIONS),
+                options.get(RESTCatalogOptions.MAX_RETIES));
     }
 
     public String uri() {
@@ -60,11 +64,15 @@ public class HttpClientOptions {
         return Optional.ofNullable(connectTimeout);
     }
 
-    public Optional<Duration> readTimeout() {
-        return Optional.ofNullable(readTimeout);
-    }
-
     public int threadPoolSize() {
         return threadPoolSize;
+    }
+
+    public int maxConnections() {
+        return maxConnections;
+    }
+
+    public int maxRetries() {
+        return Math.max(maxRetries, 0);
     }
 }

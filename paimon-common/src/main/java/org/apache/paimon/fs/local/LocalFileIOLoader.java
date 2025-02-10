@@ -24,6 +24,8 @@ import org.apache.paimon.fs.Path;
 /** {@link FileIOLoader} to load {@link LocalFileIO}. */
 public class LocalFileIOLoader implements FileIOLoader {
 
+    private static final long serialVersionUID = 1L;
+
     public static final String SCHEME = "file";
 
     @Override

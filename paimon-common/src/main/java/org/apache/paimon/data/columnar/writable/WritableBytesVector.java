@@ -27,7 +27,7 @@ public interface WritableBytesVector extends WritableColumnVector, BytesColumnVe
      * Append byte[] at rowId with the provided value. Note: Must append values according to the
      * order of rowId, can not random append.
      */
-    void appendBytes(int rowId, byte[] value, int offset, int length);
+    void putByteArray(int rowId, byte[] value, int offset, int length);
 
     /** Fill the column vector with the provided value. */
     void fill(byte[] value);

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.clone;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -30,7 +29,6 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFile.ManifestEntryWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
 
@@ -58,6 +56,8 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
     private transient Catalog sourceCatalog;
     private transient Catalog targetCatalog;
 
+    private transient Map<String, FileIO> srcFileIOs;
+    private transient Map<String, FileIO> targetFileIOs;
     private transient Map<String, Path> targetLocations;
 
     public CopyManifestFileOperator(
@@ -78,19 +78,16 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
     @Override
     public void processElement(StreamRecord<CloneFileInfo> streamRecord) throws Exception {
         CloneFileInfo cloneFileInfo = streamRecord.getValue();
-        FileIO sourceTableFileIO = sourceCatalog.fileIO();
-        FileIO targetTableFileIO = targetCatalog.fileIO();
+
+        FileIO sourceTableFileIO =
+                CloneFilesUtil.getFileIO(
+                        srcFileIOs, cloneFileInfo.getSourceIdentifier(), sourceCatalog);
+        FileIO targetTableFileIO =
+                CloneFilesUtil.getFileIO(
+                        targetFileIOs, cloneFileInfo.getSourceIdentifier(), targetCatalog);
         Path targetTableRootPath =
-                targetLocations.computeIfAbsent(
-                        cloneFileInfo.getTargetIdentifier(),
-                        key -> {
-                            try {
-                                return pathOfTable(
-                                        targetCatalog.getTable(Identifier.fromString(key)));
-                            } catch (Catalog.TableNotExistException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
+                CloneFilesUtil.getPath(
+                        targetLocations, cloneFileInfo.getTargetIdentifier(), targetCatalog);
 
         String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
         Path sourcePath = new Path(cloneFileInfo.getSourceFilePath());
@@ -208,10 +205,6 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
             }
         }
         return result;
-    }
-
-    private Path pathOfTable(Table table) {
-        return new Path(table.options().get(CoreOptions.PATH.key()));
     }
 
     @Override

@@ -40,6 +40,7 @@ import org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask;
 import org.apache.flink.streaming.util.MockOutput;
 import org.apache.flink.streaming.util.MockStreamConfig;
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -51,7 +52,7 @@ import java.util.stream.Collectors;
 /** Tests for {@link AppendOnlySingleTableCompactionWorkerOperator}. */
 public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTestBase {
 
-    @Test
+    @RepeatedTest(100)
     public void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
@@ -111,6 +112,11 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                                                         .size()
                                                 == 1)
                                 .isTrue());
+        // need to close the operator to release the thread pool and close all files.
+        workerOperator.close();
+
+        // wait the last runnable in thread pool to stop
+        Thread.sleep(2_000);
     }
 
     @Test
