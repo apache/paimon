@@ -27,6 +27,8 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -36,11 +38,24 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link TypeUtils}. */
 public class TypeUtilsTest {
+    private static TimeZone originalTimeZone;
+
+    @BeforeAll
+    public static void setUp() {
+        originalTimeZone = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Tokyo"));
+    }
+
+    @AfterAll
+    public static void tearDown() {
+        TimeZone.setDefault(originalTimeZone);
+    }
 
     @Test
     public void testCastFromString() {
@@ -210,7 +225,11 @@ public class TypeUtilsTest {
         String value = "2017-12-12 09:30:00";
         Object result = TypeUtils.castFromString(value, DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
         Timestamp expected =
-                Timestamp.fromLocalDateTime(LocalDateTime.parse("2017-12-12T09:30:00"));
+                Timestamp.fromEpochMillis(
+                        LocalDateTime.parse("2017-12-12T09:30:00")
+                                        .atZone(TimeZone.getTimeZone("Asia/Tokyo").toZoneId())
+                                        .toEpochSecond()
+                                * 1000);
         assertThat(result).isEqualTo(expected);
     }
 
