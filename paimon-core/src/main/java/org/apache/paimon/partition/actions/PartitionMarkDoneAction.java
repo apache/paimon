@@ -46,25 +46,38 @@ public interface PartitionMarkDoneAction extends Closeable {
         return options.partitionMarkDoneActions().stream()
                 .map(
                         action -> {
+                            PartitionMarkDoneAction instance;
                             switch (action) {
                                 case SUCCESS_FILE:
-                                    return new SuccessFileMarkDoneAction(
-                                            fileStoreTable.fileIO(), fileStoreTable.location());
+                                    instance =
+                                            new SuccessFileMarkDoneAction(
+                                                    fileStoreTable.fileIO(),
+                                                    fileStoreTable.location());
+                                    break;
                                 case DONE_PARTITION:
-                                    return new AddDonePartitionAction(
-                                            createPartitionHandler(fileStoreTable, options));
+                                    instance =
+                                            new AddDonePartitionAction(
+                                                    createPartitionHandler(
+                                                            fileStoreTable, options));
+                                    break;
                                 case MARK_EVENT:
-                                    return new MarkPartitionDoneEventAction(
-                                            createPartitionHandler(fileStoreTable, options));
+                                    instance =
+                                            new MarkPartitionDoneEventAction(
+                                                    createPartitionHandler(
+                                                            fileStoreTable, options));
+                                    break;
                                 case HTTP_REPORT:
-                                    return new HttpReportMarkDoneAction();
+                                    instance = new HttpReportMarkDoneAction();
+                                    break;
                                 case CUSTOM:
-                                    return generateCustomMarkDoneAction(cl, options);
+                                    instance = generateCustomMarkDoneAction(cl, options);
+                                    break;
                                 default:
                                     throw new UnsupportedOperationException(action.toString());
                             }
+                            instance.open(fileStoreTable, options);
+                            return instance;
                         })
-                .peek(action -> action.open(fileStoreTable, options))
                 .collect(Collectors.toList());
     }
 
