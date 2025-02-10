@@ -287,6 +287,9 @@ paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/Vectorize
 paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedReaderBase.java
 paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedRleValuesReader.java
 paimon-format/src/main/java/org/apache/paimon/format/parquet/newReader/VectorizedValuesReader.java
+paimon-format/test/main/java/org/apache/paimon/format/parquet/newReader/DeltaByteArrayEncodingTest.java
+paimon-format/test/main/java/org/apache/paimon/format/parquet/newReader/DeltaEncodingTest.java
+paimon-format/test/main/java/org/apache/paimon/format/parquet/newReader/DeltaLengthByteArrayEncodingTest.java
 from https://spark.apache.org/ version 4.0.0-preview2
 
 MIT License
