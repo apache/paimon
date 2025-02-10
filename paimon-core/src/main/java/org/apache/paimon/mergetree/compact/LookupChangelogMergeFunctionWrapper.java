@@ -91,7 +91,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
         LookupMergeFunction lookupMergeFunction = (LookupMergeFunction) mergeFunction;
         this.keySerializer = lookupMergeFunction.getKeySerializer();
-        this.valueSerializer = lookupMergeFunction.getKeySerializer();
+        this.valueSerializer = lookupMergeFunction.getValueSerializer();
         this.mergeFunction = mergeFunctionFactory.create();
         this.lookup = lookup;
         this.valueEqualiser = valueEqualiser;
