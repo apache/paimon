@@ -73,7 +73,19 @@ public class IcebergConversions {
             case VARCHAR:
                 CharBuffer buffer = CharBuffer.wrap(value.toString());
                 try {
-                    return ENCODER.get().encode(buffer);
+                    ByteBuffer encoded = ENCODER.get().encode(buffer);
+                    // ByteBuffer and CharBuffer allocate space based on capacity
+                    // not actual content length. so we need to create a new ByteBuffer
+                    // with the exact length of the encoded content
+                    // to avoid padding the output with \u0000
+                    if (encoded.limit() != encoded.capacity()) {
+                        ByteBuffer exact = ByteBuffer.allocate(encoded.limit());
+                        encoded.position(0);
+                        exact.put(encoded);
+                        exact.flip();
+                        return exact;
+                    }
+                    return encoded;
                 } catch (CharacterCodingException e) {
                     throw new RuntimeException("Failed to encode value as UTF-8: " + value, e);
                 }
