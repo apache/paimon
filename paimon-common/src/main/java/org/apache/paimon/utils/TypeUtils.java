@@ -172,7 +172,12 @@ public class TypeUtils {
                     List<Object> resultList = new ArrayList<>();
                     for (JsonNode elementNode : arrayNode) {
                         if (!elementNode.isNull()) {
-                            String elementJson = elementNode.toString();
+                            String elementJson;
+                            if (elementNode.isTextual()) {
+                                elementJson = elementNode.asText();
+                            } else {
+                                elementJson = elementNode.toString();
+                            }
                             Object elementObject =
                                     castFromStringInternal(elementJson, elementType, isCdcValue);
                             resultList.add(elementObject);
@@ -260,7 +265,12 @@ public class TypeUtils {
                         DataField field = rowType.getFields().get(pos);
                         JsonNode fieldNode = rowNode.get(field.name());
                         if (fieldNode != null && !fieldNode.isNull()) {
-                            String fieldJson = fieldNode.toString();
+                            String fieldJson;
+                            if (fieldNode.isTextual()) {
+                                fieldJson = fieldNode.asText();
+                            } else {
+                                fieldJson = fieldNode.toString();
+                            }
                             Object fieldObject =
                                     castFromStringInternal(fieldJson, field.type(), isCdcValue);
                             genericRow.setField(pos, fieldObject);
