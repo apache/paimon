@@ -46,7 +46,7 @@ Also, see [rescale bucket]({{< ref "maintenance/rescale-bucket" >}}) if you want
 
 ## LSM Trees
 
-Paimon adapts the LSM tree (log-structured merge-tree) as the data structure for file storage. This documentation briefly introduces the concepts about LSM trees.
+Paimon adopts the LSM tree (log-structured merge-tree) as the data structure for file storage. This documentation briefly introduces the concepts about LSM trees.
 
 ### Sorted Runs
 
