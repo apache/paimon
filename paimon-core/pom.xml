@@ -285,21 +285,9 @@ under the License.
                                     <shadedPattern>org.apache.paimon.shade.okhttp3</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>okhttp3.internal</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.okhttp3.internal</shadedPattern>
-                                </relocation>
-                                <relocation>
                                     <pattern>okio</pattern>
                                     <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
                                 </relocation>
-                                <relocation>
-                                    <pattern>okio.internal</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.okio.internal</shadedPattern>
-                                </relocation>
-<!--                                <relocation>-->
-<!--                                    <pattern>okio</pattern>-->
-<!--                                    <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>-->
-<!--                                </relocation>-->
                             </relocations>
                         </configuration>
                     </execution>
