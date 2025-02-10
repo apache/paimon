@@ -139,14 +139,7 @@ public class ParquetVectorUpdaterFactory {
                     case BINARY:
                         return new BinaryToDecimalUpdater(c, decimalType);
                     case FIXED_LEN_BYTE_ARRAY:
-                        int precision = decimalType.getPrecision();
-                        if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-                            return new IntegerToDecimalUpdater(c, decimalType);
-                        } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-                            return new LongToDecimalUpdater(c, decimalType);
-                        } else {
-                            return new FixedLenByteArrayToDecimalUpdater(c, decimalType);
-                        }
+                        return new FixedLenByteArrayToDecimalUpdater(c, decimalType);
                 }
                 throw new RuntimeException(
                         "Unsupported decimal type: " + c.getPrimitiveType().getPrimitiveTypeName());
@@ -745,7 +738,7 @@ public class ParquetVectorUpdaterFactory {
     }
 
     private static class FixedLenByteArrayToDecimalUpdater
-            extends DecimalUpdater<WritableBytesVector> {
+            extends DecimalUpdater<WritableColumnVector> {
         private final int arrayLen;
 
         FixedLenByteArrayToDecimalUpdater(ColumnDescriptor descriptor, DecimalType paimonType) {
@@ -766,7 +759,7 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public void readValue(
-                int offset, WritableBytesVector values, VectorizedValuesReader valuesReader) {
+                int offset, WritableColumnVector values, VectorizedValuesReader valuesReader) {
             Binary binary = valuesReader.readBinary(arrayLen);
 
             int precision = paimonType.getPrecision();
@@ -776,7 +769,7 @@ public class ParquetVectorUpdaterFactory {
                 ((HeapLongVector) values).setLong(offset, heapBinaryToLong(binary));
             } else {
                 byte[] bytes = binary.getBytesUnsafe();
-                values.putByteArray(offset, bytes, 0, bytes.length);
+                ((WritableBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
             }
         }
 
@@ -799,7 +792,7 @@ public class ParquetVectorUpdaterFactory {
         @Override
         public void decodeSingleDictionaryId(
                 int offset,
-                WritableBytesVector values,
+                WritableColumnVector values,
                 WritableIntVector dictionaryIds,
                 Dictionary dictionary) {
             Binary binary = dictionary.decodeToBinary(dictionaryIds.getInt(offset));
@@ -810,7 +803,7 @@ public class ParquetVectorUpdaterFactory {
                 ((HeapLongVector) values).setLong(offset, heapBinaryToLong(binary));
             } else {
                 byte[] bytes = binary.getBytesUnsafe();
-                values.putByteArray(offset, bytes, 0, bytes.length);
+                ((WritableBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
             }
         }
     }
