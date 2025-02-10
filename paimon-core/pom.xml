@@ -81,7 +81,7 @@ under the License.
 
         <dependency>
             <groupId>com.squareup.okio</groupId>
-            <artifactId>okio-jvm</artifactId>
+            <artifactId>okio</artifactId>
             <version>${okio.version}</version>
         </dependency>
 
@@ -298,7 +298,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>com.squareup.okhttp3:okhttp</include>
-                                    <include>com.squareup.okio:okio-jvm</include>
+                                    <include>com.squareup.okio:okio</include>
                                     <include>org.jetbrains.kotlin:kotlin-stdlib</include>
                                 </includes>
                             </artifactSet>
