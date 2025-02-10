@@ -54,16 +54,16 @@ public class PulsarSyncDatabaseActionFactory
 
         System.out.println("Syntax:");
         System.out.println(
-                "  pulsar_sync_database \n"
-                        + "--warehouse <warehouse_path> \n"
-                        + "--database <database_name> \n"
-                        + "[--table_prefix <paimon_table_prefix>] \n"
-                        + "[--table_suffix <paimon_table_suffix>] \n"
-                        + "[--including_tables <table_name|name_regular_expr>] \n"
-                        + "[--excluding_tables <table_name|name_regular_expr>] \n"
-                        + "[--type_mapping <option1,option2...>] \n"
-                        + "[--pulsar_conf <pulsar_source_conf> [--pulsar_conf <pulsar_source_conf> ...]] \n"
-                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \n"
+                "  pulsar_sync_database \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "[--table_prefix <paimon_table_prefix>] \\\n"
+                        + "[--table_suffix <paimon_table_suffix>] \\\n"
+                        + "[--including_tables <table_name|name_regular_expr>] \\\n"
+                        + "[--excluding_tables <table_name|name_regular_expr>] \\\n"
+                        + "[--type_mapping <option1,option2...>] \\\n"
+                        + "[--pulsar_conf <pulsar_source_conf> [--pulsar_conf <pulsar_source_conf> ...]] \\\n"
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
