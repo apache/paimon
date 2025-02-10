@@ -86,34 +86,38 @@ public class PartitionIndex {
             Long number = entry.getValue();
             if (number < targetBucketRowNumber) {
                 entry.setValue(number + 1);
-                return cacheBucketAndGet(hash2Bucket, hash, bucket);
+                hash2Bucket.put(hash, (short) bucket.intValue());
+                return bucket;
             } else {
                 iterator.remove();
             }
         }
 
-        if (-1 == maxBucketsNum || totalBucket.size() < maxBucketsNum) {
+        int maxBucketId =
+                totalBucket.isEmpty()
+                        ? 0
+                        : totalBucket.stream().mapToInt(Integer::intValue).max().getAsInt();
+        if (-1 == maxBucketsNum || totalBucket.isEmpty() || maxBucketId < maxBucketsNum - 1) {
             // 3. create a new bucket
             for (int i = 0; i < Short.MAX_VALUE; i++) {
                 if (bucketFilter.test(i) && !totalBucket.contains(i)) {
                     nonFullBucketInformation.put(i, 1L);
                     totalBucket.add(i);
-                    return cacheBucketAndGet(hash2Bucket, hash, i);
+                    hash2Bucket.put(hash, (short) i);
+                    return i;
                 }
             }
 
-            @SuppressWarnings("OptionalGetWithoutIsPresent")
-            int maxBucket = totalBucket.stream().mapToInt(Integer::intValue).max().getAsInt();
             throw new RuntimeException(
                     String.format(
                             "Too more bucket %s, you should increase target bucket row number %s.",
-                            maxBucket, targetBucketRowNumber));
+                            maxBucketId, targetBucketRowNumber));
         } else {
             // exceed buckets upper bound
-            return cacheBucketAndGet(
-                    hash2Bucket,
-                    hash,
-                    KeyAndBucketExtractor.bucketWithUpperBound(totalBucket, hash, maxBucketsNum));
+            int bucket =
+                    KeyAndBucketExtractor.bucketWithUpperBound(totalBucket, hash, maxBucketsNum);
+            hash2Bucket.put(hash, (short) bucket);
+            return bucket;
         }
     }
 
@@ -148,11 +152,6 @@ public class PartitionIndex {
             }
         }
         return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
-    }
-
-    public static int cacheBucketAndGet(Int2ShortHashMap hash2Bucket, int hash, int bucket) {
-        hash2Bucket.put(hash, (short) bucket);
-        return bucket;
     }
 
     public static int[] getMaxBucketsPerAssigner(int maxBuckets, int assigners) {

@@ -28,8 +28,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.paimon.index.PartitionIndex.cacheBucketAndGet;
-
 /** When we need to overwrite the table, we should use this to avoid loading index. */
 public class SimpleHashBucketAssigner implements BucketAssigner {
 
@@ -91,11 +89,11 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
             Long num = bucketInformation.computeIfAbsent(currentBucket, i -> 0L);
             if (num >= targetBucketRowNumber) {
                 if (-1 != maxBucketsNum && bucketInformation.size() >= maxBucketsNum) {
-                    return cacheBucketAndGet(
-                            hash2Bucket,
-                            hash,
+                    int bucket =
                             KeyAndBucketExtractor.bucketWithUpperBound(
-                                    bucketInformation.keySet(), hash, maxBucketsNum));
+                                    bucketInformation.keySet(), hash, maxBucketsNum);
+                    hash2Bucket.put(hash, (short) bucket);
+                    return bucket;
                 } else {
                     loadNewBucket();
                 }
