@@ -101,12 +101,12 @@ public class CompactActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  compact --warehouse <warehouse_path> --database <database_name> \n"
-                        + "--table <table_name> [--partition <partition_name>] \n"
-                        + "[--order_strategy <order_strategy>] \n"
-                        + "[--table_conf <key>=<value>] \n"
-                        + "[--order_by <order_columns>] \n"
-                        + "[--partition_idle_time <partition_idle_time>] \n"
+                "  compact --warehouse <warehouse_path> --database <database_name> \\\n"
+                        + "--table <table_name> [--partition <partition_name>] \\\n"
+                        + "[--order_strategy <order_strategy>] \\\n"
+                        + "[--table_conf <key>=<value>] \\\n"
+                        + "[--order_by <order_columns>] \\\n"
+                        + "[--partition_idle_time <partition_idle_time>] \\\n"
                         + "[--compact_strategy <compact_strategy>]");
         System.out.println(
                 "  compact --warehouse s3://path/to/warehouse --database <database_name> "

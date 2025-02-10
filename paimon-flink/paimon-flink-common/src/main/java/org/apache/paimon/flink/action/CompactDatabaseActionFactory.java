@@ -70,11 +70,11 @@ public class CompactDatabaseActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  compact_database --warehouse <warehouse_path> --including_databases <database-name|name-regular-expr> \n"
-                        + "[--including_tables <paimon_table_name|name_regular_expr>] \n"
-                        + "[--excluding_tables <paimon_table_name|name_regular_expr>] \n"
-                        + "[--mode <compact_mode>] \n"
-                        + "[--partition_idle_time <partition_idle_time>] \n"
+                "  compact_database --warehouse <warehouse_path> --including_databases <database-name|name-regular-expr> \\\n"
+                        + "[--including_tables <paimon_table_name|name_regular_expr>] \\\n"
+                        + "[--excluding_tables <paimon_table_name|name_regular_expr>] \\\n"
+                        + "[--mode <compact_mode>] \\\n"
+                        + "[--partition_idle_time <partition_idle_time>] \\\n"
                         + "[--compact_strategy <compact_strategy>]");
         System.out.println(
                 "  compact_database --warehouse s3://path/to/warehouse --including_databases <database-name|name-regular-expr> "

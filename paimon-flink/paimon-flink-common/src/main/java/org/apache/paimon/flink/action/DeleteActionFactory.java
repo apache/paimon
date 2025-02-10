@@ -56,8 +56,11 @@ public class DeleteActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  delete --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --where <filter_spec>");
+                "  delete \\\n"
+                        + " --warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--where <filter_spec>");
         System.out.println("  delete --path <table_path> --where <filter_spec>");
         System.out.println();
 

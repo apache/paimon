@@ -60,12 +60,12 @@ public class CreateTagFromTimestampActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  create_tag_from_timestamp --warehouse <warehouse_path> \n"
-                        + "--database <database_name> \n"
-                        + "--table <table_name> \n"
-                        + "--tag <tag> \n"
-                        + "--timestamp <timestamp> \n"
-                        + "[--timeRetained <duration>] \n"
+                "  create_tag_from_timestamp --warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--tag <tag> \\\n"
+                        + "--timestamp <timestamp> \\\n"
+                        + "[--timeRetained <duration>] \\\n"
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

@@ -61,8 +61,12 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  remove_orphan_files --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> [--older_than <timestamp>] [--dry_run <false/true>]");
+                "  remove_orphan_files \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "[--older_than <timestamp>] \\\n"
+                        + "[--dry_run <false/true>]");
 
         System.out.println();
         System.out.println(

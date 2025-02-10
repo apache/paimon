@@ -68,14 +68,14 @@ public class CloneActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  clone --warehouse <warehouse_path> \n"
-                        + "[--database <database_name>] \n"
-                        + "[--table <table_name>] \n"
-                        + "[--catalog_conf <source-paimon-catalog-conf> [--catalog_conf <source-paimon-catalog-conf> ...]] \n"
-                        + "--target_warehouse <target_warehouse_path> \n"
-                        + "[--target_database <target_database_name>] \n"
-                        + "[--target_table <target_table_name>] \n"
-                        + "[--target_catalog_conf <target-paimon-catalog-conf> [--target_catalog_conf <target-paimon-catalog-conf> ...]] \n"
+                "  clone --warehouse <warehouse_path> \\\n"
+                        + "[--database <database_name>] \\\n"
+                        + "[--table <table_name>] \\\n"
+                        + "[--catalog_conf <source-paimon-catalog-conf> [--catalog_conf <source-paimon-catalog-conf> ...]] \\\n"
+                        + "--target_warehouse <target_warehouse_path> \\\n"
+                        + "[--target_database <target_database_name>] \\\n"
+                        + "[--target_table <target_table_name>] \\\n"
+                        + "[--target_catalog_conf <target-paimon-catalog-conf> [--target_catalog_conf <target-paimon-catalog-conf> ...]] \\\n"
                         + "[--parallelism <parallelism>]");
 
         System.out.println();

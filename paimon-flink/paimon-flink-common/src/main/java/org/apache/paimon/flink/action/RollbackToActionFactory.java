@@ -52,8 +52,11 @@ public class RollbackToActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  rollback_to --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --version <version_string>");
+                "  rollback_to \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--version <version_string>");
         System.out.println(
                 "  <version_string> can be a long value representing a snapshot ID or a tag name.");
         System.out.println();
