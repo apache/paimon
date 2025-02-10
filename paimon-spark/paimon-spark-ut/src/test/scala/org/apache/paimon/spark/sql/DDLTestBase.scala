@@ -572,26 +572,4 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         }
     }
   }
-
-  test("Paimon DDL: create table with default value") {
-    withTable("T") {
-      sql("""
-            |CREATE TABLE T (id INT, name STRING, pt STRING)
-            |TBLPROPERTIES (
-            |'fields.name.default-value' = 'there have null name',
-            |'fields.pt.default-value' = 'there have null pt'
-            |)
-            |""".stripMargin)
-      sql(
-        """INSERT INTO T VALUES (1, "a", "pt1"), (2, null, "pt2"), (3, "c", null), (4, null, null)""")
-      checkAnswer(
-        sql("SELECT * FROM T ORDER BY id"),
-        Seq(
-          (1, "a", "pt1"),
-          (2, "there have null name", "pt2"),
-          (3, "c", "there have null pt"),
-          (4, "there have null name", "there have null pt")).toDF()
-      )
-    }
-  }
 }

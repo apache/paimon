@@ -27,7 +27,6 @@ import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
-import org.apache.paimon.operation.DefaultValueAssigner
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.SparkRowUtils
@@ -67,30 +66,12 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
 
-    var defaultValueData: DataFrame = data // 初始时直接将 data 赋值给 defaultValueData
-
-    // 1. init defaultValueAssigner
-    val defaultValueAssigner = DefaultValueAssigner.create(tableSchema)
-
-    // 2. judge need assign default value
-    if (defaultValueAssigner.needToAssign()) {
-      // 3. set default value for null
-      defaultValueAssigner.getDefaultValues.forEach(
-        (fieldName, defaultValue) => {
-          // 使用 isNull 来检查是否为 null 值
-          defaultValueData = defaultValueData.withColumn(
-            fieldName,
-            when(col(fieldName).isNull, defaultValue).otherwise(col(fieldName))
-          )
-        })
-    }
-
     val withInitBucketCol = bucketMode match {
-      case CROSS_PARTITION if !defaultValueData.schema.fieldNames.contains(ROW_KIND_COL) =>
-        defaultValueData
+      case CROSS_PARTITION if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
+        data
           .withColumn(ROW_KIND_COL, lit(RowKind.INSERT.toByteValue))
           .withColumn(BUCKET_COL, lit(-1))
-      case _ => defaultValueData.withColumn(BUCKET_COL, lit(-1))
+      case _ => data.withColumn(BUCKET_COL, lit(-1))
     }
     val rowKindColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, ROW_KIND_COL)
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
@@ -239,7 +220,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
       case BUCKET_UNAWARE =>
         // Topology: input ->
-        writeWithoutBucket(defaultValueData)
+        writeWithoutBucket(data)
 
       case HASH_FIXED =>
         // Topology: input -> bucket-assigner -> shuffle by partition & bucket
