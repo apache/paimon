@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import net.minidev.json.JSONObject;
 import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.ArrayType;
@@ -45,12 +46,7 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
 
 import org.apache.spark.sql.paimon.shims.SparkShimLoader;
-import org.apache.spark.sql.types.DataType;
-import org.apache.spark.sql.types.DataTypes;
-import org.apache.spark.sql.types.LongType;
-import org.apache.spark.sql.types.StructField;
-import org.apache.spark.sql.types.StructType;
-import org.apache.spark.sql.types.UserDefinedType;
+import org.apache.spark.sql.types.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -253,8 +249,11 @@ public class SparkTypeUtils {
             List<StructField> fields = new ArrayList<>(rowType.getFieldCount());
             for (DataField field : rowType.getFields()) {
                 StructField structField =
+                        field.metadata() == null?
                         DataTypes.createStructField(
-                                field.name(), field.type().accept(this), field.type().isNullable());
+                                field.name(), field.type().accept(this), field.type().isNullable()):
+                                DataTypes.createStructField(
+                                        field.name(), field.type().accept(this), field.type().isNullable(),Metadata.fromJson(JSONObject.toJSONString(field.metadata())));
                 structField =
                         Optional.ofNullable(field.description())
                                 .map(structField::withComment)

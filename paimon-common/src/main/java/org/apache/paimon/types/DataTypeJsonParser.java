@@ -22,10 +22,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -44,7 +41,58 @@ public final class DataTypeJsonParser {
         if (descriptionNode != null) {
             description = descriptionNode.asText();
         }
-        return new DataField(id, name, type, description);
+        JsonNode metadataNode = json.get("metadata");
+        Map<String, Object> metadata = null;
+        if (metadataNode != null && !metadataNode.isNull()) {
+            metadata = parseMetadata(metadataNode);
+        }
+        return new DataField(id, name, type, description, metadata);
+    }
+
+    private static Map<String, Object> parseMetadata(JsonNode metadataNode) {
+        Map<String, Object> metadata = new HashMap<>();
+        Iterator<Map.Entry<String, JsonNode>> fields = metadataNode.fields();
+
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            String key = field.getKey();
+            JsonNode valueNode = field.getValue();
+            if (valueNode.isTextual()) {
+                metadata.put(key, valueNode.asText());
+            } else if (valueNode.isInt()) {
+                metadata.put(key, valueNode.asInt());
+            } else if (valueNode.isBoolean()) {
+                metadata.put(key, valueNode.asBoolean());
+            } else if (valueNode.isDouble()) {
+                metadata.put(key, valueNode.asDouble());
+            } else if (valueNode.isObject()) {
+                metadata.put(key, parseMetadata(valueNode));
+            } else if (valueNode.isArray()) {
+                metadata.put(key, parseArray(valueNode));
+            }
+        }
+
+        return metadata;
+    }
+
+    private static List<Object> parseArray(JsonNode arrayNode) {
+        List<Object> list = new ArrayList<>();
+        for (JsonNode item : arrayNode) {
+            if (item.isTextual()) {
+                list.add(item.asText());
+            } else if (item.isInt()) {
+                list.add(item.asInt());
+            } else if (item.isBoolean()) {
+                list.add(item.asBoolean());
+            } else if (item.isDouble()) {
+                list.add(item.asDouble());
+            } else if (item.isObject()) {
+                list.add(parseMetadata(item));
+            } else if (item.isArray()) {
+                list.add(parseArray(item));
+            }
+        }
+        return list;
     }
 
     public static DataType parseDataType(JsonNode json) {

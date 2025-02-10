@@ -28,12 +28,22 @@ import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.connector.catalog.TableCatalogCapability;
+import java.util.HashSet;
+import java.util.Set;
 
 /** Spark base catalog. */
 public abstract class SparkBaseCatalog
         implements TableCatalog, SupportsNamespaces, ProcedureCatalog, WithPaimonCatalog {
 
     protected String catalogName;
+
+    @Override
+    public Set<TableCatalogCapability> capabilities() {
+        Set<TableCatalogCapability> set = new HashSet<>();
+        set.add(TableCatalogCapability.SUPPORT_COLUMN_DEFAULT_VALUE);
+        return set;
+    }
 
     @Override
     public String name() {

@@ -302,12 +302,16 @@ public class Schema {
          * @param description description of the column
          */
         public Builder column(String columnName, DataType dataType, @Nullable String description) {
+            return column(columnName, dataType, description, null);
+        }
+
+        public Builder column(String columnName, DataType dataType, @Nullable String description, @Nullable Map<String, Object> metadata) {
             Preconditions.checkNotNull(columnName, "Column name must not be null.");
             Preconditions.checkNotNull(dataType, "Data type must not be null.");
 
             int id = highestFieldId.incrementAndGet();
             DataType reassignDataType = ReassignFieldId.reassign(dataType, highestFieldId);
-            columns.add(new DataField(id, columnName, reassignDataType, description));
+            columns.add(new DataField(id, columnName, reassignDataType, description, metadata));
             return this;
         }
 

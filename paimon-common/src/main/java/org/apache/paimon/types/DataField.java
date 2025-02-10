@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.EncodingUtils.escapeIdentifier;
@@ -53,16 +54,22 @@ public final class DataField implements Serializable {
 
     private final @Nullable String description;
 
+    private final @Nullable Map<String, Object> metadata;
+
     public DataField(int id, String name, DataType dataType) {
         this(id, name, dataType, null);
     }
 
-    public DataField(int id, String name, DataType type, @Nullable String description) {
+    public DataField(int id, String name, DataType dataType, @Nullable String description) { this(id, name, dataType, description, null);}
+
+    public DataField(int id, String name, DataType type, @Nullable String description, @Nullable Map<String, Object> metadata) {
         this.id = id;
         this.name = name;
         this.type = type;
         this.description = description;
+        this.metadata = metadata;
     }
+
 
     public int id() {
         return id;
@@ -92,17 +99,22 @@ public final class DataField implements Serializable {
         return new DataField(id, name, type, newDescription);
     }
 
+    public DataField newMetadata(Map<String, Object> newMetadata) {return new DataField(id, name, type, description, newMetadata);}
+
     @Nullable
     public String description() {
         return description;
     }
 
+    @Nullable
+    public Map<String, Object> metadata() {return metadata;}
+
     public DataField copy() {
-        return new DataField(id, name, type.copy(), description);
+        return new DataField(id, name, type.copy(), description, metadata);
     }
 
     public DataField copy(boolean isNullable) {
-        return new DataField(id, name, type.copy(isNullable), description);
+        return new DataField(id, name, type.copy(isNullable), description, metadata);
     }
 
     public String asSQLString() {
@@ -130,6 +142,9 @@ public final class DataField implements Serializable {
         if (description() != null) {
             generator.writeStringField("description", description());
         }
+        if (metadata() != null) {
+            generator.writeObjectField("metadata",metadata);
+        }
         generator.writeEndObject();
     }
 
@@ -145,7 +160,8 @@ public final class DataField implements Serializable {
         return Objects.equals(id, field.id)
                 && Objects.equals(name, field.name)
                 && Objects.equals(type, field.type)
-                && Objects.equals(description, field.description);
+                && Objects.equals(description, field.description)
+                && Objects.equals(metadata, field.metadata);
     }
 
     public boolean equalsIgnoreFieldId(DataField other) {

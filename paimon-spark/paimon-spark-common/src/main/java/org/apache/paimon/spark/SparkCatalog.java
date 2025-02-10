@@ -57,6 +57,7 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import scala.collection.JavaConverters;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -412,7 +413,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             schemaBuilder.column(
                     field.name(),
                     toPaimonType(field.dataType()).copy(field.nullable()),
-                    field.getComment().getOrElse(() -> null));
+                    field.getComment().getOrElse(() -> null),
+                    JavaConverters.mapAsJavaMap(field.metadata().map()));
         }
         return schemaBuilder.build();
     }
