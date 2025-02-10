@@ -33,8 +33,6 @@ under the License.
 
     <properties>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
-        <kotlin.version>1.8.21</kotlin.version>
-        <okio.version>3.6.0</okio.version>
     </properties>
 
     <dependencies>
@@ -71,18 +69,6 @@ under the License.
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>okhttp</artifactId>
             <version>${okhttp.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jetbrains.kotlin</groupId>
-            <artifactId>kotlin-stdlib-jdk8</artifactId>
-            <version>${kotlin.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.squareup.okio</groupId>
-            <artifactId>okio-jvm</artifactId>
-            <version>${okio.version}</version>
         </dependency>
 
         <!-- test dependencies -->
@@ -299,21 +285,13 @@ under the License.
                                 <includes combine.children="append">
                                     <include>com.squareup.okhttp3:okhttp</include>
                                     <include>com.squareup.okio:okio-jvm</include>
-                                    <include>org.jetbrains.kotlin:kotlin-stdlib-jdk8</include>
+                                    <include>org.jetbrains.kotlin:kotlin-stdlib</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
                                 <relocation>
                                     <pattern>okhttp3</pattern>
                                     <shadedPattern>org.apache.paimon.shade.okhttp3</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>kotlin</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.kotlin</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>okio</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>
