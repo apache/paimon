@@ -18,6 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-class DDLTest extends DDLTestBase {
-
-}
+class DDLTest extends DDLTestBase {}

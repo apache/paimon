@@ -305,7 +305,11 @@ public class Schema {
             return column(columnName, dataType, description, null);
         }
 
-        public Builder column(String columnName, DataType dataType, @Nullable String description, @Nullable Map<String, Object> metadata) {
+        public Builder column(
+                String columnName,
+                DataType dataType,
+                @Nullable String description,
+                @Nullable Map<String, Object> metadata) {
             Preconditions.checkNotNull(columnName, "Column name must not be null.");
             Preconditions.checkNotNull(dataType, "Data type must not be null.");
 

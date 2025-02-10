@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark;
 
-import net.minidev.json.JSONObject;
 import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.ArrayType;
@@ -45,6 +44,7 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
 
+import net.minidev.json.JSONObject;
 import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.*;
 
@@ -249,11 +249,17 @@ public class SparkTypeUtils {
             List<StructField> fields = new ArrayList<>(rowType.getFieldCount());
             for (DataField field : rowType.getFields()) {
                 StructField structField =
-                        field.metadata() == null?
-                        DataTypes.createStructField(
-                                field.name(), field.type().accept(this), field.type().isNullable()):
-                                DataTypes.createStructField(
-                                        field.name(), field.type().accept(this), field.type().isNullable(),Metadata.fromJson(JSONObject.toJSONString(field.metadata())));
+                        field.metadata() == null
+                                ? DataTypes.createStructField(
+                                        field.name(),
+                                        field.type().accept(this),
+                                        field.type().isNullable())
+                                : DataTypes.createStructField(
+                                        field.name(),
+                                        field.type().accept(this),
+                                        field.type().isNullable(),
+                                        Metadata.fromJson(
+                                                JSONObject.toJSONString(field.metadata())));
                 structField =
                         Optional.ofNullable(field.description())
                                 .map(structField::withComment)
