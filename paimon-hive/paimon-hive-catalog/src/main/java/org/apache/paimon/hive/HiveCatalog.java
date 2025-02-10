@@ -406,8 +406,18 @@ public class HiveCatalog extends AbstractCatalog {
                                             false));
 
                     if (!externalTable) {
-                        String partitionLocation = getPartitionLocation(dataFilePath, part);
-                        locationHelper.dropPathIfRequired(new Path(partitionLocation), fileIO);
+                        Path partitionLocation = new Path(getPartitionLocation(dataFilePath, part));
+                        try {
+                            if (fileIO.exists(partitionLocation)) {
+                                fileIO.deleteDirectoryQuietly(partitionLocation);
+                            }
+                        } catch (Exception ee) {
+                            LOG.error(
+                                    "Delete directory[{}] fail for table {} partition.",
+                                    partitionLocation,
+                                    identifier,
+                                    ee);
+                        }
                     }
                 } catch (NoSuchObjectException e) {
                     // do nothing if the partition not exists
@@ -424,13 +434,15 @@ public class HiveCatalog extends AbstractCatalog {
     private String getDataFilePath(Identifier tableIdentifier, Table hmsTable) {
         String tableLocation = getTableLocation(tableIdentifier, hmsTable).toUri().toString();
         return hmsTable.getParameters().containsKey(DATA_FILE_PATH_DIRECTORY.key())
-                ? tableLocation + "/" + hmsTable.getParameters().get(DATA_FILE_PATH_DIRECTORY.key())
+                ? tableLocation
+                        + Path.SEPARATOR
+                        + hmsTable.getParameters().get(DATA_FILE_PATH_DIRECTORY.key())
                 : tableLocation;
     }
 
     private String getPartitionLocation(String dataFilePath, Map<String, String> partitionSpec) {
         return dataFilePath
-                + "/"
+                + Path.SEPARATOR
                 + PartitionPathUtils.generatePartitionPath(new LinkedHashMap<>(partitionSpec));
     }
 

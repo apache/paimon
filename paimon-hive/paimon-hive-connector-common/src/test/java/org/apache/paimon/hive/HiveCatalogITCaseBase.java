@@ -679,27 +679,35 @@ public abstract class HiveCatalogITCaseBase {
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
 
+        Path tablePath = new Path(path, "test_db.db/t");
+
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 1)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
+        assertThat(tablePath.getFileSystem().exists(new Path(tablePath, "pt=1"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 3)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=4");
+        assertThat(tablePath.getFileSystem().exists(new Path(tablePath, "pt=3"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 1)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=2", "pt=4");
+        assertThat(tablePath.getFileSystem().exists(new Path(tablePath, "pt=1"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 4)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=2", "pt=4");
+        assertThat(tablePath.getFileSystem().exists(new Path(tablePath, "pt=4"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 4)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).containsExactlyInAnyOrder("pt=2");
+        assertThat(tablePath.getFileSystem().exists(new Path(tablePath, "pt=4"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 2)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).isEmpty();
+        assertThat(tablePath.getFileSystem().exists(new Path(tablePath, "pt=2"))).isFalse();
     }
 
     @Test
@@ -1281,6 +1289,9 @@ public abstract class HiveCatalogITCaseBase {
                         "ptb=2b/pta=2",
                         "ptb=3a/pta=3",
                         "ptb=3b/pta=3");
+
+        Path tablePath = new Path(path, "test_db.db/t");
+        assertThat(tablePath.getFileSystem().exists(new Path(tablePath, "ptb=1a/pta=1"))).isTrue();
     }
 
     @Test
