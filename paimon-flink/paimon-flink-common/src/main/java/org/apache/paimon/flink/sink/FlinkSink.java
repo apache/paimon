@@ -262,7 +262,7 @@ public abstract class FlinkSink<T> implements Serializable {
         return written;
     }
 
-    protected DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
+    public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
         ReadableConfig conf = env.getConfiguration();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();

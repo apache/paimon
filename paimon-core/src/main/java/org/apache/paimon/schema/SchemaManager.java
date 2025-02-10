@@ -35,6 +35,7 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -837,7 +838,7 @@ public class SchemaManager implements Serializable {
                             : Integer.parseInt(oldValue);
             int newBucket = Integer.parseInt(newValue);
 
-            if (fromDynamicOptions) {
+            if (fromDynamicOptions && oldBucket != BucketMode.POSTPONE_BUCKET) {
                 throw new UnsupportedOperationException(
                         "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
             }

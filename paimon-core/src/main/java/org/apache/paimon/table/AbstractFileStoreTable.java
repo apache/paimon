@@ -308,11 +308,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                     String oldValue = oldOptions.get(k);
                     if (!Objects.equals(oldValue, newValue)) {
                         SchemaManager.checkAlterTableOption(k, oldValue, newValue, true);
-
-                        if (CoreOptions.BUCKET.key().equals(k)) {
-                            throw new UnsupportedOperationException(
-                                    "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
-                        }
                     }
                 });
     }

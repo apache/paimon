@@ -250,7 +250,7 @@ public class FlinkSinkBuilder {
         }
     }
 
-    protected DataStream<InternalRow> mapToInternalRow(
+    public static DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
         SingleOutputStreamOperator<InternalRow> result =
                 input.transform(
