@@ -75,13 +75,13 @@ under the License.
 
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
-            <artifactId>kotlin-stdlib</artifactId>
+            <artifactId>kotlin-stdlib-jdk8</artifactId>
             <version>${kotlin.version}</version>
         </dependency>
 
         <dependency>
             <groupId>com.squareup.okio</groupId>
-            <artifactId>okio</artifactId>
+            <artifactId>okio-jvm</artifactId>
             <version>${okio.version}</version>
         </dependency>
 
@@ -298,8 +298,8 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>com.squareup.okhttp3:okhttp</include>
-                                    <include>com.squareup.okio:okio</include>
-                                    <include>org.jetbrains.kotlin:kotlin-stdlib</include>
+                                    <include>com.squareup.okio:okio-jvm</include>
+                                    <include>org.jetbrains.kotlin:kotlin-stdlib-jdk8</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
