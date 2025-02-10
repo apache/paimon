@@ -82,7 +82,6 @@ class DataTableSourceTest {
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         sEnv1.setParallelism(-1);
-        System.out.println(sEnv1.getParallelism());
         DataStream<RowData> sourceStream1 =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), sEnv1);
         assertThat(sourceStream1.getParallelism()).isEqualTo(1);
