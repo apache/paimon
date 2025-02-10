@@ -60,9 +60,7 @@ Supported filter types:
 * `file-index.bloom-filter.<column_name>.fpp` to config false positive probability.
 * `file-index.bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
 
-`Bitmap`:
-* `file-index.bitmap.columns`: specify the columns that need bitmap index.
-* `file-index.bitmap.<column_name>.index-block-size`: to config secondary index block size, default value is 16kb.
+We have the bitmap index, see more information in [bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}})
 
 `Bit-Slice Index Bitmap`
 * `file-index.bsi.columns`: specify the columns that need bsi index.

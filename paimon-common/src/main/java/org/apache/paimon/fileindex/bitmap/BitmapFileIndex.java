@@ -90,7 +90,7 @@ public class BitmapFileIndex implements FileIndexer {
         private final Options options;
 
         public Writer(DataType dataType, Options options) {
-            this.version = options.getInteger(VERSION, VERSION_2);
+            this.version = options.getInteger(VERSION, VERSION_1);
             this.dataType = dataType;
             this.valueMapper = getValueMapper(dataType);
             this.options = options;

@@ -96,7 +96,10 @@ This class use (64-bits) long hash. Store the num hash function (one integer) an
 
 ## Index: Bitmap
 
-Define `'file-index.bitmap.columns'`.
+* `file-index.bitmap.columns`: specify the columns that need bitmap index.
+* `file-index.bitmap.version`: specify the bitmap index format version, default version is 1, latest version is 2.
+* `file-index.bitmap.<column_name>.index-block-size`: to config secondary index block size, default value is 16kb.
+
 
 Bitmap file index format (V2):
 
