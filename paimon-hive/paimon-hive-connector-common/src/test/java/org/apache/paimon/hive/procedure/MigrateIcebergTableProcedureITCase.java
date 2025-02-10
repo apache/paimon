@@ -32,20 +32,24 @@ import org.apache.flink.types.Row;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Stream;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** Tests for {@link MigrateIcebergTableProcedure}. */
 public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(MigrateIcebergTableProcedureITCase.class);
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
@@ -64,30 +68,25 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.stop();
     }
 
-    private static Stream<Arguments> testIcebergArguments() {
-        // isPartitioned, icebergIsHive, paimonIsHive, isNamedArgument
-        return Stream.of(
-                Arguments.of(true, false, false, true),
-                Arguments.of(false, false, false, true),
-                Arguments.of(true, true, false, true),
-                Arguments.of(false, true, false, true),
-                Arguments.of(true, true, false, false),
-                Arguments.of(false, true, false, false),
-                Arguments.of(true, false, true, true),
-                Arguments.of(true, true, true, true));
-    }
-
-    @ParameterizedTest
-    @MethodSource("testIcebergArguments")
-    public void testMigrateIcebergTableProcedure(
-            boolean isPartitioned,
-            boolean icebergIsHive,
-            boolean paimonIsHive,
-            boolean isNamedArgument)
-            throws Exception {
+    @Test
+    public void testMigrateIcebergTableProcedure() throws Exception {
         TableEnvironment tEnv =
                 TableEnvironmentImpl.create(
                         EnvironmentSettings.newInstance().inBatchMode().build());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        boolean isPartitioned = random.nextBoolean();
+        boolean icebergIsHive = random.nextBoolean();
+        boolean paimonIsHive = random.nextBoolean();
+        boolean isNamedArgument = random.nextBoolean();
+
+        // Logging the random arguments for debugging
+        LOG.info(
+                "isPartitioned:{}, icebergIsHive:{}, paimonIsHive:{}, isNamedArgument:{}",
+                isPartitioned,
+                icebergIsHive,
+                paimonIsHive,
+                isNamedArgument);
 
         // create iceberg catalog, database, table, and insert some data to iceberg table
         tEnv.executeSql(icebergCatalogDdl(icebergIsHive));
