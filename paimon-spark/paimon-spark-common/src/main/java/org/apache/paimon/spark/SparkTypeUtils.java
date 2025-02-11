@@ -46,7 +46,13 @@ import org.apache.paimon.types.VariantType;
 
 import net.minidev.json.JSONObject;
 import org.apache.spark.sql.paimon.shims.SparkShimLoader;
-import org.apache.spark.sql.types.*;
+import org.apache.spark.sql.types.DataType;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.LongType;
+import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.types.UserDefinedType;
 
 import java.util.ArrayList;
 import java.util.List;
