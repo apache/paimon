@@ -29,14 +29,18 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.rest.RESTCatalogInternalOptions.DATABASE_COMMENT;
+import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 
 /** Response for getting database. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GetDatabaseResponse implements RESTResponse, Database {
 
+    private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_OPTIONS = "options";
+
+    @JsonProperty(FIELD_ID)
+    private final String id;
 
     @JsonProperty(FIELD_NAME)
     private final String name;
@@ -46,10 +50,17 @@ public class GetDatabaseResponse implements RESTResponse, Database {
 
     @JsonCreator
     public GetDatabaseResponse(
+            @JsonProperty(FIELD_ID) String id,
             @JsonProperty(FIELD_NAME) String name,
             @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
+        this.id = id;
         this.name = name;
         this.options = options;
+    }
+
+    @JsonGetter(FIELD_ID)
+    public String getId() {
+        return id;
     }
 
     @JsonGetter(FIELD_NAME)
@@ -64,17 +75,16 @@ public class GetDatabaseResponse implements RESTResponse, Database {
 
     @Override
     public String name() {
-        return this.getName();
+        return getName();
     }
 
     @Override
     public Map<String, String> options() {
-        return this.getOptions();
+        return getOptions();
     }
 
     @Override
     public Optional<String> comment() {
-        return Optional.ofNullable(
-                this.options.getOrDefault(DATABASE_COMMENT.key(), DATABASE_COMMENT.defaultValue()));
+        return Optional.ofNullable(options.get(COMMENT_PROP));
     }
 }

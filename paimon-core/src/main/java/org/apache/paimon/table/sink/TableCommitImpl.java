@@ -20,7 +20,6 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -28,13 +27,11 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.tag.TagAutoManager;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
-import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -72,13 +69,13 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialR
 
 /** An abstraction layer above {@link FileStoreCommit} to provide snapshot commit and expiration. */
 public class TableCommitImpl implements InnerTableCommit {
+
     private static final Logger LOG = LoggerFactory.getLogger(TableCommitImpl.class);
 
     private final FileStoreCommit commit;
     @Nullable private final Runnable expireSnapshots;
     @Nullable private final PartitionExpire partitionExpire;
     @Nullable private final TagAutoManager tagAutoManager;
-    private final Lock lock;
 
     @Nullable private final Duration consumerExpireTime;
     private final ConsumerManager consumerManager;
@@ -97,15 +94,12 @@ public class TableCommitImpl implements InnerTableCommit {
             @Nullable Runnable expireSnapshots,
             @Nullable PartitionExpire partitionExpire,
             @Nullable TagAutoManager tagAutoManager,
-            Lock lock,
             @Nullable Duration consumerExpireTime,
             ConsumerManager consumerManager,
             ExpireExecutionMode expireExecutionMode,
             String tableName,
             boolean forceCreatingSnapshot) {
-        commit.withLock(lock);
         if (partitionExpire != null) {
-            partitionExpire.withLock(lock);
             commit.withPartitionExpire(partitionExpire);
         }
 
@@ -113,7 +107,6 @@ public class TableCommitImpl implements InnerTableCommit {
         this.expireSnapshots = expireSnapshots;
         this.partitionExpire = partitionExpire;
         this.tagAutoManager = tagAutoManager;
-        this.lock = lock;
 
         this.consumerExpireTime = consumerExpireTime;
         this.consumerManager = consumerManager;
@@ -252,19 +245,13 @@ public class TableCommitImpl implements InnerTableCommit {
 
     private void checkFilesExistence(List<ManifestCommittable> committables) {
         List<Path> files = new ArrayList<>();
-        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> factoryMap = new HashMap<>();
+        DataFilePathFactories factories = new DataFilePathFactories(commit.pathFactory());
         PathFactory indexFileFactory = commit.pathFactory().indexFileFactory();
         for (ManifestCommittable committable : committables) {
             for (CommitMessage message : committable.fileCommittables()) {
                 CommitMessageImpl msg = (CommitMessageImpl) message;
                 DataFilePathFactory pathFactory =
-                        factoryMap.computeIfAbsent(
-                                Pair.of(message.partition(), message.bucket()),
-                                k ->
-                                        commit.pathFactory()
-                                                .createDataFilePathFactory(
-                                                        k.getKey(), k.getValue()));
-
+                        factories.get(message.partition(), message.bucket());
                 Consumer<DataFileMeta> collector = f -> files.addAll(f.collectFiles(pathFactory));
                 msg.newFilesIncrement().newFiles().forEach(collector);
                 msg.newFilesIncrement().changelogFiles().forEach(collector);
@@ -355,7 +342,6 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void close() throws Exception {
         commit.close();
-        IOUtils.closeQuietly(lock);
         expireMainExecutor.shutdownNow();
     }
 

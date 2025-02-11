@@ -19,6 +19,8 @@
 package org.apache.paimon;
 
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
@@ -31,6 +33,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
@@ -261,7 +264,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser, List<CommitCallback> callbacks) {
+        SnapshotManager snapshotManager = snapshotManager();
+        SnapshotCommit snapshotCommit = catalogEnvironment.snapshotCommit(snapshotManager);
+        if (snapshotCommit == null) {
+            snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
+        }
         return new FileStoreCommitImpl(
+                snapshotCommit,
                 fileIO,
                 schemaManager,
                 tableName,
@@ -270,7 +279,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options,
                 options.partitionDefaultName(),
                 pathFactory(),
-                snapshotManager(),
+                snapshotManager,
                 manifestFileFactory(),
                 manifestListFactory(),
                 indexManifestFileFactory(),

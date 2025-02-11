@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.BufferedReader;
+import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -39,17 +40,21 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.fs.FileIOUtils.checkAccess;
+import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILEIO_ENABLED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -59,7 +64,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 @Public
 @ThreadSafe
-public interface FileIO extends Serializable {
+public interface FileIO extends Serializable, Closeable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);
 
@@ -103,6 +108,75 @@ public interface FileIO extends Serializable {
      * @return the statuses of the files/directories in the given path
      */
     FileStatus[] listStatus(Path path) throws IOException;
+
+    /**
+     * List the statuses of the files in the given path if the path is a directory.
+     *
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
+     *     otherwise only files in the current directory will be listed
+     * @return the statuses of the files in the given path
+     */
+    default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+        List<FileStatus> files = new ArrayList<>();
+        try (RemoteIterator<FileStatus> iter = listFilesIterative(path, recursive)) {
+            while (iter.hasNext()) {
+                files.add(iter.next());
+            }
+        }
+        return files.toArray(new FileStatus[0]);
+    }
+
+    /**
+     * List the statuses of the files iteratively in the given path if the path is a directory.
+     *
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
+     *     otherwise only files in the current directory will be listed
+     * @return an {@link RemoteIterator} over {@link FileStatus} of the files in the given path
+     */
+    default RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        Queue<FileStatus> files = new LinkedList<>();
+        Queue<Path> directories = new LinkedList<>(Collections.singletonList(path));
+        return new RemoteIterator<FileStatus>() {
+
+            @Override
+            public boolean hasNext() throws IOException {
+                maybeUnpackDirectory();
+                return !files.isEmpty();
+            }
+
+            @Override
+            public FileStatus next() throws IOException {
+                maybeUnpackDirectory();
+                return files.remove();
+            }
+
+            private void maybeUnpackDirectory() throws IOException {
+                if (!files.isEmpty()) {
+                    return;
+                }
+                if (directories.isEmpty()) {
+                    return;
+                }
+                FileStatus[] statuses = listStatus(directories.remove());
+                for (FileStatus f : statuses) {
+                    if (!f.isDir()) {
+                        files.add(f);
+                        continue;
+                    }
+                    if (!recursive) {
+                        continue;
+                    }
+                    directories.add(f.getPath());
+                }
+            }
+
+            @Override
+            public void close() {}
+        };
+    }
 
     /**
      * List the statuses of the directories in the given path if the path is a directory.
@@ -157,6 +231,13 @@ public interface FileIO extends Serializable {
      * @return <code>true</code> if the renaming was successful, <code>false</code> otherwise
      */
     boolean rename(Path src, Path dst) throws IOException;
+
+    /**
+     * Override this method to empty, many FileIO implementation classes rely on static variables
+     * and do not have the ability to close them.
+     */
+    @Override
+    default void close() {}
 
     // -------------------------------------------------------------------------
     //                            utils
@@ -339,6 +420,12 @@ public interface FileIO extends Serializable {
      * by the given path.
      */
     static FileIO get(Path path, CatalogContext config) throws IOException {
+        if (config.options().get(RESOLVING_FILEIO_ENABLED)) {
+            FileIO fileIO = new ResolvingFileIO();
+            fileIO.configure(config);
+            return fileIO;
+        }
+
         URI uri = path.toUri();
         if (LOG.isDebugEnabled()) {
             LOG.debug("Getting FileIO by scheme {}.", uri.getScheme());

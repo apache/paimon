@@ -35,12 +35,13 @@ FileSystem pluggable jars for user to query tables from Spark/Hive side.
 
 ## Supported FileSystems
 
-| FileSystem        | URI Scheme | Pluggable | Description                                                            |
-|:------------------|:-----------|-----------|:-----------------------------------------------------------------------|
-| Local File System | file://    | N         | Built-in Support                                                       |
-| HDFS              | hdfs://    | N         | Built-in Support, ensure that the cluster is in the hadoop environment |
-| Aliyun OSS        | oss://     | Y         |                                                                        |
-| S3                | s3://      | Y         |                                                                        |
+| FileSystem                   | URI Scheme | Pluggable | Description                                                            |
+|:-----------------------------|:-----------|-----------|:-----------------------------------------------------------------------|
+| Local File System            | file://    | N         | Built-in Support                                                       |
+| HDFS                         | hdfs://    | N         | Built-in Support, ensure that the cluster is in the hadoop environment |
+| Aliyun OSS                   | oss://     | Y         |                                                                        |
+| S3                           | s3://      | Y         |                                                                        |
+| Tencent Cloud Object Storage | cosn://    | Y         |                                                                        |
 
 ## Dependency
 
@@ -345,7 +346,7 @@ Please refer to [Trino S3](https://trino.io/docs/current/object-storage/file-sys
 
 {{< /tabs >}}
 
-### S3 Complaint Object Stores
+### S3 Compliant Object Stores
 
 The S3 Filesystem also support using S3 compliant object stores such as MinIO, Tencent's COS and IBM’s Cloud Object
 Storage. Just configure your endpoint to the provider of the object store service.

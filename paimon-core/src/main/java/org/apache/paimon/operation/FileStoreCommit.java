@@ -32,9 +32,6 @@ import java.util.Map;
 /** Commit operation which provides commit and overwrite. */
 public interface FileStoreCommit extends AutoCloseable {
 
-    /** With global lock. */
-    FileStoreCommit withLock(Lock lock);
-
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
     FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire);

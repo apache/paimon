@@ -240,11 +240,7 @@ paths:
               $ref: '#/components/schemas/CreateTableRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetTableResponse'
+          description: Success, no content
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}:
@@ -312,11 +308,7 @@ paths:
               $ref: '#/components/schemas/AlterTableRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetTableResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -358,7 +350,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/rename:
+  /v1/{prefix}/databases/{database}/tables/rename:
     post:
       tags:
         - table
@@ -375,11 +367,6 @@ paths:
           required: true
           schema:
             type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -387,11 +374,7 @@ paths:
               $ref: '#/components/schemas/RenameTableRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetTableResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -400,6 +383,86 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/commit:
+    post:
+      tags:
+        - table
+      summary: Commit table
+      operationId: commitTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitTableRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitTableResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/token:
+    get:
+      tags:
+        - table
+      summary: Get table token
+      operationId: getTableToken
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableDataTokenResponse'
+        "404":
+          description: Resource not found
           content:
             application/json:
               schema:
@@ -446,8 +509,8 @@ paths:
     post:
       tags:
         - partition
-      summary: Create partition
-      operationId: createPartition
+      summary: Create partitions
+      operationId: createPartitions
       parameters:
         - name: prefix
           in: path
@@ -468,14 +531,219 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreatePartitionRequest'
+              $ref: '#/components/schemas/CreatePartitionsRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
+    post:
+      tags:
+        - partition
+      summary: Drop partitions
+      operationId: dropPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropPartitionsRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/alter:
+    post:
+      tags:
+        - partition
+      summary: Alter partitions
+      operationId: alterPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterPartitionsRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/mark:
+    post:
+      tags:
+        - partition
+      summary: MarkDone partitions
+      operationId: markDonePartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkDonePartitionsRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/views:
+    get:
+      tags:
+        - view
+      summary: List views
+      operationId: listViews
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PartitionResponse'
+                $ref: '#/components/schemas/ListViewsResponse'
+        "500":
+          description: Internal Server Error
+    post:
+      tags:
+        - view
+      summary: Create view
+      operationId: createView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateViewRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/views/{view}:
+    get:
+      tags:
+        - view
+      summary: Get view
+      operationId: getView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: view
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetViewResponse'
         "404":
           description: Resource not found
           content:
@@ -486,9 +754,9 @@ paths:
           description: Internal Server Error
     delete:
       tags:
-        - partition
-      summary: Drop partition
-      operationId: dropPartition
+        - view
+      summary: Drop view
+      operationId: dropView
       parameters:
         - name: prefix
           in: path
@@ -500,7 +768,35 @@ paths:
           required: true
           schema:
             type: string
-        - name: table
+        - name: view
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/views/rename:
+    post:
+      tags:
+        - view
+      summary: Rename view
+      operationId: renameView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
           in: path
           required: true
           schema:
@@ -509,12 +805,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DropPartitionRequest'
+              $ref: '#/components/schemas/RenameTableRequest'
       responses:
         "200":
           description: Success, no content
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
           content:
             application/json:
               schema:
@@ -532,18 +834,34 @@ components:
           type: object
           additionalProperties:
             type: string
-    CreatePartitionRequest:
+    CreatePartitionsRequest:
       type: object
       properties:
-        identifier:
-          $ref: '#/components/schemas/Identifier'
-        spec:
-          type: object
-    DropPartitionRequest:
+        specs:
+          type: array
+          items:
+            type: object
+    DropPartitionsRequest:
       type: object
       properties:
-        spec:
-          type: object
+        specs:
+          type: array
+          items:
+            type: object
+    AlterTableRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SchemaChange'
+    MarkDonePartitionsRequest:
+      type: object
+      properties:
+        specs:
+          type: array
+          items:
+            type: object
     CreateDatabaseResponse:
       type: object
       properties:
@@ -572,6 +890,13 @@ components:
           $ref: '#/components/schemas/Identifier'
         schema:
           $ref: '#/components/schemas/Schema'
+    CreateViewRequest:
+      type: object
+      properties:
+        identifier:
+          $ref: '#/components/schemas/Identifier'
+        schema:
+          $ref: '#/components/schemas/ViewSchema'
     DataField:
       type: object
       properties:
@@ -630,7 +955,9 @@ components:
           pattern: ^ROW.*
           example: ROW
         fields:
-          $ref: '#/components/schemas/DataField'
+          type: array
+          items:
+           $ref: '#/components/schemas/DataField'
     Identifier:
       type: object
       properties:
@@ -664,20 +991,17 @@ components:
     GetTableResponse:
       type: object
       properties:
-        path:
+        id:
+          type: string
+        name:
           type: string
         schemaId:
           type: integer
           format: int64
         schema:
           $ref: '#/components/schemas/Schema'
-    AlterTableRequest:
-      type: object
-      properties:
-        changes:
-          type: array
-          items:
-            $ref: '#/components/schemas/SchemaChange'
+        uuid:
+          type: string
     SchemaChange:
       anyOf:
         - $ref: '#/components/schemas/SetOption'
@@ -812,8 +1136,83 @@ components:
     RenameTableRequest:
       type: object
       properties:
-        newIdentifier:
+        source:
           $ref: '#/components/schemas/Identifier'
+        destination:
+          $ref: '#/components/schemas/Identifier'
+    CommitTableRequest:
+      type: object
+      properties:
+        identifier:
+          $ref: '#/components/schemas/Identifier'
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+    Snapshot:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int32
+          nullable: true
+        id:
+          type: integer
+          format: int64
+        schemaId:
+          type: integer
+          format: int64
+        baseManifestList:
+          type: string
+        deltaManifestList:
+          type: string
+        changelogManifestList:
+          type: string
+          nullable: true
+        indexManifest:
+          type: string
+        commitUser:
+          type: string
+        commitIdentifier:
+          type: string
+        commitKind:
+          type: string
+          enum: ["APPEND", "COMPACT", "OVERWRITE", "ANALYZE"]
+        timeMillis:
+          type: integer
+          format: int64
+        logOffsets:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        totalRecordCount:
+          type: integer
+          format: int64
+        deltaRecordCount:
+          type: integer
+          format: int64
+        changelogRecordCount:
+          type: integer
+          format: int64
+        watermark:
+          type: integer
+          format: int64
+        statistics:
+          type: string
+    CommitTableResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+    GetTableDataTokenResponse:
+      type: object
+      properties:
+        token:
+          type: object
+          additionalProperties:
+            type: string
+        expiresAt:
+          type: integer
+          format: int64
     AlterDatabaseRequest:
       type: object
       properties:
@@ -825,6 +1224,13 @@ components:
           type: object
           additionalProperties:
             type: string
+    AlterPartitionsRequest:
+      type: object
+      properties:
+        partitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partition'
     AlterDatabaseResponse:
       type: object
       properties:
@@ -850,6 +1256,8 @@ components:
     GetDatabaseResponse:
       type: object
       properties:
+        id:
+          type: string
         name:
           type: string
         options:
@@ -881,11 +1289,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
-    PartitionResponse:
+    GetViewResponse:
       type: object
       properties:
-        partition:
-          $ref: '#/components/schemas/Partition'
+        id:
+          type: string
+        name:
+          type: string
+        schema:
+          $ref: '#/components/schemas/ViewSchema'
+    ListViewsResponse:
+      type: object
+      properties:
+        views:
+          type: array
+          items:
+            type: string
+    ViewSchema:
+      type: object
+      properties:
+        rowType:
+          $ref: '#/components/schemas/RowType'
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        comment:
+          type: string
+        query:
+          type: string
     Partition:
       type: object
       properties:

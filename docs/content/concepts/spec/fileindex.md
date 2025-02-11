@@ -69,15 +69,15 @@ File index file format. Put all column and offset in the header.
 ｜                BODY                 ｜
 ｜_____________________________________｜    _____________________
 *
-magic:                            8 bytes long, value is 1493475289347502L, BIT_ENDIAN
-version:                          4 bytes int, BIT_ENDIAN
-head length:                      4 bytes int, BIT_ENDIAN
-column number:                    4 bytes int, BIT_ENDIAN
-column x name:                    2 bytes short BIT_ENDIAN and Java modified-utf-8
-index number:                     4 bytes int (how many column items below), BIT_ENDIAN
-index name x:                     2 bytes short BIT_ENDIAN and Java modified-utf-8
-start pos:                        4 bytes int, BIT_ENDIAN
-length:                           4 bytes int, BIT_ENDIAN
+magic:                            8 bytes long, value is 1493475289347502L, BIG_ENDIAN
+version:                          4 bytes int, BIG_ENDIAN
+head length:                      4 bytes int, BIG_ENDIAN
+column number:                    4 bytes int, BIG_ENDIAN
+column x name:                    2 bytes short BIG_ENDIAN and Java modified-utf-8
+index number:                     4 bytes int (how many column items below), BIG_ENDIAN
+index name x:                     2 bytes short BIG_ENDIAN and Java modified-utf-8
+start pos:                        4 bytes int, BIG_ENDIAN
+length:                           4 bytes int, BIG_ENDIAN
 redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
 redundant bytes:                  var bytes (for compatibility with later version, in this version, is empty)
 BODY:                             column index bytes + column index bytes + column index bytes + .......
@@ -88,7 +88,7 @@ BODY:                             column index bytes + column index bytes + colu
 Define `'file-index.bloom-filter.columns'`.
 
 Content of bloom filter index is simple: 
-- numHashFunctions 4 bytes int, BIT_ENDIAN
+- numHashFunctions 4 bytes int, BIG_ENDIAN
 - bloom filter bytes
 
 This class use (64-bits) long hash. Store the num hash function (one integer) and bit set bytes only. Hash bytes type 
@@ -135,7 +135,7 @@ offset:                        4 bytes int (when it is negative, it represents t
                                  and its position is the inverse of the negative value)
 </pre>
 
-Integer are all BIT_ENDIAN.
+Integer are all BIG_ENDIAN.
 
 ## Index: Bit-Slice Index Bitmap
 

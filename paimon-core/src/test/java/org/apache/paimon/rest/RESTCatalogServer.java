@@ -18,44 +18,65 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
+import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListViewsResponse;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewImpl;
+import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
 
-    private static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
     private static final String PREFIX = "paimon";
     private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
 
@@ -68,10 +89,8 @@ public class RESTCatalogServer {
         authToken = initToken;
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
-        this.catalog =
-                CatalogFactory.createCatalog(
-                        CatalogContext.create(conf), this.getClass().getClassLoader());
-        this.dispatcher = initDispatcher(catalog, authToken);
+        this.catalog = TestRESTCatalog.create(CatalogContext.create(conf));
+        this.dispatcher = initDispatcher(catalog, warehouse, authToken);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
         server = mockWebServer;
@@ -89,7 +108,7 @@ public class RESTCatalogServer {
         server.shutdown();
     }
 
-    public static Dispatcher initDispatcher(Catalog catalog, String authToken) {
+    public static Dispatcher initDispatcher(Catalog catalog, String warehouse, String authToken) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
@@ -102,7 +121,7 @@ public class RESTCatalogServer {
                     if ("/v1/config".equals(request.getPath())) {
                         return new MockResponse()
                                 .setResponseCode(200)
-                                .setBody(getConfigBody(catalog.warehouse()));
+                                .setBody(getConfigBody(warehouse));
                     } else if (DATABASE_URI.equals(request.getPath())) {
                         return databasesApiHandler(catalog, request);
                     } else if (request.getPath().startsWith(DATABASE_URI)) {
@@ -111,29 +130,134 @@ public class RESTCatalogServer {
                                         .substring((DATABASE_URI + "/").length())
                                         .split("/");
                         String databaseName = resources[0];
+                        boolean isViews = resources.length == 2 && "views".equals(resources[1]);
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
-                        boolean isTable = resources.length == 3 && "tables".equals(resources[1]);
                         boolean isTableRename =
-                                resources.length == 4 && "rename".equals(resources[3]);
+                                resources.length == 3
+                                        && "tables".equals(resources[1])
+                                        && "rename".equals(resources[2]);
+                        boolean isViewRename =
+                                resources.length == 3
+                                        && "views".equals(resources[1])
+                                        && "rename".equals(resources[2]);
+                        boolean isView =
+                                resources.length == 3
+                                        && "views".equals(resources[1])
+                                        && !"rename".equals(resources[2]);
+                        boolean isTable =
+                                resources.length == 3
+                                        && "tables".equals(resources[1])
+                                        && !"rename".equals(resources[2])
+                                        && !"commit".equals(resources[2]);
+                        boolean isTableCommit =
+                                resources.length == 3
+                                        && "tables".equals(resources[1])
+                                        && "commit".equals(resources[2]);
+                        boolean isTableToken =
+                                resources.length == 4
+                                        && "tables".equals(resources[1])
+                                        && "token".equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
                                         && "partitions".equals(resources[3]);
-                        if (isPartitions) {
+
+                        boolean isDropPartitions =
+                                resources.length == 5
+                                        && "tables".equals(resources[1])
+                                        && "partitions".equals(resources[3])
+                                        && "drop".equals(resources[4]);
+                        boolean isAlterPartitions =
+                                resources.length == 5
+                                        && "tables".equals(resources[1])
+                                        && "partitions".equals(resources[3])
+                                        && "alter".equals(resources[4]);
+                        boolean isMarkDonePartitions =
+                                resources.length == 5
+                                        && "tables".equals(resources[1])
+                                        && "partitions".equals(resources[3])
+                                        && "mark".equals(resources[4]);
+                        if (isDropPartitions) {
                             String tableName = resources[2];
-                            List<Partition> partitions =
-                                    catalog.listPartitions(
-                                            Identifier.create(databaseName, tableName));
-                            response = new ListPartitionsResponse(partitions);
-                            return mockResponse(response, 200);
+                            Identifier identifier = Identifier.create(databaseName, tableName);
+                            Optional<MockResponse> error =
+                                    checkTablePartitioned(catalog, identifier);
+                            if (error.isPresent()) {
+                                return error.get();
+                            }
+                            DropPartitionsRequest dropPartitionsRequest =
+                                    OBJECT_MAPPER.readValue(
+                                            request.getBody().readUtf8(),
+                                            DropPartitionsRequest.class);
+                            catalog.dropPartitions(
+                                    identifier, dropPartitionsRequest.getPartitionSpecs());
+                            return new MockResponse().setResponseCode(200);
+                        } else if (isAlterPartitions) {
+                            String tableName = resources[2];
+                            Identifier identifier = Identifier.create(databaseName, tableName);
+                            Optional<MockResponse> error =
+                                    checkTablePartitioned(catalog, identifier);
+                            if (error.isPresent()) {
+                                return error.get();
+                            }
+                            AlterPartitionsRequest alterPartitionsRequest =
+                                    OBJECT_MAPPER.readValue(
+                                            request.getBody().readUtf8(),
+                                            AlterPartitionsRequest.class);
+                            catalog.alterPartitions(
+                                    identifier, alterPartitionsRequest.getPartitions());
+                            return new MockResponse().setResponseCode(200);
+                        } else if (isMarkDonePartitions) {
+                            String tableName = resources[2];
+                            Identifier identifier = Identifier.create(databaseName, tableName);
+                            Optional<MockResponse> error =
+                                    checkTablePartitioned(catalog, identifier);
+                            if (error.isPresent()) {
+                                return error.get();
+                            }
+                            MarkDonePartitionsRequest markDonePartitionsRequest =
+                                    OBJECT_MAPPER.readValue(
+                                            request.getBody().readUtf8(),
+                                            MarkDonePartitionsRequest.class);
+                            catalog.markDonePartitions(
+                                    identifier, markDonePartitionsRequest.getPartitionSpecs());
+                            return new MockResponse().setResponseCode(200);
+                        } else if (isPartitions) {
+                            String tableName = resources[2];
+                            Optional<MockResponse> error =
+                                    checkTablePartitioned(
+                                            catalog, Identifier.create(databaseName, tableName));
+                            if (error.isPresent()) {
+                                return error.get();
+                            }
+                            return partitionsApiHandler(catalog, request, databaseName, tableName);
+                        } else if (isTableToken) {
+                            GetTableTokenResponse getTableTokenResponse =
+                                    new GetTableTokenResponse(
+                                            ImmutableMap.of("key", "value"),
+                                            System.currentTimeMillis());
+                            return new MockResponse()
+                                    .setResponseCode(200)
+                                    .setBody(
+                                            OBJECT_MAPPER.writeValueAsString(
+                                                    getTableTokenResponse));
                         } else if (isTableRename) {
-                            return renameTableApiHandler(
+                            return renameTableApiHandler(catalog, request);
+                        } else if (isTableCommit) {
+                            return commitTableApiHandler(
                                     catalog, request, databaseName, resources[2]);
                         } else if (isTable) {
                             String tableName = resources[2];
                             return tableApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTables) {
                             return tablesApiHandler(catalog, request, databaseName);
+                        } else if (isViews) {
+                            return viewsApiHandler(catalog, request, databaseName);
+                        } else if (isViewRename) {
+                            return renameViewApiHandler(catalog, request);
+                        } else if (isView) {
+                            String viewName = resources[2];
+                            return viewApiHandler(catalog, request, databaseName, viewName);
                         } else {
                             return databaseApiHandler(catalog, request, databaseName);
                         }
@@ -187,6 +311,22 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
+                } catch (Catalog.ViewNotExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.VIEW,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.ViewAlreadyExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.VIEW,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    409);
+                    return mockResponse(response, 409);
                 } catch (IllegalArgumentException e) {
                     response = new ErrorResponse(null, null, e.getMessage(), 400);
                     return mockResponse(response, 400);
@@ -209,102 +349,230 @@ public class RESTCatalogServer {
         };
     }
 
-    private static MockResponse renameTableApiHandler(
+    private static Optional<MockResponse> checkTablePartitioned(
+            Catalog catalog, Identifier identifier) {
+        Table table;
+        try {
+            table = catalog.getTable(identifier);
+        } catch (Catalog.TableNotExistException e) {
+            return Optional.of(
+                    mockResponse(
+                            new ErrorResponse(ErrorResponseResourceType.TABLE, null, "", 404),
+                            404));
+        }
+        boolean partitioned = CoreOptions.fromMap(table.options()).partitionedTableInMetastore();
+        if (!partitioned) {
+            return Optional.of(mockResponse(new ErrorResponse(null, null, "", 501), 501));
+        }
+        return Optional.empty();
+    }
+
+    private static MockResponse commitTableApiHandler(
             Catalog catalog, RecordedRequest request, String databaseName, String tableName)
             throws Exception {
-        RenameTableRequest requestBody =
-                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
-        catalog.renameTable(
-                Identifier.create(databaseName, tableName), requestBody.getNewIdentifier(), false);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(requestBody.getNewIdentifier());
-        RESTResponse response =
-                new GetTableResponse(
-                        AbstractCatalog.newTableLocation(
-                                        catalog.warehouse(), requestBody.getNewIdentifier())
-                                .toString(),
-                        table.schema().id(),
-                        table.schema().toSchema());
+        CommitTableRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(Identifier.create(databaseName, tableName));
+        RenamingSnapshotCommit commit =
+                new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
+        String branchName = requestBody.getIdentifier().getBranchName();
+        if (branchName == null) {
+            branchName = "main";
+        }
+        boolean success = commit.commit(requestBody.getSnapshot(), branchName);
+        CommitTableResponse response = new CommitTableResponse(success);
         return mockResponse(response, 200);
     }
 
     private static MockResponse databasesApiHandler(Catalog catalog, RecordedRequest request)
             throws Exception {
         RESTResponse response;
-        if (request.getMethod().equals("GET")) {
-            List<String> databaseNameList = catalog.listDatabases();
-            response = new ListDatabasesResponse(databaseNameList);
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("POST")) {
-            CreateDatabaseRequest requestBody =
-                    OBJECT_MAPPER.readValue(
-                            request.getBody().readUtf8(), CreateDatabaseRequest.class);
-            String databaseName = requestBody.getName();
-            catalog.createDatabase(databaseName, false);
-            response = new CreateDatabaseResponse(databaseName, requestBody.getOptions());
-            return mockResponse(response, 200);
+        switch (request.getMethod()) {
+            case "GET":
+                List<String> databaseNameList = catalog.listDatabases();
+                response = new ListDatabasesResponse(databaseNameList);
+                return mockResponse(response, 200);
+            case "POST":
+                CreateDatabaseRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), CreateDatabaseRequest.class);
+                String databaseName = requestBody.getName();
+                catalog.createDatabase(databaseName, false);
+                response = new CreateDatabaseResponse(databaseName, requestBody.getOptions());
+                return mockResponse(response, 200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
-        return new MockResponse().setResponseCode(404);
     }
 
     private static MockResponse databaseApiHandler(
             Catalog catalog, RecordedRequest request, String databaseName) throws Exception {
         RESTResponse response;
-        if (request.getMethod().equals("GET")) {
-            Database database = catalog.getDatabase(databaseName);
-            response = new GetDatabaseResponse(database.name(), database.options());
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("DELETE")) {
-            catalog.dropDatabase(databaseName, false, true);
-            return new MockResponse().setResponseCode(200);
+        switch (request.getMethod()) {
+            case "GET":
+                Database database = catalog.getDatabase(databaseName);
+                response =
+                        new GetDatabaseResponse(
+                                UUID.randomUUID().toString(), database.name(), database.options());
+                return mockResponse(response, 200);
+            case "DELETE":
+                catalog.dropDatabase(databaseName, false, true);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
-        return new MockResponse().setResponseCode(404);
     }
 
     private static MockResponse tablesApiHandler(
             Catalog catalog, RecordedRequest request, String databaseName) throws Exception {
         RESTResponse response;
-        if (request.getMethod().equals("POST")) {
-            CreateTableRequest requestBody =
-                    OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CreateTableRequest.class);
-            catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
-            response = new GetTableResponse("", 1L, requestBody.getSchema());
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("GET")) {
-            catalog.listTables(databaseName);
-            response = new ListTablesResponse(catalog.listTables(databaseName));
-            return mockResponse(response, 200);
+        switch (request.getMethod()) {
+            case "GET":
+                response = new ListTablesResponse(catalog.listTables(databaseName));
+                return mockResponse(response, 200);
+            case "POST":
+                CreateTableRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), CreateTableRequest.class);
+                catalog.createTable(requestBody.getIdentifier(), requestBody.getSchema(), false);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
-        return new MockResponse().setResponseCode(404);
     }
 
     private static MockResponse tableApiHandler(
             Catalog catalog, RecordedRequest request, String databaseName, String tableName)
             throws Exception {
         RESTResponse response;
-        if (request.getMethod().equals("GET")) {
-            Identifier identifier = Identifier.create(databaseName, tableName);
-            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-            response =
-                    new GetTableResponse(
-                            AbstractCatalog.newTableLocation(catalog.warehouse(), identifier)
-                                    .toString(),
-                            table.schema().id(),
-                            table.schema().toSchema());
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("POST")) {
-            Identifier identifier = Identifier.create(databaseName, tableName);
-            AlterTableRequest requestBody =
-                    OBJECT_MAPPER.readValue(request.getBody().readUtf8(), AlterTableRequest.class);
-            catalog.alterTable(identifier, requestBody.getChanges(), false);
-            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-            response = new GetTableResponse("", table.schema().id(), table.schema().toSchema());
-            return mockResponse(response, 200);
-        } else if (request.getMethod().equals("DELETE")) {
-            Identifier identifier = Identifier.create(databaseName, tableName);
-            catalog.dropTable(identifier, false);
-            return new MockResponse().setResponseCode(200);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        switch (request.getMethod()) {
+            case "GET":
+                response = getTable(catalog, databaseName, tableName);
+                return mockResponse(response, 200);
+            case "POST":
+                AlterTableRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), AlterTableRequest.class);
+                catalog.alterTable(identifier, requestBody.getChanges(), false);
+                return new MockResponse().setResponseCode(200);
+            case "DELETE":
+                catalog.dropTable(identifier, false);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
-        return new MockResponse().setResponseCode(404);
+    }
+
+    private static MockResponse renameTableApiHandler(Catalog catalog, RecordedRequest request)
+            throws Exception {
+        RenameTableRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+        catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
+        return new MockResponse().setResponseCode(200);
+    }
+
+    private static MockResponse partitionsApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName, String tableName)
+            throws Exception {
+        RESTResponse response;
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        switch (request.getMethod()) {
+            case "GET":
+                List<Partition> partitions = catalog.listPartitions(identifier);
+                response = new ListPartitionsResponse(partitions);
+                return mockResponse(response, 200);
+            case "POST":
+                CreatePartitionsRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), CreatePartitionsRequest.class);
+                catalog.createPartitions(identifier, requestBody.getPartitionSpecs());
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private static MockResponse viewsApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName) throws Exception {
+        RESTResponse response;
+        switch (request.getMethod()) {
+            case "GET":
+                response = new ListViewsResponse(catalog.listViews(databaseName));
+                return mockResponse(response, 200);
+            case "POST":
+                CreateViewRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), CreateViewRequest.class);
+                ViewImpl view =
+                        new ViewImpl(
+                                requestBody.getIdentifier(),
+                                requestBody.getSchema().rowType(),
+                                requestBody.getSchema().query(),
+                                requestBody.getSchema().comment(),
+                                requestBody.getSchema().options());
+                catalog.createView(requestBody.getIdentifier(), view, false);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private static MockResponse viewApiHandler(
+            Catalog catalog, RecordedRequest request, String databaseName, String viewName)
+            throws Exception {
+        RESTResponse response;
+        Identifier identifier = Identifier.create(databaseName, viewName);
+        switch (request.getMethod()) {
+            case "GET":
+                View view = catalog.getView(identifier);
+                ViewSchema schema =
+                        new ViewSchema(
+                                view.rowType(),
+                                view.options(),
+                                view.comment().orElse(null),
+                                view.query());
+                response = new GetViewResponse("id", identifier.getTableName(), schema);
+                return mockResponse(response, 200);
+            case "DELETE":
+                catalog.dropView(identifier, false);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private static MockResponse renameViewApiHandler(Catalog catalog, RecordedRequest request)
+            throws Exception {
+        RenameTableRequest requestBody =
+                OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
+        catalog.renameView(requestBody.getSource(), requestBody.getDestination(), false);
+        return new MockResponse().setResponseCode(200);
+    }
+
+    private static GetTableResponse getTable(Catalog catalog, String databaseName, String tableName)
+            throws Exception {
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        Table table = catalog.getTable(identifier);
+        Schema schema;
+        Long schemaId = 1L;
+        if (table instanceof FileStoreTable) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            schema = fileStoreTable.schema().toSchema();
+            schemaId = fileStoreTable.schema().id();
+        } else {
+            FormatTable formatTable = (FormatTable) table;
+            List<DataField> fields = formatTable.rowType().getFields();
+            schema =
+                    new Schema(
+                            fields,
+                            table.partitionKeys(),
+                            table.primaryKeys(),
+                            table.options(),
+                            table.comment().orElse(null));
+        }
+        return new GetTableResponse(table.uuid(), table.name(), schemaId, schema);
     }
 
     private static MockResponse mockResponse(RESTResponse response, int httpCode) {

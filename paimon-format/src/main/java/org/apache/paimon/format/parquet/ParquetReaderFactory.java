@@ -27,9 +27,9 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
-import org.apache.paimon.data.columnar.heap.ElementCountable;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.parquet.newreader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
 import org.apache.paimon.format.parquet.reader.ParquetReadState;
@@ -43,6 +43,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Pool;
 
 import org.apache.parquet.ParquetReadOptions;
@@ -70,11 +71,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.LIST_ELEMENT_NAME;
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.LIST_NAME;
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_KEY_NAME;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_REPEATED_NAME;
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_VALUE_NAME;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.buildFieldsList;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createColumnReader;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createWritableColumnVector;
@@ -91,26 +91,21 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private static final String ALLOCATION_SIZE = "parquet.read.allocation.size";
 
     private final Options conf;
-
-    private final RowType projectedType;
-    private final String[] projectedColumnNames;
-    private final DataField[] projectedFields;
+    private final DataField[] readFields;
     private final int batchSize;
     private final FilterCompat.Filter filter;
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
 
     public ParquetReaderFactory(
-            Options conf, RowType projectedType, int batchSize, FilterCompat.Filter filter) {
+            Options conf, RowType readType, int batchSize, FilterCompat.Filter filter) {
         this.conf = conf;
-        this.projectedType = projectedType;
-        this.projectedColumnNames = projectedType.getFieldNames().toArray(new String[0]);
-        this.projectedFields = projectedType.getFields().toArray(new DataField[0]);
+        this.readFields = readType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
         this.filter = filter;
     }
 
-    @Override
-    public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
+    // TODO: remove this when new reader is stable
+    public FileRecordReader<InternalRow> createReaderOld(FormatReaderFactory.Context context)
             throws IOException {
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(0, context.fileSize());
@@ -131,11 +126,38 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 createPoolOfBatches(context.filePath(), requestedSchema);
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields =
-                buildFieldsList(projectedType.getFields(), projectedType.getFieldNames(), columnIO);
+        List<ParquetField> fields = buildFieldsList(readFields, columnIO);
 
         return new ParquetReader(
                 reader, requestedSchema, reader.getFilteredRecordCount(), poolOfBatches, fields);
+    }
+
+    @Override
+    public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
+            throws IOException {
+        if (Boolean.parseBoolean(conf.getString("parquet.use-old-reader", "false"))) {
+            return createReaderOld(context);
+        }
+
+        ParquetReadOptions.Builder builder =
+                ParquetReadOptions.builder().withRange(0, context.fileSize());
+        setReadOptions(builder);
+
+        ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        builder.build(),
+                        context.selection());
+        MessageType fileSchema = reader.getFileMetaData().getSchema();
+        MessageType requestedSchema = clipParquetSchema(fileSchema);
+        reader.setRequestedSchema(requestedSchema);
+        WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
+
+        MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
+        List<ParquetField> fields = buildFieldsList(readFields, columnIO);
+
+        return new VectorizedParquetRecordReader(
+                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {
@@ -160,24 +182,23 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     /** Clips `parquetSchema` according to `fieldNames`. */
     private MessageType clipParquetSchema(GroupType parquetSchema) {
-        Type[] types = new Type[projectedColumnNames.length];
-        for (int i = 0; i < projectedColumnNames.length; ++i) {
-            String fieldName = projectedColumnNames[i];
+        Type[] types = new Type[readFields.length];
+        for (int i = 0; i < readFields.length; ++i) {
+            String fieldName = readFields[i].name();
             if (!parquetSchema.containsField(fieldName)) {
                 LOG.warn(
                         "{} does not exist in {}, will fill the field with null.",
                         fieldName,
                         parquetSchema);
-                types[i] =
-                        ParquetSchemaConverter.convertToParquetType(fieldName, projectedFields[i]);
+                types[i] = ParquetSchemaConverter.convertToParquetType(readFields[i]);
                 unknownFieldsIndices.add(i);
             } else {
                 Type parquetType = parquetSchema.getType(fieldName);
-                types[i] = clipParquetType(projectedFields[i].type(), parquetType);
+                types[i] = clipParquetType(readFields[i].type(), parquetType);
             }
         }
 
-        return Types.buildMessage().addFields(types).named("paimon-parquet");
+        return Types.buildMessage().addFields(types).named(PAIMON_SCHEMA);
     }
 
     /** Clips `parquetType` by `readType`. */
@@ -201,25 +222,21 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             case MAP:
                 MapType mapType = (MapType) readType;
                 GroupType mapGroup = (GroupType) parquetType;
-                GroupType keyValue = mapGroup.getType(MAP_REPEATED_NAME).asGroupType();
+                Pair<Type, Type> keyValueType = parquetMapKeyValueType(mapGroup);
                 return ConversionPatterns.mapType(
                         mapGroup.getRepetition(),
                         mapGroup.getName(),
                         MAP_REPEATED_NAME,
-                        clipParquetType(mapType.getKeyType(), keyValue.getType(MAP_KEY_NAME)),
-                        keyValue.containsField(MAP_VALUE_NAME)
-                                ? clipParquetType(
-                                        mapType.getValueType(), keyValue.getType(MAP_VALUE_NAME))
-                                : null);
+                        clipParquetType(mapType.getKeyType(), keyValueType.getLeft()),
+                        clipParquetType(mapType.getValueType(), keyValueType.getRight()));
             case ARRAY:
                 ArrayType arrayType = (ArrayType) readType;
                 GroupType arrayGroup = (GroupType) parquetType;
-                GroupType list = arrayGroup.getType(LIST_NAME).asGroupType();
                 return ConversionPatterns.listOfElements(
                         arrayGroup.getRepetition(),
                         arrayGroup.getName(),
                         clipParquetType(
-                                arrayType.getElementType(), list.getType(LIST_ELEMENT_NAME)));
+                                arrayType.getElementType(), parquetListElementType(arrayGroup)));
             default:
                 return parquetType;
         }
@@ -227,7 +244,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private void checkSchema(MessageType fileSchema, MessageType requestedSchema)
             throws IOException, UnsupportedOperationException {
-        if (projectedColumnNames.length != requestedSchema.getFieldCount()) {
+        if (readFields.length != requestedSchema.getFieldCount()) {
             throw new RuntimeException(
                     "The quality of field type is incompatible with the request schema!");
         }
@@ -275,13 +292,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     private WritableColumnVector[] createWritableVectors(MessageType requestedSchema) {
-        WritableColumnVector[] columns = new WritableColumnVector[projectedFields.length];
+        WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         List<Type> types = requestedSchema.getFields();
-        for (int i = 0; i < projectedFields.length; i++) {
+        for (int i = 0; i < readFields.length; i++) {
             columns[i] =
                     createWritableColumnVector(
                             batchSize,
-                            projectedFields[i].type(),
+                            readFields[i].type(),
                             types.get(i),
                             requestedSchema.getColumns(),
                             0);
@@ -297,12 +314,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             WritableColumnVector[] writableVectors) {
         ColumnVector[] vectors = new ColumnVector[writableVectors.length];
         for (int i = 0; i < writableVectors.length; i++) {
-            switch (projectedFields[i].type().getTypeRoot()) {
+            switch (readFields[i].type().getTypeRoot()) {
                 case DECIMAL:
-                    vectors[i] =
-                            new ParquetDecimalVector(
-                                    writableVectors[i],
-                                    ((ElementCountable) writableVectors[i]).getLen());
+                    vectors[i] = new ParquetDecimalVector(writableVectors[i]);
                     break;
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
@@ -436,7 +450,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 if (!unknownFieldsIndices.contains(i)) {
                     columnReaders[i] =
                             createColumnReader(
-                                    projectedFields[i].type(),
+                                    readFields[i].type(),
                                     types.get(i),
                                     requestedSchema.getColumns(),
                                     rowGroup,

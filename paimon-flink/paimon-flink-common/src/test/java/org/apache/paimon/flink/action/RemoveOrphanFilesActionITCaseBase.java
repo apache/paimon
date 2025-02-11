@@ -175,9 +175,13 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                                 "--warehouse",
                                 warehouse,
                                 "--database",
-                                database,
-                                "--table",
-                                "*"));
+                                database));
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            args.add("--table");
+            args.add("*");
+        }
+
         RemoveOrphanFilesAction action1 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action1::run).doesNotThrowAnyException();
 

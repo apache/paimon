@@ -20,12 +20,10 @@ package org.apache.paimon.iceberg.migrate;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.factories.Factory;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
 
 /** Factory to create {@link IcebergMigrateMetadata}. */
 public interface IcebergMigrateMetadataFactory extends Factory {
 
-    IcebergMigrateMetadata create(
-            Identifier icebergIdentifier, FileIO fileIO, Options icebergOptions);
+    IcebergMigrateMetadata create(Identifier icebergIdentifier, Options icebergOptions);
 }

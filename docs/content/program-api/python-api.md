@@ -266,7 +266,7 @@ Then you can step into Scan Plan stage to get `splits`:
 
 ```python
 table_scan = read_builder.new_scan()
-splits = table_scan.splits()
+splits = table_scan.plan().splits()
 ```
 
 ### Read Splits

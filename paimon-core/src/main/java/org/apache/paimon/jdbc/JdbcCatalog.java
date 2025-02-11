@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
@@ -289,7 +290,8 @@ public class JdbcCatalog extends AbstractCatalog {
     protected void createTableImpl(Identifier identifier, Schema schema) {
         try {
             // create table file
-            getSchemaManager(identifier).createTable(schema);
+            SchemaManager schemaManager = getSchemaManager(identifier);
+            runWithLock(identifier, () -> schemaManager.createTable(schema));
             // Update schema metadata
             Path path = getTableLocation(identifier);
             int insertRecord =
@@ -350,22 +352,30 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
-            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+            throws ColumnAlreadyExistException, TableNotExistException, ColumnNotExistException {
         assertMainBranch(identifier);
         SchemaManager schemaManager = getSchemaManager(identifier);
-        schemaManager.commitChanges(changes);
+        try {
+            runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+        } catch (TableNotExistException
+                | ColumnAlreadyExistException
+                | ColumnNotExistException
+                | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to alter table " + identifier.getFullName(), e);
+        }
     }
 
     @Override
-    protected TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+    protected TableSchema loadTableSchema(Identifier identifier) throws TableNotExistException {
         assertMainBranch(identifier);
         if (!JdbcUtils.tableExists(
                 connections, catalogKey, identifier.getDatabaseName(), identifier.getTableName())) {
             throw new TableNotExistException(identifier);
         }
         Path tableLocation = getTableLocation(identifier);
-        return new SchemaManager(fileIO, tableLocation)
-                .latest()
+        return tableSchemaInFileSystem(tableLocation, identifier.getBranchNameOrDefault())
                 .orElseThrow(
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
     }
@@ -385,9 +395,9 @@ public class JdbcCatalog extends AbstractCatalog {
         return Optional.of(new JdbcCatalogLockContext(catalogKey, options));
     }
 
-    private Lock lock(Identifier identifier) {
+    public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
         if (!lockEnabled()) {
-            return new Lock.EmptyLock();
+            return callable.call();
         }
         JdbcCatalogLock lock =
                 new JdbcCatalogLock(
@@ -395,7 +405,7 @@ public class JdbcCatalog extends AbstractCatalog {
                         catalogKey,
                         checkMaxSleep(options.toMap()),
                         acquireTimeout(options.toMap()));
-        return Lock.fromCatalog(lock, identifier);
+        return Lock.fromCatalog(lock, identifier).runWithLock(callable);
     }
 
     @Override
@@ -404,7 +414,7 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {
-        return new SchemaManager(fileIO, getTableLocation(identifier)).withLock(lock(identifier));
+        return new SchemaManager(fileIO, getTableLocation(identifier));
     }
 
     private Map<String, String> fetchProperties(String databaseName) {

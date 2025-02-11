@@ -18,9 +18,11 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.operation.Lock;
+import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
@@ -33,22 +35,22 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable private final Identifier identifier;
     @Nullable private final String uuid;
-    private final Lock.Factory lockFactory;
     @Nullable private final CatalogLoader catalogLoader;
+    @Nullable private final SnapshotCommit.Factory commitFactory;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
             @Nullable String uuid,
-            Lock.Factory lockFactory,
-            @Nullable CatalogLoader catalogLoader) {
+            @Nullable CatalogLoader catalogLoader,
+            @Nullable SnapshotCommit.Factory commitFactory) {
         this.identifier = identifier;
         this.uuid = uuid;
-        this.lockFactory = lockFactory;
         this.catalogLoader = catalogLoader;
+        this.commitFactory = commitFactory;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, Lock.emptyFactory(), null);
+        return new CatalogEnvironment(null, null, null, null);
     }
 
     @Nullable
@@ -61,8 +63,12 @@ public class CatalogEnvironment implements Serializable {
         return uuid;
     }
 
-    public Lock.Factory lockFactory() {
-        return lockFactory;
+    @Nullable
+    public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
+        if (commitFactory == null) {
+            return null;
+        }
+        return commitFactory.create(identifier, snapshotManager);
     }
 
     @Nullable
@@ -71,5 +77,10 @@ public class CatalogEnvironment implements Serializable {
             return null;
         }
         return PartitionHandler.create(catalogLoader.load(), identifier);
+    }
+
+    @VisibleForTesting
+    public SnapshotCommit.Factory commitFactory() {
+        return commitFactory;
     }
 }

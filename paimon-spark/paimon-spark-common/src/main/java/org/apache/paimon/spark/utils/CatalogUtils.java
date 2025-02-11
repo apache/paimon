@@ -38,4 +38,18 @@ public class CatalogUtils {
         checkNamespace(ident.namespace());
         return new org.apache.paimon.catalog.Identifier(ident.namespace()[0], ident.name());
     }
+
+    public static Identifier removeCatalogName(Identifier ident, String catalogName) {
+        String[] namespace = ident.namespace();
+        if (namespace.length > 1) {
+            checkArgument(
+                    namespace[0].equals(catalogName),
+                    "Only supports operations within the same catalog, target catalog name: %s, current catalog name: %s",
+                    namespace[0],
+                    catalogName);
+            return Identifier.of(Arrays.copyOfRange(namespace, 1, namespace.length), ident.name());
+        } else {
+            return ident;
+        }
+    }
 }

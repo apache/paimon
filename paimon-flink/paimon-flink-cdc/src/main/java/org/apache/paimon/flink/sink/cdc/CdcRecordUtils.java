@@ -73,12 +73,14 @@ public class CdcRecordUtils {
      * CdcRecordUtils#projectAsInsert} instead.
      *
      * @param dataFields {@link DataField}s of the converted {@link GenericRow}.
+     * @param logCorruptRecord whether to log data during conversion error
      * @return if all field names of {@code dataFields} existed in keys of {@code fields} and all
      *     values of {@code fields} can be correctly converted to the specified type, an {@code
      *     Optional#of(GenericRow)} will be returned, otherwise an {@code Optional#empty()} will be
      *     returned
      */
-    public static Optional<GenericRow> toGenericRow(CdcRecord record, List<DataField> dataFields) {
+    public static Optional<GenericRow> toGenericRow(
+            CdcRecord record, List<DataField> dataFields, boolean logCorruptRecord) {
         GenericRow genericRow = new GenericRow(record.kind(), dataFields.size());
         List<String> fieldNames =
                 dataFields.stream().map(DataField::name).collect(Collectors.toList());
@@ -105,7 +107,7 @@ public class CdcRecordUtils {
             } catch (Exception e) {
                 LOG.info(
                         "Failed to convert value "
-                                + value
+                                + (logCorruptRecord ? value : "<redacted>")
                                 + " to type "
                                 + type
                                 + ". Waiting for schema update.",

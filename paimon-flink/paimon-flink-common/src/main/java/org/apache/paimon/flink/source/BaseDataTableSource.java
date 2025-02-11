@@ -94,7 +94,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                     CoreOptions.SCAN_VERSION);
 
     protected final ObjectIdentifier tableIdentifier;
-    protected final boolean streaming;
+    protected final boolean unbounded;
     protected final DynamicTableFactory.Context context;
     @Nullable protected final LogStoreTableFactory logStoreTableFactory;
 
@@ -104,7 +104,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     public BaseDataTableSource(
             ObjectIdentifier tableIdentifier,
             Table table,
-            boolean streaming,
+            boolean unbounded,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
@@ -114,7 +114,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             @Nullable Long countPushed) {
         super(table, predicate, projectFields, limit);
         this.tableIdentifier = tableIdentifier;
-        this.streaming = streaming;
+        this.unbounded = unbounded;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
         this.predicate = predicate;
@@ -126,7 +126,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
     @Override
     public ChangelogMode getChangelogMode() {
-        if (!streaming) {
+        if (!unbounded) {
             // batch merge all, return insert only
             return ChangelogMode.insertOnly();
         }
@@ -195,7 +195,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         FlinkSourceBuilder sourceBuilder =
                 new FlinkSourceBuilder(table)
                         .sourceName(tableIdentifier.asSummaryString())
-                        .sourceBounded(!streaming)
+                        .sourceBounded(!unbounded)
                         .logSourceProvider(logSourceProvider)
                         .projection(projectFields)
                         .predicate(predicate)
@@ -204,7 +204,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
 
         return new PaimonDataStreamScanProvider(
-                !streaming,
+                !unbounded,
                 env ->
                         sourceBuilder
                                 .sourceParallelism(inferSourceParallelism(env))
@@ -294,7 +294,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             List<int[]> groupingSets,
             List<AggregateExpression> aggregateExpressions,
             DataType producedDataType) {
-        if (isStreaming()) {
+        if (isUnbounded()) {
             return false;
         }
 
@@ -349,7 +349,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     }
 
     @Override
-    public boolean isStreaming() {
-        return streaming;
+    public boolean isUnbounded() {
+        return unbounded;
     }
 }

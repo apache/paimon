@@ -43,7 +43,7 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    postgres_sync_table
+    postgres_sync_table \
     --warehouse <warehouse_path> \
     --database <database_name> \
     --table <table_name> \

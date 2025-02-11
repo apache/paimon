@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure.privilege;
 
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.flink.procedure.ProcedureBase;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.privilege.FileBasedPrivilegeManager;
@@ -28,6 +29,8 @@ import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import static org.apache.paimon.catalog.DelegateCatalog.rootCatalog;
 
 /**
  * Procedure to initialize file-based privilege system in warehouse. This procedure will
@@ -48,11 +51,18 @@ public class InitFileBasedPrivilegeProcedure extends ProcedureBase {
             throw new IllegalArgumentException("Catalog is already a PrivilegedCatalog");
         }
 
+        if (!(rootCatalog(catalog) instanceof AbstractCatalog)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Catalog %s cannot support Privileged Catalog.",
+                            rootCatalog(catalog).getClass().getName()));
+        }
+
         Options options = new Options(catalog.options());
         PrivilegeManager privilegeManager =
                 new FileBasedPrivilegeManager(
-                        catalog.warehouse(),
-                        catalog.fileIO(),
+                        ((AbstractCatalog) rootCatalog(catalog)).warehouse(),
+                        ((AbstractCatalog) rootCatalog(catalog)).fileIO(),
                         options.get(PrivilegedCatalog.USER),
                         options.get(PrivilegedCatalog.PASSWORD));
         privilegeManager.initializePrivilege(rootPassword);

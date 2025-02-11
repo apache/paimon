@@ -32,8 +32,8 @@ import org.junit.jupiter.api.Test;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_CUSTOM_CLASS;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
+import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.CUSTOM;
 import static org.apache.paimon.flink.sink.partition.PartitionMarkDoneTest.notifyCommits;
-import static org.apache.paimon.partition.actions.PartitionMarkDoneAction.CUSTOM;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for custom PartitionMarkDoneAction. */
@@ -99,6 +99,6 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
         assertThat(table2.fileIO().exists(successFile)).isEqualTo(true);
 
         assertThat(MockCustomPartitionMarkDoneAction.getMarkedDonePartitions().iterator().next())
-                .isEqualTo("a=0/");
+                .isEqualTo("table=default.T,partition=a=0/");
     }
 }

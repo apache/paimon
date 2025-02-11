@@ -36,7 +36,7 @@ Its structure is very simple, only storing hash values in the file:
 
 HASH_VALUE | HASH_VALUE | HASH_VALUE | HASH_VALUE | ...
 
-HASH_VALUE is the hash value of the primary-key. 4 bytes, BIT_ENDIAN.
+HASH_VALUE is the hash value of the primary-key. 4 bytes, BIG_ENDIAN.
 
 ## Deletion Vectors
 
@@ -49,9 +49,9 @@ The deletion file is a binary file, and the format is as follows:
 
 - First, record version by a byte. Current version is 1.
 - Then, record <size of serialized bin, serialized bin, checksum of serialized bin> in sequence.
-- Size and checksum are BIT_ENDIAN Integer.
+- Size and checksum are BIG_ENDIAN Integer.
 
 For each serialized bin:
 
-- First, record a const magic number by an int (BIT_ENDIAN). Current the magic number is 1581511376.
+- First, record a const magic number by an int (BIG_ENDIAN). Current the magic number is 1581511376.
 - Then, record serialized bitmap. Which is a [RoaringBitmap](https://github.com/RoaringBitmap/RoaringBitmap) (org.roaringbitmap.RoaringBitmap).

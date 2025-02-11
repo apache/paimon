@@ -21,7 +21,9 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonHiveTestBase
 
 import org.apache.spark.sql.Row
+
 class MigrateDatabaseProcedureTest extends PaimonHiveTestBase {
+
   Seq("parquet", "orc", "avro").foreach(
     format => {
       test(s"Paimon migrate database procedure: migrate $format non-partitioned database") {
@@ -45,8 +47,11 @@ class MigrateDatabaseProcedureTest extends PaimonHiveTestBase {
 
           spark.sql(s"INSERT INTO hive_tbl VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
-          spark.sql(
-            s"CALL sys.migrate_database(source_type => 'hive', database => '$hiveDbName', options => 'file.format=$format')")
+          checkAnswer(
+            spark.sql(
+              s"CALL sys.migrate_database(source_type => 'hive', database => '$hiveDbName', options => 'file.format=$format')"),
+            Seq(Row("migrate database is finished, success cnt: 2 , failed cnt: 0"))
+          )
 
           checkAnswer(
             spark.sql(s"SELECT * FROM hive_tbl ORDER BY id"),
@@ -57,7 +62,6 @@ class MigrateDatabaseProcedureTest extends PaimonHiveTestBase {
 
           rows1 = spark.sql("SHOW CREATE TABLE hive_tbl1").collect()
           assert(rows1.apply(0).toString().contains("USING paimon"))
-
         }
       }
     })

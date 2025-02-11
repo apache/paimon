@@ -42,7 +42,7 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mongodb_sync_table
+    mongodb_sync_table \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
@@ -187,7 +187,7 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mongodb_sync_database
+    mongodb_sync_database \
     --warehouse <warehouse-path> \
     --database <database-name> \
     [--table_prefix <paimon-table-prefix>] \

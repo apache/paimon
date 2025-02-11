@@ -18,11 +18,11 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.LocalScan
-import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
 /** A scan does not require [[RDD]] to execute */
@@ -30,7 +30,7 @@ case class PaimonLocalScan(
     rows: Array[InternalRow],
     readSchema: StructType,
     table: Table,
-    filters: Array[Filter])
+    filters: Array[Predicate])
   extends LocalScan {
 
   override def description(): String = {
