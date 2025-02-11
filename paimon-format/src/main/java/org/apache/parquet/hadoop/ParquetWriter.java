@@ -137,8 +137,10 @@ public class ParquetWriter<T> implements Closeable {
      * @param <SELF> The type of this builder that is returned by builder methods
      */
     public abstract static class Builder<T, SELF extends Builder<T, SELF>> {
-        private OutputFile file = null;
-        private Configuration conf = new Configuration();
+
+        private final OutputFile file;
+
+        private Configuration conf = new Configuration(false);
         private ParquetFileWriter.Mode mode;
         private CompressionCodecName codecName = DEFAULT_COMPRESSION_CODEC_NAME;
         private long rowGroupSize = DEFAULT_BLOCK_SIZE;

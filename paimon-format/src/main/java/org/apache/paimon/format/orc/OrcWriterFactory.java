@@ -66,7 +66,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
      */
     @VisibleForTesting
     OrcWriterFactory(Vectorizer<InternalRow> vectorizer) {
-        this(vectorizer, new Properties(), new Configuration(), 1024);
+        this(vectorizer, new Properties(), new Configuration(false), 1024);
     }
 
     /**

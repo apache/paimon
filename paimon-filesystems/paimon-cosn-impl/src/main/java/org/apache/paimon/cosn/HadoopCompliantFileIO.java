@@ -38,7 +38,9 @@ import java.io.IOException;
  * <p>Important: copy this class from HadoopFileIO here to avoid class loader conflicts.
  */
 public abstract class HadoopCompliantFileIO implements FileIO {
+
     private static final long serialVersionUID = 1L;
+
     protected transient volatile FileSystem fs;
 
     @Override

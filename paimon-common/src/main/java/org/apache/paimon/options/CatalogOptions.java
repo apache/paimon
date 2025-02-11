@@ -150,12 +150,21 @@ public class CatalogOptions {
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
 
-    public static final ConfigOption<Boolean> RESOLVING_FILEIO_ENABLED =
-            ConfigOptions.key("resolving-fileio.enabled")
+    public static final ConfigOption<Boolean> RESOLVING_FILE_IO_ENABLED =
+            ConfigOptions.key("resolving-file-io.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
                             "Whether to enable resolving fileio, when this option is enabled, in conjunction with the table's property data-file.external-paths, "
                                     + "Paimon can read and write to external storage paths, such as OSS or S3. "
                                     + "In order to access these external paths correctly, you also need to configure the corresponding access key and secret key.");
+
+    public static final ConfigOption<Boolean> FILE_IO_ALLOW_CACHE =
+            ConfigOptions.key("file-io.allow-cache")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to allow static cache in file io implementation. If not allowed, this means that "
+                                    + "there may be a large number of FileIO instances generated, enabling caching can "
+                                    + "lead to resource leakage.");
 }

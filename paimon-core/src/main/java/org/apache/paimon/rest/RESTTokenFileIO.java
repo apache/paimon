@@ -44,6 +44,8 @@ import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
+
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
 
@@ -162,6 +164,7 @@ public class RESTTokenFileIO implements FileIO {
             CatalogContext context = catalogLoader.context();
             Options options = context.options();
             options = new Options(RESTUtil.merge(options.toMap(), token.token));
+            options.set(FILE_IO_ALLOW_CACHE, false);
             context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
             try {
                 fileIO = FileIO.get(path, context);
