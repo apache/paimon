@@ -57,6 +57,14 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         candidates.add(kv.copy(keySerializer, valueSerializer));
     }
 
+    public InternalRowSerializer getKeySerializer() {
+        return keySerializer;
+    }
+
+    public InternalRowSerializer getValueSerializer() {
+        return valueSerializer;
+    }
+
     @Override
     public KeyValue getResult() {
         // 1. Find the latest high level record
@@ -77,10 +85,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         mergeFunction.reset();
         candidates.forEach(mergeFunction::add);
         return mergeFunction.getResult();
-    }
-
-    LinkedList<KeyValue> candidates() {
-        return candidates;
     }
 
     public static MergeFunctionFactory<KeyValue> wrap(
