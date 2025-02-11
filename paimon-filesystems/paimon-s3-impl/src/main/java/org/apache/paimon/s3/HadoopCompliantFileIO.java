@@ -30,7 +30,6 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -146,19 +145,12 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         if (authority == null) {
             authority = "DEFAULT";
         }
-        try {
-            return map.computeIfAbsent(
-                    authority,
-                    k -> {
-                        try {
-                            return createFileSystem(path);
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    });
-        } catch (UncheckedIOException e) {
-            throw e.getCause();
+        FileSystem fs = map.get(authority);
+        if (fs == null) {
+            fs = createFileSystem(path);
+            map.put(authority, fs);
         }
+        return fs;
     }
 
     protected abstract FileSystem createFileSystem(org.apache.hadoop.fs.Path path)
