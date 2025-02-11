@@ -901,7 +901,8 @@ public abstract class HiveCatalogITCaseBase {
 
         // hive read
         List<String> tables = hiveShell.executeQuery("SHOW TABLES");
-        assertThat(tables).contains("t3", "t1");
+        assertThat(tables).contains("t3");
+        assertThat(tables).doesNotContain("t1");
         List<String> data = hiveShell.executeQuery("SELECT * FROM t3");
         assertThat(data).containsExactlyInAnyOrder("1");
 
