@@ -52,11 +52,25 @@ public class DlfAuthProvider implements AuthProvider {
     private final Long tokenRefreshInMills;
 
     public static DlfAuthProvider buildRefreshToken(
-            String tokenDirPath, String tokenFileName, Long tokenRefreshInMills) {
+            String tokenDirPath, String roleSessionName, Long tokenRefreshInMills) {
+        String tokenFileName = decodeBase64(roleSessionName);
         DlfToken token = readToken(tokenDirPath, tokenFileName);
         Long expiresAtMillis = token.getExpiresInMills();
         return new DlfAuthProvider(
                 tokenDirPath, tokenFileName, token, true, expiresAtMillis, tokenRefreshInMills);
+    }
+
+    public static String decodeBase64(String s) {
+        if (s == null) {
+            return null;
+        }
+        java.util.Base64.Decoder decoder = java.util.Base64.getUrlDecoder();
+        try {
+            byte[] b = decoder.decode(s);
+            return new String(b);
+        } catch (Exception e) {
+            throw new RuntimeException("Error decoding base64 string ", e);
+        }
     }
 
     public static DlfAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {

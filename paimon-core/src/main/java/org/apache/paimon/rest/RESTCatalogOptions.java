@@ -92,11 +92,11 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token access key secret");
 
-    public static final ConfigOption<String> TOKEN_PROVIDER_FILE_NAME =
-            ConfigOptions.key("token.provider.file-name")
+    public static final ConfigOption<String> TOKEN_PROVIDER_ROLE_SESSION_NAME =
+            ConfigOptions.key("pipeline.dlf.role-session-name")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("REST Catalog auth token provider file name.");
+                    .withDescription("REST Catalog auth token provider role session name.");
 
     public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
             ConfigOptions.key("data-token.enabled")
