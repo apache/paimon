@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.sort.zorder;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;

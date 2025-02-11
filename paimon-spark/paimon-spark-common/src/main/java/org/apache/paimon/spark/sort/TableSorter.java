@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sort;
 
+import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.spark.sql.Dataset;
@@ -62,7 +63,7 @@ public abstract class TableSorter {
     public abstract Dataset<Row> sort(Dataset<Row> input);
 
     public static TableSorter getSorter(
-            FileStoreTable table, TableSorter.OrderType orderType, List<String> orderColumns) {
+            FileStoreTable table, OrderType orderType, List<String> orderColumns) {
         switch (orderType) {
             case ORDER:
                 return new OrderSorter(table, orderColumns);
@@ -79,39 +80,6 @@ public abstract class TableSorter {
                 };
             default:
                 throw new IllegalArgumentException("cannot match order type: " + orderType);
-        }
-    }
-
-    /** order type for sorting. */
-    public enum OrderType {
-        ORDER("order"),
-        ZORDER("zorder"),
-        HILBERT("hilbert"),
-        NONE("none");
-
-        private final String orderType;
-
-        OrderType(String orderType) {
-            this.orderType = orderType;
-        }
-
-        @Override
-        public String toString() {
-            return "order type: " + orderType;
-        }
-
-        public static OrderType of(String orderType) {
-            if (ORDER.orderType.equalsIgnoreCase(orderType)) {
-                return ORDER;
-            } else if (ZORDER.orderType.equalsIgnoreCase(orderType)) {
-                return ZORDER;
-            } else if (HILBERT.orderType.equalsIgnoreCase(orderType)) {
-                return HILBERT;
-            } else if (NONE.orderType.equalsIgnoreCase(orderType)) {
-                return NONE;
-            }
-
-            throw new IllegalArgumentException("cannot match type: " + orderType + " for ordering");
         }
     }
 }
