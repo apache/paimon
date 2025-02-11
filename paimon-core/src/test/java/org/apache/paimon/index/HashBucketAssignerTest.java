@@ -37,8 +37,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.Arrays;
 import java.util.Collections;
 
-import static org.apache.paimon.index.PartitionIndex.getMaxBucketsPerAssigner;
-import static org.apache.paimon.index.PartitionIndex.getSpecifiedMaxBuckets;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -122,11 +120,11 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         assertThat(assigner.assign(row(1), 8)).isEqualTo(0);
 
         // full
-        assertThat(assigner.assign(row(1), 10)).isEqualTo(2);
-        assertThat(assigner.assign(row(1), 12)).isEqualTo(2);
-        assertThat(assigner.assign(row(1), 14)).isEqualTo(2);
-        assertThat(assigner.assign(row(1), 16)).isEqualTo(2);
-        assertThat(assigner.assign(row(1), 18)).isEqualTo(2);
+        assertThat(assigner.assign(row(1), 10)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 12)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 14)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 16)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 18)).isEqualTo(0);
 
         // another partition
         assertThat(assigner.assign(row(2), 12)).isEqualTo(0);
@@ -154,39 +152,9 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testMultiAssigners() {
-        int[] maxBucketsArr = getMaxBucketsPerAssigner(4, 2);
-        Assertions.assertThat(maxBucketsArr).isEqualTo(new int[] {2, 2});
-
-        maxBucketsArr = getMaxBucketsPerAssigner(8, 3);
-        Assertions.assertThat(maxBucketsArr).isEqualTo(new int[] {3, 3, 2});
-
-        maxBucketsArr = getMaxBucketsPerAssigner(3, 2);
-        Assertions.assertThat(maxBucketsArr).isEqualTo(new int[] {2, 1});
-
-        Assertions.assertThat(getSpecifiedMaxBuckets(maxBucketsArr, 0)).isEqualTo(2);
-        Assertions.assertThat(getSpecifiedMaxBuckets(maxBucketsArr, 1)).isEqualTo(1);
-        Assertions.assertThat(getSpecifiedMaxBuckets(maxBucketsArr, 2)).isEqualTo(0);
-
-        maxBucketsArr = getMaxBucketsPerAssigner(-1, 2);
-        Assertions.assertThat(maxBucketsArr).isEqualTo(new int[] {-1, -1});
-
-        Assertions.assertThat(getSpecifiedMaxBuckets(maxBucketsArr, 0)).isEqualTo(-1);
-        Assertions.assertThat(getSpecifiedMaxBuckets(maxBucketsArr, 1)).isEqualTo(-1);
-        Assertions.assertThat(getSpecifiedMaxBuckets(maxBucketsArr, 2)).isEqualTo(-1);
-
-        assertThatThrownBy(() -> getMaxBucketsPerAssigner(-10, 2))
-                .hasMessageContaining(
-                        "Max-buckets should either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).");
-    }
-
-    @Test
     public void testAssignWithUpperBoundMultiAssigners() {
-        int[] maxBucketsArr = getMaxBucketsPerAssigner(3, 2);
-        Assertions.assertThat(maxBucketsArr).isEqualTo(new int[] {2, 1});
-
-        HashBucketAssigner assigner0 = createAssigner(2, 2, 0, maxBucketsArr[0]);
-        HashBucketAssigner assigner1 = createAssigner(2, 2, 1, maxBucketsArr[1]);
+        HashBucketAssigner assigner0 = createAssigner(2, 2, 0, 3);
+        HashBucketAssigner assigner1 = createAssigner(2, 2, 1, 3);
 
         // assigner0: assign
         assertThat(assigner0.assign(row(1), 0)).isEqualTo(0);

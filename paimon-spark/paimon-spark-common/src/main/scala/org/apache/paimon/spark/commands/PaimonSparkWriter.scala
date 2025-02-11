@@ -176,9 +176,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         val numAssigners = Option(table.coreOptions.dynamicBucketInitialBuckets)
           .map(initialBuckets => Math.min(initialBuckets.toInt, assignerParallelism))
           .getOrElse(assignerParallelism)
-        val maxBucketsArr = PartitionIndex.getMaxBucketsPerAssigner(
-          table.coreOptions.dynamicBucketMaxBuckets,
-          numAssigners)
 
         def partitionByKey(): DataFrame = {
           repartitionByKeyPartitionHash(
@@ -200,7 +197,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                   numAssigners,
                   TaskContext.getPartitionId(),
                   table.coreOptions.dynamicBucketTargetRowNum,
-                  PartitionIndex.getSpecifiedMaxBuckets(maxBucketsArr, TaskContext.getPartitionId)
+                  table.coreOptions.dynamicBucketMaxBuckets
                 )
               row => {
                 val sparkRow = new SparkRow(rowType, row)

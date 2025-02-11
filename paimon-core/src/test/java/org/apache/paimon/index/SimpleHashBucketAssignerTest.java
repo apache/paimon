@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import static org.apache.paimon.index.PartitionIndex.getMaxBucketsPerAssigner;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -72,27 +71,19 @@ public class SimpleHashBucketAssignerTest {
             Assertions.assertThat(bucket).isEqualTo(2);
         }
 
-        for (int i = 0; i < 100; i++) {
-            int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(4);
-        }
-
         // exceed upper bound
         for (int i = 0; i < 200; i++) {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isIn(0, 2, 4);
+            Assertions.assertThat(bucket).isIn(0, 2);
         }
     }
 
     @Test
     public void testAssignWithUpperBoundMultiAssigners() {
-        int[] maxBucketsArr = getMaxBucketsPerAssigner(3, 2);
-        Assertions.assertThat(maxBucketsArr).isEqualTo(new int[] {2, 1});
-
         SimpleHashBucketAssigner simpleHashBucketAssigner0 =
-                new SimpleHashBucketAssigner(2, 0, 100, maxBucketsArr[0]);
+                new SimpleHashBucketAssigner(2, 0, 100, 3);
         SimpleHashBucketAssigner simpleHashBucketAssigner1 =
-                new SimpleHashBucketAssigner(2, 1, 100, maxBucketsArr[1]);
+                new SimpleHashBucketAssigner(2, 1, 100, 3);
 
         BinaryRow binaryRow = BinaryRow.EMPTY_ROW;
         int hash = 0;

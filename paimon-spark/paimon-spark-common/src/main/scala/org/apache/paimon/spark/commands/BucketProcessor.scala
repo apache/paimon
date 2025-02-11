@@ -101,9 +101,6 @@ case class DynamicBucketProcessor(
   private val targetBucketRowNumber = fileStoreTable.coreOptions.dynamicBucketTargetRowNum
   private val rowType = fileStoreTable.rowType
   private val commitUser = UUID.randomUUID.toString
-  private val maxBucketsArr = PartitionIndex.getMaxBucketsPerAssigner(
-    fileStoreTable.coreOptions.dynamicBucketMaxBuckets,
-    numAssigners)
 
   def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
     val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(fileStoreTable.schema)
@@ -115,7 +112,7 @@ case class DynamicBucketProcessor(
       numAssigners,
       TaskContext.getPartitionId(),
       targetBucketRowNumber,
-      PartitionIndex.getSpecifiedMaxBuckets(maxBucketsArr, TaskContext.getPartitionId)
+      fileStoreTable.coreOptions.dynamicBucketMaxBuckets
     )
 
     new Iterator[Row]() {
