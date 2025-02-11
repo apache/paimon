@@ -18,8 +18,12 @@
 
 package org.apache.paimon.partition;
 
-import javax.annotation.Nullable;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
+import javax.annotation.Nullable;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -30,6 +34,7 @@ import java.time.format.ResolverStyle;
 import java.time.format.SignStyle;
 import java.time.temporal.ChronoField;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -79,9 +84,20 @@ public class PartitionTimeExtractor {
     @Nullable private final String pattern;
     @Nullable private final String formatter;
 
+    public PartitionTimeExtractor(CoreOptions options) {
+        this(options.partitionTimestampPattern(), options.partitionTimestampFormatter());
+    }
+
     public PartitionTimeExtractor(@Nullable String pattern, @Nullable String formatter) {
         this.pattern = pattern;
         this.formatter = formatter;
+    }
+
+    public LocalDateTime extract(BinaryRow partition, RowType partitionType) {
+        RowDataToObjectArrayConverter toObjectArrayConverter =
+                new RowDataToObjectArrayConverter(partitionType);
+        Object[] array = toObjectArrayConverter.convert(partition);
+        return extract(partitionType.getFieldNames(), Arrays.asList(array));
     }
 
     public LocalDateTime extract(LinkedHashMap<String, String> spec) {

@@ -41,7 +41,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
-
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -624,6 +623,13 @@ public class CoreOptions implements Serializable {
                                             text("Default value of Append Table is '50'."),
                                             text("Default value of Bucketed Append Table is '5'."))
                                     .build());
+
+    public static final ConfigOption<Duration> LATE_ARRIVED_THRESHOLD =
+            key("compaction.late-arrived-threshold")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The threshold of partitioned pk table to differentiate late arrived data. Late arrived data can be configured with a less frequent compaction strategy to sacrifice timeliness for overall resource usage saving. This option is only valid for a partitioned pk table when needLookup() is true.");
 
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
@@ -2072,6 +2078,10 @@ public class CoreOptions implements Serializable {
 
     public Optional<Integer> compactionMaxFileNum() {
         return options.getOptional(COMPACTION_MAX_FILE_NUM);
+    }
+
+    public Optional<Duration> lateArrivedThreshold() {
+        return options.getOptional(LATE_ARRIVED_THRESHOLD);
     }
 
     public long dynamicBucketTargetRowNum() {
