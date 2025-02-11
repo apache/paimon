@@ -43,7 +43,7 @@ import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 /** OSS {@link FileIO}. */
 public class OSSFileIO extends HadoopCompliantFileIO {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private static final Logger LOG = LoggerFactory.getLogger(OSSFileIO.class);
 
