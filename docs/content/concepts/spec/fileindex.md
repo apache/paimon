@@ -200,6 +200,7 @@ offset:                        4 bytes int (when it is negative, it represents t
                                  and its position is the inverse of the negative value)
 </pre>
 
+Integers are all BIG_ENDIAN.
 Integer are all BIG_ENDIAN. In the paimon version that supports v2, the bitmap index version defaults to v2.
 
 Bitmap only support the following data type:
@@ -294,7 +295,7 @@ Bitmap only support the following data type:
 
 ## Index: Bit-Slice Index Bitmap
 
-BSI file index is a numeric range index, used to accelerate range query, it can use with bitmap index.
+BSI file index is a numeric range index, used to accelerate range query, it can be used with bitmap index.
 
 Define `'file-index.bsi.columns'`.
 
