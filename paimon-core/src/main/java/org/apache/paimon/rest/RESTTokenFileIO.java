@@ -27,6 +27,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.ThreadUtils;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -53,11 +54,7 @@ public class RESTTokenFileIO implements FileIO {
                     .expireAfterAccess(30, TimeUnit.MINUTES)
                     .maximumSize(100)
                     .removalListener(
-                            (ignored, value, cause) -> {
-                                if (value != null) {
-                                    ((FileIO) value).close();
-                                }
-                            })
+                            (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
                     .scheduler(
                             Scheduler.forScheduledExecutorService(
                                     Executors.newSingleThreadScheduledExecutor(

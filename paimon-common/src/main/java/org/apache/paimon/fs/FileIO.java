@@ -237,7 +237,7 @@ public interface FileIO extends Serializable, Closeable {
      * and do not have the ability to close them.
      */
     @Override
-    default void close() {}
+    default void close() throws IOException {}
 
     // -------------------------------------------------------------------------
     //                            utils
