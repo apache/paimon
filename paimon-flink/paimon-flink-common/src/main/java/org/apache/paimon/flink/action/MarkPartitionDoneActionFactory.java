@@ -58,8 +58,11 @@ public class MarkPartitionDoneActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mark_partition_done --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --partition <partition_name> [--partition <partition_name> ...]");
+                "  mark_partition_done \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--partition <partition_name> [--partition <partition_name> ...]");
         System.out.println(
                 "  mark_partition_done --path <table_path> --partition <partition_name> [--partition <partition_name> ...]");
         System.out.println();

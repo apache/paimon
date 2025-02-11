@@ -62,12 +62,13 @@ public class CreateTagFromWatermarkActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  create_tag_from_watermark --warehouse <warehouse_path> "
-                        + "--database <database_name>"
-                        + "--table <table_name> "
-                        + "--tag <tag> "
-                        + "--watermark <watermark> "
-                        + "[--timeRetained <duration>] "
+                "  create_tag_from_watermark \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--tag <tag> \\\n"
+                        + "--watermark <watermark> \\\n"
+                        + "[--timeRetained <duration>] \\\n"
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

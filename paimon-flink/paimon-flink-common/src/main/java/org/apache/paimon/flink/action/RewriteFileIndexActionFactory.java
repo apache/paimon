@@ -50,6 +50,8 @@ public class RewriteFileIndexActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  rewrite_file_index --warehouse <warehouse_path> --identifier <database.table> ");
+                "  rewrite_file_index \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--identifier <database.table>");
     }
 }

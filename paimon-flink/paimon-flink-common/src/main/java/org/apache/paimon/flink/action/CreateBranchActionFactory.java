@@ -52,8 +52,12 @@ public class CreateBranchActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  create_branch --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --branch_name <branch_name> [--tag_name <tag_name>]");
+                "  create_branch \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--branch_name <branch_name> \\\n"
+                        + "[--tag_name <tag_name>]");
         System.out.println();
     }
 }

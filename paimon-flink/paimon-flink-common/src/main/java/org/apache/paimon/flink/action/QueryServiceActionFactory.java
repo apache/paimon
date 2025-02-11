@@ -61,8 +61,12 @@ public class QueryServiceActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  query-service --warehouse <warehouse-path> --database <database-name> --table <table-name> --parallelism <parallelism>"
-                        + "[--catalog_conf <key>=<value> [--catalog_conf <key>=<value> ...]] "
-                        + "[--table_conf <key>=<value> [--table_conf <key>=<value> ...]] ");
+                "  query-service \\\n"
+                        + "--warehouse <warehouse-path> \\\n"
+                        + "--database <database-name> \\\n"
+                        + "--table <table-name> \\\n"
+                        + "--parallelism <parallelism> \\\n"
+                        + "[--catalog_conf <key>=<value> [--catalog_conf <key>=<value> ...]] \\\n"
+                        + "[--table_conf <key>=<value> [--table_conf <key>=<value> ...]]");
     }
 }

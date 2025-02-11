@@ -53,9 +53,15 @@ public class ExpirePartitionsActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  expire_partitions --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --tag_name <tag_name> --expiration_time <expiration_time> --timestamp_formatter <timestamp_formatter>"
-                        + "[--timestamp_pattern <timestamp_pattern>] [--expire_strategy <expire_strategy>]");
+                "  expire_partitions \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--tag_name <tag_name> \\\n"
+                        + "--expiration_time <expiration_time> \\\n"
+                        + "--timestamp_formatter <timestamp_formatter> \\\n"
+                        + "[--timestamp_pattern <timestamp_pattern>] \\\n"
+                        + "[--expire_strategy <expire_strategy>]");
         System.out.println();
     }
 }
