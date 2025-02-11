@@ -18,7 +18,11 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.*;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.DelegateCatalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
