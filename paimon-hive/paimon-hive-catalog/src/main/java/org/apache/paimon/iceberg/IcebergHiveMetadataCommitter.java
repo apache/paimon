@@ -84,7 +84,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         String hadoopConfDir = options.get(IcebergOptions.HADOOP_CONF_DIR);
         String icebergDatabase = options.get(IcebergOptions.METASTORE_DATABASE);
         String icebergTable = options.get(IcebergOptions.METASTORE_TABLE);
-        Configuration hadoopConf = new Configuration(false);
+        Configuration hadoopConf = new Configuration();
         hadoopConf.setClassLoader(IcebergHiveMetadataCommitter.class.getClassLoader());
         HiveConf hiveConf = HiveCatalog.createHiveConf(hiveConfDir, hadoopConfDir, hadoopConf);
 
