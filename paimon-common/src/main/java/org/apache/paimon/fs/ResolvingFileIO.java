@@ -21,12 +21,15 @@ package org.apache.paimon.fs;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILEIO_ENABLED;
 
 /**
  * An implementation of {@link FileIO} that supports multiple file system schemas. It dynamically
@@ -56,7 +59,12 @@ public class ResolvingFileIO implements FileIO {
 
     @Override
     public void configure(CatalogContext context) {
-        this.context = context;
+        Options options = new Options();
+        context.options().toMap().forEach(options::set);
+        options.set(RESOLVING_FILEIO_ENABLED, false);
+        this.context =
+                CatalogContext.create(
+                        options, context.hadoopConf(), context.preferIO(), context.fallbackIO());
     }
 
     @Override
