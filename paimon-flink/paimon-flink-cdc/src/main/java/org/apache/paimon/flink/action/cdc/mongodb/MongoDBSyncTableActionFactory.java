@@ -70,12 +70,14 @@ public class MongoDBSyncTableActionFactory extends SyncTableActionFactoryBase {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mongodb_sync_table --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> "
-                        + "[--partition_keys <partition_keys>] "
-                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] "
-                        + "[--mongodb_conf <mongodb_cdc_source_conf> [--mongodb_conf <mongodb_cdc_source_conf> ...]] "
-                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                "  mongodb_sync_table \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "[--partition_keys <partition_keys>] \\\n"
+                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] \\\n"
+                        + "[--mongodb_conf <mongodb_cdc_source_conf> [--mongodb_conf <mongodb_cdc_source_conf> ...]] \\\n"
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 

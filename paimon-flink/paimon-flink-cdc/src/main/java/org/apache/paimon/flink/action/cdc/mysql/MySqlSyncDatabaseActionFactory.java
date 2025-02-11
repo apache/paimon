@@ -76,18 +76,20 @@ public class MySqlSyncDatabaseActionFactory
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mysql_sync_database --warehouse <warehouse_path> --database <database_name> "
-                        + "[--ignore_incompatible <true/false>] "
-                        + "[--merge_shards <true/false>] "
-                        + "[--table_prefix <paimon_table_prefix>] "
-                        + "[--table_suffix <paimon_table_suffix>] "
-                        + "[--including_tables <mysql_table_name|name_regular_expr>] "
-                        + "[--excluding_tables <mysql_table_name|name_regular_expr>] "
-                        + "[--mode <sync_mode>] "
-                        + "[--metadata_column <metadata_column>] "
-                        + "[--type_mapping <option1,option2...>] "
-                        + "[--mysql_conf <mysql_cdc_source_conf> [--mysql_conf <mysql_cdc_source_conf> ...]] "
-                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                "  mysql_sync_database \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "[--ignore_incompatible <true/false>] \\\n"
+                        + "[--merge_shards <true/false>] \\\n"
+                        + "[--table_prefix <paimon_table_prefix>] \\\n"
+                        + "[--table_suffix <paimon_table_suffix>] \\\n"
+                        + "[--including_tables <mysql_table_name|name_regular_expr>] \\\n"
+                        + "[--excluding_tables <mysql_table_name|name_regular_expr>] \\\n"
+                        + "[--mode <sync_mode>] \\\n"
+                        + "[--metadata_column <metadata_column>] \\\n"
+                        + "[--type_mapping <option1,option2...>] \\\n"
+                        + "[--mysql_conf <mysql_cdc_source_conf> [--mysql_conf <mysql_cdc_source_conf> ...]] \\\n"
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
