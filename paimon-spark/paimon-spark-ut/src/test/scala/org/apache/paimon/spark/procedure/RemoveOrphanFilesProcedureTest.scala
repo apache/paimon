@@ -204,7 +204,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
 
     checkAnswer(
       spark.sql(
-        s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than1', mode => 'diSTributed')"),
+        s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than1', mode => 'distributed')"),
       Row(1, 1) :: Nil)
 
     val older_than2 = DateTimeUtils.formatLocalDateTime(
