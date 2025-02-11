@@ -107,7 +107,7 @@ public class S3FileIO extends HadoopCompliantFileIO {
         return CACHE.computeIfAbsent(
                 new CacheKey(hadoopOptions, scheme, authority),
                 key -> {
-                    Configuration hadoopConf = new Configuration(false);
+                    Configuration hadoopConf = new Configuration();
                     key.options.toMap().forEach(hadoopConf::set);
                     URI fsUri = path.toUri();
                     if (scheme == null && authority == null) {
