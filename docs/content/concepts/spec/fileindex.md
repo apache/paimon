@@ -135,11 +135,11 @@ offset:                        4 bytes int (when it is negative, it represents t
                                  and its position is the inverse of the negative value)
 </pre>
 
-Integer are all BIG_ENDIAN.
+Integers are all BIG_ENDIAN.
 
 ## Index: Bit-Slice Index Bitmap
 
-BSI file index is a numeric range index, used to accelerate range query, it can use with bitmap index.
+BSI file index is a numeric range index, used to accelerate range query, it can be used with bitmap index.
 
 Define `'file-index.bsi.columns'`.
 
