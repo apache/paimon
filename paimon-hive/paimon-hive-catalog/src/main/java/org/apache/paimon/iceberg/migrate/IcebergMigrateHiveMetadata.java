@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg.migrate;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
@@ -45,7 +46,8 @@ public class IcebergMigrateHiveMetadata implements IcebergMigrateMetadata {
     public static final String ICEBERG_TABLE_TYPE_VALUE = "iceberg";
     private static final String ICEBERG_METADATA_LOCATION = "metadata_location";
 
-    private final FileIO fileIO;
+    private FileIO fileIO;
+    private final Options icebergOptions;
     private final Identifier icebergIdentifier;
 
     private final ClientPool<IMetaStoreClient, TException> clients;
@@ -54,10 +56,10 @@ public class IcebergMigrateHiveMetadata implements IcebergMigrateMetadata {
 
     private IcebergMetadata icebergMetadata;
 
-    public IcebergMigrateHiveMetadata(
-            Identifier icebergIdentifier, FileIO fileIO, Options icebergOptions) {
-        this.fileIO = fileIO;
+    public IcebergMigrateHiveMetadata(Identifier icebergIdentifier, Options icebergOptions) {
+
         this.icebergIdentifier = icebergIdentifier;
+        this.icebergOptions = icebergOptions;
 
         String uri = icebergOptions.get(IcebergOptions.URI);
         String hiveConfDir = icebergOptions.get(IcebergOptions.HIVE_CONF_DIR);
@@ -104,7 +106,6 @@ public class IcebergMigrateHiveMetadata implements IcebergMigrateMetadata {
                                     client.getTable(
                                             icebergIdentifier.getDatabaseName(),
                                             icebergIdentifier.getTableName()));
-            // TODO:Is this check necessary?
             // check whether it is an iceberg table
             String tableType = icebergHiveTable.getParameters().get(TABLE_TYPE_PROP);
             Preconditions.checkArgument(
@@ -115,6 +116,8 @@ public class IcebergMigrateHiveMetadata implements IcebergMigrateMetadata {
 
             metadataLocation = icebergHiveTable.getParameters().get(ICEBERG_METADATA_LOCATION);
             LOG.info("iceberg latest metadata location: {}", metadataLocation);
+
+            fileIO = FileIO.get(new Path(metadataLocation), CatalogContext.create(icebergOptions));
 
             icebergMetadata = IcebergMetadata.fromPath(fileIO, new Path(metadataLocation));
             return icebergMetadata;
