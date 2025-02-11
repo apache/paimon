@@ -356,9 +356,6 @@ This section introduce all available spark procedures about paimon.
    <tr>
       <td>refresh_object_table</td>
       <td>
-         CALL sys.refresh_object_table('identifier')
-      </td>
-      <td>
          To refresh_object_table a object table. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
       </td>
@@ -368,9 +365,6 @@ This section introduce all available spark procedures about paimon.
    </tr>
    <tr>
       <td>compact_manifest</td>
-      <td>
-         CALL sys.compact_manifest(`table` => 'identifier')
-      </td>
       <td>
          To compact_manifest the manifests. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
