@@ -67,6 +67,13 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  expire_snapshots --warehouse <warehouse_path> --database <database> --table <table> --retain_max <max> --retain_min <min> --older_than <older_than> --max_delete <max_delete>");
+                "  expire_snapshots \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database> \\\n"
+                        + "--table <table> \\\n"
+                        + "--retain_max <max> \\\n"
+                        + "--retain_min <min> \\\n"
+                        + "--older_than <older_than> \\\n"
+                        + "--max_delete <max_delete>");
     }
 }

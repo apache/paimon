@@ -49,8 +49,12 @@ public class CreateTagActionFactory extends CreateOrReplaceTagActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  create_tag --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --tag_name <tag_name> [--snapshot <snapshot_id>]");
+                "  create_tag \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--tag_name <tag_name> \\\n"
+                        + "[--snapshot <snapshot_id>]");
         System.out.println();
     }
 }
