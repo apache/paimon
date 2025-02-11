@@ -32,6 +32,8 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
+import org.apache.spark.sql.functions.{col, lit}
+import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
@@ -39,7 +41,7 @@ import scala.collection.JavaConverters._
 case class WriteIntoPaimonTable(
     override val originTable: FileStoreTable,
     saveMode: SaveMode,
-    data: DataFrame,
+    _data: DataFrame,
     options: Options)
   extends RunnableCommand
   with PaimonCommand
@@ -49,10 +51,25 @@ case class WriteIntoPaimonTable(
   private lazy val mergeSchema = options.get(SparkConnectorOptions.MERGE_SCHEMA)
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    var data = _data
     if (mergeSchema) {
       val dataSchema = SparkSystemColumns.filterSparkSystemColumns(data.schema)
       val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST)
       mergeAndCommitSchema(dataSchema, allowExplicitCast)
+
+      // For case that some columns is absent in data, we still allow to write once write.merge-schema is true.
+      val newTableSchema = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
+      if (!schemaEqualsIgnoreNullability(newTableSchema, data.schema)) {
+        val resolve = sparkSession.sessionState.conf.resolver
+        val cols = newTableSchema.map {
+          field =>
+            dataSchema.find(f => resolve(f.name, field.name)) match {
+              case Some(f) => col(f.name)
+              case _ => lit(null).as(field.name)
+            }
+        }
+        data = data.select(cols: _*)
+      }
     }
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()
@@ -110,6 +127,11 @@ case class WriteIntoPaimonTable(
         throw new UnsupportedOperationException(s" This mode is unsupported for now.")
     }
     (dynamicPartitionOverwriteMode, overwritePartition)
+  }
+
+  private def schemaEqualsIgnoreNullability(s1: StructType, s2: StructType): Boolean = {
+    def ignoreNullable(s: StructType) = StructType(s.fields.map(_.copy(nullable = true)))
+    ignoreNullable(s1) == ignoreNullable(s2)
   }
 
   override def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan]): LogicalPlan =

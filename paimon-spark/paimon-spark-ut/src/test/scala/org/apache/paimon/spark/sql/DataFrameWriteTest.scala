@@ -506,4 +506,50 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
         }
       }
   }
+
+  test("Paimon Schema Evolution: some columns is absent in the coming data") {
+
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, b STRING)
+                 |""".stripMargin)
+
+    val paimonTable = loadTable("T")
+    val location = paimonTable.location().toString
+
+    val df1 = Seq((1, "2023-08-01"), (2, "2023-08-02")).toDF("a", "b")
+    df1.write.format("paimon").mode("append").save(location)
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY a, b"),
+      Row(1, "2023-08-01") :: Row(2, "2023-08-02") :: Nil)
+
+    // Case 1: two additional fields: DoubleType and TimestampType
+    val ts = java.sql.Timestamp.valueOf("2023-08-01 10:00:00.0")
+    val df2 = Seq((1, "2023-08-01", 12.3d, ts), (3, "2023-08-03", 34.5d, ts))
+      .toDF("a", "b", "c", "d")
+    df2.write
+      .format("paimon")
+      .mode("append")
+      .option("write.merge-schema", "true")
+      .save(location)
+
+    // Case 2: colum b and d are absent in the coming data
+    val df3 = Seq((4, 45.6d), (5, 56.7d))
+      .toDF("a", "c")
+    df3.write
+      .format("paimon")
+      .mode("append")
+      .option("write.merge-schema", "true")
+      .save(location)
+    val expected3 =
+      Row(1, "2023-08-01", null, null) :: Row(1, "2023-08-01", 12.3d, ts) :: Row(
+        2,
+        "2023-08-02",
+        null,
+        null) :: Row(3, "2023-08-03", 34.5d, ts) :: Row(4, null, 45.6d, null) :: Row(
+        5,
+        null,
+        56.7d,
+        null) :: Nil
+    checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+  }
 }
