@@ -38,7 +38,6 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -766,7 +765,6 @@ public class CloneActionITCase extends ActionITCaseBase {
     //  Random Tests
     // ------------------------------------------------------------------------
 
-    @Disabled
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     @Timeout(180)
@@ -846,6 +844,44 @@ public class CloneActionITCase extends ActionITCaseBase {
 
         Thread.sleep(ThreadLocalRandom.current().nextInt(2000));
         String targetWarehouse = getTempDirPath("target-ware");
+
+        doCloneJob(invoker, sourceWarehouse, targetWarehouse);
+
+        running.set(false);
+        thread.join();
+
+        // check result
+        tEnv.executeSql(
+                "CREATE CATALOG targetcat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + String.format("  'warehouse' = '%s'\n", targetWarehouse)
+                        + ")");
+        tEnv.executeSql("USE CATALOG targetcat");
+
+        List<String> result;
+        while (true) {
+            try {
+                result = collect(tEnv, "SELECT pt, COUNT(*) FROM t GROUP BY pt ORDER BY pt");
+            } catch (Exception e) {
+                // ignore the exception, as it is expected to fail due to FileNotFoundException
+                // we will retry the clone job, and check the result again until success.
+                doCloneJob(invoker, sourceWarehouse, targetWarehouse);
+                continue;
+            }
+            break;
+        }
+
+        assertThat(result)
+                .isEqualTo(
+                        IntStream.range(0, numPartitions)
+                                .mapToObj(i -> String.format("+I[%d, %d]", i, numKeysPerPartition))
+                                .collect(Collectors.toList()));
+        assertThat(collect(tEnv, "SELECT COUNT(DISTINCT v) FROM t"))
+                .isEqualTo(Collections.singletonList("+I[1]"));
+    }
+
+    private void doCloneJob(String invoker, String sourceWarehouse, String targetWarehouse)
+            throws Exception {
         switch (invoker) {
             case "action":
                 String[] args =
@@ -886,24 +922,6 @@ public class CloneActionITCase extends ActionITCaseBase {
             default:
                 throw new UnsupportedOperationException(invoker);
         }
-
-        running.set(false);
-        thread.join();
-
-        // check result
-        tEnv.executeSql(
-                "CREATE CATALOG targetcat WITH (\n"
-                        + "  'type' = 'paimon',\n"
-                        + String.format("  'warehouse' = '%s'\n", targetWarehouse)
-                        + ")");
-        tEnv.executeSql("USE CATALOG targetcat");
-        assertThat(collect(tEnv, "SELECT pt, COUNT(*) FROM t GROUP BY pt ORDER BY pt"))
-                .isEqualTo(
-                        IntStream.range(0, numPartitions)
-                                .mapToObj(i -> String.format("+I[%d, %d]", i, numKeysPerPartition))
-                                .collect(Collectors.toList()));
-        assertThat(collect(tEnv, "SELECT COUNT(DISTINCT v) FROM t"))
-                .isEqualTo(Collections.singletonList("+I[1]"));
     }
 
     // ------------------------------------------------------------------------

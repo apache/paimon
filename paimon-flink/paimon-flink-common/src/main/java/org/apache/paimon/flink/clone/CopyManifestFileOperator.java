@@ -72,6 +72,8 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
                 FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(sourceCatalogConfig));
         targetCatalog =
                 FlinkCatalogFactory.createPaimonCatalog(Options.fromMap(targetCatalogConfig));
+        srcFileIOs = new HashMap<>();
+        targetFileIOs = new HashMap<>();
         targetLocations = new HashMap<>();
     }
 
