@@ -52,8 +52,8 @@ Writing performance is almost always affected by compaction, so its tuning is cr
 
 ## Asynchronous Compaction
 
-Compaction is inherently asynchronous, but if you want it to be completely asynchronous and not blocking writing,
-expect a mode to have maximum writing throughput, the compaction can be done slowly and not in a hurry.
+Compaction is inherently asynchronous, but if you want it to be completely asynchronous without blocking writes,
+expecting a mode for maximum writing throughput, the compaction can be done slowly and not in a hurry.
 You can use the following strategies for your table:
 
 ```shell
@@ -62,7 +62,7 @@ sort-spill-threshold = 10
 lookup-wait = false
 ```
 
-This configuration will generate more files during peak write periods and gradually merge into optimal read
+This configuration will generate more files during peak write periods and gradually merge them for optimal read
 performance during low write periods.
 
 ## Dedicated compaction job
