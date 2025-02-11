@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.sort.zorder;
 
 import org.junit.Assert;
 import org.junit.Test;

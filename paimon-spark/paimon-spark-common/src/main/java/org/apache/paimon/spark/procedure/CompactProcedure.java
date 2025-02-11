@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
@@ -144,7 +145,7 @@ public class CompactProcedure extends BaseProcedure {
         String partitions = blank(args, 1) ? null : args.getString(1);
         // make full compact strategy as default.
         String compactStrategy = blank(args, 2) ? FULL : args.getString(2);
-        String sortType = blank(args, 3) ? TableSorter.OrderType.NONE.name() : args.getString(3);
+        String sortType = blank(args, 3) ? OrderType.NONE.name() : args.getString(3);
         List<String> sortColumns =
                 blank(args, 4)
                         ? Collections.emptyList()
@@ -153,11 +154,11 @@ public class CompactProcedure extends BaseProcedure {
         String options = args.isNullAt(6) ? null : args.getString(6);
         Duration partitionIdleTime =
                 blank(args, 7) ? null : TimeUtils.parseDuration(args.getString(7));
-        if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
+        if (OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
         }
-        if (partitionIdleTime != null && (!TableSorter.OrderType.NONE.name().equals(sortType))) {
+        if (partitionIdleTime != null && (!OrderType.NONE.name().equals(sortType))) {
             throw new IllegalArgumentException(
                     "sort compact do not support 'partition_idle_time'.");
         }
@@ -234,7 +235,7 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable Expression condition,
             @Nullable Duration partitionIdleTime) {
         BucketMode bucketMode = table.bucketMode();
-        TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
+        OrderType orderType = OrderType.of(sortType);
         boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
         Predicate filter =
                 condition == null
@@ -245,7 +246,7 @@ public class CompactProcedure extends BaseProcedure {
                                         table.rowType(),
                                         false)
                                 .getOrElse(null);
-        if (orderType.equals(TableSorter.OrderType.NONE)) {
+        if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             switch (bucketMode) {
                 case HASH_FIXED:
@@ -474,7 +475,7 @@ public class CompactProcedure extends BaseProcedure {
 
     private void sortCompactUnAwareBucketTable(
             FileStoreTable table,
-            TableSorter.OrderType orderType,
+            OrderType orderType,
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable Predicate filter) {

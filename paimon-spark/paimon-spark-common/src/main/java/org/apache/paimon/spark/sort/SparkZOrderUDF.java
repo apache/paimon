@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sort;
 
-import org.apache.paimon.utils.ZOrderByteUtils;
+import org.apache.paimon.sort.zorder.ZOrderByteUtils;
 
 import org.apache.spark.sql.Column;
 import org.apache.spark.sql.expressions.UserDefinedFunction;

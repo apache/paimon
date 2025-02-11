@@ -47,7 +47,6 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
-import org.apache.paimon.utils.ZOrderByteUtils;
 
 import java.io.Serializable;
 import java.nio.ByteBuffer;
@@ -57,8 +56,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.BiFunction;
 
-import static org.apache.paimon.utils.ZOrderByteUtils.NULL_BYTES;
-import static org.apache.paimon.utils.ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE;
+import static org.apache.paimon.sort.zorder.ZOrderByteUtils.NULL_BYTES;
+import static org.apache.paimon.sort.zorder.ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE;
 
 /** Z-indexer for responsibility to generate z-index. */
 public class ZIndexer implements Serializable {
