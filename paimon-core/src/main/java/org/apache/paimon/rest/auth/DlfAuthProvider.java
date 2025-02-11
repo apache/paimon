@@ -29,12 +29,15 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Base64;
+import java.util.Base64.Decoder;
 import java.util.Map;
 import java.util.Optional;
 
 /** Auth provider for DLF. */
 public class DlfAuthProvider implements AuthProvider {
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
+    public static final String DLF_SECRET_HEADER_KEY = "x-dlf-secret";
     public static final String DLF_HOST_HEADER_KEY = "host";
     public static final String DLF_ENDPOINT_AUTHORIZATION_KEY = "Authorization";
     public static final double EXPIRED_FACTOR = 0.4;
@@ -42,6 +45,7 @@ public class DlfAuthProvider implements AuthProvider {
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final Decoder BASE64_DECODER = Base64.getUrlDecoder();
 
     private final String tokenDirPath;
     private final String tokenFileName;
@@ -64,9 +68,8 @@ public class DlfAuthProvider implements AuthProvider {
         if (s == null) {
             return null;
         }
-        java.util.Base64.Decoder decoder = java.util.Base64.getUrlDecoder();
         try {
-            byte[] b = decoder.decode(s);
+            byte[] b = BASE64_DECODER.decode(s);
             return new String(b);
         } catch (Exception e) {
             throw new RuntimeException("Error decoding base64 string ", e);
@@ -107,7 +110,9 @@ public class DlfAuthProvider implements AuthProvider {
                     DLF_DATE_HEADER_KEY,
                     getDate(),
                     DLF_HOST_HEADER_KEY,
-                    restAuthParameter.host());
+                    restAuthParameter.host(),
+                    DLF_SECRET_HEADER_KEY, // todo: just for test
+                    token.getAccessKeySecret());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
