@@ -86,7 +86,7 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
                         srcFileIOs, cloneFileInfo.getSourceIdentifier(), sourceCatalog);
         FileIO targetTableFileIO =
                 CloneFilesUtil.getFileIO(
-                        targetFileIOs, cloneFileInfo.getSourceIdentifier(), targetCatalog);
+                        targetFileIOs, cloneFileInfo.getTargetIdentifier(), targetCatalog);
         Path targetTableRootPath =
                 CloneFilesUtil.getPath(
                         targetLocations, cloneFileInfo.getTargetIdentifier(), targetCatalog);
