@@ -25,7 +25,6 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.ZOrderByteUtils;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
