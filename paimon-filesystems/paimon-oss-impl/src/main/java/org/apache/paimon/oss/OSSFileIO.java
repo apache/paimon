@@ -72,6 +72,9 @@ public class OSSFileIO extends HadoopCompliantFileIO {
      */
     private static final Map<CacheKey, AliyunOSSFileSystem> CACHE = new ConcurrentHashMap<>();
 
+    // create a shared config to avoid load properties everytime
+    private static final Configuration SHARED_CONFIG = new Configuration();
+
     private Options hadoopOptions;
     private boolean allowCache = true;
 
@@ -109,7 +112,9 @@ public class OSSFileIO extends HadoopCompliantFileIO {
         final String authority = path.toUri().getAuthority();
         Supplier<AliyunOSSFileSystem> supplier =
                 () -> {
-                    Configuration hadoopConf = new Configuration(false);
+                    // create config from base config, if initializing a new config, it will
+                    // retrieve props from the file, which comes at a high cost
+                    Configuration hadoopConf = new Configuration(SHARED_CONFIG);
                     hadoopOptions.toMap().forEach(hadoopConf::set);
                     URI fsUri = path.toUri();
                     if (scheme == null && authority == null) {
