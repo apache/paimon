@@ -21,6 +21,7 @@ package org.apache.paimon.rest.auth;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+/** Test for {@link DlfAuthSignature}. */
 public class DlfAuthSignatureTest {
 
     @Test
