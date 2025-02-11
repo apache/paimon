@@ -18,33 +18,23 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
-import java.util.Map;
+public class DlfAuthSignatureTest {
 
-/** Auth provider for bear token. */
-public class BearTokenAuthProvider implements AuthProvider {
-
-    private static final String BEARER_PREFIX = "Bearer ";
-
-    protected String token;
-
-    public BearTokenAuthProvider(String token) {
-        this.token = token;
-    }
-
-    @Override
-    public String token() {
-        return token;
-    }
-
-    @Override
-    public Map<String, String> generateAuthorizationHeader(RestAuthParameter restAuthParameter) {
-        return ImmutableMap.of("Authorization", BEARER_PREFIX + token);
-    }
-
-    @Override
-    public boolean refresh() {
-        return true;
+    @Test
+    public void testGetAuthorization() throws Exception {
+        RestAuthParameter restAuthParameter =
+                new RestAuthParameter(
+                        "endpoint",
+                        "/v1/catalogs/test/databases/test/tables/test/commit",
+                        "POST",
+                        "");
+        DlfToken token =
+                new DlfToken("accessKeyId", "accessKeySecret", "securityToken", "expiration");
+        String authorization = DlfAuthSignature.getAuthorization(restAuthParameter, token, "date");
+        Assertions.assertEquals(
+                DlfAuthSignature.getAuthorization(restAuthParameter, token, "date"), authorization);
     }
 }

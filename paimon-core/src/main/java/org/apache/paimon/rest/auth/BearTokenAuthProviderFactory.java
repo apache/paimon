@@ -25,7 +25,7 @@ import org.apache.paimon.rest.RESTCatalogOptions;
 public class BearTokenAuthProviderFactory implements AuthProviderFactory {
     @Override
     public String identifier() {
-        return "bear";
+        return AuthProviderEnum.BEAR.identifier();
     }
 
     @Override

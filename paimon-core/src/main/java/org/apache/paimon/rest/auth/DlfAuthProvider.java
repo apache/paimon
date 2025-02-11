@@ -20,6 +20,7 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.utils.FileIOUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -28,14 +29,19 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Map;
 import java.util.Optional;
 
 /** Auth provider for DLF. */
 public class DlfAuthProvider implements AuthProvider {
+    public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
+    public static final String DLF_HOST_HEADER_KEY = "host";
+    public static final String DLF_ENDPOINT_AUTHORIZATION_KEY = "Authorization";
+    public static final double EXPIRED_FACTOR = 0.4;
+
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    public static final double EXPIRED_FACTOR = 0.4;
 
     private final String tokenDirPath;
     private final String tokenFileName;
@@ -76,23 +82,26 @@ public class DlfAuthProvider implements AuthProvider {
     }
 
     @Override
-    public String generateAuthorization(RestAuthParameter restAuthParameter) {
-        String date = getDate();
-        String region = getRegion(restAuthParameter.host());
+    public Map<String, String> generateAuthorizationHeader(RestAuthParameter restAuthParameter) {
         try {
-            return DlfAuthSignature.getAuthorization(
-                    restAuthParameter.path(),
-                    restAuthParameter.method(),
-                    restAuthParameter.query(),
-                    restAuthParameter.headers(),
-                    token.getAccessKeySecret(),
-                    token.getSecurityToken(),
-                    token.getAccessKeyId(),
-                    region,
-                    date);
+            String date = getDate();
+            String authorization =
+                    DlfAuthSignature.getAuthorization(restAuthParameter, token, date);
+            return ImmutableMap.of(
+                    DLF_ENDPOINT_AUTHORIZATION_KEY,
+                    authorization,
+                    DLF_DATE_HEADER_KEY,
+                    getDate(),
+                    DLF_HOST_HEADER_KEY,
+                    restAuthParameter.host());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static String getDate() {
+        LocalDate currentDate = LocalDate.now();
+        return currentDate.format(DATE_FORMATTER);
     }
 
     @Override
@@ -155,20 +164,5 @@ public class DlfAuthProvider implements AuthProvider {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-    }
-
-    private static String getRegion(String host) {
-        try {
-            return host.split("\\.")[1];
-        } catch (Exception ignore) {
-
-        }
-        // fixme
-        return "cn-hangzhou";
-    }
-
-    private static String getDate() {
-        LocalDate currentDate = LocalDate.now();
-        return currentDate.format(DATE_FORMATTER);
     }
 }

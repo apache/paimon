@@ -52,7 +52,7 @@ public class HttpClientTest {
     private String mockResponseDataStr;
     private String errorResponseStr;
     private Map<String, String> headers;
-    private Function<RestAuthParameter, String> authenticationFunction;
+    private Function<RestAuthParameter, Map<String, String>> authenticationFunction;
 
     @Before
     public void setUp() throws Exception {
@@ -70,8 +70,8 @@ public class HttpClientTest {
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);
         headers = new HashMap<>();
-        headers.put("Authorization", authProvider.generateAuthorization(null));
-        authenticationFunction = r -> authProvider.generateAuthorization(r);
+        authenticationFunction = r -> authProvider.generateAuthorizationHeader(r);
+        headers.putAll(authProvider.generateAuthorizationHeader(null));
     }
 
     @After

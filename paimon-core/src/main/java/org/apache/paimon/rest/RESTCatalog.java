@@ -112,7 +112,7 @@ public class RESTCatalog implements Catalog {
     private final boolean dataTokenEnabled;
     private final FileIO fileIO;
     private Map<String, String> baseHeaders = Collections.emptyMap();
-    private Function<RestAuthParameter, String> authenticationFunction;
+    private Function<RestAuthParameter, Map<String, String>> authenticationHeaderFunction;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
@@ -123,7 +123,8 @@ public class RESTCatalog implements Catalog {
     public RESTCatalog(CatalogContext context, boolean configRequired) {
         this.client = new HttpClient(context.options());
         this.catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
-        authenticationFunction = p -> catalogAuth.getAuthProvider().generateAuthorization(p);
+        authenticationHeaderFunction =
+                p -> catalogAuth.getAuthProvider().generateAuthorizationHeader(p);
         Options options = context.options();
         if (configRequired) {
             if (context.options().contains(WAREHOUSE)) {
@@ -137,7 +138,7 @@ public class RESTCatalog implements Catalog {
                                             ResourcePaths.V1_CONFIG,
                                             ConfigResponse.class,
                                             baseHeaders,
-                                            authenticationFunction)
+                                            authenticationHeaderFunction)
                                     .merge(context.options().toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
@@ -167,7 +168,7 @@ public class RESTCatalog implements Catalog {
                         resourcePaths.databases(),
                         ListDatabasesResponse.class,
                         headers(),
-                        authenticationFunction);
+                        authenticationHeaderFunction);
         if (response.getDatabases() != null) {
             return response.getDatabases();
         }
@@ -185,7 +186,7 @@ public class RESTCatalog implements Catalog {
                     request,
                     CreateDatabaseResponse.class,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new DatabaseAlreadyExistException(name);
@@ -206,7 +207,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.database(name),
                             GetDatabaseResponse.class,
                             headers(),
-                            authenticationFunction);
+                            authenticationHeaderFunction);
             return new Database.DatabaseImpl(
                     name, response.options(), response.comment().orElseGet(() -> null));
         } catch (NoSuchResourceException e) {
@@ -224,7 +225,7 @@ public class RESTCatalog implements Catalog {
             if (!cascade && !this.listTables(name).isEmpty()) {
                 throw new DatabaseNotEmptyException(name);
             }
-            client.delete(resourcePaths.database(name), headers(), authenticationFunction);
+            client.delete(resourcePaths.database(name), headers(), authenticationHeaderFunction);
         } catch (NoSuchResourceException | DatabaseNotExistException e) {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name);
@@ -251,7 +252,7 @@ public class RESTCatalog implements Catalog {
                             request,
                             AlterDatabaseResponse.class,
                             headers(),
-                            authenticationFunction);
+                            authenticationHeaderFunction);
             if (response.getUpdated().isEmpty()) {
                 throw new IllegalStateException("Failed to update properties");
             }
@@ -272,7 +273,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.tables(databaseName),
                             ListTablesResponse.class,
                             headers(),
-                            authenticationFunction);
+                            authenticationHeaderFunction);
             if (response.getTables() != null) {
                 return response.getTables();
             }
@@ -312,7 +313,7 @@ public class RESTCatalog implements Catalog {
                 resourcePaths.tableToken(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetTableTokenResponse.class,
                 headers(),
-                authenticationFunction);
+                authenticationHeaderFunction);
     }
 
     public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {
@@ -323,7 +324,7 @@ public class RESTCatalog implements Catalog {
                         request,
                         CommitTableResponse.class,
                         headers(),
-                        authenticationFunction);
+                        authenticationHeaderFunction);
         return response.isSuccess();
     }
 
@@ -336,7 +337,7 @@ public class RESTCatalog implements Catalog {
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             GetTableResponse.class,
                             headers(),
-                            authenticationFunction);
+                            authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -359,7 +360,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.tables(identifier.getDatabaseName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -388,7 +389,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.renameTable(fromTable.getDatabaseName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
@@ -411,7 +412,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 if (e.resourceType() == ErrorResponseResourceType.TABLE) {
@@ -442,7 +443,7 @@ public class RESTCatalog implements Catalog {
             client.delete(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(identifier);
@@ -462,7 +463,7 @@ public class RESTCatalog implements Catalog {
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
@@ -480,7 +481,7 @@ public class RESTCatalog implements Catalog {
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
@@ -507,7 +508,7 @@ public class RESTCatalog implements Catalog {
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
@@ -525,7 +526,7 @@ public class RESTCatalog implements Catalog {
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
@@ -542,7 +543,7 @@ public class RESTCatalog implements Catalog {
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             ListPartitionsResponse.class,
                             headers(),
-                            authenticationFunction);
+                            authenticationHeaderFunction);
             if (response == null || response.getPartitions() == null) {
                 return Collections.emptyList();
             }
@@ -566,7 +567,7 @@ public class RESTCatalog implements Catalog {
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             GetViewResponse.class,
                             headers(),
-                            authenticationFunction);
+                            authenticationHeaderFunction);
             return new ViewImpl(
                     identifier,
                     response.getSchema().rowType(),
@@ -585,7 +586,7 @@ public class RESTCatalog implements Catalog {
             client.delete(
                     resourcePaths.view(identifier.getDatabaseName(), identifier.getTableName()),
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new ViewNotExistException(identifier);
@@ -608,7 +609,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.views(identifier.getDatabaseName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         } catch (AlreadyExistsException e) {
@@ -626,7 +627,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.views(databaseName),
                             ListViewsResponse.class,
                             headers(),
-                            authenticationFunction);
+                            authenticationHeaderFunction);
             return response.getViews();
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
@@ -642,7 +643,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.renameView(fromView.getDatabaseName()),
                     request,
                     headers(),
-                    authenticationFunction);
+                    authenticationHeaderFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new ViewNotExistException(fromView);

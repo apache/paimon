@@ -21,6 +21,7 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -139,6 +140,9 @@ public class AuthSession {
     public static AuthSession createAuthSession(
             Options options, ScheduledExecutorService refreshExecutor) {
         String tokenProvider = options.get(RESTCatalogOptions.TOKEN_PROVIDER);
+        if (StringUtils.isEmpty(tokenProvider)) {
+            throw new IllegalArgumentException("token.provider is not set.");
+        }
         AuthProvider authProvider = AuthProviderFactory.createAuthProvider(tokenProvider, options);
         if (authProvider.keepRefreshed()) {
             return AuthSession.fromRefreshAuthProvider(refreshExecutor, authProvider);

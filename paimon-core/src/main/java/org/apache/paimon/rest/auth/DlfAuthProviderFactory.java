@@ -29,7 +29,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
 public class DlfAuthProviderFactory implements AuthProviderFactory {
     @Override
     public String identifier() {
-        return "dlf";
+        return AuthProviderEnum.DLF.identifier();
     }
 
     @Override

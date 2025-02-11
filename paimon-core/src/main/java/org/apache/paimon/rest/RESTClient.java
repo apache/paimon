@@ -31,29 +31,29 @@ public interface RESTClient extends Closeable {
             String path,
             Class<T> responseType,
             Map<String, String> headers,
-            Function<RestAuthParameter, String> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
 
     <T extends RESTResponse> T post(
             String path,
             RESTRequest body,
             Map<String, String> headers,
-            Function<RestAuthParameter, String> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
 
     <T extends RESTResponse> T post(
             String path,
             RESTRequest body,
             Class<T> responseType,
             Map<String, String> headers,
-            Function<RestAuthParameter, String> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
 
     <T extends RESTResponse> T delete(
             String path,
             Map<String, String> headers,
-            Function<RestAuthParameter, String> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
 
     <T extends RESTResponse> T delete(
             String path,
             RESTRequest body,
             Map<String, String> headers,
-            Function<RestAuthParameter, String> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
 }

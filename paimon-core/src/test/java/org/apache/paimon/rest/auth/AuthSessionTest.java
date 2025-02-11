@@ -68,8 +68,9 @@ public class AuthSessionTest {
         options.set(TOKEN.key(), token);
         AuthProvider authProvider = AuthProviderFactory.createAuthProvider("bear", options);
         AuthSession session = new AuthSession(authProvider);
-        String authorization = session.getAuthProvider().generateAuthorization(null);
-        assertEquals(authorization, "Bearer " + token);
+        Map<String, String> authorizationHeader =
+                session.getAuthProvider().generateAuthorizationHeader(null);
+        assertEquals(authorizationHeader.get("Authorization"), "Bearer " + token);
     }
 
     @Test
