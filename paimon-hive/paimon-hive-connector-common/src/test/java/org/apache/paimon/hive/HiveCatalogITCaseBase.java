@@ -19,25 +19,26 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.flink.FlinkCatalog;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.TimeUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
-import org.apache.flink.core.fs.FSDataInputStream;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
@@ -94,6 +95,7 @@ public abstract class HiveCatalogITCaseBase {
     protected TableEnvironment tEnv;
     protected TableEnvironment sEnv;
     private boolean locationInProperties;
+    private FileIO fileIO;
 
     @HiveSQL(files = {})
     protected static HiveShell hiveShell;
@@ -133,6 +135,10 @@ public abstract class HiveCatalogITCaseBase {
         if (locationInProperties) {
             catalogProperties.putAll(minioTestContainer.getS3ConfigOptions());
         }
+
+        Options catalogOptions = new Options(catalogProperties);
+        CatalogContext catalogContext = CatalogContext.create(catalogOptions);
+        fileIO = FileIO.get(new Path(path), catalogContext);
 
         tEnv = TableEnvironmentImpl.create(EnvironmentSettings.newInstance().inBatchMode().build());
         sEnv =
@@ -255,7 +261,7 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
         Path tablePath = new Path(path, "test_db2.db/t");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
         assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
                 .hasRootCauseInstanceOf(ValidationException.class)
                 .hasRootCauseMessage("Cannot drop a database which is currently in use.");
@@ -267,7 +273,7 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("DROP DATABASE test_db2 CASCADE").await();
         assertThat(collect("SHOW DATABASES"))
                 .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db")));
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
+        assertThat(fileIO.exists(tablePath)).isFalse();
     }
 
     @Test
@@ -295,11 +301,11 @@ public abstract class HiveCatalogITCaseBase {
         // drop table
         tEnv.executeSql("INSERT INTO s VALUES (1, 'Hi'), (2, 'Hello')").await();
         Path tablePath = new Path(path, "test_db.db/s");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
         tEnv.executeSql("DROP TABLE s").await();
         assertThat(collect("SHOW TABLES"))
                 .containsExactlyInAnyOrder(Row.of("t"), Row.of("hive_table"));
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
+        assertThat(fileIO.exists(tablePath)).isFalse();
         tEnv.executeSql("DROP TABLE IF EXISTS s").await();
         assertThatThrownBy(() -> tEnv.executeSql("DROP TABLE s").await())
                 .isInstanceOf(ValidationException.class)
@@ -356,7 +362,7 @@ public abstract class HiveCatalogITCaseBase {
                 .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL");
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
     }
 
     @Test
@@ -504,7 +510,7 @@ public abstract class HiveCatalogITCaseBase {
                 .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL");
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
     }
 
     @Test
@@ -591,27 +597,35 @@ public abstract class HiveCatalogITCaseBase {
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
 
+        Path tablePath = new Path(path, "test_db.db/t");
+
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 1)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=1"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 3)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=4");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=3"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 1)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=2", "pt=4");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=1"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 4)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=2", "pt=4");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=4"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 4)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).containsExactlyInAnyOrder("pt=2");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=4"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 2)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).isEmpty();
+        assertThat(fileIO.exists(new Path(tablePath, "pt=2"))).isFalse();
     }
 
     @Test
@@ -1193,6 +1207,9 @@ public abstract class HiveCatalogITCaseBase {
                         "ptb=2b/pta=2",
                         "ptb=3a/pta=3",
                         "ptb=3b/pta=3");
+
+        Path tablePath = new Path(path, "test_db.db/t");
+        assertThat(fileIO.exists(new Path(tablePath, "ptb=1a/pta=1"))).isTrue();
     }
 
     @Test
@@ -1464,10 +1481,7 @@ public abstract class HiveCatalogITCaseBase {
 
         // check partition.mark-done-action=success-file
         Path successFile = new Path(path, "test_db.db/mark_done_t2/dt=20240501/_SUCCESS");
-        String successText;
-        try (FSDataInputStream in = successFile.getFileSystem().open(successFile)) {
-            successText = IOUtils.readUTF8Fully(in);
-        }
+        String successText = fileIO.readFileUtf8(successFile);
 
         assertThat(successText).contains("creationTime").contains("modificationTime");
 
