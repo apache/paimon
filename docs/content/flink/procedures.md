@@ -655,5 +655,31 @@ All available procedures are listed below.
          CALL sys.fast_forward(`table` => 'default.T', branch => 'branch1')
       </td>
    </tr>
+   <tr>
+      <td>refresh_object_table</td>
+      <td>
+         CALL sys.refresh_object_table('identifier')
+      </td>
+      <td>
+         To refresh_object_table a object table. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.refresh_object_table('default.T')
+      </td>
+   </tr>
+   <tr>
+      <td>compact_manifest</td>
+      <td>
+         CALL sys.compact_manifest(`table` => 'identifier')
+      </td>
+      <td>
+         To compact_manifest the manifests. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.compact_manifest(`table` => 'default.T')
+      </td>
+   </tr>
    </tbody>
 </table>

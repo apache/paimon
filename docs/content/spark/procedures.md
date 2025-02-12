@@ -372,5 +372,25 @@ This section introduce all available spark procedures about paimon.
          CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01;day=2024-07-02')
       </td>
    </tr>
-    </tbody>
+   <tr>
+      <td>refresh_object_table</td>
+      <td>
+         To refresh_object_table a object table. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.refresh_object_table('default.T')
+      </td>
+   </tr>
+   <tr>
+      <td>compact_manifest</td>
+      <td>
+         To compact_manifest the manifests. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.compact_manifest(`table` => 'default.T')
+      </td>
+   </tr>
+   </tbody>
 </table>
