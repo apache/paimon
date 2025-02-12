@@ -21,6 +21,7 @@ package org.apache.paimon.oss;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.IOUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -35,11 +36,14 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
+
+import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 
 /** OSS {@link FileIO}. */
 public class OSSFileIO extends HadoopCompliantFileIO {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private static final Logger LOG = LoggerFactory.getLogger(OSSFileIO.class);
 
@@ -68,7 +72,11 @@ public class OSSFileIO extends HadoopCompliantFileIO {
      */
     private static final Map<CacheKey, AliyunOSSFileSystem> CACHE = new ConcurrentHashMap<>();
 
+    // create a shared config to avoid load properties everytime
+    private static final Configuration SHARED_CONFIG = new Configuration();
+
     private Options hadoopOptions;
+    private boolean allowCache = true;
 
     @Override
     public boolean isObjectStore() {
@@ -77,6 +85,7 @@ public class OSSFileIO extends HadoopCompliantFileIO {
 
     @Override
     public void configure(CatalogContext context) {
+        allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
@@ -101,11 +110,12 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
-        return CACHE.computeIfAbsent(
-                new CacheKey(hadoopOptions, scheme, authority),
-                key -> {
-                    Configuration hadoopConf = new Configuration();
-                    key.options.toMap().forEach(hadoopConf::set);
+        Supplier<AliyunOSSFileSystem> supplier =
+                () -> {
+                    // create config from base config, if initializing a new config, it will
+                    // retrieve props from the file, which comes at a high cost
+                    Configuration hadoopConf = new Configuration(SHARED_CONFIG);
+                    hadoopOptions.toMap().forEach(hadoopConf::set);
                     URI fsUri = path.toUri();
                     if (scheme == null && authority == null) {
                         fsUri = FileSystem.getDefaultUri(hadoopConf);
@@ -124,7 +134,22 @@ public class OSSFileIO extends HadoopCompliantFileIO {
                         throw new UncheckedIOException(e);
                     }
                     return fs;
-                });
+                };
+
+        if (allowCache) {
+            return CACHE.computeIfAbsent(
+                    new CacheKey(hadoopOptions, scheme, authority), key -> supplier.get());
+        } else {
+            return supplier.get();
+        }
+    }
+
+    @Override
+    public void close() {
+        if (!allowCache) {
+            fsMap.values().forEach(IOUtils::closeQuietly);
+            fsMap.clear();
+        }
     }
 
     private static class CacheKey {
