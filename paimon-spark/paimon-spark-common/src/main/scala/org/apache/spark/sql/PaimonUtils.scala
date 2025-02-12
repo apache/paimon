@@ -30,7 +30,7 @@ import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy.translateFilterV2WithMapping
 import org.apache.spark.sql.internal.connector.PredicateUtils
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.PartitioningUtils
 import org.apache.spark.util.{Utils => SparkUtils}
 
@@ -120,5 +120,9 @@ object PaimonUtils {
       spec: TablePartitionSpec,
       partitionColumnNames: Seq[String]): Unit = {
     PartitioningUtils.requireExactMatchedPartitionSpec(tableName, spec, partitionColumnNames)
+  }
+
+  def sameType(left: DataType, right: DataType): Boolean = {
+    left.sameType(right)
   }
 }

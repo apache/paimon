@@ -29,11 +29,10 @@ import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, TypeUtils}
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, PaimonUtils, Row, SparkSession}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.functions.{col, lit}
-import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
@@ -59,7 +58,7 @@ case class WriteIntoPaimonTable(
 
       // For case that some columns is absent in data, we still allow to write once write.merge-schema is true.
       val newTableSchema = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
-      if (!schemaEqualsIgnoreNullability(newTableSchema, dataSchema)) {
+      if (!PaimonUtils.sameType(newTableSchema, dataSchema)) {
         val resolve = sparkSession.sessionState.conf.resolver
         val cols = newTableSchema.map {
           field =>
@@ -127,11 +126,6 @@ case class WriteIntoPaimonTable(
         throw new UnsupportedOperationException(s" This mode is unsupported for now.")
     }
     (dynamicPartitionOverwriteMode, overwritePartition)
-  }
-
-  private def schemaEqualsIgnoreNullability(s1: StructType, s2: StructType): Boolean = {
-    def ignoreNullable(s: StructType) = StructType(s.fields.map(_.copy(nullable = true)))
-    ignoreNullable(s1) == ignoreNullable(s2)
   }
 
   override def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan]): LogicalPlan =
