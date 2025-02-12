@@ -217,7 +217,13 @@ public class SnapshotManager implements Serializable {
     }
 
     private @Nullable Snapshot earliestSnapshot(boolean includeChangelog) {
-        Long snapshotId = earliestSnapshotId();
+        Long snapshotId = null;
+        if (includeChangelog) {
+            snapshotId = earliestLongLivedChangelogId();
+        }
+        if (snapshotId == null) {
+            snapshotId = earliestSnapshotId();
+        }
         if (snapshotId == null) {
             return null;
         }
