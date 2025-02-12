@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
@@ -100,6 +101,35 @@ public class ConsumerManager implements Serializable {
                                         DateTimeUtils.toLocalDateTime(status.getModificationTime());
                                 if (expireDateTime.isAfter(modificationTime)) {
                                     fileIO.deleteQuietly(status.getPath());
+                                }
+                            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Clear consumers. */
+    public void clearConsumers(Pattern includingPattern, Pattern excludingPattern) {
+        try {
+            listVersionedFileStatus(fileIO, consumerDirectory(), CONSUMER_PREFIX)
+                    .forEach(
+                            fileStatus -> {
+                                String consumerName =
+                                        fileStatus
+                                                .getPath()
+                                                .getName()
+                                                .substring(CONSUMER_PREFIX.length());
+                                boolean shouldClear =
+                                        includingPattern.matcher(consumerName).matches();
+                                if (excludingPattern != null) {
+                                    shouldClear =
+                                            shouldClear
+                                                    && !excludingPattern
+                                                            .matcher(consumerName)
+                                                            .matches();
+                                }
+                                if (shouldClear) {
+                                    fileIO.deleteQuietly(fileStatus.getPath());
                                 }
                             });
         } catch (IOException e) {
