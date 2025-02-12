@@ -425,8 +425,7 @@ public class SnapshotManager implements Serializable {
         if ((earliestWatermark = earliestSnapShot.watermark()) == null) {
             while (earliest < latest) {
                 earliest++;
-                Snapshot snapshot = snapshot(earliest);
-                earliestWatermark = snapshot.watermark();
+                earliestWatermark = snapshot(earliest).watermark();
                 if (earliestWatermark != null) {
                     break;
                 }
