@@ -60,24 +60,26 @@ import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.Lookup
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
-import org.apache.paimon.mergetree.compact.TimeAwareCompaction;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
@@ -229,18 +231,15 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger(),
                         options.optimizedCompactionInterval());
-        ForceUpLevel0Compaction forceUpLevel0Compaction =
-                new ForceUpLevel0Compaction(universalCompaction);
         if (options.needLookup()) {
-            Optional<Duration> lateArrivedThreshold = options.lateArrivedThreshold();
+            Optional<Duration> lateArrivedThreshold = options.lateArrivalThreshold();
             if (partition.getFieldCount() > 0 && lateArrivedThreshold.isPresent()) {
-                return new TimeAwareCompaction(
-                        lateArrivedThreshold.get(),
-                        forceUpLevel0Compaction,
+                return new ForceUpLevel0Compaction(
                         universalCompaction,
+                        lateArrivedThreshold.get(),
                         partitionTimeExtractor.extract(partition, partitionType));
             } else {
-                return forceUpLevel0Compaction;
+                return new ForceUpLevel0Compaction(universalCompaction);
             }
         } else {
             return universalCompaction;

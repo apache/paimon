@@ -24,6 +24,8 @@ import org.apache.paimon.mergetree.SortedRun;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
@@ -57,6 +59,56 @@ public class ForceUpLevel0CompactionTest {
         result = compaction.pick(3, Arrays.asList(run(0, 1), run(0, 5), run(0, 10), run(0, 20)));
         assertThat(result).isPresent();
         assertThat(result.get().outputLevel()).isEqualTo(2);
+    }
+
+    @Test
+    public void testForceCompaction0WithLateArrivalThreshold() {
+        int lateArrivalThresholdDays = 3;
+        Duration lateArrivalThreshold = Duration.ofDays(lateArrivalThresholdDays);
+        for (int i = 0; i < 30; i++) {
+            LocalDateTime testPartitionDate = LocalDateTime.now().minusDays(i);
+            ForceUpLevel0Compaction compaction =
+                    new ForceUpLevel0Compaction(
+                            new UniversalCompaction(200, 1, 5),
+                            lateArrivalThreshold,
+                            testPartitionDate);
+
+            if (i >= lateArrivalThresholdDays) {
+                assertThat(compaction.isLateArrival()).isTrue();
+
+                Optional<CompactUnit> result =
+                        compaction.pick(3, Arrays.asList(run(0, 1), run(0, 1)));
+                assertThat(result).isEmpty();
+
+                result = compaction.pick(3, Arrays.asList(run(0, 1), run(0, 1), run(1, 10)));
+                assertThat(result).isEmpty();
+
+                result =
+                        compaction.pick(
+                                4,
+                                Arrays.asList(
+                                        run(0, 1), run(0, 1), run(0, 1), run(1, 10), run(2, 30)));
+                assertThat(result).isPresent();
+                assertThat(result.get().outputLevel()).isEqualTo(1);
+                assertThat(result.get().files().size()).isEqualTo(4);
+
+            } else {
+                assertThat(compaction.isLateArrival()).isFalse();
+
+                Optional<CompactUnit> result =
+                        compaction.pick(3, Arrays.asList(run(0, 1), run(0, 1)));
+                assertThat(result).isPresent();
+                assertThat(result.get().outputLevel()).isEqualTo(2);
+
+                result = compaction.pick(3, Arrays.asList(run(0, 1), run(1, 10)));
+                assertThat(result).isPresent();
+                assertThat(result.get().outputLevel()).isEqualTo(2);
+
+                result = compaction.pick(3, Arrays.asList(run(0, 1), run(0, 5), run(2, 10)));
+                assertThat(result).isPresent();
+                assertThat(result.get().outputLevel()).isEqualTo(1);
+            }
+        }
     }
 
     private LevelSortedRun run(int level, int size) {

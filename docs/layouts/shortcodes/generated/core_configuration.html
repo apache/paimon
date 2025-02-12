@@ -147,6 +147,12 @@ under the License.
             <td>Specifies the commit user prefix.</td>
         </tr>
         <tr>
+            <td><h5>compaction.late-arrival-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The threshold of partitioned pk table to differentiate late arrived data. Late arrived data can be configured with a less frequent compaction strategy to sacrifice timeliness for overall resource usage saving. This option is only valid for a partitioned pk table when needLookup() is true.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
