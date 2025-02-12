@@ -98,7 +98,7 @@ public class BitmapIndexBenchmark {
                 new BitmapFileIndex(DataTypes.STRING(), writeOptions1).createWriter();
 
         Options writeOptions2 = new Options();
-        writeOptions1.setInteger(BitmapFileIndex.VERSION, BitmapFileIndex.VERSION_2);
+        writeOptions2.setInteger(BitmapFileIndex.VERSION, BitmapFileIndex.VERSION_2);
         FileIndexWriter writer2 =
                 new BitmapFileIndex(DataTypes.STRING(), writeOptions2).createWriter();
 
