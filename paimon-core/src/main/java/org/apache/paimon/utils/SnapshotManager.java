@@ -168,6 +168,11 @@ public class SnapshotManager implements Serializable {
         return Changelog.fromPath(fileIO, changelogPath);
     }
 
+    private Changelog tryGetChangelog(long snapshotId) throws FileNotFoundException {
+        Path changelogPath = longLivedChangelogPath(snapshotId);
+        return Changelog.tryFromPath(fileIO, changelogPath);
+    }
+
     public Changelog longLivedChangelog(long snapshotId) {
         return Changelog.fromPath(fileIO, longLivedChangelogPath(snapshotId));
     }
@@ -216,8 +221,41 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot earliestSnapshot() {
-        Long snapshotId = earliestSnapshotId();
-        return snapshotId == null ? null : snapshot(snapshotId);
+        return earliestSnapshot(false);
+    }
+
+    private @Nullable Snapshot earliestSnapshot(boolean includeChangelog) {
+        Long snapshotId = null;
+        if (includeChangelog) {
+            snapshotId = earliestLongLivedChangelogId();
+        }
+        if (snapshotId == null) {
+            snapshotId = earliestSnapshotId();
+        }
+        if (snapshotId == null) {
+            return null;
+        }
+
+        FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction =
+                includeChangelog ? this::tryGetChangelogOrSnapshot : this::tryGetSnapshot;
+
+        // The loss of the earliest snapshot is an event of small probability, so the retry number
+        // here need not be too large.
+        int retry = 0;
+        do {
+            try {
+                return snapshotFunction.apply(snapshotId);
+            } catch (FileNotFoundException e) {
+                if (retry++ >= 3) {
+                    throw new RuntimeException(e);
+                }
+                LOG.warn(
+                        "The earliest snapshot or changelog was once identified but disappeared. "
+                                + "It might have been expired by other jobs operating on this table. "
+                                + "Searching for the second earliest snapshot or changelog instead. ");
+                snapshotId++;
+            }
+        } while (true);
     }
 
     public @Nullable Long earliestSnapshotId() {
@@ -276,28 +314,34 @@ public class SnapshotManager implements Serializable {
         }
     }
 
+    private Snapshot tryGetChangelogOrSnapshot(long snapshotId) throws FileNotFoundException {
+        if (longLivedChangelogExists(snapshotId)) {
+            return tryGetChangelog(snapshotId);
+        } else {
+            return tryGetSnapshot(snapshotId);
+        }
+    }
+
     /**
      * Returns the latest snapshot earlier than the timestamp mills. A non-existent snapshot may be
      * returned if all snapshots are equal to or later than the timestamp mills.
      */
     public @Nullable Long earlierThanTimeMills(long timestampMills, boolean startFromChangelog) {
-        Long earliestSnapshot = earliestSnapshotId();
-        Long earliest;
-        if (startFromChangelog) {
-            Long earliestChangelog = earliestLongLivedChangelogId();
-            earliest = earliestChangelog == null ? earliestSnapshot : earliestChangelog;
-        } else {
-            earliest = earliestSnapshot;
-        }
         Long latest = latestSnapshotId();
-        if (earliest == null || latest == null) {
+        if (latest == null) {
             return null;
         }
 
-        if (changelogOrSnapshot(earliest).timeMillis() >= timestampMills) {
-            return earliest - 1;
+        Snapshot earliestSnapshot = earliestSnapshot(startFromChangelog);
+        if (earliestSnapshot == null) {
+            return null;
         }
 
+        if (earliestSnapshot.timeMillis() >= timestampMills) {
+            return earliestSnapshot.id() - 1;
+        }
+
+        long earliest = earliestSnapshot.id();
         while (earliest < latest) {
             long mid = (earliest + latest + 1) / 2;
             if (changelogOrSnapshot(mid).timeMillis() < timestampMills) {
@@ -314,16 +358,17 @@ public class SnapshotManager implements Serializable {
      * mills. If there is no such a snapshot, returns null.
      */
     public @Nullable Snapshot earlierOrEqualTimeMills(long timestampMills) {
-        Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
-        if (earliest == null || latest == null) {
+        if (latest == null) {
             return null;
         }
 
-        Snapshot earliestSnapShot = snapshot(earliest);
-        if (earliestSnapShot.timeMillis() > timestampMills) {
+        Snapshot earliestSnapShot = earliestSnapshot();
+        if (earliestSnapShot == null || earliestSnapShot.timeMillis() > timestampMills) {
             return earliestSnapShot;
         }
+        long earliest = earliestSnapShot.id();
+
         Snapshot finalSnapshot = null;
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
@@ -376,16 +421,22 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot earlierOrEqualWatermark(long watermark) {
-        Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
         // If latest == Long.MIN_VALUE don't need next binary search for watermark
         // which can reduce IO cost with snapshot
-        if (earliest == null || latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
+        if (latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
             return null;
         }
+
+        Snapshot earliestSnapShot = earliestSnapshot();
+        if (earliestSnapShot == null) {
+            return null;
+        }
+        long earliest = earliestSnapShot.id();
+
         Long earliestWatermark = null;
         // find the first snapshot with watermark
-        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
+        if ((earliestWatermark = earliestSnapShot.watermark()) == null) {
             while (earliest < latest) {
                 earliest++;
                 earliestWatermark = snapshot(earliest).watermark();
@@ -435,16 +486,22 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
-        Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
         // If latest == Long.MIN_VALUE don't need next binary search for watermark
         // which can reduce IO cost with snapshot
-        if (earliest == null || latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
+        if (latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
             return null;
         }
+
+        Snapshot earliestSnapShot = earliestSnapshot();
+        if (earliestSnapShot == null) {
+            return null;
+        }
+        long earliest = earliestSnapShot.id();
+
         Long earliestWatermark = null;
         // find the first snapshot with watermark
-        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
+        if ((earliestWatermark = earliestSnapShot.watermark()) == null) {
             while (earliest < latest) {
                 earliest++;
                 earliestWatermark = snapshot(earliest).watermark();
