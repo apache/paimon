@@ -15,3 +15,4 @@
 
 org.apache.paimon.utils.FailingFileIO$Loader
 org.apache.paimon.utils.TraceableFileIO$Loader
+org.apache.paimon.iceberg.migrate.IcebergMigrateHadoopMetadataTest$TestFileIOLoader

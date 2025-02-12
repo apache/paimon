@@ -57,19 +57,23 @@ public class IcebergMigrateHadoopMetadata implements IcebergMigrateMetadata {
                 icebergOptions.get(ICEBERG_WAREHOUSE) != null,
                 "'iceberg_warehouse' is null. "
                         + "In hadoop-catalog, you should explicitly set this argument for finding iceberg metadata.");
-        Path path =
-                new Path(
-                        String.format(
-                                "%s/%s/metadata",
-                                icebergIdentifier.getDatabaseName(),
-                                icebergIdentifier.getTableName()));
+
+        Path icebergWarehouse = new Path(icebergOptions.get(ICEBERG_WAREHOUSE));
+
         try {
-            fileIO = FileIO.get(path, CatalogContext.create(icebergOptions));
+            fileIO = FileIO.get(icebergWarehouse, CatalogContext.create(icebergOptions));
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
         this.icebergMetaPathFactory =
-                new IcebergPathFactory(new Path(icebergOptions.get(ICEBERG_WAREHOUSE), path));
+                new IcebergPathFactory(
+                        new Path(
+                                icebergWarehouse,
+                                new Path(
+                                        String.format(
+                                                "%s/%s/metadata",
+                                                icebergIdentifier.getDatabaseName(),
+                                                icebergIdentifier.getTableName()))));
         long icebergLatestMetaVersion = getIcebergLatestMetaVersion();
 
         this.icebergLatestMetaVersionPath =
