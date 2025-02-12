@@ -682,6 +682,26 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         }
     }
 
+    @Test
+    public void testAggregationWithNullSequenceField() {
+        sql(
+                "CREATE TABLE test ("
+                        + "  pk INT PRIMARY KEY NOT ENFORCED,"
+                        + "  v STRING,"
+                        + "  s0 INT,"
+                        + "  s1 INT"
+                        + ") WITH ("
+                        + "  'merge-engine' = 'aggregation',"
+                        + "  'sequence.field' = 's0,s1')");
+
+        sql(
+                "INSERT INTO test VALUES (1, 'A1', CAST (NULL AS INT), 1), (1, 'A2', 1, CAST (NULL AS INT))");
+        assertThat(sql("SELECT * FROM test")).containsExactly(Row.of(1, "A2", 1, null));
+
+        sql("INSERT INTO test VALUES (1, 'A3', 1, 0)");
+        assertThat(sql("SELECT * FROM test")).containsExactly(Row.of(1, "A3", 1, 0));
+    }
+
     private void validateCount1PushDown(String sql) {
         Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
         while (!transformation.getInputs().isEmpty()) {
