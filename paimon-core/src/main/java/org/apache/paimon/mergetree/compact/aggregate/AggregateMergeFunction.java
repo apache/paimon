@@ -26,6 +26,7 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastNonNullValueAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldPrimaryKeyAggFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
@@ -149,8 +150,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
         private String getAggFuncName(String fieldName, List<String> sequenceFields) {
             if (sequenceFields.contains(fieldName)) {
-                // no agg for sequence fields, use last_non_null_value to do cover
-                return FieldLastNonNullValueAggFactory.NAME;
+                // no agg for sequence fields, use last_value to do cover
+                return FieldLastValueAggFactory.NAME;
             }
 
             if (primaryKeys.contains(fieldName)) {
