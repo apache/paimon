@@ -43,7 +43,13 @@ public class WriteActionsITCase extends CatalogITCaseBase {
 
     @Timeout(value = TIMEOUT)
     @ParameterizedTest
-    @ValueSource(strings = {"PARTITION-EXPIRE", "SNAPSHOT-EXPIRE", "TAG-AUTOMATIC-CREATION"})
+    @ValueSource(
+            strings = {
+                "PARTITION-EXPIRE",
+                "SNAPSHOT-EXPIRE",
+                "TAG-AUTOMATIC-CREATION",
+                "FULL-COMPACT"
+            })
     public void testWriteActionsWhichExecutedDuringCommit(String val) throws Exception {
 
         CoreOptions.WriteAction writeAction =
@@ -51,11 +57,7 @@ public class WriteActionsITCase extends CatalogITCaseBase {
 
         HashMap<String, String> writeActionOptions =
                 createOptions(
-                        String.format(
-                                "%s,%s,%s",
-                                writeAction,
-                                CoreOptions.WriteAction.FULL_COMPACT,
-                                CoreOptions.WriteAction.MINOR_COMPACT));
+                        String.format("%s,%s", writeAction, CoreOptions.WriteAction.FULL_COMPACT));
 
         createPrimaryKeyTable("T", writeActionOptions);
         sql("INSERT INTO T VALUES ('HXH', '20250101')");
@@ -95,6 +97,17 @@ public class WriteActionsITCase extends CatalogITCaseBase {
                 // Snapshot 2 is Compact, full compact.
                 assertThat(snapshotManager.snapshot(2).commitKind())
                         .isEqualTo(Snapshot.CommitKind.COMPACT);
+                break;
+            case FULL_COMPACT:
+                // A single write will trigger full compact.
+                expectTable(table, snapshotManager, 2, 2, 0, "20250101");
+                // Snapshot 1 is APPEND.
+                assertThat(snapshotManager.snapshot(1).commitKind())
+                        .isEqualTo(Snapshot.CommitKind.APPEND);
+                // Snapshot 2 is COMPACT.
+                assertThat(snapshotManager.snapshot(2).commitKind())
+                        .isEqualTo(Snapshot.CommitKind.COMPACT);
+                break;
         }
     }
 
@@ -150,13 +163,11 @@ public class WriteActionsITCase extends CatalogITCaseBase {
 
     @Timeout(value = TIMEOUT)
     @ParameterizedTest
-    @ValueSource(strings = {"FULL-COMPACT", "MINOR-COMPACT"})
+    @ValueSource(strings = {"DO", "SKIP"})
     public void testAppendOnlyCompactActions(String val) throws Exception {
 
-        CoreOptions.WriteAction writeAction =
-                CoreOptions.WriteAction.valueOf(val.replace("-", "_"));
-
-        HashMap<String, String> writeActionOptions = createOptions(writeAction.toString());
+        HashMap<String, String> writeActionOptions =
+                createOptions(val.equals("DO") ? "FULL_COMPACT" : "");
         writeActionOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "4");
 
         createAppendOnlyTable("T", writeActionOptions);
@@ -167,29 +178,29 @@ public class WriteActionsITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES ('HXH', '20250101')");
         sql("INSERT INTO T VALUES ('HXH', '20250101')");
 
-        switch (writeAction) {
-            case FULL_COMPACT:
+        switch (val) {
+            case "DO":
                 // Trigger full compaction.
                 expectTable(table, snapshotManager, 4, 4, 0, "20250101");
+                // Snapshot 3 is APPEND.
+                assertThat(snapshotManager.snapshot(3).commitKind())
+                        .isEqualTo(Snapshot.CommitKind.APPEND);
+                // Snapshot 4 is COMPACT.
+                assertThat(snapshotManager.snapshot(4).commitKind())
+                        .isEqualTo(Snapshot.CommitKind.COMPACT);
                 break;
-            case MINOR_COMPACT:
-                // Will not trigger full compact because we skip it.
+            case "SKIP":
                 expectTable(table, snapshotManager, 3, 3, 0, "20250101");
-                // Trigger minor compact.
-                sql("INSERT INTO T VALUES ('HXH', '20250101')");
-                expectTable(table, snapshotManager, 5, 5, 0, "20250101");
         }
     }
 
     @Timeout(value = TIMEOUT)
     @ParameterizedTest
-    @ValueSource(strings = {"FULL-COMPACT", "MINOR-COMPACT"})
+    @ValueSource(strings = {"DO", "SKIP"})
     public void testPrimaryKeyTableCompactActions(String val) throws Exception {
 
-        CoreOptions.WriteAction writeAction =
-                CoreOptions.WriteAction.valueOf(val.replace("-", "_"));
-
-        HashMap<String, String> writeActionOptions = createOptions(writeAction.toString());
+        HashMap<String, String> writeActionOptions =
+                createOptions(val.equals("DO") ? "FULL_COMPACT" : "");
 
         // Ensure that a single data write does not trigger a minor compaction.
         writeActionOptions.put(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.key(), "2");
@@ -200,8 +211,8 @@ public class WriteActionsITCase extends CatalogITCaseBase {
         FileStoreTable table = paimonTable("T");
         SnapshotManager snapshotManager = table.snapshotManager();
 
-        switch (writeAction) {
-            case FULL_COMPACT:
+        switch (val) {
+            case "DO":
                 // A single write will trigger full compact.
                 expectTable(table, snapshotManager, 2, 2, 0, "20250101");
                 // Snapshot 1 is APPEND.
@@ -211,7 +222,7 @@ public class WriteActionsITCase extends CatalogITCaseBase {
                 assertThat(snapshotManager.snapshot(2).commitKind())
                         .isEqualTo(Snapshot.CommitKind.COMPACT);
                 break;
-            case MINOR_COMPACT:
+            case "SKIP":
                 // A single write will not trigger a minor compaction.
                 expectTable(table, snapshotManager, 1, 1, 0, "20250101");
                 // Snapshot 1 is APPEND.

@@ -465,8 +465,6 @@ public class CoreOptions implements Serializable {
                                     .linebreak()
                                     .text("5. 'full-compact': Perform full compaction action.")
                                     .linebreak()
-                                    .text("6. 'minor-compact': Perform minor compaction action.")
-                                    .linebreak()
                                     .text(
                                             "Both can be configured at the same time: 'partition-expire,"
                                                     + "snapshot-expire,tag-automatic-creation', "
@@ -2287,45 +2285,6 @@ public class CoreOptions implements Serializable {
                 .collect(Collectors.toCollection(HashSet::new));
     }
 
-    public boolean doPartitionExpireAction(Set<WriteAction> doWriteActions) {
-        return doAllWriteActions(doWriteActions)
-                || doWriteActions.contains(WriteAction.PARTITION_EXPIRE);
-    }
-
-    public boolean doSnapshotExpireAction(Set<WriteAction> doWriteActions) {
-        return doAllWriteActions(doWriteActions)
-                || doWriteActions.contains(WriteAction.SNAPSHOT_EXPIRE);
-    }
-
-    public boolean doAutoCreateTagAction(Set<WriteAction> doWriteActions) {
-        return doAllWriteActions(doWriteActions)
-                || doWriteActions.contains(WriteAction.TAG_AUTOMATIC_CREATION);
-    }
-
-    public boolean doFullCompactionAction(Set<WriteAction> doWriteActions) {
-        return doAllWriteActions(doWriteActions)
-                || doWriteActions.contains(WriteAction.FULL_COMPACT);
-    }
-
-    public boolean doMinorCompactionAction(Set<WriteAction> doWriteActions) {
-        return doAllWriteActions(doWriteActions)
-                || doWriteActions.contains(WriteAction.MINOR_COMPACT);
-    }
-
-    public boolean doCompact() {
-        return doCompact(writeActions());
-    }
-
-    public static boolean doCompact(Set<WriteAction> doWriteActions) {
-        return doWriteActions.contains(WriteAction.ALL)
-                || doWriteActions.contains(WriteAction.FULL_COMPACT)
-                || doWriteActions.contains(WriteAction.MINOR_COMPACT);
-    }
-
-    public boolean doAllWriteActions(Set<WriteAction> doWriteActions) {
-        return doWriteActions.contains(WriteAction.ALL);
-    }
-
     public boolean streamingReadOverwrite() {
         return options.get(STREAMING_READ_OVERWRITE);
     }
@@ -3324,7 +3283,6 @@ public class CoreOptions implements Serializable {
         TAG_AUTOMATIC_CREATION("tag-automatic-creation"),
 
         // Actions during writing.
-        MINOR_COMPACT("minor-compact"),
         FULL_COMPACT("full-compact");
 
         private final String value;
@@ -3336,6 +3294,30 @@ public class CoreOptions implements Serializable {
         @Override
         public String toString() {
             return value;
+        }
+
+        public static boolean doPartitionExpireAction(Set<WriteAction> doWriteActions) {
+            return doAllWriteActions(doWriteActions)
+                    || doWriteActions.contains(WriteAction.PARTITION_EXPIRE);
+        }
+
+        public static boolean doSnapshotExpireAction(Set<WriteAction> doWriteActions) {
+            return doAllWriteActions(doWriteActions)
+                    || doWriteActions.contains(WriteAction.SNAPSHOT_EXPIRE);
+        }
+
+        public static boolean doAutoCreateTagAction(Set<WriteAction> doWriteActions) {
+            return doAllWriteActions(doWriteActions)
+                    || doWriteActions.contains(WriteAction.TAG_AUTOMATIC_CREATION);
+        }
+
+        public static boolean doFullCompactionAction(Set<WriteAction> doWriteActions) {
+            return doAllWriteActions(doWriteActions)
+                    || doWriteActions.contains(WriteAction.FULL_COMPACT);
+        }
+
+        public static boolean doAllWriteActions(Set<WriteAction> doWriteActions) {
+            return doWriteActions.contains(WriteAction.ALL);
         }
     }
 

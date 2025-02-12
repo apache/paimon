@@ -170,13 +170,12 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
     public static void checkWriteActions(CoreOptions coreOptions) {
         Preconditions.checkArgument(
-                coreOptions.doCompact(),
+                CoreOptions.WriteAction.doFullCompactionAction(coreOptions.writeActions()),
                 String.format(
-                        "%s should not be true or %s should be %s or contains %s/%s for StoreCompactOperator.",
+                        "%s should not be true or %s should be %s or contains %s for StoreCompactOperator.",
                         CoreOptions.WRITE_ONLY.key(),
                         CoreOptions.WRITE_ACTIONS.key(),
                         CoreOptions.WriteAction.ALL,
-                        CoreOptions.WriteAction.MINOR_COMPACT,
                         CoreOptions.WriteAction.FULL_COMPACT));
     }
 

@@ -150,13 +150,12 @@ public class MultiTablesStoreCompactOperator
         FileStoreTable table = getTable(tableId);
 
         Preconditions.checkArgument(
-                table.coreOptions().doCompact(),
+                CoreOptions.WriteAction.doFullCompactionAction(table.coreOptions().writeActions()),
                 String.format(
-                        "%s should not be true or %s should be %s or contains %s/%s for MultiTablesStoreCompactOperator.",
+                        "%s should not be true or %s should be %s or contains %s for MultiTablesStoreCompactOperator.",
                         CoreOptions.WRITE_ONLY.key(),
                         CoreOptions.WRITE_ACTIONS.key(),
                         CoreOptions.WriteAction.ALL,
-                        CoreOptions.WriteAction.MINOR_COMPACT,
                         CoreOptions.WriteAction.FULL_COMPACT));
 
         storeSinkWriteProvider =
@@ -270,7 +269,7 @@ public class MultiTablesStoreCompactOperator
         Set<CoreOptions.WriteAction> writeActions = coreOptions.writeActions();
         int deltaCommits = -1;
 
-        if (coreOptions.doFullCompactionAction(writeActions)) {
+        if (CoreOptions.WriteAction.doFullCompactionAction(writeActions)) {
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
                 deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
             } else if (options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {

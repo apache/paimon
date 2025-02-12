@@ -78,7 +78,7 @@ public class AppendOnlyFixedBucketFileStoreWrite extends AppendOnlyFileStoreWrit
             List<DataFileMeta> restoredFiles,
             ExecutorService compactExecutor,
             @Nullable DeletionVectorsMaintainer dvMaintainer) {
-        if (!options.doCompact()) {
+        if (!CoreOptions.WriteAction.doFullCompactionAction(options.writeActions())) {
             return new NoopCompactManager();
         } else {
             Function<String, DeletionVector> dvFactory =
