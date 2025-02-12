@@ -59,7 +59,7 @@ case class WriteIntoPaimonTable(
 
       // For case that some columns is absent in data, we still allow to write once write.merge-schema is true.
       val newTableSchema = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
-      if (!schemaEqualsIgnoreNullability(newTableSchema, data.schema)) {
+      if (!schemaEqualsIgnoreNullability(newTableSchema, dataSchema)) {
         val resolve = sparkSession.sessionState.conf.resolver
         val cols = newTableSchema.map {
           field =>
