@@ -27,6 +27,10 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -56,8 +60,42 @@ public class SnapshotManagerTest {
         }
     }
 
-    @Test
-    public void testEarlierThanTimeMillis() throws IOException {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testEarliestSnapshot(boolean isRaceCondition) throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new TestSnapshotManager(localFileIO, new Path(tempDir.toString()), isRaceCondition);
+        // create 10 snapshots
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.earliestSnapshot().id()).isEqualTo(isRaceCondition ? 1 : 0);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testEarlierOrEqualWatermark(boolean isRaceCondition) throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new TestSnapshotManager(localFileIO, new Path(tempDir.toString()), isRaceCondition);
+        // create 10 snapshots
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000, millis + i * 1000);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.earlierOrEqualWatermark(millis + 999).id())
+                .isEqualTo(isRaceCondition ? 1 : 0);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testEarlierThanTimeMillis(boolean isRaceCondition) throws IOException {
         long base = System.currentTimeMillis();
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
@@ -70,7 +108,7 @@ public class SnapshotManagerTest {
 
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                new TestSnapshotManager(localFileIO, new Path(tempDir.toString()), isRaceCondition);
         int firstSnapshotId = random.nextInt(1, 100);
         for (int i = 0; i < numSnapshots; i++) {
             Snapshot snapshot = createSnapshotWithMillis(firstSnapshotId + i, millis.get(i));
@@ -90,11 +128,24 @@ public class SnapshotManagerTest {
             Long actual = snapshotManager.earlierThanTimeMills(time, false);
 
             if (millis.get(numSnapshots - 1) < time) {
-                assertThat(actual).isEqualTo(firstSnapshotId + numSnapshots - 1);
+                if (isRaceCondition && millis.size() == 1) {
+                    assertThat(actual).isNull();
+                } else {
+                    assertThat(actual).isEqualTo(firstSnapshotId + numSnapshots - 1);
+                }
             } else {
                 for (int i = 0; i < numSnapshots; i++) {
                     if (millis.get(i) >= time) {
-                        assertThat(actual).isEqualTo(firstSnapshotId + i - 1);
+                        if (isRaceCondition && i == 0) {
+                            // The first snapshot expired during invocation
+                            if (millis.size() == 1) {
+                                assertThat(actual).isNull();
+                            } else {
+                                assertThat(actual).isLessThanOrEqualTo(firstSnapshotId);
+                            }
+                        } else {
+                            assertThat(actual).isLessThanOrEqualTo(firstSnapshotId + i - 1);
+                        }
                         break;
                     }
                 }
@@ -102,31 +153,45 @@ public class SnapshotManagerTest {
         }
     }
 
-    @Test
-    public void testEarlierOrEqualTimeMills() throws IOException {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testEarlierOrEqualTimeMills(boolean isRaceCondition) throws IOException {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                new TestSnapshotManager(localFileIO, new Path(tempDir.toString()), isRaceCondition);
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
 
-        // there is no snapshot smaller than "millis - 1L" return the earliest snapshot
-        assertThat(snapshotManager.earlierOrEqualTimeMills(millis - 1L).timeMillis())
-                .isEqualTo(millis);
+        if (isRaceCondition) {
+            // The earliest snapshot has expired, so always return the second snapshot
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis - 1L).timeMillis())
+                    .isEqualTo(millis + 1000L);
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
+                    .isEqualTo(millis + 1000L);
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1000).timeMillis())
+                    .isEqualTo(millis + 1000L);
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
+                    .isEqualTo(millis + 1000L);
+        } else {
+            // there is no snapshot smaller than "millis - 1L" return the earliest snapshot
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis - 1L).timeMillis())
+                    .isEqualTo(millis);
 
-        // smaller than the second snapshot return the first snapshot
-        assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
-                .isEqualTo(millis);
-        // equal to the second snapshot return the second snapshot
-        assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1000).timeMillis())
-                .isEqualTo(millis + 1000);
-        // larger than the second snapshot return the second snapshot
-        assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
-                .isEqualTo(millis + 1000);
+            // smaller than the second snapshot return the first snapshot
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
+                    .isEqualTo(millis);
+
+            // equal to the second snapshot return the second snapshot
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1000).timeMillis())
+                    .isEqualTo(millis + 1000);
+            // larger than the second snapshot return the second snapshot
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
+                    .isEqualTo(millis + 1000);
+        }
     }
 
     @Test
@@ -154,12 +219,13 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.laterOrEqualTimeMills(millis + 10001)).isNull();
     }
 
-    @Test
-    public void testlaterOrEqualWatermark() throws IOException {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLaterOrEqualWatermark(boolean isRaceCondition) throws IOException {
         long millis = Long.MIN_VALUE;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                new TestSnapshotManager(localFileIO, new Path(tempDir.toString()), isRaceCondition);
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, millis, Long.MIN_VALUE);
@@ -409,5 +475,36 @@ public class SnapshotManagerTest {
         Changelog changelog = createChangelogWithMillis(id, 1L);
         snapshotManager.commitChangelog(changelog, id);
         assertDoesNotThrow(() -> snapshotManager.commitChangelog(changelog, id));
+    }
+
+    /**
+     * Test {@link SnapshotManager} to mock situations when there is a race condition, that the
+     * earliest snapshot is deleted by another thread in the middle of the current thread's
+     * invocation.
+     */
+    private static class TestSnapshotManager extends SnapshotManager {
+        private final boolean isRaceCondition;
+
+        private boolean deleteEarliestSnapshot = false;
+
+        public TestSnapshotManager(FileIO fileIO, Path tablePath, boolean isRaceCondition) {
+            super(fileIO, tablePath);
+            this.isRaceCondition = isRaceCondition;
+        }
+
+        @Override
+        public @Nullable Long earliestSnapshotId() {
+            Long snapshotId = super.earliestSnapshotId();
+            if (isRaceCondition && snapshotId != null && !deleteEarliestSnapshot) {
+                Path snapshotPath = snapshotPath(snapshotId);
+                try {
+                    fileIO().delete(snapshotPath, true);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                deleteEarliestSnapshot = true;
+            }
+            return snapshotId;
+        }
     }
 }
