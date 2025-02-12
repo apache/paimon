@@ -805,6 +805,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue("debezium-json")
                     .withDescription("Specify the message format of log system.");
 
+    @ExcludeFromDocumentation("Confused without log system")
+    public static final ConfigOption<Boolean> LOG_IGNORE_DELETE =
+            key("log.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Specify whether the log system ignores delete records.");
+
     public static final ConfigOption<Boolean> AUTO_CREATE =
             key("auto-create")
                     .booleanType()
