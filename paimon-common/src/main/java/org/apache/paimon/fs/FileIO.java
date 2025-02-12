@@ -54,7 +54,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.fs.FileIOUtils.checkAccess;
-import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILEIO_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -420,7 +420,7 @@ public interface FileIO extends Serializable, Closeable {
      * by the given path.
      */
     static FileIO get(Path path, CatalogContext config) throws IOException {
-        if (config.options().get(RESOLVING_FILEIO_ENABLED)) {
+        if (config.options().get(RESOLVING_FILE_IO_ENABLED)) {
             FileIO fileIO = new ResolvingFileIO();
             fileIO.configure(config);
             return fileIO;

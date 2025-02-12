@@ -75,7 +75,7 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
     public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
             throws IOException {
         try (Reader reader =
-                OrcReaderFactory.createReader(new Configuration(), fileIO, path, null)) {
+                OrcReaderFactory.createReader(new Configuration(false), fileIO, path, null)) {
             long rowCount = reader.getNumberOfRows();
             ColumnStatistics[] columnStatistics = reader.getStatistics();
             TypeDescription schema = reader.getSchema();

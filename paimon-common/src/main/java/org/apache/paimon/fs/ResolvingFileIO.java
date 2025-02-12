@@ -29,7 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILEIO_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
 
 /**
  * An implementation of {@link FileIO} that supports multiple file system schemas. It dynamically
@@ -61,7 +61,7 @@ public class ResolvingFileIO implements FileIO {
     public void configure(CatalogContext context) {
         Options options = new Options();
         context.options().toMap().forEach(options::set);
-        options.set(RESOLVING_FILEIO_ENABLED, false);
+        options.set(RESOLVING_FILE_IO_ENABLED, false);
         this.context =
                 CatalogContext.create(
                         options, context.hadoopConf(), context.preferIO(), context.fallbackIO());
