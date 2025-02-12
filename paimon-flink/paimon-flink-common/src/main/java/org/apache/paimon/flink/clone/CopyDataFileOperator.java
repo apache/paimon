@@ -18,15 +18,11 @@
 
 package org.apache.paimon.flink.clone;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.IOUtils;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -35,14 +31,15 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.util.HashMap;
 import java.util.Map;
 
 /** A Operator to copy files. */
-public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
+public class CopyDataFileOperator extends AbstractStreamOperator<CloneFileInfo>
         implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CopyFileOperator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CopyDataFileOperator.class);
 
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
@@ -54,7 +51,7 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
     private transient Map<String, FileIO> targetFileIOs;
     private transient Map<String, Path> targetLocations;
 
-    public CopyFileOperator(
+    public CopyDataFileOperator(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
@@ -76,82 +73,59 @@ public class CopyFileOperator extends AbstractStreamOperator<CloneFileInfo>
         CloneFileInfo cloneFileInfo = streamRecord.getValue();
 
         FileIO sourceTableFileIO =
-                srcFileIOs.computeIfAbsent(
-                        cloneFileInfo.getSourceIdentifier(),
-                        key -> {
-                            try {
-                                return ((FileStoreTable)
-                                                sourceCatalog.getTable(Identifier.fromString(key)))
-                                        .fileIO();
-                            } catch (Catalog.TableNotExistException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
-
+                CloneFilesUtil.getFileIO(
+                        srcFileIOs, cloneFileInfo.getSourceIdentifier(), sourceCatalog);
         FileIO targetTableFileIO =
-                targetFileIOs.computeIfAbsent(
-                        cloneFileInfo.getTargetIdentifier(),
-                        key -> {
-                            try {
-                                return ((FileStoreTable)
-                                                targetCatalog.getTable(Identifier.fromString(key)))
-                                        .fileIO();
-                            } catch (Catalog.TableNotExistException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
-
+                CloneFilesUtil.getFileIO(
+                        targetFileIOs, cloneFileInfo.getTargetIdentifier(), targetCatalog);
         Path targetTableRootPath =
-                targetLocations.computeIfAbsent(
-                        cloneFileInfo.getTargetIdentifier(),
-                        key -> {
-                            try {
-                                return pathOfTable(
-                                        targetCatalog.getTable(Identifier.fromString(key)));
-                            } catch (Catalog.TableNotExistException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
+                CloneFilesUtil.getPath(
+                        targetLocations, cloneFileInfo.getTargetIdentifier(), targetCatalog);
 
         String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
         Path sourcePath = new Path(cloneFileInfo.getSourceFilePath());
         Path targetPath = new Path(targetTableRootPath + filePathExcludeTableRoot);
 
-        if (targetTableFileIO.exists(targetPath)
-                && targetTableFileIO.getFileSize(targetPath)
-                        == sourceTableFileIO.getFileSize(sourcePath)) {
+        try {
+            if (targetTableFileIO.exists(targetPath)
+                    && targetTableFileIO.getFileSize(targetPath)
+                            == sourceTableFileIO.getFileSize(sourcePath)) {
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Skipping clone target file {} because it already exists and has the same size.",
-                        targetPath);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Skipping clone target file {} because it already exists and has the same size.",
+                            targetPath);
+                }
+
+                // We still send record to SnapshotHintOperator to avoid the following corner case:
+                //
+                // When cloning two tables under a catalog, after clone table A is completed,
+                // the job fails due to snapshot expiration when cloning table B.
+                // If we don't re-send file information of table A to SnapshotHintOperator,
+                // the snapshot hint file of A will not be created after the restart.
+                output.collect(streamRecord);
+                return;
             }
-
-            // We still send record to SnapshotHintOperator to avoid the following corner case:
-            //
-            // When cloning two tables under a catalog, after clone table A is completed,
-            // the job fails due to snapshot expiration when cloning table B.
-            // If we don't re-send file information of table A to SnapshotHintOperator,
-            // the snapshot hint file of A will not be created after the restart.
-            output.collect(streamRecord);
-            return;
+        } catch (FileNotFoundException e) {
+            LOG.warn("File {} does not exist. ignore it", sourcePath, e);
         }
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Begin copy file from {} to {}.", sourcePath, targetPath);
         }
-        IOUtils.copyBytes(
-                sourceTableFileIO.newInputStream(sourcePath),
-                targetTableFileIO.newOutputStream(targetPath, true));
+        try {
+            IOUtils.copyBytes(
+                    sourceTableFileIO.newInputStream(sourcePath),
+                    targetTableFileIO.newOutputStream(targetPath, true));
+        } catch (FileNotFoundException e) {
+            LOG.warn("File {} does not exist. ignore it", sourcePath, e);
+        }
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("End copy file from {} to {}.", sourcePath, targetPath);
         }
 
         output.collect(streamRecord);
-    }
-
-    private Path pathOfTable(Table table) {
-        return new Path(table.options().get(CoreOptions.PATH.key()));
     }
 
     @Override
