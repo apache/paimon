@@ -95,8 +95,6 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
             rowTypeBuilder.field(fieldName, DataTypes.STRING());
         }
 
-        evalComputedColumns(resultMap, rowTypeBuilder);
-
         return resultMap;
     }
 
