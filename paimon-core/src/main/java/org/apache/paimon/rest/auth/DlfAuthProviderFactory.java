@@ -21,12 +21,18 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_ROLE_SESSION_NAME;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
 
 /** Factory for {@link DlfAuthProvider}. */
 public class DlfAuthProviderFactory implements AuthProviderFactory {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DlfAuthProviderFactory.class);
+
     @Override
     public String identifier() {
         return AuthProviderEnum.DLF.identifier();
@@ -34,6 +40,11 @@ public class DlfAuthProviderFactory implements AuthProviderFactory {
 
     @Override
     public AuthProvider create(Options options) {
+        LOG.info("Begin create dlf AuthProvider");
+        LOG.info("path: {}", options.get(RESTCatalogOptions.TOKEN_PROVIDER_PATH));
+        LOG.info(
+                "TOKEN_PROVIDER_ROLE_SESSION_NAME: {}",
+                options.get(RESTCatalogOptions.TOKEN_PROVIDER_ROLE_SESSION_NAME));
         if (options.getOptional(RESTCatalogOptions.TOKEN_PROVIDER_PATH).isPresent()) {
             if (!options.getOptional(TOKEN_PROVIDER_PATH).isPresent()) {
                 throw new IllegalArgumentException(TOKEN_PROVIDER_PATH.key() + " is required");

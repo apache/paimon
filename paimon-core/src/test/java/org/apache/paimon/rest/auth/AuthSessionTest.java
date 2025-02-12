@@ -76,7 +76,7 @@ public class AuthSessionTest {
     @Test
     public void testRefreshDlfAuthTokenFileAuthProvider() throws IOException, InterruptedException {
         String roleSessionName = "tom";
-        String fileName = DlfAuthProvider.decodeBase64(roleSessionName);
+        String fileName = DlfAuthProvider.encodeBase64(roleSessionName);
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
@@ -98,7 +98,7 @@ public class AuthSessionTest {
     @Test
     public void testRefreshAuthProviderIsSoonExpire() throws IOException, InterruptedException {
         String roleSessionName = "tom";
-        String fileName = DlfAuthProvider.decodeBase64(roleSessionName);
+        String fileName = DlfAuthProvider.encodeBase64(roleSessionName);
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();

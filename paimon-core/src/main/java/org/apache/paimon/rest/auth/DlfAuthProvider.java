@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -27,10 +28,11 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
-import java.util.Base64.Decoder;
+import java.util.Base64.Encoder;
 import java.util.Map;
 import java.util.Optional;
 
@@ -44,8 +46,8 @@ public class DlfAuthProvider implements AuthProvider {
 
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final Decoder BASE64_DECODER = Base64.getUrlDecoder();
+            DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
+    private static final Encoder BASE64_ENCODER = Base64.getUrlEncoder();
 
     private final String tokenDirPath;
     private final String tokenFileName;
@@ -57,22 +59,22 @@ public class DlfAuthProvider implements AuthProvider {
 
     public static DlfAuthProvider buildRefreshToken(
             String tokenDirPath, String roleSessionName, Long tokenRefreshInMills) {
-        String tokenFileName = decodeBase64(roleSessionName);
+        String tokenFileName = encodeBase64(roleSessionName);
         DlfToken token = readToken(tokenDirPath, tokenFileName);
         Long expiresAtMillis = token.getExpiresInMills();
         return new DlfAuthProvider(
                 tokenDirPath, tokenFileName, token, true, expiresAtMillis, tokenRefreshInMills);
     }
 
-    public static String decodeBase64(String s) {
+    public static String encodeBase64(String s) {
         if (s == null) {
             return null;
         }
         try {
-            byte[] b = BASE64_DECODER.decode(s);
-            return new String(b);
+            String encodeResult = BASE64_ENCODER.encodeToString(s.trim().getBytes());
+            return encodeResult.replace("\n", "").replace("=", "");
         } catch (Exception e) {
-            throw new RuntimeException("Error decoding base64 string ", e);
+            throw new RuntimeException("Error encoding base64 string ", e);
         }
     }
 
@@ -104,23 +106,22 @@ public class DlfAuthProvider implements AuthProvider {
             String date = getDate();
             String authorization =
                     DlfAuthSignature.getAuthorization(restAuthParameter, token, date);
+            String secret =
+                    StringUtils.isEmpty(token.getAccessKeySecret())
+                            ? "empty"
+                            : token.getAccessKeySecret();
             return ImmutableMap.of(
                     DLF_ENDPOINT_AUTHORIZATION_KEY,
                     authorization,
                     DLF_DATE_HEADER_KEY,
-                    getDate(),
+                    date,
                     DLF_HOST_HEADER_KEY,
                     restAuthParameter.host(),
                     DLF_SECRET_HEADER_KEY, // todo: just for test
-                    token.getAccessKeySecret());
+                    secret);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("token--" + token, e);
         }
-    }
-
-    private static String getDate() {
-        LocalDate currentDate = LocalDate.now();
-        return currentDate.format(DATE_FORMATTER);
     }
 
     @Override
@@ -172,6 +173,12 @@ public class DlfAuthProvider implements AuthProvider {
     @Override
     public Optional<Long> tokenRefreshInMills() {
         return Optional.ofNullable(this.tokenRefreshInMills);
+    }
+
+    public static String getDate() {
+        // Get the current time in UTC
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        return now.format(DATE_FORMATTER);
     }
 
     private static DlfToken readToken(String tokenDirPath, String tokenFileName) {

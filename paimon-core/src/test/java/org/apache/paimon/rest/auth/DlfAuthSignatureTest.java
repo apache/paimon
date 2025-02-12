@@ -26,6 +26,7 @@ public class DlfAuthSignatureTest {
 
     @Test
     public void testGetAuthorization() throws Exception {
+        String date = DlfAuthProvider.getDate();
         RestAuthParameter restAuthParameter =
                 new RestAuthParameter(
                         "endpoint",
@@ -34,8 +35,8 @@ public class DlfAuthSignatureTest {
                         "");
         DlfToken token =
                 new DlfToken("accessKeyId", "accessKeySecret", "securityToken", "expiration");
-        String authorization = DlfAuthSignature.getAuthorization(restAuthParameter, token, "date");
+        String authorization = DlfAuthSignature.getAuthorization(restAuthParameter, token, date);
         Assertions.assertEquals(
-                DlfAuthSignature.getAuthorization(restAuthParameter, token, "date"), authorization);
+                DlfAuthSignature.getAuthorization(restAuthParameter, token, date), authorization);
     }
 }
