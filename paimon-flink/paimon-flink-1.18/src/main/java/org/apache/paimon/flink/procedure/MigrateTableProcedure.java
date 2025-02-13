@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
+import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
@@ -50,25 +51,13 @@ public class MigrateTableProcedure extends ProcedureBase {
             String sourceTablePath,
             String properties)
             throws Exception {
-        String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
 
-        Identifier sourceTableId = Identifier.fromString(sourceTablePath);
-        Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
-
-        TableMigrationUtils.getImporter(
-                        connector,
-                        catalog,
-                        sourceTableId.getDatabaseName(),
-                        sourceTableId.getObjectName(),
-                        targetTableId.getDatabaseName(),
-                        targetTableId.getObjectName(),
-                        Runtime.getRuntime().availableProcessors(),
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties))
-                .executeMigrate();
-
-        LOG.info("Last step: rename " + targetTableId + " to " + sourceTableId);
-        catalog.renameTable(targetTableId, sourceTableId, false);
-        return new String[] {"Success"};
+        return call(
+                procedureContext,
+                connector,
+                sourceTablePath,
+                properties,
+                Runtime.getRuntime().availableProcessors());
     }
 
     public String[] call(
@@ -78,12 +67,13 @@ public class MigrateTableProcedure extends ProcedureBase {
             String properties,
             Integer parallelism)
             throws Exception {
-        String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
+        String targetTablePath = sourceTablePath + PAIMON_SUFFIX;
 
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
-        Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
+        Identifier targetTableId = Identifier.fromString(targetTablePath);
 
-        TableMigrationUtils.getImporter(
+        Migrator migrator =
+                TableMigrationUtils.getImporter(
                         connector,
                         catalog,
                         sourceTableId.getDatabaseName(),
@@ -91,11 +81,11 @@ public class MigrateTableProcedure extends ProcedureBase {
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         parallelism,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties))
-                .executeMigrate();
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties));
+        LOG.info("create migrator success.");
+        migrator.executeMigrate();
 
-        LOG.info("Last step: rename " + targetTableId + " to " + sourceTableId);
-        catalog.renameTable(targetTableId, sourceTableId, false);
+        migrator.renameTable(false);
         return new String[] {"Success"};
     }
 }

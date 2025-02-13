@@ -30,22 +30,24 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Migrate procedure to migrate hive table to paimon table. */
-public class MigrateTableProcedure extends ProcedureBase {
-
-    private static final Logger LOG = LoggerFactory.getLogger(MigrateTableProcedure.class);
+/** Migrate procedure to migrate iceberg table to paimon table. */
+public class MigrateIcebergTableProcedure extends ProcedureBase {
+    private static final Logger LOG = LoggerFactory.getLogger(MigrateIcebergTableProcedure.class);
 
     private static final String PAIMON_SUFFIX = "_paimon_";
 
     @Override
     public String identifier() {
-        return "migrate_table";
+        return "migrate_iceberg_table";
     }
 
     @ProcedureHint(
             argument = {
-                @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "source_table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "iceberg_options",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
                 @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
                         name = "parallelism",
@@ -54,12 +56,13 @@ public class MigrateTableProcedure extends ProcedureBase {
             })
     public String[] call(
             ProcedureContext procedureContext,
-            String connector,
             String sourceTablePath,
+            String icebergProperties,
             String properties,
             Integer parallelism)
             throws Exception {
         properties = notnull(properties);
+        icebergProperties = notnull(icebergProperties);
 
         String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
 
@@ -69,15 +72,15 @@ public class MigrateTableProcedure extends ProcedureBase {
         Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
 
         Migrator migrator =
-                TableMigrationUtils.getImporter(
-                        connector,
+                TableMigrationUtils.getIcebergImporter(
                         catalog,
                         sourceTableId.getDatabaseName(),
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         p,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties));
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties),
+                        ParameterUtils.parseCommaSeparatedKeyValues(icebergProperties));
         LOG.info("create migrator success.");
         migrator.executeMigrate();
 
