@@ -25,6 +25,8 @@ import java.util.Map;
 /** Auth provider for bear token. */
 public class BearTokenAuthProvider implements AuthProvider {
 
+    public static final String AUTHORIZATION_HEADER_KEY = "authorization";
+
     private static final String BEARER_PREFIX = "Bearer ";
 
     protected String token;
@@ -40,7 +42,7 @@ public class BearTokenAuthProvider implements AuthProvider {
 
     @Override
     public Map<String, String> generateAuthorizationHeader(RestAuthParameter restAuthParameter) {
-        return ImmutableMap.of("Authorization", BEARER_PREFIX + token);
+        return ImmutableMap.of(AUTHORIZATION_HEADER_KEY, BEARER_PREFIX + token);
     }
 
     @Override

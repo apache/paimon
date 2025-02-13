@@ -42,6 +42,8 @@ import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_ACCESS_KEY_ID;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_ACCESS_KEY_SECRET;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_ROLE_SESSION_NAME;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
@@ -66,11 +68,14 @@ public class AuthSessionTest {
         initialHeaders.put("k2", "v2");
         Options options = new Options();
         options.set(TOKEN.key(), token);
-        AuthProvider authProvider = AuthProviderFactory.createAuthProvider("bear", options);
+        AuthProvider authProvider =
+                AuthProviderFactory.createAuthProvider(AuthProviderEnum.BEAR.identifier(), options);
         AuthSession session = new AuthSession(authProvider);
         Map<String, String> authorizationHeader =
                 session.getAuthProvider().generateAuthorizationHeader(null);
-        assertEquals(authorizationHeader.get("Authorization"), "Bearer " + token);
+        assertEquals(
+                authorizationHeader.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY),
+                "Bearer " + token);
     }
 
     @Test
@@ -81,7 +86,8 @@ public class AuthSessionTest {
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
         long tokenRefreshInMills = 1000;
-        AuthProvider authProvider = generateDlfAuthProvider(tokenRefreshInMills, roleSessionName);
+        AuthProvider authProvider =
+                generateDlfAuthProvider(Optional.of(tokenRefreshInMills), roleSessionName);
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
@@ -103,7 +109,8 @@ public class AuthSessionTest {
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
         long tokenRefreshInMills = 1000L;
-        AuthProvider authProvider = generateDlfAuthProvider(tokenRefreshInMills, roleSessionName);
+        AuthProvider authProvider =
+                generateDlfAuthProvider(Optional.of(tokenRefreshInMills), roleSessionName);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
         String authToken = session.getAuthProvider().token();
         assertEquals(token, authToken);
@@ -151,6 +158,60 @@ public class AuthSessionTest {
         assertEquals(timeToWait, MAX_REFRESH_WINDOW_MILLIS);
     }
 
+    @Test
+    public void testCreateDlfAuthProviderByAk() throws IOException {
+        Options options = new Options();
+        String akId = UUID.randomUUID().toString();
+        String akSecret = UUID.randomUUID().toString();
+        DlfToken token = new DlfToken(akId, akSecret, null, null);
+        options.set(TOKEN_ACCESS_KEY_ID.key(), token.getAccessKeyId());
+        options.set(TOKEN_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
+        AuthProvider authProvider =
+                AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
+        AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
+        String authToken = session.getAuthProvider().token();
+        assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
+    }
+
+    @Test
+    public void testCreateDlfAuthProviderByFileNoDefineRefresh() throws IOException {
+        String roleSessionName = "tom";
+        String fileName = DlfAuthProvider.encodeBase64(roleSessionName);
+        Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        String token = tokenFile2Token.getRight();
+        AuthProvider authProvider = generateDlfAuthProvider(Optional.empty(), roleSessionName);
+        ScheduledExecutorService executor =
+                ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
+        AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
+        String authToken = session.getAuthProvider().token();
+        assertEquals(authToken, token);
+    }
+
+    @Test
+    public void testDlfAuthProviderAuthHeader() throws Exception {
+        Options options = new Options();
+        String akId = UUID.randomUUID().toString();
+        String akSecret = UUID.randomUUID().toString();
+        DlfToken token = new DlfToken(akId, akSecret, null, null);
+        options.set(TOKEN_ACCESS_KEY_ID.key(), token.getAccessKeyId());
+        options.set(TOKEN_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
+        AuthProvider authProvider =
+                AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
+        RestAuthParameter restAuthParameter =
+                new RestAuthParameter("host", "/path", "method", "data");
+        Map<String, String> header = authProvider.generateAuthorizationHeader(restAuthParameter);
+        String date = header.get(DlfAuthProvider.DLF_DATE_HEADER_KEY);
+        String dateMd5Hex = header.get(DlfAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY);
+        String authorization =
+                DlfAuthSignature.getAuthorization(
+                        new RestAuthParameter("host", "/path", "method", "data"),
+                        token,
+                        dateMd5Hex,
+                        date);
+        assertEquals(authorization, header.get(DlfAuthProvider.DLF_AUTHORIZATION_HEADER_KEY));
+        assertEquals(restAuthParameter.host(), header.get(DlfAuthProvider.DLF_HOST_HEADER_KEY));
+    }
+
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
         File tokenFile = folder.newFile(fileName);
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
@@ -163,12 +224,15 @@ public class AuthSessionTest {
         return Pair.of(tokenFile, tokenStr);
     }
 
-    private AuthProvider generateDlfAuthProvider(long tokenRefreshInMills, String roleSessionName) {
+    private AuthProvider generateDlfAuthProvider(
+            Optional<Long> tokenRefreshInMillsOpt, String roleSessionName) {
         Options options = new Options();
         options.set(TOKEN_PROVIDER_PATH.key(), folder.getRoot().getPath());
-        options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms");
+        tokenRefreshInMillsOpt.ifPresent(
+                tokenRefreshInMills ->
+                        options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms"));
         options.set(TOKEN_PROVIDER_ROLE_SESSION_NAME.key(), roleSessionName);
         options.set(TOKEN_PROVIDER_PATH, folder.getRoot().getPath());
-        return AuthProviderFactory.createAuthProvider("dlf", options);
+        return AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
     }
 }

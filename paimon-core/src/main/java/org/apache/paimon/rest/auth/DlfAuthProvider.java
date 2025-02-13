@@ -19,7 +19,6 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.utils.FileIOUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -39,9 +38,8 @@ import java.util.Optional;
 /** Auth provider for DLF. */
 public class DlfAuthProvider implements AuthProvider {
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
-    public static final String DLF_SECRET_HEADER_KEY = "x-dlf-secret";
     public static final String DLF_HOST_HEADER_KEY = "host";
-    public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
+    public static final String DLF_AUTHORIZATION_HEADER_KEY = "authorization";
     public static final String DLF_DATA_MD5_HEX_HEADER_KEY = "x-dlf-data-md5-hex";
     public static final double EXPIRED_FACTOR = 0.4;
 
@@ -81,9 +79,7 @@ public class DlfAuthProvider implements AuthProvider {
 
     public static DlfAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
         DlfToken token = new DlfToken(accessKeyId, accessKeySecret, null, null);
-        Long expiresInMills = -1L;
-        Long expiresAtMillis = -1L;
-        return new DlfAuthProvider(null, null, token, false, expiresAtMillis, expiresInMills);
+        return new DlfAuthProvider(null, null, token, false, null, null);
     }
 
     public DlfAuthProvider(
@@ -108,10 +104,6 @@ public class DlfAuthProvider implements AuthProvider {
             String dataMd5Hex = DlfAuthSignature.md5Hex(restAuthParameter.data());
             String authorization =
                     DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
-            String secret =
-                    StringUtils.isEmpty(token.getAccessKeySecret())
-                            ? "empty"
-                            : token.getAccessKeySecret();
             return ImmutableMap.of(
                     DLF_AUTHORIZATION_HEADER_KEY,
                     authorization,
@@ -120,11 +112,9 @@ public class DlfAuthProvider implements AuthProvider {
                     DLF_HOST_HEADER_KEY,
                     restAuthParameter.host(),
                     DLF_DATA_MD5_HEX_HEADER_KEY,
-                    dataMd5Hex,
-                    DLF_SECRET_HEADER_KEY, // todo: just for test
-                    secret);
+                    dataMd5Hex);
         } catch (Exception e) {
-            throw new RuntimeException("token--" + token, e);
+            throw new RuntimeException(e);
         }
     }
 
@@ -179,12 +169,12 @@ public class DlfAuthProvider implements AuthProvider {
         return Optional.ofNullable(this.tokenRefreshInMills);
     }
 
-    public static String getDate() {
-        // Get the current time in UTC
+    static String getDate() {
         ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
         return now.format(DATE_FORMATTER);
     }
 
+    // todo: if file not exist, throw exception?
     private static DlfToken readToken(String tokenDirPath, String tokenFileName) {
         try {
             String tokenStr =
