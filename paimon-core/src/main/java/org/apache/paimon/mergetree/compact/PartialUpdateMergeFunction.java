@@ -73,12 +73,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final Map<Integer, FieldAggregator> fieldAggregators;
     private final boolean removeRecordOnDelete;
     private final Set<Integer> sequenceGroupPartialDelete;
+    private final Boolean[] nullables;
 
     private InternalRow currentKey;
     private long latestSequenceNumber;
     private GenericRow row;
     private KeyValue reused;
     private boolean currentDeleteRow;
+    private boolean initedNonNullColumn;
+    private boolean meetInsert;
 
     protected PartialUpdateMergeFunction(
             InternalRow.FieldGetter[] getters,
@@ -87,7 +90,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             Map<Integer, FieldAggregator> fieldAggregators,
             boolean fieldSequenceEnabled,
             boolean removeRecordOnDelete,
-            Set<Integer> sequenceGroupPartialDelete) {
+            Set<Integer> sequenceGroupPartialDelete,
+            Boolean[] nullables) {
         this.getters = getters;
         this.ignoreDelete = ignoreDelete;
         this.fieldSeqComparators = fieldSeqComparators;
@@ -95,11 +99,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.fieldSequenceEnabled = fieldSequenceEnabled;
         this.removeRecordOnDelete = removeRecordOnDelete;
         this.sequenceGroupPartialDelete = sequenceGroupPartialDelete;
+        this.nullables = nullables;
     }
 
     @Override
     public void reset() {
         this.currentKey = null;
+        this.meetInsert = false;
+        this.initedNonNullColumn = false;
         this.row = new GenericRow(getters.length);
         fieldAggregators.values().forEach(FieldAggregator::reset);
     }
@@ -109,8 +116,13 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         // refresh key object to avoid reference overwritten
         currentKey = kv.key();
         currentDeleteRow = false;
-
         if (kv.valueKind().isRetract()) {
+
+            if (!initedNonNullColumn) {
+                initRow(row, kv.value());
+                initedNonNullColumn = true;
+            }
+
             // In 0.7- versions, the delete records might be written into data file even when
             // ignore-delete configured, so ignoreDelete still needs to be checked
             if (ignoreDelete) {
@@ -126,6 +138,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 if (kv.valueKind() == RowKind.DELETE) {
                     currentDeleteRow = true;
                     row = new GenericRow(getters.length);
+                    initRow(row, kv.value());
                 }
                 return;
             }
@@ -140,13 +153,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             "3. Configure 'sequence-group's to retract partial columns.");
 
             throw new IllegalArgumentException(msg);
-        }
-
-        latestSequenceNumber = kv.sequenceNumber();
-        if (fieldSeqComparators.isEmpty()) {
-            updateNonNullFields(kv);
         } else {
-            updateWithSequenceGroup(kv);
+            latestSequenceNumber = kv.sequenceNumber();
+            if (fieldSeqComparators.isEmpty()) {
+                updateNonNullFields(kv);
+            } else {
+                updateWithSequenceGroup(kv);
+            }
+            meetInsert = true;
+            initedNonNullColumn = true;
         }
     }
 
@@ -155,6 +170,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             Object field = getters[i].getFieldOrNull(kv.value());
             if (field != null) {
                 row.setField(i, field);
+            } else {
+                if (!nullables[i]) {
+                    throw new IllegalArgumentException("Field " + i + " can not be null");
+                }
             }
         }
     }
@@ -232,6 +251,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                         && sequenceGroupPartialDelete.contains(field)) {
                                     currentDeleteRow = true;
                                     row = new GenericRow(getters.length);
+                                    initRow(row, kv.value());
                                     return;
                                 } else {
                                     row.setField(field, getters[field].getFieldOrNull(kv.value()));
@@ -263,13 +283,26 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
     }
 
+    private void initRow(GenericRow row, InternalRow value) {
+        for (int i = 0; i < getters.length; i++) {
+            Object field = getters[i].getFieldOrNull(value);
+            if (!nullables[i]) {
+                if (field != null) {
+                    row.setField(i, getters[i].getFieldOrNull(value));
+                } else {
+                    throw new IllegalArgumentException("Field " + i + " can not be null");
+                }
+            }
+        }
+    }
+
     @Override
     public KeyValue getResult() {
         if (reused == null) {
             reused = new KeyValue();
         }
 
-        RowKind rowKind = currentDeleteRow ? RowKind.DELETE : RowKind.INSERT;
+        RowKind rowKind = currentDeleteRow || !meetInsert ? RowKind.DELETE : RowKind.INSERT;
         return reused.replace(currentKey, latestSequenceNumber, rowKind, row);
     }
 
@@ -437,14 +470,16 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     }
                 }
 
+                List<DataType> projectedTypes = Projection.of(projection).project(tableTypes);
                 return new PartialUpdateMergeFunction(
-                        createFieldGetters(Projection.of(projection).project(tableTypes)),
+                        createFieldGetters(projectedTypes),
                         ignoreDelete,
                         projectedSeqComparators,
                         projectedAggregators,
                         !fieldSeqComparators.isEmpty(),
                         removeRecordOnDelete,
-                        sequenceGroupPartialDelete);
+                        sequenceGroupPartialDelete,
+                        projectedTypes.stream().map(DataType::isNullable).toArray(Boolean[]::new));
             } else {
                 Map<Integer, FieldsComparator> fieldSeqComparators = new HashMap<>();
                 this.fieldSeqComparators.forEach(
@@ -459,7 +494,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         fieldAggregators,
                         !fieldSeqComparators.isEmpty(),
                         removeRecordOnDelete,
-                        sequenceGroupPartialDelete);
+                        sequenceGroupPartialDelete,
+                        rowType.getFieldTypes().stream()
+                                .map(DataType::isNullable)
+                                .toArray(Boolean[]::new));
             }
         }
 
