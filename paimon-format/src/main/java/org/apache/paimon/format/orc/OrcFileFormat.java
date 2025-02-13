@@ -56,6 +56,7 @@ import java.util.Properties;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.format.OrcOptions.ORC_TIMESTAMP_LTZ_LEGACY_TYPE;
 import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 
 /** Orc {@link FileFormat}. */
@@ -70,6 +71,7 @@ public class OrcFileFormat extends FileFormat {
     private final int readBatchSize;
     private final int writeBatchSize;
     private final boolean deletionVectorsEnabled;
+    private final boolean legacyTimestampLtzType;
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
@@ -81,6 +83,7 @@ public class OrcFileFormat extends FileFormat {
         this.readBatchSize = formatContext.readBatchSize();
         this.writeBatchSize = formatContext.writeBatchSize();
         this.deletionVectorsEnabled = formatContext.options().get(DELETION_VECTORS_ENABLED);
+        this.legacyTimestampLtzType = formatContext.options().get(ORC_TIMESTAMP_LTZ_LEGACY_TYPE);
     }
 
     @VisibleForTesting
@@ -96,7 +99,8 @@ public class OrcFileFormat extends FileFormat {
     @Override
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
-        return Optional.of(new OrcSimpleStatsExtractor(type, statsCollectors));
+        return Optional.of(
+                new OrcSimpleStatsExtractor(type, statsCollectors, legacyTimestampLtzType));
     }
 
     @Override
@@ -116,7 +120,8 @@ public class OrcFileFormat extends FileFormat {
                 (RowType) refineDataType(projectedRowType),
                 orcPredicates,
                 readBatchSize,
-                deletionVectorsEnabled);
+                deletionVectorsEnabled,
+                legacyTimestampLtzType);
     }
 
     @Override
@@ -141,7 +146,8 @@ public class OrcFileFormat extends FileFormat {
         DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
 
         TypeDescription typeDescription = OrcTypeUtil.convertToOrcSchema((RowType) refinedType);
-        Vectorizer<InternalRow> vectorizer = new RowDataVectorizer(typeDescription, orcTypes);
+        Vectorizer<InternalRow> vectorizer =
+                new RowDataVectorizer(typeDescription, orcTypes, legacyTimestampLtzType);
 
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
     }

@@ -69,6 +69,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
     protected final List<OrcFilters.Predicate> conjunctPredicates;
     protected final int batchSize;
     protected final boolean deletionVectorsEnabled;
+    protected final boolean legacyTimestampLtzType;
 
     /**
      * @param hadoopConfig the hadoop config for orc reader.
@@ -80,13 +81,15 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final RowType readType,
             final List<OrcFilters.Predicate> conjunctPredicates,
             final int batchSize,
-            final boolean deletionVectorsEnabled) {
+            final boolean deletionVectorsEnabled,
+            final boolean legacyTimestampLtzType) {
         this.hadoopConfig = checkNotNull(hadoopConfig);
         this.schema = convertToOrcSchema(readType);
         this.tableType = readType;
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
         this.batchSize = batchSize;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
+        this.legacyTimestampLtzType = legacyTimestampLtzType;
     }
 
     // ------------------------------------------------------------------------
@@ -131,7 +134,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
             DataType type = tableFieldTypes.get(i);
             vectors[i] =
                     createPaimonVector(
-                            orcBatch.cols[tableFieldNames.indexOf(name)], orcBatch, type);
+                            orcBatch.cols[tableFieldNames.indexOf(name)],
+                            orcBatch,
+                            type,
+                            legacyTimestampLtzType);
         }
         return new OrcReaderBatch(filePath, orcBatch, new VectorizedColumnBatch(vectors), recycler);
     }
