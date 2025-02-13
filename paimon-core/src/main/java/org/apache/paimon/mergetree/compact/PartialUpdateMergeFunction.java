@@ -80,7 +80,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private GenericRow row;
     private KeyValue reused;
     private boolean currentDeleteRow;
-    private boolean initedNonNullColumn;
+    private boolean notNullColumnFilled;
     private boolean meetInsert;
 
     protected PartialUpdateMergeFunction(
@@ -106,7 +106,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public void reset() {
         this.currentKey = null;
         this.meetInsert = false;
-        this.initedNonNullColumn = false;
+        this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
         fieldAggregators.values().forEach(FieldAggregator::reset);
     }
@@ -118,9 +118,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         currentDeleteRow = false;
         if (kv.valueKind().isRetract()) {
 
-            if (!initedNonNullColumn) {
+            if (!notNullColumnFilled) {
                 initRow(row, kv.value());
-                initedNonNullColumn = true;
+                notNullColumnFilled = true;
             }
 
             // In 0.7- versions, the delete records might be written into data file even when
@@ -161,7 +161,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 updateWithSequenceGroup(kv);
             }
             meetInsert = true;
-            initedNonNullColumn = true;
+            notNullColumnFilled = true;
         }
     }
 
