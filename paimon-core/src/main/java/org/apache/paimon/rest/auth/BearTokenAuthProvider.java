@@ -18,8 +18,7 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-
+import java.util.HashMap;
 import java.util.Map;
 
 /** Auth provider for bear token. */
@@ -41,8 +40,12 @@ public class BearTokenAuthProvider implements AuthProvider {
     }
 
     @Override
-    public Map<String, String> generateAuthorizationHeader(RestAuthParameter restAuthParameter) {
-        return ImmutableMap.of(AUTHORIZATION_HEADER_KEY, BEARER_PREFIX + token);
+    public Map<String, String> header(
+            Map<String, String> baseHeader, RestAuthParameter restAuthParameter) {
+        Map<String, String> headersWithAuth = new HashMap<>();
+        headersWithAuth.putAll(baseHeader);
+        headersWithAuth.put(AUTHORIZATION_HEADER_KEY, BEARER_PREFIX + token);
+        return headersWithAuth;
     }
 
     @Override

@@ -24,7 +24,7 @@ import java.util.Optional;
 /** Authentication provider. */
 public interface AuthProvider {
 
-    Map<String, String> generateAuthorizationHeader(RestAuthParameter restAuthParameter);
+    Map<String, String> header(Map<String, String> baseHeader, RestAuthParameter restAuthParameter);
 
     String token();
 

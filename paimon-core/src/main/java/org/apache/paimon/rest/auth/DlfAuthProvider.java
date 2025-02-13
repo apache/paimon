@@ -20,7 +20,6 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.utils.FileIOUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -32,6 +31,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Base64.Encoder;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -98,21 +98,20 @@ public class DlfAuthProvider implements AuthProvider {
     }
 
     @Override
-    public Map<String, String> generateAuthorizationHeader(RestAuthParameter restAuthParameter) {
+    public Map<String, String> header(
+            Map<String, String> baseHeader, RestAuthParameter restAuthParameter) {
         try {
             String date = getDate();
             String dataMd5Hex = DlfAuthSignature.md5Hex(restAuthParameter.data());
             String authorization =
                     DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
-            return ImmutableMap.of(
-                    DLF_AUTHORIZATION_HEADER_KEY,
-                    authorization,
-                    DLF_DATE_HEADER_KEY,
-                    date,
-                    DLF_HOST_HEADER_KEY,
-                    restAuthParameter.host(),
-                    DLF_DATA_MD5_HEX_HEADER_KEY,
-                    dataMd5Hex);
+            Map<String, String> headersWithAuth = new HashMap<>();
+            headersWithAuth.putAll(baseHeader);
+            headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
+            headersWithAuth.put(DLF_DATE_HEADER_KEY, date);
+            headersWithAuth.put(DLF_HOST_HEADER_KEY, restAuthParameter.host());
+            headersWithAuth.put(DLF_DATA_MD5_HEX_HEADER_KEY, dataMd5Hex);
+            return headersWithAuth;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

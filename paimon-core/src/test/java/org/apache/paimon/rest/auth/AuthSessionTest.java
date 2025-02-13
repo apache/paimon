@@ -71,11 +71,9 @@ public class AuthSessionTest {
         AuthProvider authProvider =
                 AuthProviderFactory.createAuthProvider(AuthProviderEnum.BEAR.identifier(), options);
         AuthSession session = new AuthSession(authProvider);
-        Map<String, String> authorizationHeader =
-                session.getAuthProvider().generateAuthorizationHeader(null);
+        Map<String, String> headers = session.getAuthProvider().header(initialHeaders, null);
         assertEquals(
-                authorizationHeader.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY),
-                "Bearer " + token);
+                headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer " + token);
     }
 
     @Test
@@ -199,7 +197,7 @@ public class AuthSessionTest {
                 AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
         RestAuthParameter restAuthParameter =
                 new RestAuthParameter("host", "/path", "method", "data");
-        Map<String, String> header = authProvider.generateAuthorizationHeader(restAuthParameter);
+        Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
         String date = header.get(DlfAuthProvider.DLF_DATE_HEADER_KEY);
         String dateMd5Hex = header.get(DlfAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY);
         String authorization =

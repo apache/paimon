@@ -30,30 +30,24 @@ public interface RESTClient extends Closeable {
     <T extends RESTResponse> T get(
             String path,
             Class<T> responseType,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> headersFunction);
 
     <T extends RESTResponse> T post(
             String path,
             RESTRequest body,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> headersFunction);
 
     <T extends RESTResponse> T post(
             String path,
             RESTRequest body,
             Class<T> responseType,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> headersFunction);
 
     <T extends RESTResponse> T delete(
-            String path,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
+            String path, Function<RestAuthParameter, Map<String, String>> headersFunction);
 
     <T extends RESTResponse> T delete(
             String path,
             RESTRequest body,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> headersFunction);
 }

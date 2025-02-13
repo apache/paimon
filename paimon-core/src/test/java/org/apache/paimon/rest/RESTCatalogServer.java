@@ -590,10 +590,12 @@ public class RESTCatalogServer {
 
     private static String getConfigBody(String warehouseStr) {
         return String.format(
-                "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
+                "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\", \"%s\": \"%s\"}}",
                 RESTCatalogInternalOptions.PREFIX.key(),
                 PREFIX,
                 CatalogOptions.WAREHOUSE.key(),
-                warehouseStr);
+                warehouseStr,
+                "header.test-header",
+                "test-value");
     }
 }

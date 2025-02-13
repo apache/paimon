@@ -38,10 +38,7 @@ import okhttp3.Response;
 
 import java.io.IOException;
 import java.net.URI;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -60,8 +57,6 @@ public class HttpClient implements RESTClient {
 
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
-    private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final int CONNECTION_KEEP_ALIVE_DURATION_MS = 300_000;
 
     private final OkHttpClient okHttpClient;
@@ -92,10 +87,8 @@ public class HttpClient implements RESTClient {
     public <T extends RESTResponse> T get(
             String path,
             Class<T> responseType,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction) {
-        Map<String, String> authHeaders =
-                getAuthHeaders(path, "GET", headers, "", authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> headersFunction) {
+        Map<String, String> authHeaders = getHeaders(path, "GET", "", headersFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
@@ -109,9 +102,8 @@ public class HttpClient implements RESTClient {
     public <T extends RESTResponse> T post(
             String path,
             RESTRequest body,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction) {
-        return post(path, body, null, headers, authenticationFunction);
+            Function<RestAuthParameter, Map<String, String>> headersFunction) {
+        return post(path, body, null, headersFunction);
     }
 
     @Override
@@ -119,17 +111,12 @@ public class HttpClient implements RESTClient {
             String path,
             RESTRequest body,
             Class<T> responseType,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction) {
+            Function<RestAuthParameter, Map<String, String>> headersFunction) {
         try {
 
             Map<String, String> authHeaders =
-                    getAuthHeaders(
-                            path,
-                            "POST",
-                            headers,
-                            OBJECT_MAPPER.writeValueAsString(body),
-                            authenticationFunction);
+                    getHeaders(
+                            path, "POST", OBJECT_MAPPER.writeValueAsString(body), headersFunction);
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
@@ -145,11 +132,8 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T delete(
-            String path,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction) {
-        Map<String, String> authHeaders =
-                getAuthHeaders(path, "DELETE", headers, "", authenticationFunction);
+            String path, Function<RestAuthParameter, Map<String, String>> headersFunction) {
+        Map<String, String> authHeaders = getHeaders(path, "DELETE", "", headersFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
@@ -163,16 +147,14 @@ public class HttpClient implements RESTClient {
     public <T extends RESTResponse> T delete(
             String path,
             RESTRequest body,
-            Map<String, String> headers,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction) {
+            Function<RestAuthParameter, Map<String, String>> headersFunction) {
         try {
             Map<String, String> authHeaders =
-                    getAuthHeaders(
+                    getHeaders(
                             path,
                             "DELETE",
-                            headers,
                             OBJECT_MAPPER.writeValueAsString(body),
-                            authenticationFunction);
+                            headersFunction);
             RequestBody requestBody = buildRequestBody(body);
             Request request =
                     new Request.Builder()
@@ -237,23 +219,13 @@ public class HttpClient implements RESTClient {
         return URI.create(uri).getHost();
     }
 
-    private Map<String, String> getAuthHeaders(
+    private Map<String, String> getHeaders(
             String path,
             String method,
-            Map<String, String> headers,
             String data,
-            Function<RestAuthParameter, Map<String, String>> authenticationFunction) {
+            Function<RestAuthParameter, Map<String, String>> headerFunction) {
         RestAuthParameter restAuthParameter = new RestAuthParameter(getHost(), path, method, data);
-        Map<String, String> authHeaders = authenticationFunction.apply(restAuthParameter);
-        Map<String, String> headersWithAuth = new HashMap<>();
-        headersWithAuth.putAll(headers);
-        headersWithAuth.putAll(authHeaders);
-        return headersWithAuth;
-    }
-
-    private static String getDate() {
-        LocalDate currentDate = LocalDate.now();
-        return currentDate.format(DATE_FORMATTER);
+        return headerFunction.apply(restAuthParameter);
     }
 
     private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {

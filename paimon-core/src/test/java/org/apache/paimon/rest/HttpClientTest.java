@@ -52,7 +52,7 @@ public class HttpClientTest {
     private String mockResponseDataStr;
     private String errorResponseStr;
     private Map<String, String> headers;
-    private Function<RestAuthParameter, Map<String, String>> authenticationFunction;
+    private Function<RestAuthParameter, Map<String, String>> headersFunction;
 
     @Before
     public void setUp() throws Exception {
@@ -70,8 +70,7 @@ public class HttpClientTest {
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);
         headers = new HashMap<>();
-        authenticationFunction = r -> authProvider.generateAuthorizationHeader(r);
-        headers.putAll(authProvider.generateAuthorizationHeader(null));
+        headersFunction = r -> authProvider.header(headers, r);
     }
 
     @After
@@ -82,8 +81,7 @@ public class HttpClientTest {
     @Test
     public void testGetSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
-        MockRESTData response =
-                httpClient.get(MOCK_PATH, MockRESTData.class, headers, authenticationFunction);
+        MockRESTData response = httpClient.get(MOCK_PATH, MockRESTData.class, headersFunction);
         assertEquals(mockResponseData.data(), response.data());
     }
 
@@ -92,21 +90,14 @@ public class HttpClientTest {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
                 BadRequestException.class,
-                () ->
-                        httpClient.get(
-                                MOCK_PATH, MockRESTData.class, headers, authenticationFunction));
+                () -> httpClient.get(MOCK_PATH, MockRESTData.class, headersFunction));
     }
 
     @Test
     public void testPostSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
         MockRESTData response =
-                httpClient.post(
-                        MOCK_PATH,
-                        mockResponseData,
-                        MockRESTData.class,
-                        headers,
-                        authenticationFunction);
+                httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, headersFunction);
         assertEquals(mockResponseData.data(), response.data());
     }
 
@@ -117,25 +108,20 @@ public class HttpClientTest {
                 BadRequestException.class,
                 () ->
                         httpClient.post(
-                                MOCK_PATH,
-                                mockResponseData,
-                                ErrorResponse.class,
-                                headers,
-                                authenticationFunction));
+                                MOCK_PATH, mockResponseData, ErrorResponse.class, headersFunction));
     }
 
     @Test
     public void testDeleteSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
-        assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, headers, authenticationFunction));
+        assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, headersFunction));
     }
 
     @Test
     public void testDeleteFail() {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
-                BadRequestException.class,
-                () -> httpClient.delete(MOCK_PATH, headers, authenticationFunction));
+                BadRequestException.class, () -> httpClient.delete(MOCK_PATH, headersFunction));
     }
 
     @Test
@@ -146,9 +132,6 @@ public class HttpClientTest {
                                 server.getBaseUrl(), Duration.ofSeconds(30), 1, 10, 2));
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 200);
-        assertDoesNotThrow(
-                () ->
-                        httpClient.get(
-                                MOCK_PATH, MockRESTData.class, headers, authenticationFunction));
+        assertDoesNotThrow(() -> httpClient.get(MOCK_PATH, MockRESTData.class, headersFunction));
     }
 }

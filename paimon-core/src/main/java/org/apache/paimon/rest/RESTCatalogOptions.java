@@ -96,7 +96,7 @@ public class RESTCatalogOptions {
             ConfigOptions.key("pipeline.dlf.role-session-name")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("REST Catalog auth token provider role session name.");
+                    .withDescription("REST Catalog dlf auth token provider role session name.");
 
     public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
             ConfigOptions.key("data-token.enabled")
