@@ -29,8 +29,6 @@ import java.io.UncheckedIOException;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Base64;
-import java.util.Base64.Encoder;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -46,10 +44,8 @@ public class DlfAuthProvider implements AuthProvider {
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
-    private static final Encoder BASE64_ENCODER = Base64.getUrlEncoder();
 
-    private final String tokenDirPath;
-    private final String tokenFileName;
+    private final String tokenFilePath;
 
     protected DlfToken token;
     private final boolean keepRefreshed;
@@ -57,40 +53,25 @@ public class DlfAuthProvider implements AuthProvider {
     private final Long tokenRefreshInMills;
 
     public static DlfAuthProvider buildRefreshToken(
-            String tokenDirPath, String roleSessionName, Long tokenRefreshInMills) {
-        String tokenFileName = encodeBase64(roleSessionName);
-        DlfToken token = readToken(tokenDirPath, tokenFileName);
+            String tokenFilePath, Long tokenRefreshInMills) {
+        DlfToken token = readToken(tokenFilePath);
         Long expiresAtMillis = token.getExpiresInMills();
         return new DlfAuthProvider(
-                tokenDirPath, tokenFileName, token, true, expiresAtMillis, tokenRefreshInMills);
-    }
-
-    public static String encodeBase64(String s) {
-        if (s == null) {
-            return null;
-        }
-        try {
-            String encodeResult = BASE64_ENCODER.encodeToString(s.trim().getBytes());
-            return encodeResult.replace("\n", "").replace("=", "");
-        } catch (Exception e) {
-            throw new RuntimeException("Error encoding base64 string ", e);
-        }
+                tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills);
     }
 
     public static DlfAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
         DlfToken token = new DlfToken(accessKeyId, accessKeySecret, null, null);
-        return new DlfAuthProvider(null, null, token, false, null, null);
+        return new DlfAuthProvider(null, token, false, null, null);
     }
 
     public DlfAuthProvider(
-            String tokenDirPath,
-            String tokenFileName,
+            String tokenFilePath,
             DlfToken token,
             boolean keepRefreshed,
             Long expiresAtMillis,
             Long tokenRefreshInMills) {
-        this.tokenDirPath = tokenDirPath;
-        this.tokenFileName = tokenFileName;
+        this.tokenFilePath = tokenFilePath;
         this.token = token;
         this.keepRefreshed = keepRefreshed;
         this.expiresAtMillis = expiresAtMillis;
@@ -129,7 +110,7 @@ public class DlfAuthProvider implements AuthProvider {
     @Override
     public boolean refresh() {
         long start = System.currentTimeMillis();
-        DlfToken newToken = readToken(tokenDirPath, tokenFileName);
+        DlfToken newToken = readToken(tokenFilePath);
         if (newToken == null) {
             return false;
         }
@@ -174,11 +155,9 @@ public class DlfAuthProvider implements AuthProvider {
     }
 
     // todo: if file not exist, throw exception?
-    private static DlfToken readToken(String tokenDirPath, String tokenFileName) {
+    private static DlfToken readToken(String tokenFilePath) {
         try {
-            String tokenStr =
-                    FileIOUtils.readFileUtf8(
-                            new File(tokenDirPath + File.separator + tokenFileName));
+            String tokenStr = FileIOUtils.readFileUtf8(new File(tokenFilePath));
             return OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DlfToken.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);

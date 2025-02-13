@@ -21,8 +21,7 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_PATH;
-import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_ROLE_SESSION_NAME;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
 
 /** Factory for {@link DlfAuthProvider}. */
@@ -35,15 +34,13 @@ public class DlfAuthProviderFactory implements AuthProviderFactory {
 
     @Override
     public AuthProvider create(Options options) {
-        if (options.getOptional(RESTCatalogOptions.TOKEN_PROVIDER_PATH).isPresent()) {
-            String tokenFilePath = options.get(TOKEN_PROVIDER_PATH);
+        if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
+            String tokenFilePath = options.get(DLF_TOKEN_PATH);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
-            String roleSessionName = options.get(TOKEN_PROVIDER_ROLE_SESSION_NAME);
-            return DlfAuthProvider.buildRefreshToken(
-                    tokenFilePath, roleSessionName, tokenRefreshInMills);
+            return DlfAuthProvider.buildRefreshToken(tokenFilePath, tokenRefreshInMills);
         }
         return DlfAuthProvider.buildAKToken(
-                options.get(RESTCatalogOptions.TOKEN_ACCESS_KEY_ID),
-                options.get(RESTCatalogOptions.TOKEN_ACCESS_KEY_SECRET));
+                options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID),
+                options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET));
     }
 }
