@@ -233,6 +233,100 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         it.close();
     }
 
+    @Test
+    public void testRescaleBucket() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+
+        int numPartitions = 3;
+        int numKeys = 100;
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < numPartitions; i++) {
+            for (int j = 0; j < numKeys; j++) {
+                values.add(String.format("(%d, %d, %d)", i, j, i * numKeys + j));
+            }
+        }
+        tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        tEnv.executeSql(
+                "CALL sys.compact_postpone_bucket(`table` => 'default.T', `default_bucket_num` => 2)");
+
+        List<String> expectedBuckets = new ArrayList<>();
+        for (int i = 0; i < numPartitions; i++) {
+            expectedBuckets.add(String.format("+I[{%d}, 2]", i));
+        }
+        String bucketSql =
+                "SELECT `partition`, COUNT(DISTINCT bucket) FROM `T$files` GROUP BY `partition`";
+        assertThat(collect(tEnv.executeSql(bucketSql))).hasSameElementsAs(expectedBuckets);
+
+        List<String> expectedData = new ArrayList<>();
+        for (int i = 0; i < numPartitions; i++) {
+            expectedData.add(
+                    String.format(
+                            "+I[%d, %d]",
+                            i, (i * numKeys + i * numKeys + numKeys - 1) * numKeys / 2));
+        }
+        String query = "SELECT pt, SUM(v) FROM T GROUP BY pt";
+        assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expectedData);
+
+        // before rescaling, write some files in bucket = -2 directory,
+        // these files should not be touched by rescaling
+        values.clear();
+        int changedPartition = 1;
+        for (int j = 0; j < numKeys; j++) {
+            values.add(
+                    String.format(
+                            "(%d, %d, %d)",
+                            changedPartition, j, -(changedPartition * numKeys + j)));
+        }
+        tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+
+        tEnv.executeSql(
+                "CALL sys.rescale_postpone_bucket(`table` => 'default.T', `bucket_num` => 4, `partition` => 'pt="
+                        + changedPartition
+                        + "')");
+        expectedBuckets.clear();
+        for (int i = 0; i < numPartitions; i++) {
+            expectedBuckets.add(String.format("+I[{%d}, %d]", i, i == changedPartition ? 4 : 2));
+        }
+        assertThat(collect(tEnv.executeSql(bucketSql))).hasSameElementsAs(expectedBuckets);
+        assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expectedData);
+
+        // rescaling bucket should not touch the files in bucket = -2 directory
+        String compactSql =
+                "CALL sys.compact_postpone_bucket(`table` => 'default.T', `default_bucket_num` => 2)";
+        assertThat(collect(tEnv.executeSql(compactSql)))
+                .containsExactly(String.format("+I[%d]", changedPartition));
+        assertThat(collect(tEnv.executeSql(bucketSql))).hasSameElementsAs(expectedBuckets);
+
+        expectedData.clear();
+        for (int i = 0; i < numPartitions; i++) {
+            int val = (i * numKeys + i * numKeys + numKeys - 1) * numKeys / 2;
+            if (i == changedPartition) {
+                val *= -1;
+            }
+            expectedData.add(String.format("+I[%d, %d]", i, val));
+        }
+        assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expectedData);
+    }
+
     private List<String> collect(TableResult result) throws Exception {
         List<String> ret = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {
