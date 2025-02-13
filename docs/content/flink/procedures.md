@@ -658,7 +658,7 @@ All available procedures are listed below.
    <tr>
       <td>refresh_object_table</td>
       <td>
-         CALL sys.refresh_object_table('identifier')
+         CALL [catalog.]sys.refresh_object_table('identifier')
       </td>
       <td>
          To refresh_object_table a object table. Arguments:
@@ -671,7 +671,7 @@ All available procedures are listed below.
    <tr>
       <td>compact_manifest</td>
       <td>
-         CALL sys.compact_manifest(`table` => 'identifier')
+         CALL [catalog.]sys.compact_manifest(`table` => 'identifier')
       </td>
       <td>
          To compact_manifest the manifests. Arguments:
@@ -679,6 +679,35 @@ All available procedures are listed below.
       </td>
       <td>
          CALL sys.compact_manifest(`table` => 'default.T')
+      </td>
+   </tr>
+   <tr>
+      <td>migrate_iceberg_table</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.migrate_iceberg_table(<br/>
+            `source_table` => 'identifier',<br/>
+            `iceberg_options` => 'iceberg options',<br/>
+            `options` =>'table options',<br/>
+            `parallelism` => 'the parallelism of migrate process')<br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.migrate_iceberg_table('source_table') <br/><br/>
+         CALL [catalog.]sys.migrate_iceberg_table('source_table', 'iceberg_options') <br/><br/>
+         CALL [catalog.]sys.migrate_iceberg_table('source_table', 'iceberg_options', 'options') <br/><br/>
+         CALL [catalog.]sys.migrate_iceberg_table('source_table', 'iceberg_options', 'options', 'parallelism') <br/><br/>
+      </td>
+      <td>
+         To migrate_iceberg_table iceberg table to paimon table. Arguments:
+            <li>source_table(required): name of the origin table to migrate. Cannot be empty.</li>
+            <li>iceberg_options(optional): the table options of the iceberg table to migrate.</li>
+            <li>options(optional): the core options.See its <a href="https://paimon.apache.org/docs/master/maintenance/configurations/#coreoptions">document</a> for a complete list of configurations.</li>
+            <li>parallelism(optional): number of parallelisms to migrate iceberg tables.</li>
+      </td>
+      <td>
+         -- for hive-catalog<br/><br/>
+         CALL sys.migrate_iceberg_table(`source_table` => 'default.T', `iceberg_options` => 'metadata.iceberg.storage=hive-catalog,metadata.iceberg.uri=thrift://localhost:9083', `options` => 'file.format=parquet', `parallelism` => 5)<br/><br/>
+         -- for hadoop-catalog<br/><br/>
+         CALL sys.migrate_iceberg_table(`source_table` => 'default.T', `iceberg_options` => 'metadata.iceberg.storage=hadoop-catalog,iceberg_warehouse=hdfs:///path/to/iceberg/warehouse', `options` => 'file.format=parquet', `parallelism` => 5)<br/><br/>
       </td>
    </tr>
    </tbody>
