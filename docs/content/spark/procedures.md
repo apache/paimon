@@ -207,10 +207,10 @@ This section introduce all available spark procedures about paimon.
     <tr>
       <td>migrate_database</td>
       <td>
-         Migrate hive table to a paimon table. Arguments:
-            <li>source_type: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
+         Migrate hive database to a paimon database. Arguments:
+            <li>source_type: the origin database's type to be migrated, such as hive. Cannot be empty.</li>
             <li>database: name of the origin database to be migrated. Cannot be empty.</li>
-            <li>options: the table options of the paimon table to migrate.</li>
+            <li>options: the database options of the paimon database to migrate.</li>
             <li>options_map: Options map for adding key-value options which is a map.</li>
             <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
       </td>
