@@ -19,11 +19,7 @@
 package org.apache.paimon.client;
 
 import java.io.Closeable;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 
 /** Client pool for using multiple clients to execute actions. */
 public interface ClientPool<C, E extends Exception> {
@@ -43,31 +39,27 @@ public interface ClientPool<C, E extends Exception> {
 
     /** Default implementation for {@link ClientPool}. */
     abstract class ClientPoolImpl<C, E extends Exception> implements Closeable, ClientPool<C, E> {
-
-        private volatile LinkedBlockingDeque<C> clients;
-
-        protected ClientPoolImpl(int poolSize, Supplier<C> supplier) {
-            this.clients = new LinkedBlockingDeque<>();
-            for (int i = 0; i < poolSize; i++) {
-                this.clients.add(supplier.get());
-            }
+        protected ClientPoolImpl(int poolSize) {
+            initPool(poolSize);
         }
+
+        protected abstract void initPool(int poolSize);
+
+        protected abstract C getClient(long timeout, TimeUnit unit) throws E, InterruptedException;
+
+        protected abstract void recycleClient(C client) throws E, InterruptedException;
 
         @Override
         public <R> R run(Action<R, C, E> action) throws E, InterruptedException {
             while (true) {
-                LinkedBlockingDeque<C> clients = this.clients;
-                if (clients == null) {
-                    throw new IllegalStateException("Cannot get a client from a closed pool");
-                }
-                C client = clients.pollFirst(10, TimeUnit.SECONDS);
+                C client = getClient(10, TimeUnit.SECONDS);
                 if (client == null) {
                     continue;
                 }
                 try {
                     return action.run(client);
                 } finally {
-                    clients.addFirst(client);
+                    recycleClient(client);
                 }
             }
         }
@@ -82,17 +74,11 @@ public interface ClientPool<C, E extends Exception> {
                             });
         }
 
-        protected abstract void close(C client);
+        protected abstract void closePool();
 
         @Override
         public void close() {
-            LinkedBlockingDeque<C> clients = this.clients;
-            this.clients = null;
-            if (clients != null) {
-                List<C> drain = new ArrayList<>();
-                clients.drainTo(drain);
-                drain.forEach(this::close);
-            }
+            closePool();
         }
     }
 }

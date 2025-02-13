@@ -25,8 +25,12 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.thrift.TException;
+import org.checkerframework.checker.units.qual.C;
 
-import java.util.function.Supplier;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Pool of Hive Metastore clients.
@@ -35,19 +39,50 @@ import java.util.function.Supplier;
  */
 public class HiveClientPool extends ClientPool.ClientPoolImpl<IMetaStoreClient, TException> {
 
-    public HiveClientPool(int poolSize, Configuration conf, String clientClassName) {
-        super(poolSize, clientSupplier(conf, clientClassName));
-    }
+    private Configuration conf;
 
-    private static Supplier<IMetaStoreClient> clientSupplier(
-            Configuration conf, String clientClassName) {
-        HiveConf hiveConf = new HiveConf(conf, HiveClientPool.class);
-        hiveConf.addResource(conf);
-        return () -> new RetryingMetaStoreClientFactory().createClient(hiveConf, clientClassName);
+    private String clientClassName;
+
+    private volatile LinkedBlockingDeque<IMetaStoreClient> clients;
+
+    public HiveClientPool(int poolSize, Configuration conf, String clientClassName) {
+        super(poolSize);
+        this.conf = conf;
+        this.clientClassName = clientClassName;
     }
 
     @Override
-    protected void close(IMetaStoreClient client) {
-        client.close();
+    protected void initPool(int poolSize) {
+        this.clients = new LinkedBlockingDeque<>();
+        for (int i = 0; i < poolSize; i++) {
+            HiveConf hiveConf = new HiveConf(conf, HiveClientPool.class);
+            hiveConf.addResource(conf);
+            this.clients.add(
+                    new RetryingMetaStoreClientFactory().createClient(hiveConf, clientClassName));
+        }
+    }
+
+    @Override
+    protected IMetaStoreClient getClient(long timeout, TimeUnit unit) throws InterruptedException {
+        if (this.clients == null) {
+            throw new IllegalStateException("Cannot get a client from a closed pool");
+        }
+        return this.clients.pollFirst(10, TimeUnit.SECONDS);
+    }
+
+    @Override
+    protected void recycleClient(IMetaStoreClient client) {
+        this.clients.addFirst(client);
+    }
+
+    @Override
+    protected void closePool() {
+        LinkedBlockingDeque<IMetaStoreClient> clients = this.clients;
+        this.clients = null;
+        if (clients != null) {
+            List<IMetaStoreClient> drain = new ArrayList<>();
+            clients.drainTo(drain);
+            drain.forEach(IMetaStoreClient::close);
+        }
     }
 }
