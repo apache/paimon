@@ -34,7 +34,7 @@ enable `'lock.enabled'` option for the catalog.
 {{< /hint >}}
 
 By default, Paimon supports concurrent writing to different partitions. A recommended mode is that streaming
-job writes records to Paimon's latest partition; Simultaneously batch job (overwrite) writes records to the
+job writes records to Paimon's latest partition, Simultaneously batch job (overwrite) writes records to the
 historical partition.
 
 {{< img src="/img/multiple-writers.png">}}
