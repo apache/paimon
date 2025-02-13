@@ -26,8 +26,6 @@ public interface AuthProvider {
 
     Map<String, String> header(Map<String, String> baseHeader, RestAuthParameter restAuthParameter);
 
-    String token();
-
     boolean refresh();
 
     default boolean supportRefresh() {

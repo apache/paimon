@@ -20,7 +20,6 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.utils.FileIOUtils;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.File;
@@ -33,7 +32,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-/** Auth provider for DLF. */
+/** Auth provider for <b>Ali CLoud</b> DLF. */
 public class DlfAuthProvider implements AuthProvider {
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
     public static final String DLF_HOST_HEADER_KEY = "host";
@@ -94,15 +93,6 @@ public class DlfAuthProvider implements AuthProvider {
             headersWithAuth.put(DLF_DATA_MD5_HEX_HEADER_KEY, dataMd5Hex);
             return headersWithAuth;
         } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public String token() {
-        try {
-            return OBJECT_MAPPER_INSTANCE.writeValueAsString(this.token);
-        } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
     }

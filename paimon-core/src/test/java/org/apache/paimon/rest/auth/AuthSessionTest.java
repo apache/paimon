@@ -87,13 +87,14 @@ public class AuthSessionTest {
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
-        String authToken = session.getAuthProvider().token();
+        DlfAuthProvider dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(authToken, token);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
         Thread.sleep(tokenRefreshInMills * 2);
-        authToken = session.getAuthProvider().token();
+        authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(authToken, token);
     }
 
@@ -107,7 +108,8 @@ public class AuthSessionTest {
         AuthProvider authProvider =
                 generateDlfAuthProvider(Optional.of(tokenRefreshInMills), fileName);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
-        String authToken = session.getAuthProvider().token();
+        DlfAuthProvider dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(token, authToken);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
@@ -115,7 +117,8 @@ public class AuthSessionTest {
         tokenFile = tokenFile2Token.getLeft();
         FileUtils.writeStringToFile(tokenFile, token);
         Thread.sleep((long) (tokenRefreshInMills * (1 - DlfAuthProvider.EXPIRED_FACTOR)) + 10L);
-        authToken = session.getAuthProvider().token();
+        dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(token, authToken);
     }
 
@@ -164,7 +167,8 @@ public class AuthSessionTest {
         AuthProvider authProvider =
                 AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
-        String authToken = session.getAuthProvider().token();
+        DlfAuthProvider dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
     }
 
@@ -177,7 +181,8 @@ public class AuthSessionTest {
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
-        String authToken = session.getAuthProvider().token();
+        DlfAuthProvider dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(authToken, token);
     }
 

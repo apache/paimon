@@ -111,7 +111,6 @@ public class RESTCatalog implements Catalog {
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
     private final FileIO fileIO;
-    private Map<String, String> baseHeaders = Collections.emptyMap();
     private Function<RestAuthParameter, Map<String, String>> headersFunction;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
@@ -123,8 +122,8 @@ public class RESTCatalog implements Catalog {
     public RESTCatalog(CatalogContext context, boolean configRequired) {
         this.client = new HttpClient(context.options());
         this.catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
-        headersFunction = p -> catalogAuth.getAuthProvider().header(baseHeaders, p);
         Options options = context.options();
+        Map<String, String> baseHeaders = Collections.emptyMap();
         if (configRequired) {
             if (context.options().contains(WAREHOUSE)) {
                 throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
@@ -136,10 +135,14 @@ public class RESTCatalog implements Catalog {
                             client.get(
                                             ResourcePaths.V1_CONFIG,
                                             ConfigResponse.class,
-                                            headersFunction)
+                                            p ->
+                                                    catalogAuth
+                                                            .getAuthProvider()
+                                                            .header(Collections.emptyMap(), p))
                                     .merge(context.options().toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
+        this.headersFunction = p -> catalogAuth.getAuthProvider().header(Collections.emptyMap(), p);
         context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
         this.context = context;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);

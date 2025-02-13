@@ -35,11 +35,6 @@ public class BearTokenAuthProvider implements AuthProvider {
     }
 
     @Override
-    public String token() {
-        return token;
-    }
-
-    @Override
     public Map<String, String> header(
             Map<String, String> baseHeader, RestAuthParameter restAuthParameter) {
         Map<String, String> headersWithAuth = new HashMap<>();

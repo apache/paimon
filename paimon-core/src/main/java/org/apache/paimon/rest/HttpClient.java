@@ -38,6 +38,7 @@ import okhttp3.Response;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -113,11 +114,9 @@ public class HttpClient implements RESTClient {
             Class<T> responseType,
             Function<RestAuthParameter, Map<String, String>> headersFunction) {
         try {
-
-            Map<String, String> authHeaders =
-                    getHeaders(
-                            path, "POST", OBJECT_MAPPER.writeValueAsString(body), headersFunction);
-            RequestBody requestBody = buildRequestBody(body);
+            String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
+            Map<String, String> authHeaders = getHeaders(path, "POST", bodyStr, headersFunction);
+            RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
                             .url(getRequestUrl(path))
@@ -149,13 +148,9 @@ public class HttpClient implements RESTClient {
             RESTRequest body,
             Function<RestAuthParameter, Map<String, String>> headersFunction) {
         try {
-            Map<String, String> authHeaders =
-                    getHeaders(
-                            path,
-                            "DELETE",
-                            OBJECT_MAPPER.writeValueAsString(body),
-                            headersFunction);
-            RequestBody requestBody = buildRequestBody(body);
+            String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
+            Map<String, String> authHeaders = getHeaders(path, "DELETE", bodyStr, headersFunction);
+            RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
                             .url(getRequestUrl(path))
@@ -207,8 +202,8 @@ public class HttpClient implements RESTClient {
         }
     }
 
-    private RequestBody buildRequestBody(RESTRequest body) throws JsonProcessingException {
-        return RequestBody.create(OBJECT_MAPPER.writeValueAsBytes(body), MEDIA_TYPE);
+    private RequestBody buildRequestBody(String body) throws JsonProcessingException {
+        return RequestBody.create(body.getBytes(StandardCharsets.UTF_8), MEDIA_TYPE);
     }
 
     private String getRequestUrl(String path) {
