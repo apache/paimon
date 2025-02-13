@@ -39,6 +39,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -220,6 +221,30 @@ public class KeyValueFileStoreScanTest {
                 store.toKvMap(
                         data.stream()
                                 .filter(kv -> getBucket(kv) == wantedBucket)
+                                .collect(Collectors.toList()));
+        runTestExactMatch(scan, snapshot.id(), expected);
+    }
+
+    @Test
+    public void testWithBuckets() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<KeyValue> data = generateData(random.nextInt(1000) + 1);
+        Snapshot snapshot = writeData(data);
+
+        int wantedBucket1 = random.nextInt(NUM_BUCKETS);
+        int wantedBucket2 = random.nextInt(NUM_BUCKETS);
+        int wantedBucket3 = random.nextInt(NUM_BUCKETS);
+        Set<Integer> buckets =
+                new HashSet<>(Arrays.asList(wantedBucket1, wantedBucket2, wantedBucket3));
+
+        FileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id());
+        scan.withBuckets(buckets);
+
+        Map<BinaryRow, BinaryRow> expected =
+                store.toKvMap(
+                        data.stream()
+                                .filter(kv -> buckets.contains(getBucket(kv)))
                                 .collect(Collectors.toList()));
         runTestExactMatch(scan, snapshot.id(), expected);
     }
