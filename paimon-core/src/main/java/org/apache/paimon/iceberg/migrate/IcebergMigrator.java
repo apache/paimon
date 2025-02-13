@@ -181,7 +181,7 @@ public class IcebergMigrator implements Migrator {
             for (IcebergManifestFileMeta icebergManifestFileMeta : icebergManifestFileMetas) {
                 long schemaId =
                         getSchemaIdFromIcebergManifestFile(
-                                new Path(icebergManifestFileMeta.manifestPath()));
+                                new Path(icebergManifestFileMeta.manifestPath()), fileIO);
                 List<IcebergManifestEntry> entries = manifestFile.read(icebergManifestFileMeta);
                 icebergEntries
                         .computeIfAbsent(schemaId, v -> new ArrayList<>())
@@ -331,11 +331,11 @@ public class IcebergMigrator implements Migrator {
         }
     }
 
-    public long getSchemaIdFromIcebergManifestFile(Path manifestPath) {
+    public long getSchemaIdFromIcebergManifestFile(Path manifestPath, FileIO fileIO) {
 
         try (DataFileStream<GenericRecord> dataFileStream =
                 new DataFileStream<>(
-                        paimonFileIO.newInputStream(manifestPath), new GenericDatumReader<>())) {
+                        fileIO.newInputStream(manifestPath), new GenericDatumReader<>())) {
             String schema = dataFileStream.getMetaString("schema");
             return JsonSerdeUtil.fromJson(schema, IcebergSchema.class).schemaId();
         } catch (IOException e) {
