@@ -35,8 +35,11 @@ public class DlfAuthSignatureTest {
                         "");
         DlfToken token =
                 new DlfToken("accessKeyId", "accessKeySecret", "securityToken", "expiration");
-        String authorization = DlfAuthSignature.getAuthorization(restAuthParameter, token, date);
+        String dataMd5Hex = DlfAuthSignature.md5Hex(restAuthParameter.data());
+        String authorization =
+                DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
         Assertions.assertEquals(
-                DlfAuthSignature.getAuthorization(restAuthParameter, token, date), authorization);
+                DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date),
+                authorization);
     }
 }

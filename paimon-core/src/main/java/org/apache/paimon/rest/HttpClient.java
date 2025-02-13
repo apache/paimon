@@ -60,7 +60,6 @@ public class HttpClient implements RESTClient {
 
     private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
-    private static final String DLF_DATE_HEADER = "x-dlf-date";
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final int CONNECTION_KEEP_ALIVE_DURATION_MS = 300_000;
@@ -244,13 +243,11 @@ public class HttpClient implements RESTClient {
             Map<String, String> headers,
             String data,
             Function<RestAuthParameter, Map<String, String>> authenticationFunction) {
-        String dateStr = getDate();
         RestAuthParameter restAuthParameter = new RestAuthParameter(getHost(), path, method, data);
         Map<String, String> authHeaders = authenticationFunction.apply(restAuthParameter);
         Map<String, String> headersWithAuth = new HashMap<>();
         headersWithAuth.putAll(headers);
         headersWithAuth.putAll(authHeaders);
-        headersWithAuth.put(DLF_DATE_HEADER, dateStr);
         return headersWithAuth;
     }
 

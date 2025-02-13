@@ -38,6 +38,7 @@ public class DlfAuthProviderFactory implements AuthProviderFactory {
         return AuthProviderEnum.DLF.identifier();
     }
 
+    // todo: not set TOKEN_REFRESH_TIME case
     @Override
     public AuthProvider create(Options options) {
         LOG.info("Begin create dlf AuthProvider");
@@ -51,11 +52,9 @@ public class DlfAuthProviderFactory implements AuthProviderFactory {
             }
             String tokenFilePath = options.get(TOKEN_PROVIDER_PATH);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
-            if (options.getOptional(TOKEN_REFRESH_TIME).isPresent()) {
-                String roleSessionName = options.get(TOKEN_PROVIDER_ROLE_SESSION_NAME);
-                return DlfAuthProvider.buildRefreshToken(
-                        tokenFilePath, roleSessionName, tokenRefreshInMills);
-            }
+            String roleSessionName = options.get(TOKEN_PROVIDER_ROLE_SESSION_NAME);
+            return DlfAuthProvider.buildRefreshToken(
+                    tokenFilePath, roleSessionName, tokenRefreshInMills);
         }
         return DlfAuthProvider.buildAKToken(
                 options.get(RESTCatalogOptions.TOKEN_ACCESS_KEY_ID),

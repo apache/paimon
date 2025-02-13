@@ -41,7 +41,8 @@ public class DlfAuthProvider implements AuthProvider {
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
     public static final String DLF_SECRET_HEADER_KEY = "x-dlf-secret";
     public static final String DLF_HOST_HEADER_KEY = "host";
-    public static final String DLF_ENDPOINT_AUTHORIZATION_KEY = "Authorization";
+    public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
+    public static final String DLF_DATA_MD5_HEX_HEADER_KEY = "x-dlf-data-md5-hex";
     public static final double EXPIRED_FACTOR = 0.4;
 
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
@@ -104,19 +105,22 @@ public class DlfAuthProvider implements AuthProvider {
     public Map<String, String> generateAuthorizationHeader(RestAuthParameter restAuthParameter) {
         try {
             String date = getDate();
+            String dataMd5Hex = DlfAuthSignature.md5Hex(restAuthParameter.data());
             String authorization =
-                    DlfAuthSignature.getAuthorization(restAuthParameter, token, date);
+                    DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
             String secret =
                     StringUtils.isEmpty(token.getAccessKeySecret())
                             ? "empty"
                             : token.getAccessKeySecret();
             return ImmutableMap.of(
-                    DLF_ENDPOINT_AUTHORIZATION_KEY,
+                    DLF_AUTHORIZATION_HEADER_KEY,
                     authorization,
                     DLF_DATE_HEADER_KEY,
                     date,
                     DLF_HOST_HEADER_KEY,
                     restAuthParameter.host(),
+                    DLF_DATA_MD5_HEX_HEADER_KEY,
+                    dataMd5Hex,
                     DLF_SECRET_HEADER_KEY, // todo: just for test
                     secret);
         } catch (Exception e) {

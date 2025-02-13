@@ -31,7 +31,6 @@ import java.security.MessageDigest;
 public class DlfAuthSignature {
     private static final String SIGNATURE_ALGORITHM = "DLF4-HMAC-SHA256";
     private static final String PAYLOAD = "UNSIGNED-PAYLOAD";
-    private static final String DATA_MD5_HEX = "data-md5-hex";
     private static final String PRODUCT = "DlfNext";
     private static final Charset CHARSET = StandardCharsets.UTF_8;
     private static final String HMAC_SHA256 = "HmacSHA256";
@@ -40,8 +39,9 @@ public class DlfAuthSignature {
     private static final String SIGNATURE_KEY = "Signature";
 
     public static String getAuthorization(
-            RestAuthParameter restAuthParameter, DlfToken dlfToken, String date) throws Exception {
-        String canonicalRequest = getCanonicalRequest(restAuthParameter, date);
+            RestAuthParameter restAuthParameter, DlfToken dlfToken, String dataMd5Hex, String date)
+            throws Exception {
+        String canonicalRequest = getCanonicalRequest(restAuthParameter, dataMd5Hex, date);
         String stringToSign =
                 Joiner.on("\n")
                         .join(
@@ -70,7 +70,13 @@ public class DlfAuthSignature {
         return authorization;
     }
 
-    public static byte[] hmacSha256(byte[] key, String data) {
+    public static String md5Hex(String raw) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("MD5");
+        byte[] hash = digest.digest(raw.getBytes(CHARSET.name()));
+        return hexEncode(hash);
+    }
+
+    private static byte[] hmacSha256(byte[] key, String data) {
         try {
             SecretKeySpec secretKeySpec = new SecretKeySpec(key, HMAC_SHA256);
             Mac mac = Mac.getInstance(HMAC_SHA256);
@@ -82,13 +88,14 @@ public class DlfAuthSignature {
         }
     }
 
-    private static String getCanonicalRequest(RestAuthParameter restAuthParameter, String date)
-            throws Exception {
+    private static String getCanonicalRequest(
+            RestAuthParameter restAuthParameter, String dataMd5Hex, String date) throws Exception {
         return Joiner.on("\n")
                 .join(
                         restAuthParameter.method(),
                         restAuthParameter.path(),
-                        String.format("%s:%s", DATA_MD5_HEX, md5Hex(restAuthParameter.data())),
+                        String.format(
+                                "%s:%s", DlfAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY, dataMd5Hex),
                         String.format(
                                 "%s:%s",
                                 DlfAuthProvider.DLF_HOST_HEADER_KEY, restAuthParameter.host()),
@@ -99,12 +106,6 @@ public class DlfAuthSignature {
 
     private static String sha256Hex(String raw) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] hash = digest.digest(raw.getBytes(CHARSET.name()));
-        return hexEncode(hash);
-    }
-
-    private static String md5Hex(String raw) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("MD5");
         byte[] hash = digest.digest(raw.getBytes(CHARSET.name()));
         return hexEncode(hash);
     }
