@@ -288,7 +288,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             Object field = getters[i].getFieldOrNull(value);
             if (!nullables[i]) {
                 if (field != null) {
-                    row.setField(i, getters[i].getFieldOrNull(value));
+                    row.setField(i, field);
                 } else {
                     throw new IllegalArgumentException("Field " + i + " can not be null");
                 }

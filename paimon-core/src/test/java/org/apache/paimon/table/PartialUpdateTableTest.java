@@ -63,7 +63,7 @@ public class PartialUpdateTableTest {
         catalog.createTable(identifier, schema(), true);
     }
 
-    public static String path() {
+    private String path() {
         return tempDir.toString() + "/" + PartialUpdateTableTest.class.getSimpleName();
     }
 
