@@ -43,6 +43,7 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /**
  * Builder for CDC {@link FlinkWriteSink} when syncing the whole database into one Paimon database.
@@ -140,8 +141,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         .process(
                                 new CdcDynamicTableParsingProcessFunction<>(
                                         database, catalogLoader, parserFactory))
-                        .name("Side Output")
-                        .setParallelism(input.getParallelism());
+                        .name("Side Output");
+        forwardParallelism(parsed, input);
 
         // for newly-added tables, create a multiplexing operator that handles all their records
         //     and writes to multiple tables
@@ -188,8 +189,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))
-                        .name("Side Output")
-                        .setParallelism(input.getParallelism());
+                        .name("Side Output");
+        forwardParallelism(parsed, input);
 
         for (FileStoreTable table : tables) {
             DataStream<Void> schemaChangeProcessFunction =

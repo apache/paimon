@@ -49,6 +49,7 @@ import java.io.Serializable;
 
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
 import static org.apache.paimon.flink.sink.FlinkSink.configureGlobalCommitter;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /**
  * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
@@ -109,10 +110,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
         MultiTableCommittableTypeInfo typeInfo = new MultiTableCommittableTypeInfo();
         SingleOutputStreamOperator<MultiTableCommittable> written =
                 input.transform(
-                                WRITER_NAME,
-                                typeInfo,
-                                createWriteOperator(sinkProvider, commitUser))
-                        .setParallelism(input.getParallelism());
+                        WRITER_NAME, typeInfo, createWriteOperator(sinkProvider, commitUser));
+        forwardParallelism(written, input);
 
         // shuffle committables by table
         DataStream<MultiTableCommittable> partitioned =
@@ -122,17 +121,16 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         input.getParallelism());
 
         SingleOutputStreamOperator<?> committed =
-                partitioned
-                        .transform(
-                                GLOBAL_COMMITTER_NAME,
-                                typeInfo,
-                                new CommitterOperatorFactory<>(
-                                        true,
-                                        false,
-                                        commitUser,
-                                        createCommitterFactory(),
-                                        createCommittableStateManager()))
-                        .setParallelism(input.getParallelism());
+                partitioned.transform(
+                        GLOBAL_COMMITTER_NAME,
+                        typeInfo,
+                        new CommitterOperatorFactory<>(
+                                true,
+                                false,
+                                commitUser,
+                                createCommitterFactory(),
+                                createCommittableStateManager()));
+        forwardParallelism(committed, input);
         configureGlobalCommitter(committed, commitCpuCores, commitHeapMemory);
         return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }

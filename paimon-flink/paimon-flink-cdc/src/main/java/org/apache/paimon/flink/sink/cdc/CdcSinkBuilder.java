@@ -35,6 +35,7 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import javax.annotation.Nullable;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /**
  * Builder for sink when syncing records into one Paimon table.
@@ -99,8 +100,8 @@ public class CdcSinkBuilder<T> {
         SingleOutputStreamOperator<CdcRecord> parsed =
                 input.forward()
                         .process(new CdcParsingProcessFunction<>(parserFactory))
-                        .name("Side Output")
-                        .setParallelism(input.getParallelism());
+                        .name("Side Output");
+        forwardParallelism(parsed, input);
 
         DataStream<Void> schemaChangeProcessFunction =
                 SingleOutputStreamOperatorUtils.getSideOutput(
