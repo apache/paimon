@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link MongoDBSchemaUtils}. */
-public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
+public class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
 
     @BeforeAll
     public static void initMongoDB() {
