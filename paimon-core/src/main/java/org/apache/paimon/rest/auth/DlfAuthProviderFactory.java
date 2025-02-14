@@ -38,9 +38,12 @@ public class DlfAuthProviderFactory implements AuthProviderFactory {
             String tokenFilePath = options.get(DLF_TOKEN_PATH);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
             return DlfAuthProvider.buildRefreshToken(tokenFilePath, tokenRefreshInMills);
+        } else if (options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_ID).isPresent()
+                && options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET).isPresent()) {
+            return DlfAuthProvider.buildAKToken(
+                    options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID),
+                    options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET));
         }
-        return DlfAuthProvider.buildAKToken(
-                options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID),
-                options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET));
+        throw new IllegalArgumentException("DLF token path or AK must be set for DLF Auth.");
     }
 }

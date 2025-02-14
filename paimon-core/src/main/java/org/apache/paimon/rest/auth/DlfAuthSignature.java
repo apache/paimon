@@ -38,7 +38,7 @@ public class DlfAuthSignature {
     private static final String SIGNATURE_KEY = "Signature";
 
     public static String getAuthorization(
-            RestAuthParameter restAuthParameter, DlfToken dlfToken, String dataMd5Hex, String date)
+            RESTAuthParameter restAuthParameter, DlfToken dlfToken, String dataMd5Hex, String date)
             throws Exception {
         String canonicalRequest = getCanonicalRequest(restAuthParameter, dataMd5Hex, date);
         String stringToSign =
@@ -88,7 +88,7 @@ public class DlfAuthSignature {
     }
 
     private static String getCanonicalRequest(
-            RestAuthParameter restAuthParameter, String dataMd5Hex, String date) throws Exception {
+            RESTAuthParameter restAuthParameter, String dataMd5Hex, String date) throws Exception {
         return Joiner.on("\n")
                 .join(
                         restAuthParameter.method(),

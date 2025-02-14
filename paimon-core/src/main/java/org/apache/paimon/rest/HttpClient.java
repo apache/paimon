@@ -20,7 +20,8 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.auth.RestAuthParameter;
+import org.apache.paimon.rest.auth.RESTAuthFunction;
+import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.utils.StringUtils;
@@ -86,10 +87,8 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T get(
-            String path,
-            Class<T> responseType,
-            Function<RestAuthParameter, Map<String, String>> headersFunction) {
-        Map<String, String> authHeaders = getHeaders(path, "GET", "", headersFunction);
+            String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
+        Map<String, String> authHeaders = getHeaders(path, "GET", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
@@ -101,10 +100,8 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T post(
-            String path,
-            RESTRequest body,
-            Function<RestAuthParameter, Map<String, String>> headersFunction) {
-        return post(path, body, null, headersFunction);
+            String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
+        return post(path, body, null, restAuthFunction);
     }
 
     @Override
@@ -112,10 +109,10 @@ public class HttpClient implements RESTClient {
             String path,
             RESTRequest body,
             Class<T> responseType,
-            Function<RestAuthParameter, Map<String, String>> headersFunction) {
+            RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
-            Map<String, String> authHeaders = getHeaders(path, "POST", bodyStr, headersFunction);
+            Map<String, String> authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
@@ -130,9 +127,8 @@ public class HttpClient implements RESTClient {
     }
 
     @Override
-    public <T extends RESTResponse> T delete(
-            String path, Function<RestAuthParameter, Map<String, String>> headersFunction) {
-        Map<String, String> authHeaders = getHeaders(path, "DELETE", "", headersFunction);
+    public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
+        Map<String, String> authHeaders = getHeaders(path, "DELETE", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
@@ -144,12 +140,10 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T delete(
-            String path,
-            RESTRequest body,
-            Function<RestAuthParameter, Map<String, String>> headersFunction) {
+            String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
-            Map<String, String> authHeaders = getHeaders(path, "DELETE", bodyStr, headersFunction);
+            Map<String, String> authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
@@ -218,8 +212,8 @@ public class HttpClient implements RESTClient {
             String path,
             String method,
             String data,
-            Function<RestAuthParameter, Map<String, String>> headerFunction) {
-        RestAuthParameter restAuthParameter = new RestAuthParameter(getHost(), path, method, data);
+            Function<RESTAuthParameter, Map<String, String>> headerFunction) {
+        RESTAuthParameter restAuthParameter = new RESTAuthParameter(getHost(), path, method, data);
         return headerFunction.apply(restAuthParameter);
     }
 

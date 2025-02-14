@@ -36,7 +36,7 @@ public class BearTokenAuthProvider implements AuthProvider {
 
     @Override
     public Map<String, String> header(
-            Map<String, String> baseHeader, RestAuthParameter restAuthParameter) {
+            Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
         Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
         headersWithAuth.put(AUTHORIZATION_HEADER_KEY, BEARER_PREFIX + token);
         return headersWithAuth;

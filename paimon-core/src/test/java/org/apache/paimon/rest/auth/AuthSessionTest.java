@@ -50,6 +50,7 @@ import static org.apache.paimon.rest.auth.AuthSession.MAX_REFRESH_WINDOW_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.MIN_REFRESH_WAIT_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.REFRESH_NUM_RETRIES;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -187,6 +188,15 @@ public class AuthSessionTest {
     }
 
     @Test
+    public void testCreateDlfAuthProviderWithoutNeedConf() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        AuthProviderFactory.createAuthProvider(
+                                AuthProviderEnum.DLF.identifier(), new Options()));
+    }
+
+    @Test
     public void testDlfAuthProviderAuthHeader() throws Exception {
         Options options = new Options();
         String akId = UUID.randomUUID().toString();
@@ -196,14 +206,14 @@ public class AuthSessionTest {
         options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
         AuthProvider authProvider =
                 AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
-        RestAuthParameter restAuthParameter =
-                new RestAuthParameter("host", "/path", "method", "data");
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter("host", "/path", "method", "data");
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
         String date = header.get(DlfAuthProvider.DLF_DATE_HEADER_KEY);
         String dateMd5Hex = header.get(DlfAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY);
         String authorization =
                 DlfAuthSignature.getAuthorization(
-                        new RestAuthParameter("host", "/path", "method", "data"),
+                        new RESTAuthParameter("host", "/path", "method", "data"),
                         token,
                         dateMd5Hex,
                         date);

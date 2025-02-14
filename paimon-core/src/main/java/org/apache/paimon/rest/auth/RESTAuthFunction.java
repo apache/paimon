@@ -22,20 +22,20 @@ import java.util.Map;
 import java.util.function.Function;
 
 /** The function used to generate auth header for the rest request. */
-public class RestAuthFunction implements Function<RestAuthParameter, Map<String, String>> {
+public class RESTAuthFunction implements Function<RESTAuthParameter, Map<String, String>> {
 
     private final Map<String, String> initHeader;
-    private final AuthSession catalogAuth;
+    private final AuthProvider authProvider;
 
-    public RestAuthFunction(Map<String, String> initHeader, AuthSession catalogAuth) {
+    public RESTAuthFunction(Map<String, String> initHeader, AuthProvider authProvider) {
         this.initHeader = initHeader;
-        this.catalogAuth = catalogAuth;
+        this.authProvider = authProvider;
     }
 
     @Override
-    public Map<String, String> apply(RestAuthParameter restAuthParameter) {
-        if (catalogAuth != null) {
-            return catalogAuth.getAuthProvider().header(initHeader, restAuthParameter);
+    public Map<String, String> apply(RESTAuthParameter restAuthParameter) {
+        if (authProvider != null) {
+            return authProvider.header(initHeader, restAuthParameter);
         }
         return initHeader;
     }

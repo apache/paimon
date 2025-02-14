@@ -18,36 +18,27 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.rest.auth.RestAuthParameter;
+import org.apache.paimon.rest.auth.RESTAuthFunction;
 
 import java.io.Closeable;
-import java.util.Map;
-import java.util.function.Function;
 
 /** Interface for a basic HTTP Client for interfacing with the REST catalog. */
 public interface RESTClient extends Closeable {
 
     <T extends RESTResponse> T get(
-            String path,
-            Class<T> responseType,
-            Function<RestAuthParameter, Map<String, String>> headersFunction);
+            String path, Class<T> responseType, RESTAuthFunction restAuthFunction);
 
     <T extends RESTResponse> T post(
-            String path,
-            RESTRequest body,
-            Function<RestAuthParameter, Map<String, String>> headersFunction);
+            String path, RESTRequest body, RESTAuthFunction restAuthFunction);
 
     <T extends RESTResponse> T post(
             String path,
             RESTRequest body,
             Class<T> responseType,
-            Function<RestAuthParameter, Map<String, String>> headersFunction);
+            RESTAuthFunction restAuthFunction);
+
+    <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction);
 
     <T extends RESTResponse> T delete(
-            String path, Function<RestAuthParameter, Map<String, String>> headersFunction);
-
-    <T extends RESTResponse> T delete(
-            String path,
-            RESTRequest body,
-            Function<RestAuthParameter, Map<String, String>> headersFunction);
+            String path, RESTRequest body, RESTAuthFunction restAuthFunction);
 }

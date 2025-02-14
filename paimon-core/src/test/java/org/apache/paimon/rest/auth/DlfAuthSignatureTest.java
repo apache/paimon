@@ -27,8 +27,8 @@ public class DlfAuthSignatureTest {
     @Test
     public void testGetAuthorization() throws Exception {
         String date = DlfAuthProvider.getDate();
-        RestAuthParameter restAuthParameter =
-                new RestAuthParameter(
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter(
                         "endpoint",
                         "/v1/catalogs/test/databases/test/tables/test/commit",
                         "POST",

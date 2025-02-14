@@ -81,7 +81,7 @@ public class DlfAuthProvider implements AuthProvider {
 
     @Override
     public Map<String, String> header(
-            Map<String, String> baseHeader, RestAuthParameter restAuthParameter) {
+            Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
         try {
             String date = getDate();
             String dataMd5Hex = DlfAuthSignature.md5Hex(restAuthParameter.data());
