@@ -50,8 +50,11 @@ public class FastForwardActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  fast_forward --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --branch_name <branch_name>");
+                "  fast_forward \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--branch_name <branch_name>");
         System.out.println();
     }
 }

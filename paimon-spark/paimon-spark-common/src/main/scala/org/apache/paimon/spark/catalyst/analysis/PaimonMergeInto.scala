@@ -33,21 +33,4 @@ case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
       targetOutput: Seq[AttributeReference]): Seq[MergeAction] = {
     merge.notMatchedBySourceActions.map(checkAndAlignActionAssignment(_, targetOutput))
   }
-
-  override def buildMergeIntoPaimonTable(
-      v2Table: SparkTable,
-      merge: MergeIntoTable,
-      alignedMatchedActions: Seq[MergeAction],
-      alignedNotMatchedActions: Seq[MergeAction],
-      alignedNotMatchedBySourceActions: Seq[MergeAction]): MergeIntoPaimonTable = {
-    MergeIntoPaimonTable(
-      v2Table,
-      merge.targetTable,
-      merge.sourceTable,
-      merge.mergeCondition,
-      alignedMatchedActions,
-      alignedNotMatchedActions,
-      alignedNotMatchedBySourceActions
-    )
-  }
 }

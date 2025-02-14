@@ -136,10 +136,10 @@ All data types supported by Paimon are as follows:
       </td>
     </tr>
     <tr>
-      <td><code>TIMESTAMP WITH TIME ZONE</code><br>
-          <code>TIMESTAMP(p) WITH TIME ZONE</code>
+      <td><code>TIMESTAMP WITH LOCAL TIME ZONE</code><br>
+          <code>TIMESTAMP(p) WITH LOCAL TIME ZONE</code>
       </td>
-      <td><code>Data type of a timestamp with time zone consisting of year-month-day hour:minute:second[.fractional] zone with up to nanosecond precision and values ranging from 0000-01-01 00:00:00.000000000 +14:59 to 9999-12-31 23:59:59.999999999 -14:59.</code><br><br>
+      <td><code>Data type of a timestamp with local time zone consisting of year-month-day hour:minute:second[.fractional] zone with up to nanosecond precision and values ranging from 0000-01-01 00:00:00.000000000 +14:59 to 9999-12-31 23:59:59.999999999 -14:59.</code><br><br>
           <code>This type fills the gap between time zone free and time zone mandatory timestamp types by allowing the interpretation of UTC timestamps according to the configured session time zone. A  conversion from and to int describes the number of seconds since epoch. A conversion from and to long describes the number of milliseconds since epoch.</code>
       </td>
     </tr>

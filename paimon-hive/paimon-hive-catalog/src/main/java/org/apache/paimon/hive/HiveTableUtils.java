@@ -21,14 +21,11 @@ package org.apache.paimon.hive;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FormatTable.Format;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -96,24 +93,11 @@ class HiveTableUtils {
     public static RowType createRowType(Table table) {
         List<FieldSchema> allCols = new ArrayList<>(table.getSd().getCols());
         allCols.addAll(table.getPartitionKeys());
-        Pair<String[], DataType[]> columnInformation = extractColumnInformation(allCols);
-        return RowType.builder()
-                .fields(columnInformation.getRight(), columnInformation.getLeft())
-                .build();
-    }
 
-    private static Pair<String[], DataType[]> extractColumnInformation(List<FieldSchema> allCols) {
-        String[] colNames = new String[allCols.size()];
-        DataType[] colTypes = new DataType[allCols.size()];
-
-        for (int i = 0; i < allCols.size(); i++) {
-            FieldSchema fs = allCols.get(i);
-            colNames[i] = fs.getName();
-            colTypes[i] =
-                    HiveTypeUtils.toPaimonType(
-                            TypeInfoUtils.getTypeInfoFromTypeString(fs.getType()));
+        RowType.Builder builder = RowType.builder();
+        for (FieldSchema fs : allCols) {
+            builder.field(fs.getName(), HiveTypeUtils.toPaimonType(fs.getType()), fs.getComment());
         }
-
-        return Pair.of(colNames, colTypes);
+        return builder.build();
     }
 }

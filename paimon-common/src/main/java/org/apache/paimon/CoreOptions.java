@@ -805,6 +805,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue("debezium-json")
                     .withDescription("Specify the message format of log system.");
 
+    @ExcludeFromDocumentation("Confused without log system")
+    public static final ConfigOption<Boolean> LOG_IGNORE_DELETE =
+            key("log.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Specify whether the log system ignores delete records.");
+
     public static final ConfigOption<Boolean> AUTO_CREATE =
             key("auto-create")
                     .booleanType()
@@ -3224,6 +3231,39 @@ public class CoreOptions implements Serializable {
         @Override
         public String toString() {
             return value;
+        }
+    }
+
+    /** The order type of table sort. */
+    public enum OrderType {
+        ORDER("order"),
+        ZORDER("zorder"),
+        HILBERT("hilbert"),
+        NONE("none");
+
+        private final String orderType;
+
+        OrderType(String orderType) {
+            this.orderType = orderType;
+        }
+
+        @Override
+        public String toString() {
+            return "order type: " + orderType;
+        }
+
+        public static OrderType of(String orderType) {
+            if (ORDER.orderType.equalsIgnoreCase(orderType)) {
+                return ORDER;
+            } else if (ZORDER.orderType.equalsIgnoreCase(orderType)) {
+                return ZORDER;
+            } else if (HILBERT.orderType.equalsIgnoreCase(orderType)) {
+                return HILBERT;
+            } else if (NONE.orderType.equalsIgnoreCase(orderType)) {
+                return NONE;
+            }
+
+            throw new IllegalArgumentException("cannot match type: " + orderType + " for ordering");
         }
     }
 }

@@ -57,8 +57,12 @@ public class ResetConsumerActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  reset_consumer --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --consumer_id <consumer_id> [--next_snapshot <next_snapshot_id>]");
+                "  reset_consumer \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--consumer_id <consumer_id> \\\n"
+                        + "[--next_snapshot <next_snapshot_id>]");
 
         System.out.println();
         System.out.println("Note:");

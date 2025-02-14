@@ -63,9 +63,12 @@ public class RemoveUnexistingFilesActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  remove_unexisting_files --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> [--partition <partition_name> [--partition <partition_name>]] "
-                        + "[--dry_run <false/true>] "
+                "  remove_unexisting_files \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "[--partition <partition_name> [--partition <partition_name> ...]] \\\n"
+                        + "[--dry_run <false/true>] \\\n"
                         + "[--parallelism <parallelism>]");
         System.out.println(
                 "If partitions are not specified, this action will remove unexisting files from all partitions.");

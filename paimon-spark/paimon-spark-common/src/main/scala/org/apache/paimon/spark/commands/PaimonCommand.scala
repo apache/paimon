@@ -63,6 +63,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
   def convertPartitionFilterToMap(
       filter: Filter,
       partitionRowType: RowType): Map[String, String] = {
+    // todo: replace it with SparkV2FilterConverter when we drop Spark3.2
     val converter = new SparkFilterConverter(partitionRowType)
     splitConjunctiveFilters(filter).map {
       case EqualNullSafe(attribute, value) =>

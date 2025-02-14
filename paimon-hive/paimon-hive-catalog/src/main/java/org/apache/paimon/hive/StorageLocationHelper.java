@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
 import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
 
 /** Helper for Setting Location in Hive Table Storage. */
@@ -57,5 +58,15 @@ public final class StorageLocationHelper implements LocationHelper {
     @Override
     public String getDatabaseLocation(Database database) {
         return database.getLocationUri();
+    }
+
+    @Override
+    public void specifyPartitionLocation(Partition partition, String location) {
+        partition.getSd().setLocation(location);
+    }
+
+    @Override
+    public String getPartitionLocation(Partition partition) {
+        return partition.getSd().getLocation();
     }
 }

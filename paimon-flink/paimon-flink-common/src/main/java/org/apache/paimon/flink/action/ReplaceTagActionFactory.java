@@ -50,8 +50,13 @@ public class ReplaceTagActionFactory extends CreateOrReplaceTagActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  replace_tag --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --tag_name <tag_name> [--snapshot <snapshot_id>] [--time_retained <time_retained>]");
+                "  replace_tag \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--tag_name <tag_name> \\\n"
+                        + "[--snapshot <snapshot_id>] \\\n"
+                        + "[--time_retained <time_retained>]");
         System.out.println();
     }
 }

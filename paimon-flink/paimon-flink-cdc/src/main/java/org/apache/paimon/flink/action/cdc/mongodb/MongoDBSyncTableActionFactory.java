@@ -70,12 +70,14 @@ public class MongoDBSyncTableActionFactory extends SyncTableActionFactoryBase {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mongodb_sync_table --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> "
-                        + "[--partition_keys <partition_keys>] "
-                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] "
-                        + "[--mongodb_conf <mongodb_cdc_source_conf> [--mongodb_conf <mongodb_cdc_source_conf> ...]] "
-                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                "  mongodb_sync_table \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "[--partition_keys <partition_keys>] \\\n"
+                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] \\\n"
+                        + "[--mongodb_conf <mongodb_cdc_source_conf> [--mongodb_conf <mongodb_cdc_source_conf> ...]] \\\n"
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
@@ -101,7 +103,7 @@ public class MongoDBSyncTableActionFactory extends SyncTableActionFactoryBase {
                         + "This can be done by configuring 'field.name' to specify the synchronization fields and 'parser.path' to specify the JSON parsing path for those fields.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/mysql-cdc/#connector-options");
+                        + "see https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/mongodb-cdc/#connector-options");
         System.out.println();
 
         System.out.println("Paimon catalog and table sink conf syntax:");

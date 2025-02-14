@@ -19,25 +19,26 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.flink.FlinkCatalog;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.s3.MinioTestContainer;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.TimeUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
-import org.apache.flink.core.fs.FSDataInputStream;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
@@ -94,6 +95,7 @@ public abstract class HiveCatalogITCaseBase {
     protected TableEnvironment tEnv;
     protected TableEnvironment sEnv;
     private boolean locationInProperties;
+    private FileIO fileIO;
 
     @HiveSQL(files = {})
     protected static HiveShell hiveShell;
@@ -133,6 +135,10 @@ public abstract class HiveCatalogITCaseBase {
         if (locationInProperties) {
             catalogProperties.putAll(minioTestContainer.getS3ConfigOptions());
         }
+
+        Options catalogOptions = new Options(catalogProperties);
+        CatalogContext catalogContext = CatalogContext.create(catalogOptions);
+        fileIO = FileIO.get(new Path(path), catalogContext);
 
         tEnv = TableEnvironmentImpl.create(EnvironmentSettings.newInstance().inBatchMode().build());
         sEnv =
@@ -255,7 +261,7 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
         Path tablePath = new Path(path, "test_db2.db/t");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
         assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
                 .hasRootCauseInstanceOf(ValidationException.class)
                 .hasRootCauseMessage("Cannot drop a database which is currently in use.");
@@ -267,7 +273,7 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("DROP DATABASE test_db2 CASCADE").await();
         assertThat(collect("SHOW DATABASES"))
                 .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db")));
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
+        assertThat(fileIO.exists(tablePath)).isFalse();
     }
 
     @Test
@@ -295,11 +301,11 @@ public abstract class HiveCatalogITCaseBase {
         // drop table
         tEnv.executeSql("INSERT INTO s VALUES (1, 'Hi'), (2, 'Hello')").await();
         Path tablePath = new Path(path, "test_db.db/s");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
         tEnv.executeSql("DROP TABLE s").await();
         assertThat(collect("SHOW TABLES"))
                 .containsExactlyInAnyOrder(Row.of("t"), Row.of("hive_table"));
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
+        assertThat(fileIO.exists(tablePath)).isFalse();
         tEnv.executeSql("DROP TABLE IF EXISTS s").await();
         assertThatThrownBy(() -> tEnv.executeSql("DROP TABLE s").await())
                 .isInstanceOf(ValidationException.class)
@@ -352,14 +358,11 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE test_db").await();
         tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t")
-                                .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED t"))
+                .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL");
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
     }
 
     @Test
@@ -383,35 +386,14 @@ public abstract class HiveCatalogITCaseBase {
                         "CREATE TABLE t01 ( aa INT, bb STRING, cc STRING, PRIMARY KEY (cc, aa) NOT ENFORCED) PARTITIONED BY (cc) WITH ('file.format' = 'avro', 'bucket' = '3')")
                 .await();
         // assert contain properties
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t01")
-                                .contains("\tfile.format         \tavro                "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t01")
-                                .contains("\tprimary-key         \tcc,aa               "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t01")
-                                .contains("\tpartition           \tcc                  "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t01")
-                                .contains("\tbucket-key          \taa                  "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t01")
-                                .contains("\tbucket              \t3                   "))
-                .isTrue();
+        List<String> descFormattedT01 = hiveShell.executeQuery("DESC FORMATTED t01");
+        assertThat(descFormattedT01)
+                .contains(
+                        "\tfile.format         \tavro                ",
+                        "\tprimary-key         \tcc,aa               ",
+                        "\tpartition           \tcc                  ",
+                        "\tbucket-key          \taa                  ",
+                        "\tbucket              \t3                   ");
 
         tEnv.executeSql(
                         String.join(
@@ -434,35 +416,13 @@ public abstract class HiveCatalogITCaseBase {
 
         // assert not contain properties
         List<String> descFormattedT02 = hiveShell.executeQuery("DESC FORMATTED t02");
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t02")
-                                .contains("\tfile.format         \tavro                "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t02")
-                                .contains("\tprimary-key         \tcc,aa               "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t02")
-                                .contains("\tpartition           \tcc                  "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t02")
-                                .contains("\tbucket-key          \taa                  "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t02")
-                                .contains("\tbucket              \t3                   "))
-                .isFalse();
+        assertThat(descFormattedT02)
+                .doesNotContain(
+                        "\tfile.format         \tavro                ",
+                        "\tprimary-key         \tcc,aa               ",
+                        "\tpartition           \tcc                  ",
+                        "\tbucket-key          \taa                  ",
+                        "\tbucket              \t3                   ");
     }
 
     @Test
@@ -487,29 +447,14 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
 
         tEnv.executeSql("ALTER TABLE t03 SET ( 'file.format' = 'parquet' )").await();
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tfile.format         \tparquet             "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tprimary-key         \tcc,aa               "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tpartition           \tcc                  "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tbucket              \t3                   "))
-                .isFalse();
+        List<String> descFormattedT03 = hiveShell.executeQuery("DESC FORMATTED t03");
+        assertThat(descFormattedT03)
+                .doesNotContain(
+                        "\tfile.format         \tparquet             ",
+                        "\tprimary-key         \tcc,aa               ",
+                        "\tpartition           \tcc                  ",
+                        "\tbucket-key          \taa                  ",
+                        "\tbucket              \t3                   ");
 
         tEnv.executeSql(
                         String.join(
@@ -529,42 +474,18 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE test_db").await();
 
         tEnv.executeSql("ALTER TABLE t03 SET ( 'file.format' = 'parquet' )").await();
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tfile.format         \tparquet             "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tprimary-key         \tcc,aa               "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tpartition           \tcc                  "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tbucket-key          \taa                  "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\tbucket              \t3                   "))
-                .isTrue();
+        descFormattedT03 = hiveShell.executeQuery("DESC FORMATTED t03");
+        assertThat(descFormattedT03)
+                .contains(
+                        "\tfile.format         \tparquet             ",
+                        "\tprimary-key         \tcc,aa               ",
+                        "\tpartition           \tcc                  ",
+                        "\tbucket-key          \taa                  ",
+                        "\tbucket              \t3                   ");
 
         tEnv.executeSql("ALTER TABLE t03 SET ('owner' = 'test')").await();
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t03")
-                                .contains("\towner               \ttest                "))
-                .isTrue();
+        descFormattedT03 = hiveShell.executeQuery("DESC FORMATTED t03");
+        assertThat(descFormattedT03).contains("\towner               \ttest                ");
     }
 
     @Test
@@ -585,14 +506,11 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE test_db").await();
         tEnv.executeSql("CREATE TABLE t ( aa INT, Bb STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t")
-                                .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED t"))
+                .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL");
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
     }
 
     @Test
@@ -679,27 +597,35 @@ public abstract class HiveCatalogITCaseBase {
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
 
+        Path tablePath = new Path(path, "test_db.db/t");
+
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 1)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=3", "pt=4");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=1"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 3)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=1", "pt=2", "pt=4");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=3"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 1)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=2", "pt=4");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=1"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 4)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("pt=2", "pt=4");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=4"))).isTrue();
 
         tEnv.executeSql("ALTER TABLE `t$branch_test` DROP PARTITION (pt = 4)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).containsExactlyInAnyOrder("pt=2");
+        assertThat(fileIO.exists(new Path(tablePath, "pt=4"))).isFalse();
 
         tEnv.executeSql("ALTER TABLE t DROP PARTITION (pt = 2)");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t")).isEmpty();
+        assertThat(fileIO.exists(new Path(tablePath, "pt=2"))).isFalse();
     }
 
     @Test
@@ -889,8 +815,8 @@ public abstract class HiveCatalogITCaseBase {
                         "CREATE TABLE t_all_as WITH ('primary-key' = 'dt,hh' , 'partition' = 'dt' ) AS SELECT * FROM t_all")
                 .await();
         List<Row> resultAll = collect("SHOW CREATE TABLE t_all_as");
-        assertThat(resultAll.toString()).contains("PRIMARY KEY (`dt`, `hh`)");
-        assertThat(resultAll.toString()).contains("PARTITIONED BY (`dt`)");
+        assertThat(resultAll.toString())
+                .contains("PRIMARY KEY (`dt`, `hh`)", "PARTITIONED BY (`dt`)");
         List<Row> dataAll = collect("SELECT * FROM t_all_as");
         assertThat(dataAll.toString()).isEqualTo("[+I[1, 2, login, 2020-01-02, 09]]");
 
@@ -989,8 +915,8 @@ public abstract class HiveCatalogITCaseBase {
 
         // hive read
         List<String> tables = hiveShell.executeQuery("SHOW TABLES");
-        assertThat(tables.contains("t3")).isTrue();
-        assertThat(tables.contains("t1")).isFalse();
+        assertThat(tables).contains("t3");
+        assertThat(tables).doesNotContain("t1");
         List<String> data = hiveShell.executeQuery("SELECT * FROM t3");
         assertThat(data).containsExactlyInAnyOrder("1");
 
@@ -1281,6 +1207,9 @@ public abstract class HiveCatalogITCaseBase {
                         "ptb=2b/pta=2",
                         "ptb=3a/pta=3",
                         "ptb=3b/pta=3");
+
+        Path tablePath = new Path(path, "test_db.db/t");
+        assertThat(fileIO.exists(new Path(tablePath, "ptb=1a/pta=1"))).isTrue();
     }
 
     @Test
@@ -1552,10 +1481,7 @@ public abstract class HiveCatalogITCaseBase {
 
         // check partition.mark-done-action=success-file
         Path successFile = new Path(path, "test_db.db/mark_done_t2/dt=20240501/_SUCCESS");
-        String successText;
-        try (FSDataInputStream in = successFile.getFileSystem().open(successFile)) {
-            successText = IOUtils.readUTF8Fully(in);
-        }
+        String successText = fileIO.readFileUtf8(successFile);
 
         assertThat(successText).contains("creationTime").contains("modificationTime");
 
@@ -1581,11 +1507,8 @@ public abstract class HiveCatalogITCaseBase {
         // metastore.
         tEnv.executeSql("CALL sys.repair('test_db.t_repair_hive')");
 
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED test_db.t_repair_hive")
-                                .contains("item_id\tbigint\titem id"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED test_db.t_repair_hive"))
+                .contains("item_id\tbigint\titem id");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db.t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
 
@@ -1600,11 +1523,8 @@ public abstract class HiveCatalogITCaseBase {
         // When the Hive table exists, specify the paimon table to update hive table in hive
         // metastore.
         tEnv.executeSql("CALL sys.repair('test_db_01.t_repair_hive')");
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED test_db_01.t_repair_hive")
-                                .contains("item_id\tbigint\titem id"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED test_db_01.t_repair_hive"))
+                .contains("item_id\tbigint\titem id");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db_01.t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
     }
@@ -1628,11 +1548,8 @@ public abstract class HiveCatalogITCaseBase {
         // metastore.
         tEnv.executeSql("CALL sys.repair(`table` => 'test_db.t_repair_hive')");
 
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED test_db.t_repair_hive")
-                                .contains("item_id\tbigint\titem id"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED test_db.t_repair_hive"))
+                .contains("item_id\tbigint\titem id");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db.t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
 
@@ -1647,11 +1564,8 @@ public abstract class HiveCatalogITCaseBase {
         // When the Hive table exists, specify the paimon table to update hive table in hive
         // metastore.
         tEnv.executeSql("CALL sys.repair(`table` => 'test_db_02.t_repair_hive')");
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED test_db_02.t_repair_hive")
-                                .contains("item_id\tbigint\titem id"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED test_db_02.t_repair_hive"))
+                .contains("item_id\tbigint\titem id");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS test_db_02.t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
         hiveShell.execute("DROP TABLE test_db.t_repair_hive");
@@ -1690,11 +1604,8 @@ public abstract class HiveCatalogITCaseBase {
                 isNamedArgument
                         ? "CALL sys.repair(`table` => 'test_db.t_repair_hive')"
                         : "CALL sys.repair('test_db.t_repair_hive')");
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t_repair_hive")
-                                .contains("item_id\tbigint\titem id"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED t_repair_hive"))
+                .contains("item_id\tbigint\titem id");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
     }
@@ -1725,11 +1636,8 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
 
         String tableLocation = databaseLocation + "/t_repair_hive";
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t_repair_hive")
-                                .contains("Location:           \t" + tableLocation + "\tNULL"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED t_repair_hive"))
+                .contains("Location:           \t" + tableLocation + "\tNULL");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09");
 
@@ -1741,16 +1649,10 @@ public abstract class HiveCatalogITCaseBase {
                 isNamedArgument
                         ? "CALL sys.repair(`table` => 'my_database.t_repair_hive')"
                         : "CALL sys.repair('my_database.t_repair_hive')");
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t_repair_hive")
-                                .contains("Location:           \t" + tableLocation + "\tNULL"))
-                .isTrue();
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED t_repair_hive")
-                                .contains("item_id\tbigint\titem id"))
-                .isTrue();
+        assertThat(hiveShell.executeQuery("DESC FORMATTED t_repair_hive"))
+                .contains(
+                        "Location:           \t" + tableLocation + "\tNULL",
+                        "item_id\tbigint\titem id");
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t_repair_hive"))
                 .containsExactlyInAnyOrder("dt=2020-01-02/hh=09", "dt=2020-01-03/hh=10");
         hiveShell.execute("DROP TABLE my_database.t_repair_hive");
@@ -1780,29 +1682,13 @@ public abstract class HiveCatalogITCaseBase {
 
         tEnv.executeSql("CALL sys.repair('test_db.repair_t03')");
 
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED repair_t03")
-                                .contains("\tfile.format         \tavro                "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED repair_t03")
-                                .contains("\tprimary-key         \tcc,aa               "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED repair_t03")
-                                .contains("\tpartition           \tcc                  "))
-                .isFalse();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED repair_t03")
-                                .contains("\tbucket              \t3                   "))
-                .isFalse();
+        List<String> descFormattedResult = hiveShell.executeQuery("DESC FORMATTED repair_t03");
+        assertThat(descFormattedResult)
+                .doesNotContain(
+                        "\tfile.format         \tavro                ",
+                        "\tprimary-key         \tcc,aa               ",
+                        "\tpartition           \tcc                  ",
+                        "\tbucket              \t3                   ");
 
         tEnv.executeSql(
                         String.join(
@@ -1821,30 +1707,13 @@ public abstract class HiveCatalogITCaseBase {
         hiveShell.execute("use test_db");
 
         tEnv.executeSql("CALL sys.repair('test_db.repair_t03')");
-        hiveShell.executeQuery("DESC FORMATTED repair_t03").stream().forEach(System.out::println);
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED repair_t03")
-                                .contains("\tfile.format         \tavro                "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED repair_t03")
-                                .contains("\tprimary-key         \tcc,aa               "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED repair_t03")
-                                .contains("\tpartition           \tcc                  "))
-                .isTrue();
-
-        assertThat(
-                        hiveShell
-                                .executeQuery("DESC FORMATTED repair_t03")
-                                .contains("\tbucket              \t3                   "))
-                .isTrue();
+        descFormattedResult = hiveShell.executeQuery("DESC FORMATTED repair_t03");
+        assertThat(descFormattedResult)
+                .contains(
+                        "\tfile.format         \tavro                ",
+                        "\tprimary-key         \tcc,aa               ",
+                        "\tpartition           \tcc                  ",
+                        "\tbucket              \t3                   ");
     }
 
     @Test

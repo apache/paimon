@@ -50,8 +50,11 @@ public class DeleteTagActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  delete_tag --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --tag_name <tag_name>");
+                "  delete_tag \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--tag_name <tag_name>");
         System.out.println();
     }
 }

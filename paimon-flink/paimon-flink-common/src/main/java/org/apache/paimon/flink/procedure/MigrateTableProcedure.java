@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
+import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
@@ -67,7 +68,8 @@ public class MigrateTableProcedure extends ProcedureBase {
 
         Integer p = parallelism == null ? Runtime.getRuntime().availableProcessors() : parallelism;
 
-        TableMigrationUtils.getImporter(
+        Migrator migrator =
+                TableMigrationUtils.getImporter(
                         connector,
                         catalog,
                         sourceTableId.getDatabaseName(),
@@ -75,11 +77,11 @@ public class MigrateTableProcedure extends ProcedureBase {
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         p,
-                        ParameterUtils.parseCommaSeparatedKeyValues(properties))
-                .executeMigrate();
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties));
+        LOG.info("create migrator success.");
+        migrator.executeMigrate();
 
-        LOG.info("Last step: rename " + targetTableId + " to " + sourceTableId);
-        catalog.renameTable(targetTableId, sourceTableId, false);
+        migrator.renameTable(false);
         return new String[] {"Success"};
     }
 }

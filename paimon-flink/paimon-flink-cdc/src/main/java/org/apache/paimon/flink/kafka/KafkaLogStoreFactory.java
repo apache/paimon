@@ -87,7 +87,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                             .createRuntimeDecoder(sourceContext, keyType);
         }
         DeserializationSchema<RowData> valueDeserializer =
-                LogStoreTableFactory.getValueDecodingFormat(helper)
+                LogStoreTableFactory.getValueDecodingFormat(helper, primaryKey.length != 0)
                         .createRuntimeDecoder(sourceContext, physicalType);
         Options options = toOptions(helper.getOptions());
         Long timestampMills = options.get(SCAN_TIMESTAMP_MILLIS);
@@ -127,7 +127,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                             .createRuntimeEncoder(sinkContext, keyType);
         }
         SerializationSchema<RowData> valueSerializer =
-                LogStoreTableFactory.getValueEncodingFormat(helper)
+                LogStoreTableFactory.getValueEncodingFormat(helper, primaryKey.length != 0)
                         .createRuntimeEncoder(sinkContext, physicalType);
         Options options = toOptions(helper.getOptions());
         return new KafkaLogSinkProvider(

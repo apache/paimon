@@ -176,6 +176,11 @@ public class BitmapFileIndexMeta {
                             public ThrowableConsumer visitDouble() {
                                 return o -> out.writeDouble((double) o);
                             }
+
+                            @Override
+                            public ThrowableConsumer visitBoolean() {
+                                return o -> out.writeBoolean((Boolean) o);
+                            }
                         });
 
         out.writeInt(rowCount);
@@ -234,6 +239,11 @@ public class BitmapFileIndexMeta {
                             public ThrowableSupplier visitDouble() {
                                 return in::readDouble;
                             }
+
+                            @Override
+                            public ThrowableSupplier visitBoolean() {
+                                return in::readBoolean;
+                            }
                         });
 
         rowCount = in.readInt();
@@ -275,6 +285,8 @@ public class BitmapFileIndexMeta {
 
         public abstract R visitDouble();
 
+        public abstract R visitBoolean();
+
         @Override
         public final R visit(CharType charType) {
             return visitBinaryString();
@@ -287,7 +299,7 @@ public class BitmapFileIndexMeta {
 
         @Override
         public final R visit(BooleanType booleanType) {
-            return visitByte();
+            return visitBoolean();
         }
 
         @Override

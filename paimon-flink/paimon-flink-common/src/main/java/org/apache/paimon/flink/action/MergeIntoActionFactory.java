@@ -116,22 +116,23 @@ public class MergeIntoActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  merge_into --warehouse <warehouse_path>\n"
-                        + "             --database <database_name>\n"
-                        + "             --table <target_table_name>\n"
-                        + "             [--target_as <target_table_alias>]\n"
-                        + "             [--source_sql <sql> ...]\n"
-                        + "             --source_table <source_table_name>\n"
-                        + "             --on <merge_condition>\n"
-                        + "             --merge_actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete>\n"
-                        + "             --matched_upsert_condition <matched_condition>\n"
-                        + "             --matched_upsert_set <upsert_changes>\n"
-                        + "             --matched_delete_condition <matched_condition>\n"
-                        + "             --not_matched_insert_condition <not_matched_condition>\n"
-                        + "             --not_matched_insert_values <insert_values>\n"
-                        + "             --not_matched_by_source_upsert_condition <not_matched_by_source_condition>\n"
-                        + "             --not_matched_by_source_upsert_set <not_matched_upsert_changes>\n"
-                        + "             --not_matched_by_source_delete_condition <not_matched_by_source_condition>");
+                "  merge_into \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <target_table_name> \\\n"
+                        + "[--target_as <target_table_alias>] \\\n"
+                        + "[--source_sql <sql> ...] \\\n"
+                        + "--source_table <source_table_name> \\\n"
+                        + "--on <merge_condition> \\\n"
+                        + "--merge_actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \\\n"
+                        + "--matched_upsert_condition <matched_condition> \\\n"
+                        + "--matched_upsert_set <upsert_changes> \\\n"
+                        + "--matched_delete_condition <matched_condition> \\\n"
+                        + "--not_matched_insert_condition <not_matched_condition> \\\n"
+                        + "--not_matched_insert_values <insert_values> \\\n"
+                        + "--not_matched_by_source_upsert_condition <not_matched_by_source_condition> \\\n"
+                        + "--not_matched_by_source_upsert_set <not_matched_upsert_changes> \\\n"
+                        + "--not_matched_by_source_delete_condition <not_matched_by_source_condition>");
 
         System.out.println("  matched_upsert_set format:");
         System.out.println(
@@ -185,12 +186,13 @@ public class MergeIntoActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  merge_into --path hdfs:///path/to/T\n"
-                        + "             --source_table S\n"
-                        + "             --on \"T.k = S.k\"\n"
-                        + "             --merge_actions matched-upsert\n"
-                        + "             --matched_upsert_condition \"T.v <> S.v\"\n"
-                        + "             --matched_upsert_set \"v = S.v\"");
+                "  merge_into \\\n"
+                        + "--path hdfs:///path/to/T \\\n"
+                        + "--source_table S \\\n"
+                        + "--on \"T.k = S.k\" \\\n"
+                        + "--merge_actions matched-upsert \\\n"
+                        + "--matched_upsert_condition \"T.v <> S.v\" \\\n"
+                        + "--matched_upsert_set \"v = S.v\"");
         System.out.println(
                 "  It will find matched rows of target table that meet condition (T.k = S.k), then update T.v with S.v where (T.v <> S.v).");
     }

@@ -71,11 +71,13 @@ public class MigrateFileActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  migrate_file --warehouse <warehouse_path> --source_type hive "
-                        + "--source_table <database.table_name> "
-                        + "--target_table <database.table_name> "
-                        + "--delete_origin true "
-                        + "[--catalog_conf <key>=<value] "
+                "  migrate_file \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--source_type hive \\\n"
+                        + "--source_table <database.table_name> \\\n"
+                        + "--target_table <database.table_name> \\\n"
+                        + "--delete_origin true \\\n"
+                        + "[--catalog_conf <key>=<value] \\\n"
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

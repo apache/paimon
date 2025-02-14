@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.sorter.TableSorter.OrderType;
 
 import java.util.Collections;
 import java.util.List;

@@ -339,6 +339,25 @@ This section introduce all available spark procedures about paimon.
          CALL sys.reset_consumer(table => 'default.T', consumerId => 'myid')
       </td>
    </tr>
+   <tr>
+      <td>clear_consumers</td>
+      <td>
+         To clear consumers. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>includingConsumers: consumers to be cleared.</li>
+            <li>excludingConsumers: consumers which not to be cleared.</li>
+      </td>
+      <td>
+         -- clear all consumers in the table<br/>
+         CALL sys.clear_consumers(table => 'default.T')<br/><br/>
+         -- clear some consumers in the table (accept regular expression)<br/>
+         CALL sys.clear_consumers(table => 'default.T', includingConsumers => 'myid.*')<br/><br/>
+         -- clear all consumers except excludingConsumers in the table (accept regular expression)<br/>
+         CALL sys.clear_consumers(table => 'default.T', includingConsumers => '', excludingConsumers => 'myid1.*')<br/><br/>
+         -- clear all consumers with includingConsumers and excludingConsumers (accept regular expression)<br/>
+         CALL sys.clear_consumers(table => 'default.T', includingConsumers => 'myid.*', excludingConsumers => 'myid1.*')
+      </td>
+   </tr>
     <tr>
       <td>mark_partition_done</td>
       <td>
@@ -353,5 +372,25 @@ This section introduce all available spark procedures about paimon.
          CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01;day=2024-07-02')
       </td>
    </tr>
-    </tbody>
+   <tr>
+      <td>refresh_object_table</td>
+      <td>
+         To refresh_object_table a object table. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.refresh_object_table('default.T')
+      </td>
+   </tr>
+   <tr>
+      <td>compact_manifest</td>
+      <td>
+         To compact_manifest the manifests. Arguments:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.compact_manifest(`table` => 'default.T')
+      </td>
+   </tr>
+   </tbody>
 </table>

@@ -350,7 +350,6 @@ public class HiveCatalog extends AbstractCatalog {
         Identifier tableIdentifier =
                 Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
         Table hmsTable = getHmsTable(tableIdentifier);
-        Path location = getTableLocation(tableIdentifier, hmsTable);
         TableSchema schema = loadTableSchema(tableIdentifier, hmsTable);
 
         if (!metastorePartitioned(schema)) {
@@ -359,27 +358,19 @@ public class HiveCatalog extends AbstractCatalog {
 
         int currentTime = (int) (System.currentTimeMillis() / 1000);
         StorageDescriptor sd = hmsTable.getSd();
-        String dataFilePath =
-                hmsTable.getParameters().containsKey(DATA_FILE_PATH_DIRECTORY.key())
-                        ? sd.getLocation()
-                                + "/"
-                                + hmsTable.getParameters().get(DATA_FILE_PATH_DIRECTORY.key())
-                        : sd.getLocation();
+        String dataFilePath = getDataFilePath(tableIdentifier, hmsTable);
         List<Partition> hivePartitions = new ArrayList<>();
         for (Map<String, String> partitionSpec : partitions) {
             Partition hivePartition = new Partition();
             StorageDescriptor newSd = new StorageDescriptor(sd);
-            newSd.setLocation(
-                    dataFilePath
-                            + "/"
-                            + PartitionPathUtils.generatePartitionPath(
-                                    new LinkedHashMap<>(partitionSpec)));
             hivePartition.setDbName(identifier.getDatabaseName());
             hivePartition.setTableName(identifier.getTableName());
             hivePartition.setValues(new ArrayList<>(partitionSpec.values()));
             hivePartition.setSd(newSd);
             hivePartition.setCreateTime(currentTime);
             hivePartition.setLastAccessTime(currentTime);
+            String partitionLocation = getPartitionLocation(dataFilePath, partitionSpec);
+            locationHelper.specifyPartitionLocation(hivePartition, partitionLocation);
             hivePartitions.add(hivePartition);
         }
         try {
@@ -400,6 +391,9 @@ public class HiveCatalog extends AbstractCatalog {
                     tagToPart
                             ? partitions
                             : removePartitionsExistsInOtherBranches(identifier, partitions);
+            Table hmsTable = getHmsTable(identifier);
+            boolean externalTable = isExternalTable(hmsTable);
+            String dataFilePath = getDataFilePath(identifier, hmsTable);
             for (Map<String, String> part : metaPartitions) {
                 List<String> partitionValues = new ArrayList<>(part.values());
                 try {
@@ -410,6 +404,21 @@ public class HiveCatalog extends AbstractCatalog {
                                             identifier.getTableName(),
                                             partitionValues,
                                             false));
+
+                    if (!externalTable) {
+                        Path partitionLocation = new Path(getPartitionLocation(dataFilePath, part));
+                        try {
+                            if (fileIO.exists(partitionLocation)) {
+                                fileIO.deleteDirectoryQuietly(partitionLocation);
+                            }
+                        } catch (Exception ee) {
+                            LOG.error(
+                                    "Delete directory[{}] fail for table {} partition.",
+                                    partitionLocation,
+                                    identifier,
+                                    ee);
+                        }
+                    }
                 } catch (NoSuchObjectException e) {
                     // do nothing if the partition not exists
                 } catch (Exception e) {
@@ -420,6 +429,21 @@ public class HiveCatalog extends AbstractCatalog {
         if (!tagToPart) {
             super.dropPartitions(identifier, partitions);
         }
+    }
+
+    private String getDataFilePath(Identifier tableIdentifier, Table hmsTable) {
+        String tableLocation = getTableLocation(tableIdentifier, hmsTable).toUri().toString();
+        return hmsTable.getParameters().containsKey(DATA_FILE_PATH_DIRECTORY.key())
+                ? tableLocation
+                        + Path.SEPARATOR
+                        + hmsTable.getParameters().get(DATA_FILE_PATH_DIRECTORY.key())
+                : tableLocation;
+    }
+
+    private String getPartitionLocation(String dataFilePath, Map<String, String> partitionSpec) {
+        return dataFilePath
+                + Path.SEPARATOR
+                + PartitionPathUtils.generatePartitionPath(new LinkedHashMap<>(partitionSpec));
     }
 
     @Override

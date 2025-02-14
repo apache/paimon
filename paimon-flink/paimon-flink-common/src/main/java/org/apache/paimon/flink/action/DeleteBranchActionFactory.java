@@ -50,8 +50,11 @@ public class DeleteBranchActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  delete_branch --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --branch_name <branch_name>");
+                "  delete_branch \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--branch_name <branch_name>");
         System.out.println();
     }
 }

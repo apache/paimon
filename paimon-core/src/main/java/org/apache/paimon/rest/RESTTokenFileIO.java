@@ -27,37 +27,31 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.ThreadUtils;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Scheduler;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
-import java.io.Serializable;
 import java.io.UncheckedIOException;
-import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
 
-    private static final Cache<Token, FileIO> FILE_IO_CACHE =
+    private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .expireAfterAccess(30, TimeUnit.MINUTES)
                     .maximumSize(100)
                     .removalListener(
-                            (ignored, value, cause) -> {
-                                if (value != null) {
-                                    ((FileIO) value).close();
-                                }
-                            })
+                            (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
                     .scheduler(
                             Scheduler.forScheduledExecutorService(
                                     Executors.newSingleThreadScheduledExecutor(
@@ -75,7 +69,7 @@ public class RESTTokenFileIO implements FileIO {
 
     // the latest token from REST Server, serializable in order to avoid loading token from the REST
     // Server again after serialization
-    private volatile Token token;
+    private volatile RESTToken token;
 
     public RESTTokenFileIO(
             RESTCatalogLoader catalogLoader,
@@ -143,13 +137,7 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     private FileIO fileIO() throws IOException {
-        if (shouldRefresh()) {
-            synchronized (this) {
-                if (shouldRefresh()) {
-                    refreshToken();
-                }
-            }
-        }
+        tryToRefreshToken();
 
         FileIO fileIO = FILE_IO_CACHE.getIfPresent(token);
         if (fileIO != null) {
@@ -164,7 +152,8 @@ public class RESTTokenFileIO implements FileIO {
 
             CatalogContext context = catalogLoader.context();
             Options options = context.options();
-            options = new Options(RESTUtil.merge(options.toMap(), token.token));
+            options = new Options(RESTUtil.merge(options.toMap(), token.token()));
+            options.set(FILE_IO_ALLOW_CACHE, false);
             context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
             try {
                 fileIO = FileIO.get(path, context);
@@ -176,8 +165,18 @@ public class RESTTokenFileIO implements FileIO {
         }
     }
 
+    private void tryToRefreshToken() {
+        if (shouldRefresh()) {
+            synchronized (this) {
+                if (shouldRefresh()) {
+                    refreshToken();
+                }
+            }
+        }
+    }
+
     private boolean shouldRefresh() {
-        return token == null || System.currentTimeMillis() > token.expireAtMillis;
+        return token == null || System.currentTimeMillis() > token.expireAtMillis();
     }
 
     private void refreshToken() {
@@ -192,39 +191,15 @@ public class RESTTokenFileIO implements FileIO {
             }
         }
 
-        token = new Token(response.getToken(), response.getExpiresAtMillis());
+        token = new RESTToken(response.getToken(), response.getExpiresAtMillis());
     }
 
-    private static class Token implements Serializable {
-
-        private static final long serialVersionUID = 1L;
-
-        private final Map<String, String> token;
-        private final long expireAtMillis;
-
-        /** Cache the hash code. */
-        @Nullable private Integer hash;
-
-        private Token(Map<String, String> token, long expireAtMillis) {
-            this.token = token;
-            this.expireAtMillis = expireAtMillis;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            Token token1 = (Token) o;
-            return expireAtMillis == token1.expireAtMillis && Objects.equals(token, token1.token);
-        }
-
-        @Override
-        public int hashCode() {
-            if (hash == null) {
-                hash = Objects.hash(token, expireAtMillis);
-            }
-            return hash;
-        }
+    /**
+     * Public interface to get valid token, this can be invoked by native engines to get the token
+     * and use own File System.
+     */
+    public RESTToken validToken() {
+        tryToRefreshToken();
+        return token;
     }
 }

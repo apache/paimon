@@ -52,8 +52,11 @@ public class RollbackToTimestampActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  rollback_to --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --timestamp <timestamp_string>");
+                "  rollback_to \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "--timestamp <timestamp_string>");
         System.out.println("  <timestamp_string> can be a long value representing a timestamp.");
         System.out.println();
     }

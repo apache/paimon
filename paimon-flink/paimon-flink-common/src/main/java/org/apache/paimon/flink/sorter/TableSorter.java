@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.flink.action.SortCompactAction;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -81,36 +82,6 @@ public abstract class TableSorter {
                 return new HilbertSorter(batchTEnv, origin, fileStoreTable, sortInfo);
             default:
                 throw new IllegalArgumentException("cannot match order type: " + sortStrategy);
-        }
-    }
-
-    /** The order type of table sort. */
-    public enum OrderType {
-        ORDER("order"),
-        ZORDER("zorder"),
-        HILBERT("hilbert");
-
-        private final String orderType;
-
-        OrderType(String orderType) {
-            this.orderType = orderType;
-        }
-
-        @Override
-        public String toString() {
-            return "order type: " + orderType;
-        }
-
-        public static OrderType of(String orderType) {
-            if (ORDER.orderType.equalsIgnoreCase(orderType)) {
-                return ORDER;
-            } else if (ZORDER.orderType.equalsIgnoreCase(orderType)) {
-                return ZORDER;
-            } else if (HILBERT.orderType.equalsIgnoreCase(orderType)) {
-                return HILBERT;
-            }
-
-            throw new IllegalArgumentException("cannot match type: " + orderType + " for ordering");
         }
     }
 }

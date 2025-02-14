@@ -58,6 +58,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
@@ -107,6 +108,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
 import static org.apache.paimon.CoreOptions.CONSUMER_IGNORE_PROGRESS;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
@@ -1650,6 +1652,60 @@ public abstract class FileStoreTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
                         "3|30|300|binary|varbinary|mapKey:mapVal|multiset",
                         "4|40|400|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @Test
+    public void testDataSplitNotIncludeDvFilesWhenStreamingRead() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        Map<String, String> options = new HashMap<>();
+        options.put(DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(WRITE_ONLY.key(), "true");
+        table = table.copy(options);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = 0; i < 10; i++) {
+                write.write(rowData(i, 10 * i, 100L * i));
+                commit.commit(i, write.prepareCommit(false, i));
+            }
+        }
+
+        List<Split> splits =
+                toSplits(table.newSnapshotReader().withMode(ScanMode.DELTA).read().dataSplits());
+
+        for (Split split : splits) {
+            DataSplit dataSplit = (DataSplit) split;
+            Assertions.assertThat(dataSplit.deletionFiles().isPresent()).isFalse();
+        }
+    }
+
+    @Test
+    public void testDataSplitNotIncludeDvFilesWhenStreamingReadChanges() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        Map<String, String> options = new HashMap<>();
+        options.put(DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(WRITE_ONLY.key(), "true");
+        table = table.copy(options);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = 0; i < 10; i++) {
+                write.write(rowData(i, 10 * i, 100L * i));
+                commit.commit(i, write.prepareCommit(false, i));
+            }
+        }
+
+        List<Split> splits =
+                toSplits(
+                        table.newSnapshotReader()
+                                .withMode(ScanMode.DELTA)
+                                .readChanges()
+                                .dataSplits());
+
+        for (Split split : splits) {
+            DataSplit dataSplit = (DataSplit) split;
+            Assertions.assertThat(dataSplit.deletionFiles().isPresent()).isFalse();
+        }
     }
 
     protected List<String> getResult(

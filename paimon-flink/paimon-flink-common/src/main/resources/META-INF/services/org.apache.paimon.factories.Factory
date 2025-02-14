@@ -44,6 +44,7 @@ org.apache.paimon.flink.action.RepairActionFactory
 org.apache.paimon.flink.action.RewriteFileIndexActionFactory
 org.apache.paimon.flink.action.ExpireSnapshotsActionFactory
 org.apache.paimon.flink.action.RemoveUnexistingFilesActionFactory
+org.apache.paimon.flink.action.ClearConsumerActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
@@ -84,3 +85,5 @@ org.apache.paimon.flink.procedure.CloneProcedure
 org.apache.paimon.flink.procedure.CompactManifestProcedure
 org.apache.paimon.flink.procedure.RefreshObjectTableProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingFilesProcedure
+org.apache.paimon.flink.procedure.ClearConsumersProcedure
+org.apache.paimon.flink.procedure.MigrateIcebergTableProcedure

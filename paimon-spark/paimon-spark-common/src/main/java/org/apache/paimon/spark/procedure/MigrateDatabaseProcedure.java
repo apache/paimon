@@ -31,6 +31,7 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.unsafe.types.UTF8String;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -117,9 +118,9 @@ public class MigrateDatabaseProcedure extends BaseProcedure {
         String retStr =
                 String.format(
                         "migrate database is finished, success cnt: %s , failed cnt: %s",
-                        String.valueOf(successCount), String.valueOf(errorCount));
+                        successCount, errorCount);
 
-        return new InternalRow[] {newInternalRow(retStr)};
+        return new InternalRow[] {newInternalRow(UTF8String.fromString(retStr))};
     }
 
     public static Map<String, String> mapDataToHashMap(MapData mapData) {
