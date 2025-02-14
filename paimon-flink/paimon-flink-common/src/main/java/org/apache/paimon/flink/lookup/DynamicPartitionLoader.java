@@ -21,107 +21,46 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
-import java.io.Serializable;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION;
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** Dynamic partition for lookup. */
-public class DynamicPartitionLoader implements Serializable {
+public class DynamicPartitionLoader extends PartitionLoader {
 
     private static final Logger LOG = LoggerFactory.getLogger(DynamicPartitionLoader.class);
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
-    private static final String MAX_PT = "max_pt()";
-
-    private static final String MAX_TWO_PT = "max_two_pt()";
-
-    private final Table table;
     private final Duration refreshInterval;
     private final int maxPartitionNum;
-    private final RowDataToObjectArrayConverter partitionConverter;
 
-    private Comparator<InternalRow> comparator;
+    private transient Comparator<InternalRow> comparator;
+    private transient LocalDateTime lastRefresh;
 
-    private LocalDateTime lastRefresh;
-    private List<BinaryRow> partitions;
-
-    private DynamicPartitionLoader(Table table, Duration refreshInterval, int maxPartitionNum) {
-        this.table = table;
+    DynamicPartitionLoader(FileStoreTable table, Duration refreshInterval, int maxPartitionNum) {
+        super(table);
         this.refreshInterval = refreshInterval;
         this.maxPartitionNum = maxPartitionNum;
-        this.partitionConverter =
-                new RowDataToObjectArrayConverter(table.rowType().project(table.partitionKeys()));
     }
 
+    @Override
     public void open() {
+        super.open();
         RowType partitionType = table.rowType().project(table.partitionKeys());
         this.comparator = CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
-        this.partitions = Collections.emptyList();
     }
 
-    public void addPartitionKeysTo(List<String> joinKeys, List<String> projectFields) {
-        List<String> partitionKeys = table.partitionKeys();
-        checkArgument(joinKeys.stream().noneMatch(partitionKeys::contains));
-        joinKeys.addAll(partitionKeys);
-
-        partitionKeys.stream().filter(k -> !projectFields.contains(k)).forEach(projectFields::add);
-    }
-
-    public List<BinaryRow> partitions() {
-        return partitions;
-    }
-
-    public Predicate createSpecificPartFilter() {
-        Predicate partFilter = null;
-        for (BinaryRow partition : partitions) {
-            if (partFilter == null) {
-                partFilter = createSinglePartFilter(partition);
-            } else {
-                partFilter = PredicateBuilder.or(partFilter, createSinglePartFilter(partition));
-            }
-        }
-        return partFilter;
-    }
-
-    private Predicate createSinglePartFilter(BinaryRow partition) {
-        RowType rowType = table.rowType();
-        List<String> partitionKeys = table.partitionKeys();
-        Object[] partitionSpec = partitionConverter.convert(partition);
-        Map<String, Object> partitionMap = new HashMap<>(partitionSpec.length);
-        for (int i = 0; i < partitionSpec.length; i++) {
-            partitionMap.put(partitionKeys.get(i), partitionSpec[i]);
-        }
-
-        // create partition predicate base on rowType instead of partitionType
-        return createPartitionPredicate(rowType, partitionMap);
-    }
-
-    /** @return true if partition changed. */
+    @Override
     public boolean checkRefresh() {
         if (lastRefresh != null
                 && !lastRefresh.plus(refreshInterval).isBefore(LocalDateTime.now())) {
@@ -186,36 +125,5 @@ public class DynamicPartitionLoader implements Serializable {
         } else {
             return newPartitions.subList(0, maxPartitionNum);
         }
-    }
-
-    @Nullable
-    public static DynamicPartitionLoader of(Table table) {
-        Options options = Options.fromMap(table.options());
-        String dynamicPartition = options.get(LOOKUP_DYNAMIC_PARTITION);
-        if (dynamicPartition == null) {
-            return null;
-        }
-
-        checkArgument(
-                !table.partitionKeys().isEmpty(),
-                "{} is not supported for non-partitioned table.",
-                LOOKUP_DYNAMIC_PARTITION);
-
-        int maxPartitionNum;
-        switch (dynamicPartition.toLowerCase()) {
-            case MAX_PT:
-                maxPartitionNum = 1;
-                break;
-            case MAX_TWO_PT:
-                maxPartitionNum = 2;
-                break;
-            default:
-                throw new UnsupportedOperationException(
-                        "Unsupported dynamic partition pattern: " + dynamicPartition);
-        }
-
-        Duration refresh =
-                options.get(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL);
-        return new DynamicPartitionLoader(table, refresh, maxPartitionNum);
     }
 }

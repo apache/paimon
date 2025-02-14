@@ -623,6 +623,22 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         validateCount1PushDown(sql);
     }
 
+    private void validateCount1PushDown(String sql) {
+        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        assertThat(transformation.getDescription()).contains("Count1AggFunction");
+    }
+
+    private void validateCount1NotPushDown(String sql) {
+        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
+        while (!transformation.getInputs().isEmpty()) {
+            transformation = transformation.getInputs().get(0);
+        }
+        assertThat(transformation.getDescription()).doesNotContain("Count1AggFunction");
+    }
+
     @Test
     public void testParquetRowDecimalAndTimestamp() {
         sql(
@@ -702,19 +718,15 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM test")).containsExactly(Row.of(1, "A3", 1, 0));
     }
 
-    private void validateCount1PushDown(String sql) {
-        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
-        while (!transformation.getInputs().isEmpty()) {
-            transformation = transformation.getInputs().get(0);
-        }
-        assertThat(transformation.getDescription()).contains("Count1AggFunction");
-    }
-
-    private void validateCount1NotPushDown(String sql) {
-        Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
-        while (!transformation.getInputs().isEmpty()) {
-            transformation = transformation.getInputs().get(0);
-        }
-        assertThat(transformation.getDescription()).doesNotContain("Count1AggFunction");
+    @Test
+    public void testScanWithSpecifiedPartitions() {
+        sql("CREATE TABLE P (pt STRING, id INT, v INT) PARTITIONED BY (pt)");
+        sql("CREATE TABLE Q (id INT)");
+        sql(
+                "INSERT INTO P VALUES ('a', 1, 10), ('a', 2, 20), ('b', 1, 11), ('b', 3, 31), ('c', 1, 12), ('c', 2, 22), ('c', 3, 32)");
+        sql("INSERT INTO Q VALUES (1), (2)");
+        String query =
+                "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'pt=b;pt=c') */ ON Q.id = P.id ORDER BY Q.id, P.v";
+        assertThat(sql(query)).containsExactly(Row.of(1, 11), Row.of(1, 12), Row.of(2, 22));
     }
 }
