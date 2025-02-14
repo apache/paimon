@@ -20,23 +20,34 @@ package org.apache.paimon.fileindex.bitmapindex;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fileindex.FileIndexReader;
+import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
+import org.apache.paimon.fileindex.bitmap.BitmapFileIndexMetaV2;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
-import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import org.assertj.core.api.Assertions;
+import org.apache.commons.io.FileUtils;
+import org.junit.Rule;
 import org.junit.jupiter.api.Test;
+import org.junit.rules.TemporaryFolder;
 
+import java.io.File;
 import java.util.Arrays;
+import java.util.function.Consumer;
 
 /** test for {@link BitmapFileIndex}. */
 public class TestBitmapFileIndex {
+
+    @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Test
     public void testFlip() {
@@ -46,123 +57,187 @@ public class TestBitmapFileIndex {
     }
 
     @Test
-    public void testBitmapIndex1() {
-        VarCharType dataType = new VarCharType();
-        FieldRef fieldRef = new FieldRef(0, "", dataType);
-        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(dataType, null);
-        FileIndexWriter writer = bitmapFileIndex.createWriter();
-        Object[] arr = {
-            BinaryString.fromString("a"),
-            null,
-            BinaryString.fromString("b"),
-            null,
-            BinaryString.fromString("a"),
-        };
-        for (Object o : arr) {
-            writer.write(o);
-        }
-        byte[] bytes = writer.serializedBytes();
-        ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
-        FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
-
-        BitmapIndexResult result1 =
-                (BitmapIndexResult) reader.visitEqual(fieldRef, BinaryString.fromString("a"));
-        assert result1.get().equals(RoaringBitmap32.bitmapOf(0, 4));
-
-        BitmapIndexResult result2 =
-                (BitmapIndexResult) reader.visitEqual(fieldRef, BinaryString.fromString("b"));
-        assert result2.get().equals(RoaringBitmap32.bitmapOf(2));
-
-        BitmapIndexResult result3 = (BitmapIndexResult) reader.visitIsNull(fieldRef);
-        assert result3.get().equals(RoaringBitmap32.bitmapOf(1, 3));
-
-        BitmapIndexResult result4 = (BitmapIndexResult) result1.and(result2);
-        assert result4.get().equals(RoaringBitmap32.bitmapOf());
-
-        BitmapIndexResult result5 = (BitmapIndexResult) result1.or(result2);
-        assert result5.get().equals(RoaringBitmap32.bitmapOf(0, 2, 4));
+    public void testComparator() {
+        assert BitmapFileIndexMetaV2.getComparator(new VarCharType())
+                        .compare(BinaryString.fromString("a"), BinaryString.fromString("b"))
+                < 0;
+        assert BitmapFileIndexMetaV2.getComparator(new VarCharType())
+                        .compare(BinaryString.fromString("a"), BinaryString.fromString("a"))
+                == 0;
+        assert BitmapFileIndexMetaV2.getComparator(new VarCharType())
+                        .compare(BinaryString.fromString("c"), BinaryString.fromString("b"))
+                > 0;
+        assert BitmapFileIndexMetaV2.getComparator(new IntType()).compare(1, 2) < 0;
+        assert BitmapFileIndexMetaV2.getComparator(new IntType()).compare(2, 1) > 0;
     }
 
     @Test
-    public void testBitmapIndex2() {
-        IntType dataType = new IntType();
-        FieldRef fieldRef = new FieldRef(0, "", dataType);
-        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(dataType, null);
-        FileIndexWriter writer = bitmapFileIndex.createWriter();
-        Object[] arr = {0, 1, null};
-        for (Object o : arr) {
-            writer.write(o);
-        }
-        byte[] bytes = writer.serializedBytes();
-        ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
-        FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
-
-        BitmapIndexResult result1 = (BitmapIndexResult) reader.visitEqual(fieldRef, 1);
-        assert result1.get().equals(RoaringBitmap32.bitmapOf(1));
-
-        BitmapIndexResult result2 = (BitmapIndexResult) reader.visitIsNull(fieldRef);
-        assert result2.get().equals(RoaringBitmap32.bitmapOf(2));
-
-        BitmapIndexResult result3 = (BitmapIndexResult) reader.visitIsNotNull(fieldRef);
-        assert result3.get().equals(RoaringBitmap32.bitmapOf(0, 1));
-
-        BitmapIndexResult result4 =
-                (BitmapIndexResult) reader.visitNotIn(fieldRef, Arrays.asList(1, 2));
-        assert result4.get().equals(RoaringBitmap32.bitmapOf(0, 2));
-
-        BitmapIndexResult result5 =
-                (BitmapIndexResult) reader.visitNotIn(fieldRef, Arrays.asList(1, 0));
-        assert result5.get().equals(RoaringBitmap32.bitmapOf(2));
+    public void testMemorySize() {
+        assert MemorySize.parse("16kb").getBytes() == 16 * 1024;
+        assert MemorySize.parse("16KB").getBytes() == 16 * 1024;
+        assert MemorySize.parse("16 kb").getBytes() == 16 * 1024;
+        assert MemorySize.parse("16 KB").getBytes() == 16 * 1024;
+        assert MemorySize.parse("16384").getBytes() == 16 * 1024;
     }
 
     @Test
-    public void testBitmapIndex3() {
-
-        IntType intType = new IntType();
-        FieldRef fieldRef = new FieldRef(0, "", intType);
-        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(intType, null);
-        FileIndexWriter writer = bitmapFileIndex.createWriter();
-
-        // test only one null-value
-        Object[] arr = {1, 2, 1, 2, 1, 3, null};
-
-        for (Object o : arr) {
-            writer.write(o);
-        }
-        byte[] bytes = writer.serializedBytes();
-        ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
-        FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
-
-        BitmapIndexResult result1 = (BitmapIndexResult) reader.visitEqual(fieldRef, 1);
-        assert result1.get().equals(RoaringBitmap32.bitmapOf(0, 2, 4));
-
-        // test read singleton bitmap
-        BitmapIndexResult result2 = (BitmapIndexResult) reader.visitIsNull(fieldRef);
-        assert result2.get().equals(RoaringBitmap32.bitmapOf(6));
+    public void testV1() throws Exception {
+        testIntType(BitmapFileIndex.VERSION_1);
+        testStringType(BitmapFileIndex.VERSION_1);
+        testBooleanType(BitmapFileIndex.VERSION_1);
+        testHighCardinality(BitmapFileIndex.VERSION_1, 1000000, 100000, null);
     }
 
     @Test
-    void testBitmapIndexForBooleanType() {
+    public void testV2() throws Exception {
+        testIntType(BitmapFileIndex.VERSION_2);
+        testStringType(BitmapFileIndex.VERSION_2);
+        testBooleanType(BitmapFileIndex.VERSION_2);
+        testHighCardinality(BitmapFileIndex.VERSION_2, 1000000, 100000, null);
+    }
 
-        BooleanType booleanType = new BooleanType();
-        FieldRef fieldRef = new FieldRef(0, "", booleanType);
-        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(booleanType, null);
-        FileIndexWriter writer = bitmapFileIndex.createWriter();
-
-        Object[] arr = {Boolean.TRUE, Boolean.FALSE, Boolean.TRUE, Boolean.FALSE, null};
-
-        for (Object o : arr) {
-            writer.write(o);
+    private FileIndexReader createTestReaderOnWriter(
+            int writerVersion,
+            Integer indexBlockSize,
+            DataType dataType,
+            Consumer<FileIndexWriter> consumer)
+            throws Exception {
+        Options options = new Options();
+        options.setInteger(BitmapFileIndex.VERSION, writerVersion);
+        if (indexBlockSize != null) {
+            options.setInteger(BitmapFileIndex.INDEX_BLOCK_SIZE, indexBlockSize);
         }
-        byte[] bytes = writer.serializedBytes();
-        ByteArraySeekableStream seekableStream = new ByteArraySeekableStream(bytes);
-        FileIndexReader reader = bitmapFileIndex.createReader(seekableStream, 0, bytes.length);
+        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(dataType, options);
+        FileIndexWriter writer;
+        writer = bitmapFileIndex.createWriter();
+        consumer.accept(writer);
+        folder.create();
+        File file = folder.newFile("f1");
+        byte[] data = writer.serializedBytes();
+        FileUtils.writeByteArrayToFile(file, data);
+        LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
+                new LocalFileIO.LocalSeekableInputStream(file);
+        return bitmapFileIndex.createReader(localSeekableInputStream, 0, 0);
+    }
 
-        BitmapIndexResult searchTrueResult =
-                (BitmapIndexResult) reader.visitEqual(fieldRef, Boolean.TRUE);
-        Assertions.assertThat(searchTrueResult.get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 2));
+    private void testStringType(int version) throws Exception {
+        FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
+        BinaryString a = BinaryString.fromString("a");
+        BinaryString b = BinaryString.fromString("b");
+        Object[] dataColumn = {a, null, b, null, a};
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        version,
+                        null,
+                        DataTypes.STRING(),
+                        writer -> {
+                            for (Object o : dataColumn) {
+                                writer.write(o);
+                            }
+                        });
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, a))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0, 4));
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, b))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(2));
+        assert ((BitmapIndexResult) reader.visitIsNull(fieldRef))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(1, 3));
+        assert ((BitmapIndexResult) reader.visitIn(fieldRef, Arrays.asList(a, b)))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0, 2, 4));
+        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c")).remain();
+    }
 
-        BitmapIndexResult searchNullResult = (BitmapIndexResult) reader.visitIsNull(fieldRef);
-        Assertions.assertThat(searchNullResult.get()).isEqualTo(RoaringBitmap32.bitmapOf(4));
+    private void testIntType(int version) throws Exception {
+        FieldRef fieldRef = new FieldRef(0, "", DataTypes.INT());
+        Object[] dataColumn = {0, 1, null};
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        version,
+                        null,
+                        DataTypes.INT(),
+                        writer -> {
+                            for (Object o : dataColumn) {
+                                writer.write(o);
+                            }
+                        });
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, 0))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0));
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, 1))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(1));
+        assert ((BitmapIndexResult) reader.visitIsNull(fieldRef))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(2));
+        assert ((BitmapIndexResult) reader.visitIn(fieldRef, Arrays.asList(0, 1, 2)))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0, 1));
+        assert !reader.visitEqual(fieldRef, 2).remain();
+    }
+
+    void testBooleanType(int version) throws Exception {
+        FieldRef fieldRef = new FieldRef(0, "", DataTypes.BOOLEAN());
+        Object[] dataColumn = {Boolean.TRUE, Boolean.FALSE, Boolean.TRUE, Boolean.FALSE, null};
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        version,
+                        null,
+                        DataTypes.BOOLEAN(),
+                        writer -> {
+                            for (Object o : dataColumn) {
+                                writer.write(o);
+                            }
+                        });
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, Boolean.TRUE))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0, 2));
+        assert ((BitmapIndexResult) reader.visitIsNull(fieldRef))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(4));
+    }
+
+    private void testHighCardinality(
+            int version, int rowCount, int approxCardinality, Integer secondaryBlockSize)
+            throws Exception {
+        FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
+        RoaringBitmap32 middleBm = new RoaringBitmap32();
+        RoaringBitmap32 nullBm = new RoaringBitmap32();
+        long time1 = System.currentTimeMillis();
+        String prefix = "ssssssssss";
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        version,
+                        secondaryBlockSize,
+                        DataTypes.STRING(),
+                        writer -> {
+                            for (int i = 0; i < rowCount; i++) {
+
+                                int sid = (int) (Math.random() * approxCardinality);
+                                if (sid == approxCardinality / 2) {
+                                    middleBm.add(i);
+                                } else if (Math.random() < 0.01) {
+                                    nullBm.add(i);
+                                    writer.write(null);
+                                    continue;
+                                }
+                                writer.write(BinaryString.fromString(prefix + sid));
+                            }
+                        });
+        System.out.println("write time: " + (System.currentTimeMillis() - time1));
+        long time2 = System.currentTimeMillis();
+        FileIndexResult result =
+                reader.visitEqual(
+                        fieldRef, BinaryString.fromString(prefix + (approxCardinality / 2)));
+        RoaringBitmap32 resultBm = ((BitmapIndexResult) result).get();
+        System.out.println("read time: " + (System.currentTimeMillis() - time2));
+        assert resultBm.equals(middleBm);
+        long time3 = System.currentTimeMillis();
+        FileIndexResult resultNull = reader.visitIsNull(fieldRef);
+        RoaringBitmap32 resultNullBm = ((BitmapIndexResult) resultNull).get();
+        System.out.println("read null bitmap time: " + (System.currentTimeMillis() - time3));
+        assert resultNullBm.equals(nullBm);
     }
 }
