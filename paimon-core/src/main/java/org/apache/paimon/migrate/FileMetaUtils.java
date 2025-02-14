@@ -129,6 +129,47 @@ public class FileMetaUtils {
         }
     }
 
+    public static DataFileMeta constructFileMeta(
+            String format,
+            FileStatus fileStatus,
+            FileIO fileIO,
+            Table table,
+            Path dir,
+            Map<Path, Path> rollback,
+            long schemaId) {
+
+        try {
+            RowType rowTypeWithSchemaId =
+                    ((FileStoreTable) table).schemaManager().schema(schemaId).logicalRowType();
+            SimpleColStatsCollector.Factory[] factories =
+                    StatsCollectorFactories.createStatsFactories(
+                            ((FileStoreTable) table).coreOptions(),
+                            rowTypeWithSchemaId.getFieldNames());
+
+            SimpleStatsExtractor simpleStatsExtractor =
+                    FileFormat.fromIdentifier(
+                                    format,
+                                    ((FileStoreTable) table).coreOptions().toConfiguration())
+                            .createStatsExtractor(rowTypeWithSchemaId, factories)
+                            .orElseThrow(
+                                    () ->
+                                            new RuntimeException(
+                                                    "Can't get table stats extractor for format "
+                                                            + format));
+            Path newPath = renameFile(fileIO, fileStatus.getPath(), dir, format, rollback);
+            return constructFileMeta(
+                    newPath.getName(),
+                    fileStatus.getLen(),
+                    newPath,
+                    simpleStatsExtractor,
+                    fileIO,
+                    table,
+                    schemaId);
+        } catch (IOException e) {
+            throw new RuntimeException("error when construct file meta", e);
+        }
+    }
+
     // -----------------------------private method---------------------------------------------
 
     private static Path renameFile(
@@ -152,7 +193,29 @@ public class FileMetaUtils {
             FileIO fileIO,
             Table table)
             throws IOException {
-        SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(table.rowType());
+        return constructFileMeta(
+                fileName,
+                fileSize,
+                path,
+                simpleStatsExtractor,
+                fileIO,
+                table,
+                ((FileStoreTable) table).schema().id());
+    }
+
+    private static DataFileMeta constructFileMeta(
+            String fileName,
+            long fileSize,
+            Path path,
+            SimpleStatsExtractor simpleStatsExtractor,
+            FileIO fileIO,
+            Table table,
+            long schemaId)
+            throws IOException {
+        RowType rowTypeWithSchemaId =
+                ((FileStoreTable) table).schemaManager().schema(schemaId).logicalRowType();
+
+        SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(rowTypeWithSchemaId);
 
         Pair<SimpleColStats[], SimpleStatsExtractor.FileInfo> fileInfo =
                 simpleStatsExtractor.extractWithFileInfo(fileIO, path);
@@ -165,7 +228,7 @@ public class FileMetaUtils {
                 stats,
                 0,
                 0,
-                ((FileStoreTable) table).schema().id(),
+                schemaId,
                 Collections.emptyList(),
                 null,
                 FileSource.APPEND,
