@@ -38,7 +38,9 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+
 
 /**
  * Provides a base implementation for parsing messages of various formats into {@link
@@ -119,7 +121,7 @@ public abstract class AbstractRecordParser
         computedColumns.forEach(
                 computedColumn -> {
                     String argVal;
-                    if (computedColumn.fieldReference().equals(SpecialFields.VALUE_KIND.name())) {
+                    if (Objects.equals(computedColumn.fieldReference(), SpecialFields.VALUE_KIND.name())) {
                         argVal = rowKind.shortString();
                     } else {
                         argVal = rowData.get(computedColumn.fieldReference());

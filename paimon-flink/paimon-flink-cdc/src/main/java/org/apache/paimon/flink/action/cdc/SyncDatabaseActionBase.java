@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -59,7 +60,6 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected String includingTables = ".*";
     protected List<String> partitionKeys = new ArrayList<>();
     protected List<String> primaryKeys = new ArrayList<>();
-    protected boolean auditTimeEnabled = false;
     protected List<String> computedColumnArgs = new ArrayList<>();
     protected List<ComputedColumn> computedColumns = new ArrayList<>();
     @Nullable protected String excludingTables;
@@ -250,6 +250,6 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     @Override
     protected void beforeBuildingSourceSink() throws Exception {
         computedColumns =
-                buildComputedColumns(computedColumnArgs, Arrays.asList(SpecialFields.VALUE_KIND));
+                buildComputedColumns(computedColumnArgs, Collections.singletonList(SpecialFields.VALUE_KIND));
     }
 }
