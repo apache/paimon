@@ -38,7 +38,7 @@ import scala.collection.JavaConverters._
 trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   self: SparkTable =>
 
-  private lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
+  lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
 
   override lazy val partitionSchema: StructType = SparkTypeUtils.fromPaimonRowType(partitionRowType)
 
