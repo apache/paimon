@@ -119,6 +119,45 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Sink: append mode to table") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b STRING)
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                       |""".stripMargin)
+
+          val inputData = MemoryStream[(Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .format("paimon")
+            .toTable("T")
+
+          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+          try {
+            inputData.addData((1, "a"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Nil)
+
+            inputData.addData((2, "b"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+            inputData.addData((2, "b2"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
   test("Paimon Sink: complete mode") {
     failAfter(streamingTimeout) {
       withTempDir {

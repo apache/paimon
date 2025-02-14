@@ -24,7 +24,10 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{DataTable, FileStoreTable, KnownSplitsTable, Table}
 import org.apache.paimon.utils.StringUtils
 
-import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}
+import org.apache.spark.sql.PaimonUtils.V2TableWithV1Fallback
+import org.apache.spark.sql.catalyst.TableIdentifier
+import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable}
+import org.apache.spark.sql.connector.catalog._
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
@@ -41,7 +44,8 @@ case class SparkTable(table: Table)
   with SupportsRead
   with SupportsWrite
   with SupportsMetadataColumns
-  with PaimonPartitionManagement {
+  with PaimonPartitionManagement
+  with V2TableWithV1Fallback {
 
   def getTable: Table = table
 
@@ -113,5 +117,30 @@ case class SparkTable(table: Table)
 
   override def toString: String = {
     s"${table.getClass.getSimpleName}[${table.fullName()}]"
+  }
+
+  // Only used by streaming write
+  override def v1Table: CatalogTable = {
+    table match {
+      case table: FileStoreTable =>
+        val ident = table.catalogEnvironment().identifier()
+        val props = properties.asScala.toMap
+        CatalogTable(
+          identifier = TableIdentifier(ident.getTableName, Some(ident.getDatabaseName)),
+          tableType = null,
+          storage = CatalogStorageFormat(
+            locationUri = Some(table.location().toUri),
+            None,
+            None,
+            None,
+            compressed = false,
+            properties = properties.asScala.toMap),
+          owner = props.getOrElse(TableCatalog.PROP_OWNER, ""),
+          schema = schema,
+          provider = Some(SparkSource.NAME)
+        )
+      case _ =>
+        throw new UnsupportedOperationException()
+    }
   }
 }

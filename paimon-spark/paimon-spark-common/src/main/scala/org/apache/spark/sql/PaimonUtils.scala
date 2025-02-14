@@ -21,6 +21,7 @@ package org.apache.spark.sql
 import org.apache.spark.executor.OutputMetrics
 import org.apache.spark.rdd.InputFileBlockHolder
 import org.apache.spark.sql.catalyst.analysis.Resolver
+import org.apache.spark.sql.catalyst.catalog.CatalogTable
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -124,5 +125,9 @@ object PaimonUtils {
 
   def sameType(left: DataType, right: DataType): Boolean = {
     left.sameType(right)
+  }
+
+  trait V2TableWithV1Fallback extends org.apache.spark.sql.connector.catalog.V2TableWithV1Fallback {
+    def v1Table: CatalogTable
   }
 }
