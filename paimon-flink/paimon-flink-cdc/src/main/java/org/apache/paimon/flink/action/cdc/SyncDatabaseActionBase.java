@@ -231,6 +231,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 .withInput(input)
                 .withParserFactory(parserFactory)
                 .withCatalogLoader(catalogLoader())
+                .withTypeMapping(typeMapping)
                 .withDatabase(database)
                 .withTables(tables)
                 .withMode(mode)
