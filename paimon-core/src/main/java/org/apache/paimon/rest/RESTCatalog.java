@@ -135,10 +135,8 @@ public class RESTCatalog implements Catalog {
                             client.get(
                                             ResourcePaths.V1_CONFIG,
                                             ConfigResponse.class,
-                                            p ->
-                                                    catalogAuth
-                                                            .getAuthProvider()
-                                                            .header(Collections.emptyMap(), p))
+                                            new RestAuthFunction(
+                                                    Collections.emptyMap(), catalogAuth))
                                     .merge(context.options().toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }

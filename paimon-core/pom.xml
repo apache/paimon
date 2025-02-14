@@ -70,11 +70,6 @@ under the License.
             <artifactId>okhttp</artifactId>
             <version>${okhttp.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.squareup.okio</groupId>
-            <artifactId>okio</artifactId>
-            <version>${okio.version}</version>
-        </dependency>
 
         <!-- test dependencies -->
 
@@ -276,7 +271,6 @@ under the License.
                                 <includes combine.children="append">
                                     <include>com.squareup.okhttp3:okhttp</include>
                                     <include>com.squareup.okio:okio-jvm</include>
-                                    <include>com.squareup.okio:okio</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
