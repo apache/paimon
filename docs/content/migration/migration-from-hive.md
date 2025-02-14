@@ -74,7 +74,7 @@ If your flink version is below 1.17, you can use flink action to achieve this:
 ```bash
 <FLINK_HOME>/bin/flink run \
 /path/to/paimon-flink-action-{{< version >}}.jar \
-migrate_table
+migrate_table \
 --warehouse <warehouse-path> \
 --source_type hive \
 --table <database.table-name> \
@@ -84,12 +84,13 @@ migrate_table
 
 Example:
 ```bash
-<FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar migrate_table \
+<FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar \
+migrate_table \
 --warehouse /path/to/warehouse \
 --catalog_conf uri=thrift://localhost:9083 \
 --catalog_conf metastore=hive \
 --source_type hive \
---table default.hive_or_paimon \
+--table default.hive_or_paimon
 ```
 
 **Migrate Hive Database**
@@ -123,7 +124,7 @@ If your flink version is below 1.17, you can use flink action to achieve this:
 ```bash
 <FLINK_HOME>/bin/flink run \
 /path/to/paimon-flink-action-{{< version >}}.jar \
-migrate_databse
+migrate_databse \
 --warehouse <warehouse-path> \
 --source_type hive \
 --database <database> \
@@ -138,7 +139,7 @@ Example:
 --catalog_conf uri=thrift://localhost:9083 \
 --catalog_conf metastore=hive \
 --source_type hive \
---database default \
+--database default
 ```
 
 **Migrate Hive File**
