@@ -23,16 +23,15 @@ import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 /** generate authorization for dlf. */
 public class DlfAuthSignature {
     private static final String SIGNATURE_ALGORITHM = "DLF4-HMAC-SHA256";
     private static final String PAYLOAD = "UNSIGNED-PAYLOAD";
     private static final String PRODUCT = "DlfNext";
-    private static final Charset CHARSET = StandardCharsets.UTF_8;
     private static final String HMAC_SHA256 = "HmacSHA256";
     private static final String REQUEST_TYPE = "aliyun_v4_request";
     private static final String ADDITIONAL_HEADERS = "AdditionalHeaders";
@@ -72,7 +71,7 @@ public class DlfAuthSignature {
 
     public static String md5Hex(String raw) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("MD5");
-        byte[] hash = digest.digest(raw.getBytes(CHARSET.name()));
+        byte[] hash = digest.digest(raw.getBytes(UTF_8.name()));
         return hexEncode(hash);
     }
 
@@ -106,7 +105,7 @@ public class DlfAuthSignature {
 
     private static String sha256Hex(String raw) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] hash = digest.digest(raw.getBytes(CHARSET.name()));
+        byte[] hash = digest.digest(raw.getBytes(UTF_8.name()));
         return hexEncode(hash);
     }
 

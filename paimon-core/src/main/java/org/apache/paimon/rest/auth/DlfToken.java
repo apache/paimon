@@ -22,16 +22,11 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.Objects;
-import java.util.TimeZone;
 
 /** Dlf Token. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DlfToken {
-
-    public static final String DEFAULT_DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 
     private static final String ACCESS_KEY_ID_FIELD_NAME = "AccessKeyId";
     private static final String ACCESS_KEY_SECRET_FIELD_NAME = "AccessKeySecret";
@@ -74,25 +69,8 @@ public class DlfToken {
         return securityToken;
     }
 
-    public String getExpiration() {
+    public String getExpirationStr() {
         return expiration;
-    }
-
-    public Long getExpiresInMills() {
-        try {
-            return getExpirationInMills(expiration);
-        } catch (ParseException e) {
-            return null;
-        }
-    }
-
-    public static Long getExpirationInMills(String dateStr) throws ParseException {
-        if (dateStr == null) {
-            return null;
-        }
-        SimpleDateFormat sdf = new SimpleDateFormat(DEFAULT_DATE_FORMAT);
-        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
-        return sdf.parse(dateStr).getTime();
     }
 
     @Override

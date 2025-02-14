@@ -32,6 +32,7 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthSession;
+import org.apache.paimon.rest.auth.RestAuthFunction;
 import org.apache.paimon.rest.auth.RestAuthParameter;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
@@ -85,7 +86,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -111,7 +111,7 @@ public class RESTCatalog implements Catalog {
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
     private final FileIO fileIO;
-    private Function<RestAuthParameter, Map<String, String>> headersFunction;
+    private RestAuthFunction headersFunction;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
@@ -142,7 +142,7 @@ public class RESTCatalog implements Catalog {
                                     .merge(context.options().toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
-        this.headersFunction = p -> catalogAuth.getAuthProvider().header(Collections.emptyMap(), p);
+        this.headersFunction = new RestAuthFunction(baseHeaders, catalogAuth);
         context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
         this.context = context;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);

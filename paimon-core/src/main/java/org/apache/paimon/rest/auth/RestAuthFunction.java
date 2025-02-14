@@ -18,32 +18,25 @@
 
 package org.apache.paimon.rest.auth;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Function;
 
-/** Auth provider for bear token. */
-public class BearTokenAuthProvider implements AuthProvider {
+/** The function used to generate auth header for the rest request. */
+public class RestAuthFunction implements Function<RestAuthParameter, Map<String, String>> {
 
-    public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
+    private final Map<String, String> initHeader;
+    private final AuthSession catalogAuth;
 
-    private static final String BEARER_PREFIX = "Bearer ";
-
-    protected String token;
-
-    public BearTokenAuthProvider(String token) {
-        this.token = token;
+    public RestAuthFunction(Map<String, String> initHeader, AuthSession catalogAuth) {
+        this.initHeader = initHeader;
+        this.catalogAuth = catalogAuth;
     }
 
     @Override
-    public Map<String, String> header(
-            Map<String, String> baseHeader, RestAuthParameter restAuthParameter) {
-        Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
-        headersWithAuth.put(AUTHORIZATION_HEADER_KEY, BEARER_PREFIX + token);
-        return headersWithAuth;
-    }
-
-    @Override
-    public boolean refresh() {
-        return true;
+    public Map<String, String> apply(RestAuthParameter restAuthParameter) {
+        if (catalogAuth != null) {
+            return catalogAuth.getAuthProvider().header(initHeader, restAuthParameter);
+        }
+        return initHeader;
     }
 }

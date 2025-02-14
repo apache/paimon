@@ -23,8 +23,10 @@ import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -35,14 +37,14 @@ import java.util.Optional;
 /** Auth provider for <b>Ali CLoud</b> DLF. */
 public class DlfAuthProvider implements AuthProvider {
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
-    public static final String DLF_HOST_HEADER_KEY = "host";
-    public static final String DLF_AUTHORIZATION_HEADER_KEY = "authorization";
     public static final String DLF_DATA_MD5_HEX_HEADER_KEY = "x-dlf-data-md5-hex";
+    public static final String DLF_HOST_HEADER_KEY = "Host";
+    public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
     public static final double EXPIRED_FACTOR = 0.4;
 
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
     private final String tokenFilePath;
 
@@ -54,7 +56,7 @@ public class DlfAuthProvider implements AuthProvider {
     public static DlfAuthProvider buildRefreshToken(
             String tokenFilePath, Long tokenRefreshInMills) {
         DlfToken token = readToken(tokenFilePath);
-        Long expiresAtMillis = token.getExpiresInMills();
+        Long expiresAtMillis = getExpirationInMills(token.getExpirationStr());
         return new DlfAuthProvider(
                 tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills);
     }
@@ -85,8 +87,7 @@ public class DlfAuthProvider implements AuthProvider {
             String dataMd5Hex = DlfAuthSignature.md5Hex(restAuthParameter.data());
             String authorization =
                     DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
-            Map<String, String> headersWithAuth = new HashMap<>();
-            headersWithAuth.putAll(baseHeader);
+            Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
             headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
             headersWithAuth.put(DLF_DATE_HEADER_KEY, date);
             headersWithAuth.put(DLF_HOST_HEADER_KEY, restAuthParameter.host());
@@ -144,13 +145,29 @@ public class DlfAuthProvider implements AuthProvider {
         return now.format(DATE_FORMATTER);
     }
 
-    // todo: if file not exist, throw exception?
     private static DlfToken readToken(String tokenFilePath) {
         try {
-            String tokenStr = FileIOUtils.readFileUtf8(new File(tokenFilePath));
-            return OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DlfToken.class);
+            File tokenFile = new File(tokenFilePath);
+            if (tokenFile.exists()) {
+                String tokenStr = FileIOUtils.readFileUtf8(tokenFile);
+                return OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DlfToken.class);
+            } else {
+                throw new FileNotFoundException(tokenFilePath);
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    private static Long getExpirationInMills(String dateStr) {
+        try {
+            if (dateStr == null) {
+                return null;
+            }
+            LocalDateTime dateTime = LocalDateTime.parse(dateStr, DATE_FORMATTER);
+            return dateTime.atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 }
