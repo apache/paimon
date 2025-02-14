@@ -27,19 +27,14 @@ import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
-
 /** Catalog methods for working with Functions. */
 public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
 
-    static boolean isFunctionNamespace(String[] namespace) {
+    default boolean isFunctionNamespace(String[] namespace) {
         // Allow for empty namespace, as Spark's bucket join will use `bucket` function with empty
-        // namespace to generate transforms for partitioning. Otherwise, use `sys` namespace.
-        return namespace.length == 0 || isSystemNamespace(namespace);
-    }
-
-    static boolean isSystemNamespace(String[] namespace) {
-        return namespace.length == 1 && namespace[0].equalsIgnoreCase(SYSTEM_DATABASE_NAME);
+        // namespace to generate transforms for partitioning.
+        // Otherwise, check if it is paimon namespace.
+        return namespace.length == 0 || (namespace.length == 1 && namespaceExists(namespace));
     }
 
     @Override
@@ -48,8 +43,6 @@ public interface SupportFunction extends FunctionCatalog, SupportsNamespaces {
             return PaimonFunctions.names().stream()
                     .map(name -> Identifier.of(namespace, name))
                     .toArray(Identifier[]::new);
-        } else if (namespaceExists(namespace)) {
-            return new Identifier[0];
         }
 
         throw new NoSuchNamespaceException(namespace);
