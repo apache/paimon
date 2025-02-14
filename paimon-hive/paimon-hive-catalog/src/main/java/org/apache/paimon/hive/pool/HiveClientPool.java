@@ -51,9 +51,9 @@ public class HiveClientPool
             int poolSize, Configuration conf, String clientClassName) {
         return () -> {
             LinkedBlockingDeque<IMetaStoreClient> clients = new LinkedBlockingDeque<>();
+            HiveConf hiveConf = new HiveConf(conf, HiveClientPool.class);
+            hiveConf.addResource(conf);
             for (int i = 0; i < poolSize; i++) {
-                HiveConf hiveConf = new HiveConf(conf, HiveClientPool.class);
-                hiveConf.addResource(conf);
                 clients.add(
                         new RetryingMetaStoreClientFactory()
                                 .createClient(hiveConf, clientClassName));

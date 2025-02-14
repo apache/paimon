@@ -42,8 +42,9 @@ public class JdbcClientPoolTest {
         props.put("jdbc.autoReconnect", "true");
         props.put("jdbc.testOnBorrow", "true");
         props.put("jdbc.validationQuery", "SELECT 1");
-        return new JdbcClientPool(
-                10, "jdbc:mysql://127.0.0.1:33306/mysql?user=root&password=123456", props);
+
+        String testUrl = "jdbc:mysql://127.0.0.1:33306/mysql?user=root&password=123456";
+        return new JdbcClientPool(10, testUrl, props);
     }
 
     @Test
