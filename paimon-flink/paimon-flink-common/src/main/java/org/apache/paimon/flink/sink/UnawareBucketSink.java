@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.compact.UnawareBucketNewFilesCompactionCoordinatorOperator;
 import org.apache.paimon.flink.compact.UnawareBucketNewFilesCompactionWorkerOperator;
@@ -88,8 +87,7 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
                             .setParallelism(written.getParallelism());
         }
 
-        boolean enableCompaction =
-                CoreOptions.WriteAction.doFullCompactionAction(table.coreOptions().writeActions());
+        boolean enableCompaction = !table.coreOptions().writeOnly();
         boolean isStreamingMode =
                 input.getExecutionEnvironment()
                                 .getConfiguration()

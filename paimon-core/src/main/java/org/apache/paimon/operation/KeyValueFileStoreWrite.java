@@ -239,7 +239,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             ExecutorService compactExecutor,
             Levels levels,
             @Nullable DeletionVectorsMaintainer dvMaintainer) {
-        if (!CoreOptions.WriteAction.doFullCompactionAction(options.writeActions())) {
+        if (options.writeOnly()) {
             return new NoopCompactManager();
         } else {
             Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();

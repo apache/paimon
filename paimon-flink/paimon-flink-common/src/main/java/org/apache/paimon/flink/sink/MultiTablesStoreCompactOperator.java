@@ -150,13 +150,9 @@ public class MultiTablesStoreCompactOperator
         FileStoreTable table = getTable(tableId);
 
         Preconditions.checkArgument(
-                CoreOptions.WriteAction.doFullCompactionAction(table.coreOptions().writeActions()),
-                String.format(
-                        "%s should not be true or %s should be %s or contains %s for MultiTablesStoreCompactOperator.",
-                        CoreOptions.WRITE_ONLY.key(),
-                        CoreOptions.WRITE_ACTIONS.key(),
-                        CoreOptions.WriteAction.ALL,
-                        CoreOptions.WriteAction.FULL_COMPACT));
+                !table.coreOptions().writeOnly(),
+                CoreOptions.WRITE_ONLY.key()
+                        + " should not be true for MultiTablesStoreCompactOperator.");
 
         storeSinkWriteProvider =
                 createWriteProvider(table, checkpointConfig, isStreaming, ignorePreviousFiles);
