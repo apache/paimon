@@ -196,25 +196,8 @@ public class HttpClient implements RESTClient {
         }
     }
 
-    private RequestBody buildRequestBody(String body) throws JsonProcessingException {
+    private static RequestBody buildRequestBody(String body) throws JsonProcessingException {
         return RequestBody.create(body.getBytes(StandardCharsets.UTF_8), MEDIA_TYPE);
-    }
-
-    private String getRequestUrl(String path) {
-        return StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
-    }
-
-    private String getHost() {
-        return URI.create(uri).getHost();
-    }
-
-    private Map<String, String> getHeaders(
-            String path,
-            String method,
-            String data,
-            Function<RESTAuthParameter, Map<String, String>> headerFunction) {
-        RESTAuthParameter restAuthParameter = new RESTAuthParameter(getHost(), path, method, data);
-        return headerFunction.apply(restAuthParameter);
     }
 
     private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {
@@ -247,5 +230,19 @@ public class HttpClient implements RESTClient {
                         });
 
         return builder.build();
+    }
+
+    private String getRequestUrl(String path) {
+        return StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
+    }
+
+    private Map<String, String> getHeaders(
+            String path,
+            String method,
+            String data,
+            Function<RESTAuthParameter, Map<String, String>> headerFunction) {
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter(URI.create(uri).getHost(), path, method, data);
+        return headerFunction.apply(restAuthParameter);
     }
 }

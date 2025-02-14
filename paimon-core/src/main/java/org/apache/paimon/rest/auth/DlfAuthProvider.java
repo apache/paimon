@@ -20,8 +20,6 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.utils.FileIOUtils;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -34,6 +32,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
+
 /** Auth provider for <b>Ali CLoud</b> DLF. */
 public class DlfAuthProvider implements AuthProvider {
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
@@ -42,7 +42,6 @@ public class DlfAuthProvider implements AuthProvider {
     public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
     public static final double EXPIRED_FACTOR = 0.4;
 
-    private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
@@ -150,7 +149,7 @@ public class DlfAuthProvider implements AuthProvider {
             File tokenFile = new File(tokenFilePath);
             if (tokenFile.exists()) {
                 String tokenStr = FileIOUtils.readFileUtf8(tokenFile);
-                return OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DlfToken.class);
+                return OBJECT_MAPPER.readValue(tokenStr, DlfToken.class);
             } else {
                 throw new FileNotFoundException(tokenFilePath);
             }

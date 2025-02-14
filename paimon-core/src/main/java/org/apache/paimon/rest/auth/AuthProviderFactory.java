@@ -24,7 +24,6 @@ import org.apache.paimon.options.Options;
 
 /** Factory for {@link AuthProvider}. */
 public interface AuthProviderFactory extends Factory {
-    String identifier();
 
     AuthProvider create(Options options);
 
