@@ -1083,6 +1083,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Initial buckets for a partition in assigner operator for dynamic bucket mode.");
 
+    public static final ConfigOption<Integer> DYNAMIC_BUCKET_MAX_BUCKETS =
+            key("dynamic-bucket.max-buckets")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "Max buckets for a partition in dynamic bucket mode, It should "
+                                    + "either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).");
+
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
             key("dynamic-bucket.assigner-parallelism")
                     .intType()
@@ -2224,6 +2232,10 @@ public class CoreOptions implements Serializable {
 
     public Integer dynamicBucketInitialBuckets() {
         return options.get(DYNAMIC_BUCKET_INITIAL_BUCKETS);
+    }
+
+    public Integer dynamicBucketMaxBuckets() {
+        return options.get(DYNAMIC_BUCKET_MAX_BUCKETS);
     }
 
     public Integer dynamicBucketAssignerParallelism() {
