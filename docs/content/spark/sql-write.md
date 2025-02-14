@@ -227,13 +227,20 @@ spark.sql(s"""
 val inputData = MemoryStream[(Int, String)]
 val df = inputData.toDS().toDF("k", "v")
 
-// Streaming Write to paimon table.
+// Streaming Write to paimon table, you can specify either the target table path or the table name.
 val stream = df
   .writeStream
   .outputMode("append")
   .option("checkpointLocation", "/path/to/checkpoint")
   .format("paimon")
   .start("/path/to/paimon/sink/table")
+
+val stream = df
+  .writeStream
+  .outputMode("append")
+  .option("checkpointLocation", "/path/to/checkpoint")
+  .format("paimon")
+  .toTable("tableName")
 ```
 
 ## Schema Evolution
