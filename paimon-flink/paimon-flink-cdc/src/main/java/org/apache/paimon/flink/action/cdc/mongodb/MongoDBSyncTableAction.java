@@ -60,7 +60,7 @@ public class MongoDBSyncTableAction extends SyncTableActionBase {
 
     @Override
     protected Schema retrieveSchema() {
-        return MongodbSchemaUtils.getMongodbSchema(cdcSourceConfig);
+        return MongoDBSchemaUtils.getMongodbSchema(cdcSourceConfig);
     }
 
     @Override

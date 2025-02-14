@@ -52,7 +52,7 @@ import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.STAR
  * schema details are provided explicitly, while in the DYNAMIC mode, the schema is inferred from
  * the first document in the collection.
  */
-public class MongodbSchemaUtils {
+public class MongoDBSchemaUtils {
 
     private static final String ID_FIELD = "_id";
 
