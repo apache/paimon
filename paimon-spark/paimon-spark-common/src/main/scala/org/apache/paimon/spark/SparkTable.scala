@@ -134,7 +134,7 @@ case class SparkTable(table: Table)
             None,
             None,
             compressed = false,
-            properties = properties.asScala.toMap),
+            properties = props),
           owner = props.getOrElse(TableCatalog.PROP_OWNER, ""),
           schema = schema,
           provider = Some(SparkSource.NAME)
