@@ -34,7 +34,7 @@ By merge or replace branch operations, users can complete the correcting of data
 
 ## Create Branches
 
-Paimon supports creating branch from a specific tag or snapshot, or just creating an empty branch which means the initial state of the created branch is like an empty table.
+Paimon supports creating branch from a specific tag, or just creating an empty branch which means the initial state of the created branch is like an empty table.
 
 {{< tabs "create-branches" >}}
 
