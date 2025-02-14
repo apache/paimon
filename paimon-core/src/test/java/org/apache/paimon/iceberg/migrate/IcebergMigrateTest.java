@@ -130,7 +130,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
         icebergMigrator.renameTable(false);
 
@@ -172,7 +173,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
@@ -228,7 +230,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
 
         assertThatThrownBy(icebergMigrator::executeMigrate)
                 .rootCause()
@@ -270,7 +273,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
@@ -314,7 +318,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
@@ -363,7 +368,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
@@ -412,7 +418,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
@@ -461,7 +468,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
@@ -510,7 +518,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
@@ -636,7 +645,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
@@ -696,7 +706,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =

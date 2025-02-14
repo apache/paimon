@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg.migrate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -71,6 +72,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** migrate iceberg table to paimon table. */
@@ -82,6 +84,7 @@ public class IcebergMigrator implements Migrator {
     private final Catalog paimonCatalog;
     private final String paimonDatabaseName;
     private final String paimonTableName;
+    private final CoreOptions coreOptions;
 
     private final String icebergDatabaseName;
     private final String icebergTableName;
@@ -104,10 +107,18 @@ public class IcebergMigrator implements Migrator {
             String icebergDatabaseName,
             String icebergTableName,
             Options icebergOptions,
-            Integer parallelism) {
+            Integer parallelism,
+            Map<String, String> options) {
         this.paimonCatalog = paimonCatalog;
         this.paimonDatabaseName = paimonDatabaseName;
         this.paimonTableName = paimonTableName;
+        this.coreOptions = new CoreOptions(options);
+        checkArgument(
+                coreOptions.bucket() == -1,
+                "Iceberg migrator only support unaware-bucket target table, bucket should be -1");
+        checkArgument(
+                !options.containsKey(CoreOptions.PRIMARY_KEY.key()),
+                "Iceberg migrator does not support define primary key for target table.");
 
         this.icebergDatabaseName = icebergDatabaseName;
         this.icebergTableName = icebergTableName;
@@ -277,7 +288,7 @@ public class IcebergMigrator implements Migrator {
         paimonCatalog.renameTable(targetTableId, sourceTableId, ignoreIfNotExists);
     }
 
-    public List<TableSchema> icebergSchemasToPaimonSchemas(IcebergMetadata icebergMetadata) {
+    private List<TableSchema> icebergSchemasToPaimonSchemas(IcebergMetadata icebergMetadata) {
         return icebergMetadata.schemas().stream()
                 .map(
                         icebergSchema -> {
@@ -291,7 +302,7 @@ public class IcebergMigrator implements Migrator {
                 .collect(Collectors.toList());
     }
 
-    public Schema icebergSchemaToPaimonSchema(IcebergSchema icebergSchema) {
+    private Schema icebergSchemaToPaimonSchema(IcebergSchema icebergSchema) {
 
         // get iceberg current partition spec
         int currentPartitionSpecId = icebergMetadata.defaultSpecId();
@@ -331,7 +342,7 @@ public class IcebergMigrator implements Migrator {
         }
     }
 
-    public long getSchemaIdFromIcebergManifestFile(Path manifestPath, FileIO fileIO) {
+    private long getSchemaIdFromIcebergManifestFile(Path manifestPath, FileIO fileIO) {
 
         try (DataFileStream<GenericRecord> dataFileStream =
                 new DataFileStream<>(
