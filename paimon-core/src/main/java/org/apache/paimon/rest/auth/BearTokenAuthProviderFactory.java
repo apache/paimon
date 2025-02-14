@@ -23,6 +23,7 @@ import org.apache.paimon.rest.RESTCatalogOptions;
 
 /** Factory for {@link BearTokenAuthProvider}. */
 public class BearTokenAuthProviderFactory implements AuthProviderFactory {
+
     @Override
     public String identifier() {
         return AuthProviderEnum.BEAR.identifier();

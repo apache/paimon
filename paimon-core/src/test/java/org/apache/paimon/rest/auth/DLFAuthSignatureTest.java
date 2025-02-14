@@ -21,25 +21,25 @@ package org.apache.paimon.rest.auth;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/** Test for {@link DlfAuthSignature}. */
-public class DlfAuthSignatureTest {
+/** Test for {@link DLFAuthSignature}. */
+public class DLFAuthSignatureTest {
 
     @Test
     public void testGetAuthorization() throws Exception {
-        String date = DlfAuthProvider.getDate();
+        String date = DLFAuthProvider.getDate();
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter(
                         "endpoint",
                         "/v1/catalogs/test/databases/test/tables/test/commit",
                         "POST",
                         "");
-        DlfToken token =
-                new DlfToken("accessKeyId", "accessKeySecret", "securityToken", "expiration");
-        String dataMd5Hex = DlfAuthSignature.md5Hex(restAuthParameter.data());
+        DLFToken token =
+                new DLFToken("accessKeyId", "accessKeySecret", "securityToken", "expiration");
+        String dataMd5Hex = DLFAuthSignature.md5Hex(restAuthParameter.data());
         String authorization =
-                DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
+                DLFAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
         Assertions.assertEquals(
-                DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date),
+                DLFAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date),
                 authorization);
     }
 }

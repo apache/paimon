@@ -35,11 +35,12 @@ import java.util.Optional;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Auth provider for <b>Ali CLoud</b> DLF. */
-public class DlfAuthProvider implements AuthProvider {
-    public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
-    public static final String DLF_DATA_MD5_HEX_HEADER_KEY = "x-dlf-data-md5-hex";
+public class DLFAuthProvider implements AuthProvider {
+
     public static final String DLF_HOST_HEADER_KEY = "Host";
     public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
+    public static final String DLF_DATA_MD5_HEX_HEADER_KEY = "x-dlf-data-md5-hex";
+    public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
     public static final double EXPIRED_FACTOR = 0.4;
 
     private static final DateTimeFormatter DATE_FORMATTER =
@@ -47,27 +48,27 @@ public class DlfAuthProvider implements AuthProvider {
 
     private final String tokenFilePath;
 
-    protected DlfToken token;
+    protected DLFToken token;
     private final boolean keepRefreshed;
     private Long expiresAtMillis;
     private final Long tokenRefreshInMills;
 
-    public static DlfAuthProvider buildRefreshToken(
+    public static DLFAuthProvider buildRefreshToken(
             String tokenFilePath, Long tokenRefreshInMills) {
-        DlfToken token = readToken(tokenFilePath);
+        DLFToken token = readToken(tokenFilePath);
         Long expiresAtMillis = getExpirationInMills(token.getExpirationStr());
-        return new DlfAuthProvider(
+        return new DLFAuthProvider(
                 tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills);
     }
 
-    public static DlfAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
-        DlfToken token = new DlfToken(accessKeyId, accessKeySecret, null, null);
-        return new DlfAuthProvider(null, token, false, null, null);
+    public static DLFAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
+        DLFToken token = new DLFToken(accessKeyId, accessKeySecret, null, null);
+        return new DLFAuthProvider(null, token, false, null, null);
     }
 
-    public DlfAuthProvider(
+    public DLFAuthProvider(
             String tokenFilePath,
-            DlfToken token,
+            DLFToken token,
             boolean keepRefreshed,
             Long expiresAtMillis,
             Long tokenRefreshInMills) {
@@ -83,9 +84,9 @@ public class DlfAuthProvider implements AuthProvider {
             Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
         try {
             String date = getDate();
-            String dataMd5Hex = DlfAuthSignature.md5Hex(restAuthParameter.data());
+            String dataMd5Hex = DLFAuthSignature.md5Hex(restAuthParameter.data());
             String authorization =
-                    DlfAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
+                    DLFAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
             Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
             headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
             headersWithAuth.put(DLF_DATE_HEADER_KEY, date);
@@ -100,7 +101,7 @@ public class DlfAuthProvider implements AuthProvider {
     @Override
     public boolean refresh() {
         long start = System.currentTimeMillis();
-        DlfToken newToken = readToken(tokenFilePath);
+        DLFToken newToken = readToken(tokenFilePath);
         if (newToken == null) {
             return false;
         }
@@ -144,12 +145,12 @@ public class DlfAuthProvider implements AuthProvider {
         return now.format(DATE_FORMATTER);
     }
 
-    private static DlfToken readToken(String tokenFilePath) {
+    private static DLFToken readToken(String tokenFilePath) {
         try {
             File tokenFile = new File(tokenFilePath);
             if (tokenFile.exists()) {
                 String tokenStr = FileIOUtils.readFileUtf8(tokenFile);
-                return OBJECT_MAPPER.readValue(tokenStr, DlfToken.class);
+                return OBJECT_MAPPER.readValue(tokenStr, DLFToken.class);
             } else {
                 throw new FileNotFoundException(tokenFilePath);
             }

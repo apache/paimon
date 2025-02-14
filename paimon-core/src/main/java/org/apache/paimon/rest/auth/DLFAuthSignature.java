@@ -27,8 +27,9 @@ import java.security.MessageDigest;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-/** generate authorization for dlf. */
-public class DlfAuthSignature {
+/** generate authorization for <b>Ali CLoud</b> DLF. */
+public class DLFAuthSignature {
+
     private static final String SIGNATURE_ALGORITHM = "DLF4-HMAC-SHA256";
     private static final String PAYLOAD = "UNSIGNED-PAYLOAD";
     private static final String PRODUCT = "DlfNext";
@@ -38,7 +39,7 @@ public class DlfAuthSignature {
     private static final String SIGNATURE_KEY = "Signature";
 
     public static String getAuthorization(
-            RESTAuthParameter restAuthParameter, DlfToken dlfToken, String dataMd5Hex, String date)
+            RESTAuthParameter restAuthParameter, DLFToken dlfToken, String dataMd5Hex, String date)
             throws Exception {
         String canonicalRequest = getCanonicalRequest(restAuthParameter, dataMd5Hex, date);
         String stringToSign =
@@ -64,7 +65,7 @@ public class DlfAuthSignature {
                                         REQUEST_TYPE),
                                 String.format(
                                         "%s=%s",
-                                        ADDITIONAL_HEADERS, DlfAuthProvider.DLF_HOST_HEADER_KEY),
+                                        ADDITIONAL_HEADERS, DLFAuthProvider.DLF_HOST_HEADER_KEY),
                                 String.format("%s=%s", SIGNATURE_KEY, signature));
         return authorization;
     }
@@ -94,12 +95,12 @@ public class DlfAuthSignature {
                         restAuthParameter.method(),
                         restAuthParameter.path(),
                         String.format(
-                                "%s:%s", DlfAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY, dataMd5Hex),
+                                "%s:%s", DLFAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY, dataMd5Hex),
                         String.format(
                                 "%s:%s",
-                                DlfAuthProvider.DLF_HOST_HEADER_KEY, restAuthParameter.host()),
-                        String.format("%s:%s", DlfAuthProvider.DLF_DATE_HEADER_KEY, date),
-                        DlfAuthProvider.DLF_HOST_HEADER_KEY,
+                                DLFAuthProvider.DLF_HOST_HEADER_KEY, restAuthParameter.host()),
+                        String.format("%s:%s", DLFAuthProvider.DLF_DATE_HEADER_KEY, date),
+                        DLFAuthProvider.DLF_HOST_HEADER_KEY,
                         PAYLOAD);
     }
 

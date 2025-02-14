@@ -20,6 +20,7 @@ package org.apache.paimon.rest.auth;
 
 /** RestAuthParameter for building rest auth header. */
 public class RESTAuthParameter {
+
     private final String host;
     private final String path;
     private final String method;

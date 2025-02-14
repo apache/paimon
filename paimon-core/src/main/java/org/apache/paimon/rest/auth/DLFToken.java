@@ -24,9 +24,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.Objects;
 
-/** Dlf Token. */
+/** <b>Ali CLoud</b> DLF Token. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class DlfToken {
+public class DLFToken {
 
     private static final String ACCESS_KEY_ID_FIELD_NAME = "AccessKeyId";
     private static final String ACCESS_KEY_SECRET_FIELD_NAME = "AccessKeySecret";
@@ -46,7 +46,7 @@ public class DlfToken {
     private final String expiration;
 
     @JsonCreator
-    public DlfToken(
+    public DLFToken(
             @JsonProperty(ACCESS_KEY_ID_FIELD_NAME) String accessKeyId,
             @JsonProperty(ACCESS_KEY_SECRET_FIELD_NAME) String accessKeySecret,
             @JsonProperty(SECURITY_TOKEN_FIELD_NAME) String securityToken,
@@ -78,7 +78,7 @@ public class DlfToken {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        DlfToken that = (DlfToken) o;
+        DLFToken that = (DLFToken) o;
         return Objects.equals(accessKeyId, that.accessKeyId)
                 && Objects.equals(accessKeySecret, that.accessKeySecret)
                 && Objects.equals(securityToken, that.securityToken)

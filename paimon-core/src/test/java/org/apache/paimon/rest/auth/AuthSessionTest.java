@@ -77,18 +77,18 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testRefreshDlfAuthTokenFileAuthProvider() throws IOException, InterruptedException {
+    public void testRefreshDLFAuthTokenFileAuthProvider() throws IOException, InterruptedException {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
         long tokenRefreshInMills = 1000;
         AuthProvider authProvider =
-                generateDlfAuthProvider(Optional.of(tokenRefreshInMills), fileName);
+                generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName);
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
-        DlfAuthProvider dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(authToken, token);
         tokenFile.delete();
@@ -107,9 +107,9 @@ public class AuthSessionTest {
         File tokenFile = tokenFile2Token.getLeft();
         long tokenRefreshInMills = 1000L;
         AuthProvider authProvider =
-                generateDlfAuthProvider(Optional.of(tokenRefreshInMills), fileName);
+                generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
-        DlfAuthProvider dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(token, authToken);
         tokenFile.delete();
@@ -117,15 +117,15 @@ public class AuthSessionTest {
         token = tokenFile2Token.getRight();
         tokenFile = tokenFile2Token.getLeft();
         FileUtils.writeStringToFile(tokenFile, token);
-        Thread.sleep((long) (tokenRefreshInMills * (1 - DlfAuthProvider.EXPIRED_FACTOR)) + 10L);
-        dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        Thread.sleep((long) (tokenRefreshInMills * (1 - DLFAuthProvider.EXPIRED_FACTOR)) + 10L);
+        dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(token, authToken);
     }
 
     @Test
     public void testRetryWhenRefreshFail() throws Exception {
-        AuthProvider authProvider = Mockito.mock(DlfAuthProvider.class);
+        AuthProvider authProvider = Mockito.mock(DLFAuthProvider.class);
         long expiresAtMillis = System.currentTimeMillis() - 1000L;
         when(authProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
         when(authProvider.tokenRefreshInMills()).thenReturn(Optional.of(50L));
@@ -158,17 +158,17 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDlfAuthProviderByAk() throws IOException {
+    public void testCreateDLFAuthProviderByAk() throws IOException {
         Options options = new Options();
         String akId = UUID.randomUUID().toString();
         String akSecret = UUID.randomUUID().toString();
-        DlfToken token = new DlfToken(akId, akSecret, null, null);
+        DLFToken token = new DLFToken(akId, akSecret, null, null);
         options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
         options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
         AuthProvider authProvider =
                 AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
-        DlfAuthProvider dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
     }
@@ -178,17 +178,17 @@ public class AuthSessionTest {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
-        AuthProvider authProvider = generateDlfAuthProvider(Optional.empty(), fileName);
+        AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName);
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
-        DlfAuthProvider dlfAuthProvider = (DlfAuthProvider) session.getAuthProvider();
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(authToken, token);
     }
 
     @Test
-    public void testCreateDlfAuthProviderWithoutNeedConf() {
+    public void testCreateDLFAuthProviderWithoutNeedConf() {
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
@@ -197,11 +197,11 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testDlfAuthProviderAuthHeader() throws Exception {
+    public void testDLFAuthProviderAuthHeader() throws Exception {
         Options options = new Options();
         String akId = UUID.randomUUID().toString();
         String akSecret = UUID.randomUUID().toString();
-        DlfToken token = new DlfToken(akId, akSecret, null, null);
+        DLFToken token = new DLFToken(akId, akSecret, null, null);
         options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
         options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
         AuthProvider authProvider =
@@ -209,16 +209,16 @@ public class AuthSessionTest {
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter("host", "/path", "method", "data");
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
-        String date = header.get(DlfAuthProvider.DLF_DATE_HEADER_KEY);
-        String dateMd5Hex = header.get(DlfAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY);
+        String date = header.get(DLFAuthProvider.DLF_DATE_HEADER_KEY);
+        String dateMd5Hex = header.get(DLFAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY);
         String authorization =
-                DlfAuthSignature.getAuthorization(
+                DLFAuthSignature.getAuthorization(
                         new RESTAuthParameter("host", "/path", "method", "data"),
                         token,
                         dateMd5Hex,
                         date);
-        assertEquals(authorization, header.get(DlfAuthProvider.DLF_AUTHORIZATION_HEADER_KEY));
-        assertEquals(restAuthParameter.host(), header.get(DlfAuthProvider.DLF_HOST_HEADER_KEY));
+        assertEquals(authorization, header.get(DLFAuthProvider.DLF_AUTHORIZATION_HEADER_KEY));
+        assertEquals(restAuthParameter.host(), header.get(DLFAuthProvider.DLF_HOST_HEADER_KEY));
     }
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
@@ -227,13 +227,13 @@ public class AuthSessionTest {
         sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
         String expiration = sdf.format(new Date());
         String secret = UUID.randomUUID().toString();
-        DlfToken token = new DlfToken("accessKeyId", secret, "securityToken", expiration);
+        DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
         FileUtils.writeStringToFile(tokenFile, tokenStr);
         return Pair.of(tokenFile, tokenStr);
     }
 
-    private AuthProvider generateDlfAuthProvider(
+    private AuthProvider generateDLFAuthProvider(
             Optional<Long> tokenRefreshInMillsOpt, String fileName) {
         Options options = new Options();
         options.set(DLF_TOKEN_PATH.key(), folder.getRoot().getPath() + "/" + fileName);
