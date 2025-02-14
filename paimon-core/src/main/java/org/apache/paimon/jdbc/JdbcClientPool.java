@@ -28,26 +28,22 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Client pool for jdbc. */
-public class JdbcClientPool extends ClientPool.ClientPoolImpl<Connection, SQLException> {
+public class JdbcClientPool
+        extends ClientPool.ClientPoolImpl<Connection, DruidDataSource, SQLException> {
 
     private static final Pattern PROTOCOL_PATTERN = Pattern.compile("jdbc:([^:]+):(.*)");
-
-    private String dbUrl;
-
-    private Map<String, String> props;
 
     private final String protocol;
 
     private volatile DruidDataSource dataSource;
 
     public JdbcClientPool(int poolSize, String dbUrl, Map<String, String> props) {
-        super(poolSize);
-        this.dbUrl = dbUrl;
-        this.props = props;
+        super(initPoolSupplier(poolSize, dbUrl, props));
         Matcher matcher = PROTOCOL_PATTERN.matcher(dbUrl);
         if (matcher.matches()) {
             this.protocol = matcher.group(1);
@@ -60,17 +56,25 @@ public class JdbcClientPool extends ClientPool.ClientPoolImpl<Connection, SQLExc
         return protocol;
     }
 
+    private static Supplier<DruidDataSource> initPoolSupplier(
+            int poolSize, String dbUrl, Map<String, String> props) {
+        return () -> {
+            try {
+                Properties dbProps =
+                        JdbcUtils.extractJdbcConfiguration(props, JdbcCatalog.PROPERTY_PREFIX);
+                dbProps.setProperty(DruidDataSourceFactory.PROP_URL, dbUrl);
+                dbProps.setProperty(
+                        DruidDataSourceFactory.PROP_MAXACTIVE, String.valueOf(poolSize));
+                return (DruidDataSource) DruidDataSourceFactory.createDataSource(dbProps);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to create datasource", e);
+            }
+        };
+    }
+
     @Override
-    protected void initPool(int poolSize) {
-        try {
-            Properties dbProps =
-                    JdbcUtils.extractJdbcConfiguration(props, JdbcCatalog.PROPERTY_PREFIX);
-            dbProps.setProperty(DruidDataSourceFactory.PROP_URL, dbUrl);
-            dbProps.setProperty(DruidDataSourceFactory.PROP_MAXACTIVE, String.valueOf(poolSize));
-            dataSource = (DruidDataSource) DruidDataSourceFactory.createDataSource(dbProps);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create datasource", e);
-        }
+    protected void initPool(Supplier<DruidDataSource> supplier) {
+        dataSource = supplier.get();
     }
 
     @Override

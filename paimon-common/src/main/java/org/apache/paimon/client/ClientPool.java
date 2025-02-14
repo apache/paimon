@@ -20,6 +20,7 @@ package org.apache.paimon.client;
 
 import java.io.Closeable;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /** Client pool for using multiple clients to execute actions. */
 public interface ClientPool<C, E extends Exception> {
@@ -38,12 +39,13 @@ public interface ClientPool<C, E extends Exception> {
     void execute(ExecuteAction<C, E> action) throws E, InterruptedException;
 
     /** Default implementation for {@link ClientPool}. */
-    abstract class ClientPoolImpl<C, E extends Exception> implements Closeable, ClientPool<C, E> {
-        protected ClientPoolImpl(int poolSize) {
-            initPool(poolSize);
+    abstract class ClientPoolImpl<C, P, E extends Exception>
+            implements Closeable, ClientPool<C, E> {
+        protected ClientPoolImpl(Supplier<P> supplier) {
+            initPool(supplier);
         }
 
-        protected abstract void initPool(int poolSize);
+        protected abstract void initPool(Supplier<P> supplier);
 
         protected abstract C getClient(long timeout, TimeUnit unit) throws E, InterruptedException;
 

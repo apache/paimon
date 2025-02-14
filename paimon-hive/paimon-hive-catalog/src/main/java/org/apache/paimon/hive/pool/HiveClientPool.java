@@ -30,35 +30,41 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Pool of Hive Metastore clients.
  *
  * <p>Mostly copied from iceberg.
  */
-public class HiveClientPool extends ClientPool.ClientPoolImpl<IMetaStoreClient, TException> {
-
-    private Configuration conf;
-
-    private String clientClassName;
+public class HiveClientPool
+        extends ClientPool.ClientPoolImpl<
+                IMetaStoreClient, LinkedBlockingDeque<IMetaStoreClient>, TException> {
 
     private volatile LinkedBlockingDeque<IMetaStoreClient> clients;
 
     public HiveClientPool(int poolSize, Configuration conf, String clientClassName) {
-        super(poolSize);
-        this.conf = conf;
-        this.clientClassName = clientClassName;
+        super(initPoolSupplier(poolSize, conf, clientClassName));
+    }
+
+    private static Supplier<LinkedBlockingDeque<IMetaStoreClient>> initPoolSupplier(
+            int poolSize, Configuration conf, String clientClassName) {
+        return () -> {
+            LinkedBlockingDeque<IMetaStoreClient> clients = new LinkedBlockingDeque<>();
+            for (int i = 0; i < poolSize; i++) {
+                HiveConf hiveConf = new HiveConf(conf, HiveClientPool.class);
+                hiveConf.addResource(conf);
+                clients.add(
+                        new RetryingMetaStoreClientFactory()
+                                .createClient(hiveConf, clientClassName));
+            }
+            return clients;
+        };
     }
 
     @Override
-    protected void initPool(int poolSize) {
-        this.clients = new LinkedBlockingDeque<>();
-        for (int i = 0; i < poolSize; i++) {
-            HiveConf hiveConf = new HiveConf(conf, HiveClientPool.class);
-            hiveConf.addResource(conf);
-            this.clients.add(
-                    new RetryingMetaStoreClientFactory().createClient(hiveConf, clientClassName));
-        }
+    protected void initPool(Supplier<LinkedBlockingDeque<IMetaStoreClient>> supplier) {
+        this.clients = supplier.get();
     }
 
     @Override
