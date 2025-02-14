@@ -18,32 +18,19 @@
 
 package org.apache.paimon.rest.auth;
 
-import java.util.HashMap;
-import java.util.Map;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 
-/** Auth provider for bear token. */
-public class BearTokenAuthProvider implements AuthProvider {
+/** Factory for {@link BearTokenAuthProvider}. */
+public class BearTokenAuthProviderFactory implements AuthProviderFactory {
 
-    public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
-
-    private static final String BEARER_PREFIX = "Bearer ";
-
-    protected String token;
-
-    public BearTokenAuthProvider(String token) {
-        this.token = token;
+    @Override
+    public String identifier() {
+        return AuthProviderEnum.BEAR.identifier();
     }
 
     @Override
-    public Map<String, String> header(
-            Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
-        Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
-        headersWithAuth.put(AUTHORIZATION_HEADER_KEY, BEARER_PREFIX + token);
-        return headersWithAuth;
-    }
-
-    @Override
-    public boolean refresh() {
-        return true;
+    public AuthProvider create(Options options) {
+        return new BearTokenAuthProvider(options.get(RESTCatalogOptions.TOKEN));
     }
 }

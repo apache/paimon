@@ -18,32 +18,27 @@
 
 package org.apache.paimon.rest.auth;
 
-import java.util.HashMap;
-import java.util.Map;
+/** AuthProviderEnum. */
+public enum AuthProviderEnum {
+    BEAR("bear"),
+    DLF("dlf");
 
-/** Auth provider for bear token. */
-public class BearTokenAuthProvider implements AuthProvider {
+    private final String identifier;
 
-    public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
-
-    private static final String BEARER_PREFIX = "Bearer ";
-
-    protected String token;
-
-    public BearTokenAuthProvider(String token) {
-        this.token = token;
+    AuthProviderEnum(String identifier) {
+        this.identifier = identifier;
     }
 
-    @Override
-    public Map<String, String> header(
-            Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
-        Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
-        headersWithAuth.put(AUTHORIZATION_HEADER_KEY, BEARER_PREFIX + token);
-        return headersWithAuth;
+    public String identifier() {
+        return identifier;
     }
 
-    @Override
-    public boolean refresh() {
-        return true;
+    public static AuthProviderEnum fromString(String identifier) {
+        for (AuthProviderEnum authProviderEnum : AuthProviderEnum.values()) {
+            if (authProviderEnum.identifier.equals(identifier)) {
+                return authProviderEnum;
+            }
+        }
+        throw new IllegalArgumentException("Unknown AuthProvider type: " + identifier);
     }
 }
