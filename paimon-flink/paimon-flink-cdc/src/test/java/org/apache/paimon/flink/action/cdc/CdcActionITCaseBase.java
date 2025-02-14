@@ -130,6 +130,16 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
     protected void waitForResult(
             List<String> expected, FileStoreTable table, RowType rowType, List<String> primaryKeys)
             throws Exception {
+        waitForResult(false, expected, table, rowType, primaryKeys);
+    }
+
+    protected void waitForResult(
+            boolean withRegx,
+            List<String> expected,
+            FileStoreTable table,
+            RowType rowType,
+            List<String> primaryKeys)
+            throws Exception {
         assertThat(table.schema().primaryKeys()).isEqualTo(primaryKeys);
 
         // wait for table schema to become our expected schema
@@ -143,6 +153,13 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                     if (sameName && sameType) {
                         cnt++;
                     }
+
+                    LOG.info("actual: field: " + field.name() + " " + field.type());
+                    LOG.info(
+                            "expected:rowType: "
+                                    + rowType.getFieldNames().get(i)
+                                    + " "
+                                    + rowType.getFieldTypes().get(i));
                 }
                 if (cnt == rowType.getFieldCount()) {
                     break;
@@ -165,13 +182,38 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                             rowType);
             List<String> sortedActual = new ArrayList<>(result);
             Collections.sort(sortedActual);
-            if (sortedExpected.equals(sortedActual)) {
-                break;
-            }
+
             LOG.info("actual: " + sortedActual);
             LOG.info("expected: " + sortedExpected);
+
+            if (withRegx) {
+                if (isRegxMatchList(sortedActual, sortedExpected)) {
+                    break;
+                }
+            } else if (sortedExpected.equals(sortedActual)) {
+                break;
+            }
+            LOG.warn("actual: " + sortedActual);
+            LOG.warn("expected: " + sortedExpected);
             Thread.sleep(1000);
         }
+    }
+
+    private boolean isRegxMatchList(List<String> actual, List<String> expected) {
+        if (actual == null && expected == null) {
+            return true;
+        }
+        if (actual.size() != expected.size()) {
+            return false;
+        }
+
+        for (int i = 0; i < actual.size(); i++) {
+            if (!actual.get(i).matches(expected.get(i))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     protected Map<String, String> getBasicTableConfig() {
@@ -392,6 +434,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         private final List<String> partitionKeys = new ArrayList<>();
         private final List<String> primaryKeys = new ArrayList<>();
         private final List<String> metadataColumn = new ArrayList<>();
+        private final List<String> computedColumnArgs = new ArrayList<>();
         protected Map<String, String> partitionKeyMultiple = new HashMap<>();
 
         public SyncDatabaseActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
@@ -464,6 +507,12 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncDatabaseActionBuilder<T> withComputedColumnArgs(
+                List<String> computedColumnArgs) {
+            this.computedColumnArgs.addAll(computedColumnArgs);
+            return this;
+        }
+
         public SyncDatabaseActionBuilder<T> withPartitionKeyMultiple(
                 Map<String, String> partitionKeyMultiple) {
             if (partitionKeyMultiple != null) {
@@ -499,6 +548,8 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             args.addAll(mapToArgs("--multiple-table-partition-keys", partitionKeyMultiple));
             args.addAll(listToArgs("--primary-keys", primaryKeys));
             args.addAll(listToArgs("--metadata-column", metadataColumn));
+
+            args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
 
             return createAction(clazz, args);
         }
