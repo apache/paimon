@@ -27,6 +27,7 @@ import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -44,6 +45,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 
 /** Base {@link Action} for synchronizing into one Paimon database. */
 public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
@@ -58,6 +60,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected String includingTables = ".*";
     protected List<String> partitionKeys = new ArrayList<>();
     protected List<String> primaryKeys = new ArrayList<>();
+    protected List<String> computedColumnArgs = new ArrayList<>();
+    protected List<ComputedColumn> computedColumns = new ArrayList<>();
     @Nullable protected String excludingTables;
     protected String includingDbs = ".*";
     @Nullable protected String excludingDbs;
@@ -165,10 +169,15 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return this;
     }
 
+    public SyncDatabaseActionBase withComputedColumnArgs(List<String> computedColumnArgs) {
+        this.computedColumnArgs = computedColumnArgs;
+        return this;
+    }
+
     @Override
     protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
         return syncJobHandler.provideRecordParser(
-                Collections.emptyList(), typeMapping, metadataConverters);
+                this.computedColumns, typeMapping, metadataConverters);
     }
 
     public SyncDatabaseActionBase withPartitionKeyMultiple(
@@ -236,5 +245,12 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                 .withMode(mode)
                 .withTableOptions(tableConfig)
                 .build();
+    }
+
+    @Override
+    protected void beforeBuildingSourceSink() throws Exception {
+        computedColumns =
+                buildComputedColumns(
+                        computedColumnArgs, Collections.singletonList(SpecialFields.VALUE_KIND));
     }
 }

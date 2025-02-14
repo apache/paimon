@@ -115,6 +115,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
             GenericRecord record, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
         RowType.Builder rowTypeBuilder = RowType.builder();
         Map<String, String> rowData = this.extractRowData(record, rowTypeBuilder);
+        evalComputedColumns(rowKind, rowData, rowTypeBuilder);
         records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
     }
 
@@ -158,7 +159,6 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
             rowTypeBuilder.field(fieldName, avroToPaimonDataType(schema));
         }
 
-        evalComputedColumns(resultMap, rowTypeBuilder);
         return resultMap;
     }
 
