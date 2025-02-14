@@ -1045,4 +1045,30 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         iterator.close();
     }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupSpecifiedPartition(LookupCacheMode mode) throws Exception {
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED) "
+                        + "PARTITIONED BY (pt) WITH ( "
+                        + "'bucket' = '1', "
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        sql("INSERT INTO T VALUES (1), (2)");
+        sql(
+                "INSERT INTO PARTITIONED_DIM VALUES "
+                        + "('a', 1, 10), ('a', 2, 20), ('b', 1, 11), ('b', 3, 31), ('c', 1, 12), ('c', 2, 22), ('c', 3, 32)");
+
+        String query =
+                "SELECT T.i, D.v FROM T "
+                        + "LEFT JOIN PARTITIONED_DIM /*+ OPTIONS('scan.partitions' = 'pt=b;pt=c') */ "
+                        + "for system_time as of T.proctime AS D ON T.i = D.k";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+        List<Row> result = iterator.collect(3);
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 11), Row.of(1, 12), Row.of(2, 22));
+        iterator.close();
+    }
 }

@@ -80,7 +80,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreLookupFunction.class);
 
     private final Table table;
-    @Nullable private final DynamicPartitionLoader partitionLoader;
+    @Nullable private final PartitionLoader partitionLoader;
     private final List<String> projectFields;
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
@@ -101,7 +101,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @Nullable private Filter<InternalRow> cacheRowFilter;
 
     public FileStoreLookupFunction(
-            Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
+            FileStoreTable table,
+            int[] projection,
+            int[] joinKeyIndex,
+            @Nullable Predicate predicate) {
         if (!TableScanUtils.supportCompactDiffStreamingReading(table)) {
             TableScanUtils.streamingReadingValidate(table);
         }
