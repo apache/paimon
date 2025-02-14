@@ -644,6 +644,75 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
+    @Timeout(180)
+    public void testAuditTime() throws Exception {
+        final String topic = "specify-keys";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/canal/database/specify-keys/canal-data-1.txt");
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withPartitionKeys("part")
+                        .withPrimaryKeys("k", "part")
+                        .withComputedColumnArgs(
+                                Arrays.asList(
+                                        "etl_create_time=create_time()",
+                                        "etl_update_time=update_time()"))
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        waitingTables("t1", "t2");
+
+        FileStoreTable table1 = getFileStoreTable("t1");
+        assertThat(table1.partitionKeys()).containsExactly("part");
+        assertThat(table1.primaryKeys()).containsExactly("k", "part");
+
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.TIMESTAMP(),
+                            DataTypes.TIMESTAMP()
+                        },
+                        new String[] {"k", "part", "v1", "etl_create_time", "etl_update_time"});
+        waitForResult(
+                true,
+                Collections.singletonList(
+                        "\\+I\\[1, 1, A, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                table1,
+                rowType1,
+                Arrays.asList("k", "part"));
+
+        FileStoreTable table2 = getFileStoreTable("t2");
+        assertThat(table2.partitionKeys()).isEmpty();
+        assertThat(table2.primaryKeys()).containsExactly("k");
+
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.TIMESTAMP(),
+                            DataTypes.TIMESTAMP()
+                        },
+                        new String[] {"k", "v1", "etl_create_time", "etl_update_time"});
+        waitForResult(
+                true,
+                Collections.singletonList(
+                        "\\+I\\[1, A, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                table2,
+                rowType2,
+                Collections.singletonList("k"));
+    }
+
+    @Test
     @Timeout(60)
     public void testMultipleTablePartitionKeys() throws Exception {
         final String topic = "multiple-table-partition-keys";
