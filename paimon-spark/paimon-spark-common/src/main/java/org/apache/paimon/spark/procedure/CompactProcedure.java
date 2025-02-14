@@ -199,6 +199,10 @@ public class CompactProcedure extends BaseProcedure {
 
                     Map<String, String> dynamicOptions = new HashMap<>();
                     dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+                    dynamicOptions.put(
+                            CoreOptions.WRITE_ACTIONS.key(),
+                            CoreOptions.WriteAction.ALL.toString());
+
                     if (!StringUtils.isNullOrWhitespaceOnly(options)) {
                         dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
                     }

@@ -70,9 +70,9 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
             String initialCommitUser,
             boolean fullCompaction) {
         super(parameters, Options.fromMap(table.options()));
-        Preconditions.checkArgument(
-                !table.coreOptions().writeOnly(),
-                CoreOptions.WRITE_ONLY.key() + " should not be true for StoreCompactOperator.");
+
+        checkWriteActions(table.coreOptions());
+
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
@@ -168,6 +168,12 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
         write.close();
     }
 
+    public static void checkWriteActions(CoreOptions coreOptions) {
+        Preconditions.checkArgument(
+                !coreOptions.writeOnly(),
+                CoreOptions.WRITE_ONLY.key() + " should not be true for StoreCompactOperator.");
+    }
+
     /** {@link StreamOperatorFactory} of {@link StoreCompactOperator}. */
     public static class Factory extends PrepareCommitOperator.Factory<RowData, Committable> {
         private final FileStoreTable table;
@@ -181,9 +187,8 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                 String initialCommitUser,
                 boolean fullCompaction) {
             super(Options.fromMap(table.options()));
-            Preconditions.checkArgument(
-                    !table.coreOptions().writeOnly(),
-                    CoreOptions.WRITE_ONLY.key() + " should not be true for StoreCompactOperator.");
+            checkWriteActions(table.coreOptions());
+
             this.table = table;
             this.storeSinkWriteProvider = storeSinkWriteProvider;
             this.initialCommitUser = initialCommitUser;
