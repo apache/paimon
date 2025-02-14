@@ -144,7 +144,7 @@ CALL sys.clear_consumers(
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    clear-consumers \
+    clear_consumers \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
