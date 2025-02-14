@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link JdbcClientPool} */
+/** Tests for {@link JdbcClientPool}. */
 public class JdbcClientPoolTest {
     public JdbcClientPool connections;
 
