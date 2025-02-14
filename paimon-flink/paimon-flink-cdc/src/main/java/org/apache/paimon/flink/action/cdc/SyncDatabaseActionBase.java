@@ -250,6 +250,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     @Override
     protected void beforeBuildingSourceSink() throws Exception {
         computedColumns =
-                buildComputedColumns(computedColumnArgs, Collections.singletonList(SpecialFields.VALUE_KIND));
+                buildComputedColumns(
+                        computedColumnArgs, Collections.singletonList(SpecialFields.VALUE_KIND));
     }
 }
