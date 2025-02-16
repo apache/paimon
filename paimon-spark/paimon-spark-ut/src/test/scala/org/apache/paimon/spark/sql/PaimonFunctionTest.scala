@@ -66,6 +66,16 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon function: show user functions") {
+    assume(gteqSpark3_4)
+    Seq("paimon", paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"use $catalogName")
+        val functions = sql("show user functions").collect()
+        assert(functions.exists(_.getString(0).contains("max_pt")), catalogName)
+    }
+  }
+
   test("Paimon function: bucket join with SparkGenericCatalog") {
     sql(s"use $sparkCatalogName")
     assume(gteqSpark3_3)
@@ -104,6 +114,61 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
 
     sql("DROP FUNCTION myIntSum")
     checkAnswer(sql(s"SHOW FUNCTIONS FROM $hiveDbName LIKE 'myIntSum'"), Seq.empty)
+  }
+
+  test("Add max_pt function") {
+    Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        {
+          sql(s"use $catalogName")
+          val maxPt = if (catalogName == sparkCatalogName) {
+            "paimon.max_pt"
+          } else {
+            "max_pt"
+          }
+
+          intercept[Exception] {
+            sql(s"SELECT $maxPt(1)").collect()
+          }
+          intercept[Exception] {
+            sql(s"SELECT $maxPt()").collect()
+          }
+          withTable("t") {
+            sql("CREATE TABLE t (id INT) USING paimon")
+            intercept[Exception] {
+              sql(s"SELECT $maxPt('t')").collect()
+            }
+          }
+
+          withTable("t") {
+            sql("CREATE TABLE t (id INT) USING paimon PARTITIONED BY (p1 STRING)")
+            intercept[Exception] {
+              sql(s"SELECT $maxPt('t')").collect()
+            }
+            sql("INSERT INTO t PARTITION (p1='a') VALUES (1)")
+            sql("INSERT INTO t PARTITION (p1='b') VALUES (2)")
+            sql("INSERT INTO t PARTITION (p1='aa') VALUES (3)")
+            sql("ALTER TABLE t ADD PARTITION (p1='z')")
+            checkAnswer(sql(s"SELECT $maxPt('t')"), Row("b"))
+            checkAnswer(sql(s"SELECT id FROM t WHERE p1 = $maxPt('default.t')"), Row(2))
+          }
+
+          withTable("t") {
+            sql("CREATE TABLE t (id INT) USING paimon PARTITIONED BY (p1 INT, p2 STRING)")
+            intercept[Exception] {
+              sql(s"SELECT $maxPt('t')").collect()
+            }
+            sql("INSERT INTO t PARTITION (p1=1, p2='c') VALUES (1)")
+            sql("INSERT INTO t PARTITION (p1=2, p2='a') VALUES (2)")
+            sql("INSERT INTO t PARTITION (p1=2, p2='b') VALUES (3)")
+            sql("ALTER TABLE t ADD PARTITION (p1='9', p2='z')")
+            checkAnswer(sql(s"SELECT $maxPt('t')"), Row("2"))
+            checkAnswer(
+              sql(s"SELECT id FROM t WHERE p1 = $maxPt('default.t')"),
+              Row(2) :: Row(3) :: Nil)
+          }
+        }
+    }
   }
 }
 
