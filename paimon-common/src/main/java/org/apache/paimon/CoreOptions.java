@@ -443,6 +443,34 @@ public class CoreOptions implements Serializable {
                             "If set to true, compactions and snapshot expiration will be skipped. "
                                     + "This option is used along with dedicated compact jobs.");
 
+    public static final ConfigOption<String> WRITE_ACTIONS =
+            key("write-actions")
+                    .stringType()
+                    .defaultValue(WriteAction.ALL.value)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "This parameter is used to specify which actions will be performed during the writing process. This parameter is effective only when write-only is false and has no effect on action or procedure.")
+                                    .linebreak()
+                                    .text("1. 'all': By default, all actions will be performed.")
+                                    .linebreak()
+                                    .text(
+                                            "2. 'partition-expire': Perform partition expiration action.")
+                                    .linebreak()
+                                    .text(
+                                            "3. 'snapshot-expire': Perform snapshot expiration action.")
+                                    .linebreak()
+                                    .text(
+                                            "4. 'tag-automatic-creation': Perform automatic creation tag action.")
+                                    .linebreak()
+                                    .text("5. 'full-compact': Perform full compaction action.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'partition-expire,"
+                                                    + "snapshot-expire,tag-automatic-creation', "
+                                                    + "if you want to skip all actions you can set this to ''.")
+                                    .build());
+
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             key("source.split.target-size")
                     .memoryType()
@@ -2248,6 +2276,22 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_ONLY);
     }
 
+    public Set<WriteAction> writeActions() {
+        if (writeOnly()) {
+            return new HashSet<>(0);
+        }
+        return writeActions(options.get(WRITE_ACTIONS));
+    }
+
+    public static Set<WriteAction> writeActions(String str) {
+        if (StringUtils.isNullOrWhitespaceOnly(str)) {
+            return new HashSet<>(0);
+        }
+        return Arrays.stream(str.split(","))
+                .map(action -> WriteAction.valueOf(action.toUpperCase().replace('-', '_')))
+                .collect(Collectors.toCollection(HashSet::new));
+    }
+
     public boolean streamingReadOverwrite() {
         return options.get(STREAMING_READ_OVERWRITE);
     }
@@ -3231,6 +3275,56 @@ public class CoreOptions implements Serializable {
         @Override
         public String toString() {
             return value;
+        }
+    }
+
+    /** Actions performed during table writing. */
+    public enum WriteAction {
+
+        // All write actions will be performed, this is the default behavior.
+        ALL("all"),
+
+        // Actions during commit.
+        PARTITION_EXPIRE("partition-expire"),
+        SNAPSHOT_EXPIRE("snapshot-expire"),
+        TAG_AUTOMATIC_CREATION("tag-automatic-creation"),
+
+        // Actions during writing.
+        FULL_COMPACT("full-compact");
+
+        private final String value;
+
+        WriteAction(String value) {
+            this.value = value;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        public static boolean doPartitionExpireAction(Set<WriteAction> doWriteActions) {
+            return doAllWriteActions(doWriteActions)
+                    || doWriteActions.contains(WriteAction.PARTITION_EXPIRE);
+        }
+
+        public static boolean doSnapshotExpireAction(Set<WriteAction> doWriteActions) {
+            return doAllWriteActions(doWriteActions)
+                    || doWriteActions.contains(WriteAction.SNAPSHOT_EXPIRE);
+        }
+
+        public static boolean doAutoCreateTagAction(Set<WriteAction> doWriteActions) {
+            return doAllWriteActions(doWriteActions)
+                    || doWriteActions.contains(WriteAction.TAG_AUTOMATIC_CREATION);
+        }
+
+        public static boolean doFullCompactionAction(Set<WriteAction> doWriteActions) {
+            return doAllWriteActions(doWriteActions)
+                    || doWriteActions.contains(WriteAction.FULL_COMPACT);
+        }
+
+        public static boolean doAllWriteActions(Set<WriteAction> doWriteActions) {
+            return doWriteActions.contains(WriteAction.ALL);
         }
     }
 

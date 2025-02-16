@@ -82,10 +82,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.WriteAction;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract {@link FileStoreTable}. */
@@ -432,7 +434,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public TableCommitImpl newCommit(String commitUser) {
         CoreOptions options = coreOptions();
         Runnable snapshotExpire = null;
-        if (!options.writeOnly()) {
+        Set<WriteAction> skippingActions = options.writeActions();
+        if (WriteAction.doSnapshotExpireAction(skippingActions)) {
             boolean changelogDecoupled = options.changelogLifecycleDecoupled();
             ExpireConfig expireConfig = options.expireConfig();
             ExpireSnapshots expireChangelog = newExpireChangelog().config(expireConfig);
@@ -449,8 +452,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return new TableCommitImpl(
                 store().newCommit(commitUser, createCommitCallbacks(commitUser)),
                 snapshotExpire,
-                options.writeOnly() ? null : store().newPartitionExpire(commitUser),
-                options.writeOnly() ? null : store().newTagCreationManager(),
+                WriteAction.doPartitionExpireAction(skippingActions)
+                        ? store().newPartitionExpire(commitUser)
+                        : null,
+                WriteAction.doAutoCreateTagAction(skippingActions)
+                        ? store().newTagCreationManager()
+                        : null,
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),

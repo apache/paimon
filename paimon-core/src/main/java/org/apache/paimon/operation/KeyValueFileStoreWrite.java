@@ -288,7 +288,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         MergeEngine mergeEngine = options.mergeEngine();
         ChangelogProducer changelogProducer = options.changelogProducer();
         LookupStrategy lookupStrategy = options.lookupStrategy();
-        if (changelogProducer.equals(FULL_COMPACTION)) {
+        if (changelogProducer.equals(FULL_COMPACTION)
+                && CoreOptions.WriteAction.doFullCompactionAction(options.writeActions())) {
             return new FullChangelogMergeTreeCompactRewriter(
                     maxLevel,
                     mergeEngine,

@@ -45,6 +45,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
@@ -259,13 +260,12 @@ public class MultiTablesStoreCompactOperator
         Options options = fileStoreTable.coreOptions().toConfiguration();
         CoreOptions.ChangelogProducer changelogProducer =
                 fileStoreTable.coreOptions().changelogProducer();
-        boolean waitCompaction;
         CoreOptions coreOptions = fileStoreTable.coreOptions();
-        if (coreOptions.writeOnly()) {
-            waitCompaction = false;
-        } else {
-            waitCompaction = coreOptions.prepareCommitWaitCompaction();
-            int deltaCommits = -1;
+        boolean waitCompaction = coreOptions.prepareCommitWaitCompaction();
+        Set<CoreOptions.WriteAction> writeActions = coreOptions.writeActions();
+        int deltaCommits = -1;
+
+        if (CoreOptions.WriteAction.doFullCompactionAction(writeActions)) {
             if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
                 deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
             } else if (options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {
