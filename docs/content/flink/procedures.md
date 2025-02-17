@@ -687,7 +687,7 @@ All available procedures are listed below.
          CALL sys.compact_postpone_bucket(`table` => 'identifier', `default_bucket_num` => bucket_num, `parallelism` => parallelism)
       </td>
       <td>
-         Compact postpone bucket tables, which distributes records in bucket--2 directory into real bucket directories. Arguments:
+         Compact postpone bucket tables, which distributes records in bucket-postpone directory into real bucket directories. Arguments:
          <li>identifier: The target table identifier. Cannot be empty.</li>
          <li>bucket_num: Bucket number for the partitions compacted for the first time. Default value is 4.</li>
          <li>parallelism: Parallelism of this job.</li>

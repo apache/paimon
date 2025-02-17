@@ -95,7 +95,7 @@ and support different buckets for different partitions.
 Currently, only Flink supports this mode.
 
 When writing records into the table,
-all records will first be stored in the `bucket--2` directory of each partition
+all records will first be stored in the `bucket-postpone` directory of each partition
 and are not available to readers.
 
 To move the records into the correct bucket and make them readable,
