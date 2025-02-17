@@ -76,7 +76,7 @@ public class AuthSession {
     }
 
     public Boolean refresh() {
-        if ( this.authProvider.keepRefreshed()
+        if (this.authProvider.keepRefreshed()
                 && this.authProvider.tokenRefreshInMills().isPresent()) {
             return this.authProvider.refresh();
         }
