@@ -106,6 +106,7 @@ under the License.
         <parquet.version>1.13.1</parquet.version>
         <orc.version>1.9.2</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
+        <roaringbitmap.version>1.2.1</roaringbitmap.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
