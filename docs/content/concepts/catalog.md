@@ -37,6 +37,7 @@ Paimon catalogs currently support three types of metastores:
 * `filesystem` metastore (default), which stores both metadata and table files in filesystems.
 * `hive` metastore, which additionally stores metadata in Hive metastore. Users can directly access the tables from Hive.
 * `jdbc` metastore, which additionally stores metadata in relational databases such as MySQL, Postgres, etc.
+* `rest` metastore, which additionally stores metadata in remote catalog server.
 
 ## Filesystem Catalog
 
@@ -88,3 +89,22 @@ CREATE CATALOG my_jdbc WITH (
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
 ```
+## REST Catalog
+By using the Paimon REST catalog, changes to the catalog will be directly stored in a remote catalog server.
+
+```sql
+-- Flink SQL
+CREATE CATALOG my_rest WITH (
+    'type' = 'paimon',
+    'metastore' = 'rest',
+    'uri' = 'http://<host>:<port>',
+    'token.provider' = 'bear',
+    'token' = '<token>',
+);
+```
+Architecture:
+
+{{< img src="/img/rest-catalog.png">}}
+
+Unlike other catalogs, the REST catalog's technology-specific logic is implemented on the server side. 
+The server can be implemented in any language, as long as it implements these APIs: [REST Catalog API](https://github.com/apache/paimon/blob/master/paimon-open-api/rest-catalog-open-api.yaml).
