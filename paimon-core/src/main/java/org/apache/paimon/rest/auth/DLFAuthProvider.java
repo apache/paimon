@@ -41,6 +41,8 @@ public class DLFAuthProvider implements AuthProvider {
     public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
     public static final String DLF_DATA_MD5_HEX_HEADER_KEY = "x-dlf-data-md5-hex";
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
+    public static final String DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token";
+    public static final String DLF_ACCESSKEY_ID_HEADER_KEY = "x-dlf-accesskey-id";
     public static final double EXPIRED_FACTOR = 0.4;
 
     private static final DateTimeFormatter DATE_FORMATTER =
@@ -92,6 +94,10 @@ public class DLFAuthProvider implements AuthProvider {
             headersWithAuth.put(DLF_DATE_HEADER_KEY, date);
             headersWithAuth.put(DLF_HOST_HEADER_KEY, restAuthParameter.host());
             headersWithAuth.put(DLF_DATA_MD5_HEX_HEADER_KEY, dataMd5Hex);
+            if (token.getSecurityToken() != null) {
+                headersWithAuth.put(DLF_SECURITY_TOKEN_HEADER_KEY, token.getSecurityToken());
+                headersWithAuth.put(DLF_ACCESSKEY_ID_HEADER_KEY, token.getAccessKeyId());
+            }
             return headersWithAuth;
         } catch (Exception e) {
             throw new RuntimeException(e);

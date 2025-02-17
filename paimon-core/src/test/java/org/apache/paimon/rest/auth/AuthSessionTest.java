@@ -198,14 +198,11 @@ public class AuthSessionTest {
 
     @Test
     public void testDLFAuthProviderAuthHeader() throws Exception {
-        Options options = new Options();
-        String akId = UUID.randomUUID().toString();
-        String akSecret = UUID.randomUUID().toString();
-        DLFToken token = new DLFToken(akId, akSecret, null, null);
-        options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
-        options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
-        AuthProvider authProvider =
-                AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
+        String fileName = UUID.randomUUID().toString();
+        Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        String tokenStr = tokenFile2Token.getRight();
+        AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName);
+        DLFToken token = OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DLFToken.class);
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter("host", "/path", "method", "data");
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
@@ -219,6 +216,11 @@ public class AuthSessionTest {
                         date);
         assertEquals(authorization, header.get(DLFAuthProvider.DLF_AUTHORIZATION_HEADER_KEY));
         assertEquals(restAuthParameter.host(), header.get(DLFAuthProvider.DLF_HOST_HEADER_KEY));
+        assertEquals(
+                token.getSecurityToken(),
+                header.get(DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY));
+        assertEquals(
+                token.getAccessKeyId(), header.get(DLFAuthProvider.DLF_ACCESSKEY_ID_HEADER_KEY));
     }
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
