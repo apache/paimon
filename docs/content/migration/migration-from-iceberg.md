@@ -27,38 +27,37 @@ under the License.
 # Iceberg Migration
 
 Apache Iceberg data with parquet file format could be migrated to Apache Paimon.
-When migrating an iceberg table to a paimon table, the origin iceberg table will be permanently disappeared. **So please back up your data if you
-still need the original table.** The migrated paimon table will be a [append table]({{< ref "append-table/overview" >}}).
+When migrating an iceberg table to a paimon table, the origin iceberg table will permanently disappear. **So please back up your data if you
+still need the original table.** The migrated paimon table will be an [append table]({{< ref "append-table/overview" >}}).
 
 <span style="color: red; "> **We highly recommend to back up iceberg table data before migrating, because migrating action is not atomic. If been interrupted while migrating, you may lose your data.** </span>
 
 ## Migrate Iceberg Table
-Currently, we can use paimon catalog with MigrateTableProcedure or MigrateTableAction to migrate the data used by **latest iceberg snapshot** 
+Currently, we can use paimon catalog with MigrateIcebergTableProcedure or MigrateIcebergTableAction to migrate the data used by **latest iceberg snapshot** 
 in an iceberg table to a paimon table. 
 
 Iceberg tables managed by hadoop-catalog or hive-catalog are supported to be migrated to paimon.
-As for the type of paimon catalog, it only needs to have access to the file system where the iceberg metadata and data files are located. 
+As for the type of paimon catalog, it needs to have access to the file system where the iceberg metadata and data files are located. 
 This means we could migrate an iceberg table managed by hadoop-catalog to a paimon table in hive catalog if their warehouses are in the same file system.
 
 When migrating, the iceberg data files which were marked by DELETED will be ignored. Only the data files referenced by manifest entries with 'EXISTING' and 'ADDED' content will be migrated to paimon.
 Notably, now we don't support migrating iceberg tables with delete files(deletion vectors, position delete files, equality delete files etc.)
 
-Now only parquet format is supported in iceberg migration.
+Now only **parquet** format is supported in iceberg migration.
 
-### MigrateTableProcedure
+### MigrateIcebergTableProcedure
 You can run the following command to migrate an iceberg table to a paimon table.
 ```sql
 -- Use named argument
-CALL sys.migrate_table(connector => 'iceberg', source_table => '${database_name.table_name}', options => '${paimon_options}', parallelism => ${parallelism}, iceberg_options => '${iceberg_options}');
+CALL sys.migrate_iceberg_table(source_table => 'database_name.table_name', iceberg_options => 'iceberg_options', options => 'paimon_options', parallelism => parallelism);
 
 -- Use indexed argument
-CALL sys.migrate_table('connector', 'source_table', 'options', 'parallelism', 'iceberg_options');
+CALL sys.migrate_iceberg_table('source_table','iceberg_options', 'options', 'parallelism');
 ```
-* `connector` is used to specify the data source, in iceberg migration, it is always `iceberg`.
-* `source_table` is used to specify the source iceberg table to migrate, it's required;
-* `options` is used to specify the additional options for the target paimon table, it's optional.
+* `source_table`, string type, is used to specify the source iceberg table to migrate, it's required.
+* `iceberg_options`, string type, is used to specify the configuration of migration, multiple configuration items are separated by commas. it's required.
+* `options`, string type, is used to specify the additional options for the target paimon table, it's optional.
 * `parallelism`, integer type, is used to specify the parallelism of the migration job, it's optional.
-* `iceberg_options` is used to specify the configuration of migration, multiple configuration items are separated by commas. it's required. 
 
 #### hadoop-catalog
 To migrate iceberg table managed by hadoop-catalog, you need set `metadata.iceberg.storage=hadoop-catalog` and `iceberg_warehouse`. Example:
@@ -67,8 +66,7 @@ CREATE CATALOG paimon_catalog WITH ('type' = 'paimon', 'warehouse' = '/path/to/p
 
 USE CATALOG paimon_catalog;
 
-CALL sys.migrate_table(
-    connector => 'iceberg', 
+CALL sys.migrate_iceberg_table(
     source_table => 'iceberg_db.iceberg_tbl',
     iceberg_options => 'metadata.iceberg.storage=hadoop-catalog,iceberg_warehouse=/path/to/iceberg/warehouse'
 );
@@ -78,14 +76,13 @@ If you want the metadata of the migrated paimon table to be managed by hive, you
 CREATE CATALOG paimon_catalog WITH (
     'type' = 'paimon', 
     'metastore' = 'hive', 
-    'uri' = 'thrift://localhost:9083', 
+    'uri' = 'thrift://<host>:<port>', 
     'warehouse' = '/path/to/paimon/warehouse'
 );
 
 USE CATALOG paimon_catalog;
 
-CALL sys.migrate_table(
-    connector => 'iceberg', 
+CALL sys.migrate_iceberg_table(
     source_table => 'iceberg_db.iceberg_tbl',
     iceberg_options => 'metadata.iceberg.storage=hadoop-catalog,iceberg_warehouse=/path/to/iceberg/warehouse'
 );
@@ -107,19 +104,19 @@ and provide information about Hive Metastore used by the iceberg table in `icebe
     <tbody>
     <tr>
       <td><h5>metadata.iceberg.uri</h5></td>
-      <td style="word-wrap: break-word;"></td>
+      <td style="word-wrap: break-word;">none</td>
       <td>String</td>
       <td>Hive metastore uri for Iceberg Hive catalog.</td>
     </tr>
     <tr>
       <td><h5>metadata.iceberg.hive-conf-dir</h5></td>
-      <td style="word-wrap: break-word;"></td>
+      <td style="word-wrap: break-word;">none</td>
       <td>String</td>
       <td>hive-conf-dir for Iceberg Hive catalog.</td>
     </tr>
     <tr>
       <td><h5>metadata.iceberg.hadoop-conf-dir</h5></td>
-      <td style="word-wrap: break-word;"></td>
+      <td style="word-wrap: break-word;">none</td>
       <td>String</td>
       <td>hadoop-conf-dir for Iceberg Hive catalog.</td>
     </tr>
@@ -137,26 +134,24 @@ Example:
 CREATE CATALOG paimon_catalog WITH (
     'type' = 'paimon', 
     'metastore' = 'hive', 
-    'uri' = 'thrift://localhost:9083', 
+    'uri' = 'thrift://<host>:<port>', 
     'warehouse' = '/path/to/paimon/warehouse'
 );
 
 USE CATALOG paimon_catalog;
 
-CALL sys.migrate_table(
-    connector => 'iceberg', 
+CALL sys.migrate_iceberg_table(
     source_table => 'iceberg_db.iceberg_tbl',
-    iceberg_options => 'metadata.iceberg.storage=hive-catalog,metadata.iceberg.uri=thrift://localhost:9083'
+    iceberg_options => 'metadata.iceberg.storage=hive-catalog,metadata.iceberg.uri=thrift://<host>:<port>'
 );
 ```
 
-### MigrateTableAction
+### MigrateIcebergTableAction
 You can also use flink action for migration:
 ```bash
 <FLINK_HOME>/bin/flink run \
 /path/to/paimon-flink-action-{{< version >}}.jar \
-migrate_table \
---source_type iceberg \
+migrate_iceberg_table \
 --table <icebergDatabase.icebergTable> \
 --iceberg_options <iceberg-conf  [,iceberg-conf ...]> \
 [--parallelism <parallelism>] \
@@ -168,8 +163,7 @@ Example:
 ```bash
 <FLINK_HOME>/bin/flink run \
 /path/to/paimon-flink-action-{{< version >}}.jar \
-migrate_table \
---source_type iceberg \
+migrate_iceberg_table \
 --table iceberg_db.iceberg_tbl \
 --iceberg_options metadata.iceberg.storage=hive-catalog, metadata.iceberg.uri=thrift://localhost:9083 \
 --parallelism 6 \
