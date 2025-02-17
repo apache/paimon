@@ -25,17 +25,17 @@ import java.util.function.Function;
 public class RESTAuthFunction implements Function<RESTAuthParameter, Map<String, String>> {
 
     private final Map<String, String> initHeader;
-    private final AuthProvider authProvider;
+    private final AuthSession authSession;
 
-    public RESTAuthFunction(Map<String, String> initHeader, AuthProvider authProvider) {
+    public RESTAuthFunction(Map<String, String> initHeader, AuthSession authSession) {
         this.initHeader = initHeader;
-        this.authProvider = authProvider;
+        this.authSession = authSession;
     }
 
     @Override
     public Map<String, String> apply(RESTAuthParameter restAuthParameter) {
-        if (authProvider != null) {
-            return authProvider.header(initHeader, restAuthParameter);
+        if (authSession != null) {
+            return authSession.getAuthProvider().header(initHeader, restAuthParameter);
         }
         return initHeader;
     }

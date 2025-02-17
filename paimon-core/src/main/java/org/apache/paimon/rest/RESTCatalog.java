@@ -136,12 +136,11 @@ public class RESTCatalog implements Catalog {
                                             ResourcePaths.V1_CONFIG,
                                             ConfigResponse.class,
                                             new RESTAuthFunction(
-                                                    Collections.emptyMap(),
-                                                    catalogAuth.getAuthProvider()))
+                                                    Collections.emptyMap(), catalogAuth))
                                     .merge(context.options().toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
-        this.restAuthFunction = new RESTAuthFunction(baseHeaders, catalogAuth.getAuthProvider());
+        this.restAuthFunction = new RESTAuthFunction(baseHeaders, catalogAuth);
         context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
         this.context = context;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);

@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.auth.AuthProvider;
+import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.BadRequestException;
@@ -68,8 +69,9 @@ public class HttpClientTest {
         httpClient = new HttpClient(httpClientOptions);
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);
+        AuthSession authSession = new AuthSession(authProvider);
         headers = new HashMap<>();
-        restAuthFunction = new RESTAuthFunction(headers, authProvider);
+        restAuthFunction = new RESTAuthFunction(headers, authSession);
     }
 
     @After
