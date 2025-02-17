@@ -57,12 +57,6 @@ under the License.
             <td>The cache mode of lookup join.<br /><br />Possible values:<ul><li>"AUTO"</li><li>"FULL"</li></ul></td>
         </tr>
         <tr>
-            <td><h5>lookup.dynamic-partition</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Specific dynamic partition for lookup, supports 'max_pt()' and 'max_two_pt()' currently.</td>
-        </tr>
-        <tr>
             <td><h5>lookup.dynamic-partition.refresh-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
@@ -133,6 +127,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>Define a custom parallelism for the scan source. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration. If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.partitions</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the partitions to scan. Partitions should be given in the form of key1=value1,key2=value2. Partition keys not specified will be filled with the value of partition.default-name. Multiple partitions should be separated by semicolon (;). This option can support normal source tables and lookup join tables. For lookup joins, two special values max_pt() and max_two_pt() are also supported, specifying the (two) partition(s) with the largest partition value.</td>
         </tr>
         <tr>
             <td><h5>scan.remove-normalize</h5></td>

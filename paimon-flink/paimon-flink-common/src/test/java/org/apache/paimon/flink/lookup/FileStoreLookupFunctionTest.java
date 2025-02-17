@@ -34,7 +34,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -103,7 +102,8 @@ public class FileStoreLookupFunctionTest {
         lookupFunction.open(tempDir.toString());
     }
 
-    private FileStoreLookupFunction createLookupFunction(Table table, boolean joinEqualPk) {
+    private FileStoreLookupFunction createLookupFunction(
+            FileStoreTable table, boolean joinEqualPk) {
         return new FileStoreLookupFunction(
                 table, new int[] {0, 1}, joinEqualPk ? new int[] {0, 1} : new int[] {1}, null);
     }
@@ -118,7 +118,7 @@ public class FileStoreLookupFunctionTest {
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
         conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
         if (dynamicPartition) {
-            conf.set(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION, "max_pt()");
+            conf.set(FlinkConnectorOptions.SCAN_PARTITIONS, "max_pt()");
         }
 
         RowType rowType =
@@ -225,9 +225,9 @@ public class FileStoreLookupFunctionTest {
 
     @Test
     public void testParseWrongTimePeriodsBlacklist() throws Exception {
-        Table table = createFileStoreTable(false, false, false);
+        FileStoreTable table = createFileStoreTable(false, false, false);
 
-        Table table1 =
+        FileStoreTable table1 =
                 table.copy(
                         Collections.singletonMap(
                                 LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
@@ -238,7 +238,7 @@ public class FileStoreLookupFunctionTest {
                                 IllegalArgumentException.class,
                                 "Incorrect time periods format: [2024-10-31 12:00,2024-10-31 16:00]."));
 
-        Table table2 =
+        FileStoreTable table2 =
                 table.copy(
                         Collections.singletonMap(
                                 LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
@@ -249,7 +249,7 @@ public class FileStoreLookupFunctionTest {
                                 IllegalArgumentException.class,
                                 "Date time format error: [20241031 12:00]"));
 
-        Table table3 =
+        FileStoreTable table3 =
                 table.copy(
                         Collections.singletonMap(
                                 LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
@@ -271,7 +271,7 @@ public class FileStoreLookupFunctionTest {
         String left = start.atZone(ZoneId.systemDefault()).format(formatter);
         String right = end.atZone(ZoneId.systemDefault()).format(formatter);
 
-        Table table =
+        FileStoreTable table =
                 createFileStoreTable(false, false, false)
                         .copy(
                                 Collections.singletonMap(
