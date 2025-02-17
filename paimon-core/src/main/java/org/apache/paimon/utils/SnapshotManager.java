@@ -71,6 +71,7 @@ public class SnapshotManager implements Serializable {
     private static final String CHANGELOG_PREFIX = "changelog-";
     public static final String EARLIEST = "EARLIEST";
     public static final String LATEST = "LATEST";
+    private static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 3;
     private static final int READ_HINT_RETRY_NUM = 3;
     private static final int READ_HINT_RETRY_INTERVAL = 1;
 
@@ -221,10 +222,11 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot earliestSnapshot() {
-        return earliestSnapshot(false);
+        return earliestSnapshot(false, null);
     }
 
-    private @Nullable Snapshot earliestSnapshot(boolean includeChangelog) {
+    private @Nullable Snapshot earliestSnapshot(
+            boolean includeChangelog, @Nullable Long stopSnapshotId) {
         Long snapshotId = null;
         if (includeChangelog) {
             snapshotId = earliestLongLivedChangelogId();
@@ -236,24 +238,25 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
+        if (stopSnapshotId == null) {
+            stopSnapshotId = snapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
+        }
+
         FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction =
                 includeChangelog ? this::tryGetChangelogOrSnapshot : this::tryGetSnapshot;
 
-        // The loss of the earliest snapshot is an event of small probability, so the retry number
-        // here need not be too large.
-        int retry = 0;
         do {
             try {
                 return snapshotFunction.apply(snapshotId);
             } catch (FileNotFoundException e) {
-                if (retry++ >= 3) {
-                    throw new RuntimeException(e);
+                snapshotId++;
+                if (snapshotId > stopSnapshotId) {
+                    return null;
                 }
                 LOG.warn(
                         "The earliest snapshot or changelog was once identified but disappeared. "
                                 + "It might have been expired by other jobs operating on this table. "
                                 + "Searching for the second earliest snapshot or changelog instead. ");
-                snapshotId++;
             }
         } while (true);
     }
@@ -332,9 +335,9 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Snapshot earliestSnapshot = earliestSnapshot(startFromChangelog);
+        Snapshot earliestSnapshot = earliestSnapshot(startFromChangelog, latest);
         if (earliestSnapshot == null) {
-            return null;
+            return latest - 1;
         }
 
         if (earliestSnapshot.timeMillis() >= timestampMills) {
@@ -363,7 +366,7 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Snapshot earliestSnapShot = earliestSnapshot();
+        Snapshot earliestSnapShot = earliestSnapshot(false, latest);
         if (earliestSnapShot == null || earliestSnapShot.timeMillis() > timestampMills) {
             return earliestSnapShot;
         }
@@ -428,7 +431,7 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Snapshot earliestSnapShot = earliestSnapshot();
+        Snapshot earliestSnapShot = earliestSnapshot(false, latest);
         if (earliestSnapShot == null) {
             return null;
         }
@@ -493,7 +496,7 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Snapshot earliestSnapShot = earliestSnapshot();
+        Snapshot earliestSnapShot = earliestSnapshot(false, latest);
         if (earliestSnapShot == null) {
             return null;
         }
