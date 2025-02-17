@@ -46,6 +46,7 @@ public class HashBucketAssigner implements BucketAssigner {
     private final int assignId;
     private final long targetBucketRowNumber;
     private final int maxBucketsNum;
+    private int maxBucketId;
 
     private final Map<BinaryRow, PartitionIndex> partitionIndex;
 
@@ -87,10 +88,13 @@ public class HashBucketAssigner implements BucketAssigner {
             this.partitionIndex.put(partition, index);
         }
 
-        int assigned = index.assign(hash, this::isMyBucket, maxBucketsNum);
+        int assigned = index.assign(hash, this::isMyBucket, maxBucketsNum, maxBucketId);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Assign " + assigned + " to the partition " + partition + " key hash " + hash);
+        }
+        if (assigned > maxBucketId) {
+            maxBucketId = assigned;
         }
         return assigned;
     }

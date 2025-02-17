@@ -35,6 +35,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
     private final int assignId;
     private final long targetBucketRowNumber;
     private final int maxBucketsNum;
+    private int maxBucketId;
 
     private final Map<BinaryRow, SimplePartitionIndex> partitionIndex;
 
@@ -55,7 +56,11 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
             index = new SimplePartitionIndex();
             this.partitionIndex.put(partition, index);
         }
-        return index.assign(hash);
+        int assigned = index.assign(hash);
+        if (assigned > maxBucketId) {
+            maxBucketId = assigned;
+        }
+        return assigned;
     }
 
     @Override
@@ -89,13 +94,6 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
             Long num = bucketInformation.computeIfAbsent(currentBucket, i -> 0L);
 
             if (num >= targetBucketRowNumber) {
-                int maxBucketId =
-                        bucketInformation.isEmpty()
-                                ? 0
-                                : bucketInformation.keySet().stream()
-                                        .mapToInt(Integer::intValue)
-                                        .max()
-                                        .getAsInt();
                 if (-1 == maxBucketsNum
                         || bucketInformation.isEmpty()
                         || maxBucketId < maxBucketsNum - 1) {

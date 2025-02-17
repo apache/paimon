@@ -64,7 +64,7 @@ public class PartitionIndex {
         this.accessed = true;
     }
 
-    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum) {
+    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId) {
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -88,10 +88,6 @@ public class PartitionIndex {
             }
         }
 
-        int maxBucketId =
-                totalBucket.isEmpty()
-                        ? 0
-                        : totalBucket.stream().mapToInt(Integer::intValue).max().getAsInt();
         if (-1 == maxBucketsNum || totalBucket.isEmpty() || maxBucketId < maxBucketsNum - 1) {
             // 3. create a new bucket
             for (int i = 0; i < Short.MAX_VALUE; i++) {
