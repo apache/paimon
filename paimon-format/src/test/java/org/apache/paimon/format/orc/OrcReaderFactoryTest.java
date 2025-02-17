@@ -278,6 +278,7 @@ class OrcReaderFactoryTest {
                 Projection.of(selectedFields).project(formatType),
                 conjunctPredicates,
                 BATCH_SIZE,
+                false,
                 false);
     }
 
