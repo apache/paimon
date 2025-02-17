@@ -69,7 +69,7 @@ public class DLFToken {
         return securityToken;
     }
 
-    public String getExpirationStr() {
+    public String getExpiration() {
         return expiration;
     }
 

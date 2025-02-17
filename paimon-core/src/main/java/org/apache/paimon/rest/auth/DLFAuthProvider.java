@@ -58,7 +58,7 @@ public class DLFAuthProvider implements AuthProvider {
     public static DLFAuthProvider buildRefreshToken(
             String tokenFilePath, Long tokenRefreshInMills) {
         DLFToken token = readToken(tokenFilePath);
-        Long expiresAtMillis = getExpirationInMills(token.getExpirationStr());
+        Long expiresAtMillis = getExpirationInMills(token.getExpiration());
         return new DLFAuthProvider(
                 tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills);
     }

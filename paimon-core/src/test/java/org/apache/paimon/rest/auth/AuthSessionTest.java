@@ -32,12 +32,9 @@ import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -105,19 +102,19 @@ public class AuthSessionTest {
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
-        long tokenRefreshInMills = 1000L;
+        long tokenRefreshInMills = 5000L;
         AuthProvider authProvider =
                 generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
         DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(token, authToken);
+        Thread.sleep((long) (tokenRefreshInMills * (1 - DLFAuthProvider.EXPIRED_FACTOR)) + 10L);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
         tokenFile = tokenFile2Token.getLeft();
         FileUtils.writeStringToFile(tokenFile, token);
-        Thread.sleep((long) (tokenRefreshInMills * (1 - DLFAuthProvider.EXPIRED_FACTOR)) + 10L);
         dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(token, authToken);
@@ -225,9 +222,7 @@ public class AuthSessionTest {
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
         File tokenFile = folder.newFile(fileName);
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
-        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
-        String expiration = sdf.format(new Date());
+        String expiration = DLFAuthProvider.getDate();
         String secret = UUID.randomUUID().toString();
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
