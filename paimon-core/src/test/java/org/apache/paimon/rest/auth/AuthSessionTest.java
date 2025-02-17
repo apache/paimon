@@ -126,7 +126,6 @@ public class AuthSessionTest {
         long expiresAtMillis = System.currentTimeMillis() - 1000L;
         when(authProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
         when(authProvider.tokenRefreshInMills()).thenReturn(Optional.of(50L));
-        when(authProvider.supportRefresh()).thenReturn(true);
         when(authProvider.keepRefreshed()).thenReturn(true);
         when(authProvider.refresh()).thenReturn(false);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);

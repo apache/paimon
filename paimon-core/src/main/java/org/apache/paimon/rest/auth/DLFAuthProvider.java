@@ -117,11 +117,6 @@ public class DLFAuthProvider implements AuthProvider {
     }
 
     @Override
-    public boolean supportRefresh() {
-        return true;
-    }
-
-    @Override
     public boolean keepRefreshed() {
         return this.keepRefreshed;
     }

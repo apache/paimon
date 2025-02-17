@@ -28,10 +28,6 @@ public interface AuthProvider {
 
     boolean refresh();
 
-    default boolean supportRefresh() {
-        return false;
-    }
-
     default boolean keepRefreshed() {
         return false;
     }
