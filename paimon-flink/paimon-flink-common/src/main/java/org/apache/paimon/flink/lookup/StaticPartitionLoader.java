@@ -24,6 +24,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -39,19 +40,20 @@ public class StaticPartitionLoader extends PartitionLoader {
     }
 
     @Override
-    public boolean checkRefresh() {
-        if (partitions.isEmpty()) {
-            RowType partitionType = table.schema().logicalPartitionType();
-            InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
-            for (Map<String, String> spec : scanPartitions) {
-                GenericRow row =
-                        InternalRowPartitionComputer.convertSpecToInternalRow(
-                                spec, partitionType, table.coreOptions().partitionDefaultName());
-                partitions.add(serializer.toBinaryRow(row).copy());
-            }
-            return true;
-        } else {
-            return false;
+    public void open() {
+        partitions = new ArrayList<>();
+        RowType partitionType = table.schema().logicalPartitionType();
+        InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
+        for (Map<String, String> spec : scanPartitions) {
+            GenericRow row =
+                    InternalRowPartitionComputer.convertSpecToInternalRow(
+                            spec, partitionType, table.coreOptions().partitionDefaultName());
+            partitions.add(serializer.toBinaryRow(row).copy());
         }
+    }
+
+    @Override
+    public boolean checkRefresh() {
+        return false;
     }
 }
