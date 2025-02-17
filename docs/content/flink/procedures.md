@@ -681,5 +681,35 @@ All available procedures are listed below.
          CALL sys.compact_manifest(`table` => 'default.T')
       </td>
    </tr>
+   <tr>
+      <td>compact_postpone_bucket</td>
+      <td>
+         CALL sys.compact_postpone_bucket(`table` => 'identifier', `default_bucket_num` => bucket_num, `parallelism` => parallelism)
+      </td>
+      <td>
+         Compact postpone bucket tables, which distributes records in bucket--2 directory into real bucket directories. Arguments:
+         <li>identifier: The target table identifier. Cannot be empty.</li>
+         <li>bucket_num: Bucket number for the partitions compacted for the first time. Default value is 4.</li>
+         <li>parallelism: Parallelism of this job.</li>
+      </td>
+      <td>
+         CALL sys.compact_postpone_bucket(`table` => 'default.T')
+      </td>
+   </tr>
+   <tr>
+      <td>rescale_postpone_bucket</td>
+      <td>
+         CALL sys.rescale_postpone_bucket(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition')
+      </td>
+      <td>
+         Rescale one partition of postpone bucket tables. Arguments:
+         <li>identifier: The target table identifier. Cannot be empty.</li>
+         <li>bucket_num: Resulting bucket number after rescale. Cannot be empty.</li>
+         <li>partition: What partition to rescale. For partitioned table this argument cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.rescale_postpone_bucket(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08')
+      </td>
+   </tr>
    </tbody>
 </table>
