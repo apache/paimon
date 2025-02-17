@@ -212,7 +212,7 @@ public class TableSchemaTest {
         TableSchema schema =
                 new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
 
-        options.put(BUCKET.key(), "-2");
+        options.put(BUCKET.key(), "-10");
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining("The number of buckets needs to be greater than 0.");
     }
