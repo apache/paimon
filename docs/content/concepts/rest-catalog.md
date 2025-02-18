@@ -27,7 +27,7 @@ under the License.
 # RESTCatalog
 ## Overview
 
-Paimon REST Catalog provides a lightweight implementation to access the catalog service. Paimon could access the catalog service through a catalog server which implements REST API.
+Paimon REST Catalog provides a lightweight implementation to access the catalog service. Paimon could access the catalog service through a catalog server which implements REST API.You can see all APIs in [REST API](https://github.com/apache/paimon/blob/master/paimon-open-api/rest-catalog-open-api.yaml).
 
 {{< img src="/img/rest-catalog.svg">}}
 
