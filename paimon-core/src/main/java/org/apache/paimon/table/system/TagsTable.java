@@ -121,6 +121,11 @@ public class TagsTable implements ReadonlyTable {
     }
 
     @Override
+    public FileIO fileIO() {
+        return dataTable.fileIO();
+    }
+
+    @Override
     public InnerTableScan newScan() {
         return new TagsScan();
     }

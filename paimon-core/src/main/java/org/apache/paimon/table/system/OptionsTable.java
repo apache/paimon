@@ -92,6 +92,11 @@ public class OptionsTable implements ReadonlyTable {
     }
 
     @Override
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
+    @Override
     public InnerTableScan newScan() {
         return new OptionsScan();
     }
