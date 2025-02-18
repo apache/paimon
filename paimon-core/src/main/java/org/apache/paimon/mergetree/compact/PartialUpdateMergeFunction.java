@@ -31,6 +31,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ArrayUtils;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Projection;
@@ -73,7 +74,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final Map<Integer, FieldAggregator> fieldAggregators;
     private final boolean removeRecordOnDelete;
     private final Set<Integer> sequenceGroupPartialDelete;
-    private final Boolean[] nullables;
+    private final boolean[] nullables;
 
     private InternalRow currentKey;
     private long latestSequenceNumber;
@@ -91,7 +92,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             boolean fieldSequenceEnabled,
             boolean removeRecordOnDelete,
             Set<Integer> sequenceGroupPartialDelete,
-            Boolean[] nullables) {
+            boolean[] nullables) {
         this.getters = getters;
         this.ignoreDelete = ignoreDelete;
         this.fieldSeqComparators = fieldSeqComparators;
@@ -129,6 +130,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 return;
             }
 
+            latestSequenceNumber = kv.sequenceNumber();
+
             if (fieldSequenceEnabled) {
                 retractWithSequenceGroup(kv);
                 return;
@@ -153,16 +156,16 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             "3. Configure 'sequence-group's to retract partial columns.");
 
             throw new IllegalArgumentException(msg);
-        } else {
-            latestSequenceNumber = kv.sequenceNumber();
-            if (fieldSeqComparators.isEmpty()) {
-                updateNonNullFields(kv);
-            } else {
-                updateWithSequenceGroup(kv);
-            }
-            meetInsert = true;
-            notNullColumnFilled = true;
         }
+
+        latestSequenceNumber = kv.sequenceNumber();
+        if (fieldSeqComparators.isEmpty()) {
+            updateNonNullFields(kv);
+        } else {
+            updateWithSequenceGroup(kv);
+        }
+        meetInsert = true;
+        notNullColumnFilled = true;
     }
 
     private void updateNonNullFields(KeyValue kv) {
@@ -479,7 +482,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         !fieldSeqComparators.isEmpty(),
                         removeRecordOnDelete,
                         sequenceGroupPartialDelete,
-                        projectedTypes.stream().map(DataType::isNullable).toArray(Boolean[]::new));
+                        ArrayUtils.toPrimitiveBoolean(
+                                projectedTypes.stream()
+                                        .map(DataType::isNullable)
+                                        .toArray(Boolean[]::new)));
             } else {
                 Map<Integer, FieldsComparator> fieldSeqComparators = new HashMap<>();
                 this.fieldSeqComparators.forEach(
@@ -495,9 +501,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         !fieldSeqComparators.isEmpty(),
                         removeRecordOnDelete,
                         sequenceGroupPartialDelete,
-                        rowType.getFieldTypes().stream()
-                                .map(DataType::isNullable)
-                                .toArray(Boolean[]::new));
+                        ArrayUtils.toPrimitiveBoolean(
+                                rowType.getFieldTypes().stream()
+                                        .map(DataType::isNullable)
+                                        .toArray(Boolean[]::new)));
             }
         }
 
