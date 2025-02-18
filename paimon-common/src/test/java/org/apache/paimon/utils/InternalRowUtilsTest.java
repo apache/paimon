@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -143,5 +144,38 @@ public class InternalRowUtilsTest {
                                 BinaryString.fromString("b"),
                                 DataTypeRoot.VARCHAR))
                 .isLessThan(0);
+    }
+
+    @Test
+    public void testEqualsAndHashCode() {
+        for (int i = 0; i < 10; i++) {
+            GenericRow row1 = (GenericRow) rowDataGenerator.next();
+            GenericRow row2 = (GenericRow) InternalRowUtils.copyInternalRow(row1, ROW_TYPE);
+            GenericRow row3 = (GenericRow) rowDataGenerator.next();
+            assertThat(InternalRowUtils.equals(row1, row2, ROW_TYPE)).isTrue();
+            assertThat(InternalRowUtils.equals(row1, row3, ROW_TYPE)).isFalse();
+
+            assertThat(InternalRowUtils.hash(row1, ROW_TYPE))
+                    .isEqualTo(InternalRowUtils.hash(row2, ROW_TYPE));
+            assertThat(InternalRowUtils.hash(row1, ROW_TYPE))
+                    .isNotEqualTo(InternalRowUtils.hash(row3, ROW_TYPE));
+        }
+
+        RowType rowType =
+                RowType.builder()
+                        .field("f1", DataTypes.DOUBLE())
+                        .field("f2", DataTypes.FLOAT())
+                        .field("f3", DataTypes.BINARY(3))
+                        .field("f4", DataTypes.STRING())
+                        .build();
+        GenericRow row1 = new GenericRow(4);
+        row1.setField(0, Double.NaN);
+        row1.setField(1, Float.NaN);
+        row1.setField(2, "abc".getBytes());
+        row1.setField(3, null);
+        GenericRow row2 = (GenericRow) InternalRowUtils.copyInternalRow(row1, rowType);
+        assertThat(InternalRowUtils.equals(row1, row2, rowType)).isTrue();
+        assertThat(InternalRowUtils.hash(row1, rowType))
+                .isEqualTo(InternalRowUtils.hash(row2, rowType));
     }
 }
