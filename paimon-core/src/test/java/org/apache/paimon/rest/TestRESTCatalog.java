@@ -235,6 +235,8 @@ public class TestRESTCatalog extends FileSystemCatalog {
 
     @Override
     public void createFormatTable(Identifier identifier, Schema schema) {
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put("path", "/tmp/format_table");
         TableSchema tableSchema =
                 new TableSchema(
                         1L,
@@ -242,7 +244,7 @@ public class TestRESTCatalog extends FileSystemCatalog {
                         1,
                         schema.partitionKeys(),
                         schema.primaryKeys(),
-                        schema.options(),
+                        options,
                         schema.comment());
         tableFullName2Schema.put(identifier.getFullName(), tableSchema);
     }
