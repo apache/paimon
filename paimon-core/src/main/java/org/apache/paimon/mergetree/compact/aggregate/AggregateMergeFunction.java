@@ -120,6 +120,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         checkNotNull(
                 latestKv,
                 "Trying to get result from merge function without any input. This is unexpected.");
+
         if (reused == null) {
             reused = new KeyValue();
         }

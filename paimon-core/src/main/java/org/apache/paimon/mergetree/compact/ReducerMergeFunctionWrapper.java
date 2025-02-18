@@ -52,16 +52,21 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     /** Adds the given {@link KeyValue} to the {@link MergeFunction} helper. */
     @Override
     public void add(KeyValue kv) {
+        if (isInitialized) {
+            merge(kv);
+            return;
+        }
+        // AggregateMergeFunction should do merge even if there are only one element
         if (mergeFunction instanceof AggregateMergeFunction) {
             merge(kv);
+            isInitialized = true;
         } else {
             if (initialKv == null) {
                 initialKv = kv;
             } else {
-                if (!isInitialized) {
-                    merge(initialKv);
-                    isInitialized = true;
-                }
+                // isInitialized must be false
+                merge(initialKv);
+                isInitialized = true;
                 merge(kv);
             }
         }
@@ -74,9 +79,6 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     /** Get current value of the {@link MergeFunction} helper. */
     @Override
     public KeyValue getResult() {
-        if (mergeFunction instanceof AggregateMergeFunction) {
-            return mergeFunction.getResult();
-        }
         return isInitialized ? mergeFunction.getResult() : initialKv;
     }
 }
