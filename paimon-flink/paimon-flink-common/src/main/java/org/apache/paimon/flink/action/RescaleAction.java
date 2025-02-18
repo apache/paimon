@@ -35,36 +35,33 @@ import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.data.RowData;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 import java.util.Map;
 
-/** Action to rescale one partition of postpone bucket tables. */
-public class RescalePostponeBucketAction extends TableActionBase {
+/** Action to rescale one partition of a table. */
+public class RescaleAction extends TableActionBase {
 
-    private final int bucketNum;
+    private @Nullable Integer bucketNum;
     private Map<String, String> partition = new HashMap<>();
 
-    public RescalePostponeBucketAction(
-            String databaseName,
-            String tableName,
-            Map<String, String> catalogConfig,
-            int bucketNum) {
+    public RescaleAction(String databaseName, String tableName, Map<String, String> catalogConfig) {
         super(databaseName, tableName, catalogConfig);
-        this.bucketNum = bucketNum;
     }
 
-    public RescalePostponeBucketAction withPartition(Map<String, String> partition) {
+    public RescaleAction withBucketNum(int bucketNum) {
+        this.bucketNum = bucketNum;
+        return this;
+    }
+
+    public RescaleAction withPartition(Map<String, String> partition) {
         this.partition = partition;
         return this;
     }
 
     @Override
     public void build() throws Exception {
-        Preconditions.checkArgument(
-                String.valueOf(BucketMode.POSTPONE_BUCKET)
-                        .equals(table.options().get(CoreOptions.BUCKET.key())),
-                "Compact postpone bucket action can only be used for bucket = -2 tables");
-
         Configuration flinkConf = new Configuration();
         flinkConf.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
         env.configure(flinkConf);
@@ -85,15 +82,22 @@ public class RescalePostponeBucketAction extends TableActionBase {
                         .predicate(partitionPredicate)
                         .build();
 
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
-        FileStoreTable rescaledTable = fileStoreTable.copy(dynamicOptions);
+        Map<String, String> bucketOptions = new HashMap<>(fileStoreTable.options());
+        if (bucketNum == null) {
+            Preconditions.checkArgument(
+                    fileStoreTable.coreOptions().bucket() != BucketMode.POSTPONE_BUCKET,
+                    "When rescaling postpone bucket tables, you must provide the resulting bucket number.");
+        } else {
+            bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
+        }
+        FileStoreTable rescaledTable =
+                fileStoreTable.copy(fileStoreTable.schema().copy(bucketOptions));
         new FlinkSinkBuilder(rescaledTable).overwrite(partition).forRowData(source).build();
     }
 
     @Override
     public void run() throws Exception {
         build();
-        env.execute("Rescale Postpone Bucket : " + table.name());
+        env.execute("Rescale Postpone Bucket : " + table.fullName());
     }
 }

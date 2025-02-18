@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.RescalePostponeBucketAction;
+import org.apache.paimon.flink.action.RescaleAction;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
@@ -29,37 +29,37 @@ import org.apache.flink.table.procedure.ProcedureContext;
 
 import javax.annotation.Nullable;
 
-/** Procedure to rescale one partition of postpone bucket tables. */
-public class RescalePostponeBucketProcedure extends ProcedureBase {
+/** Procedure to rescale one partition of a table. */
+public class RescaleProcedure extends ProcedureBase {
 
-    public static final String IDENTIFIER = "rescale_postpone_bucket";
+    public static final String IDENTIFIER = "rescale";
 
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "bucket_num", type = @DataTypeHint("INT")),
+                @ArgumentHint(name = "bucket_num", type = @DataTypeHint("INT"), isOptional = true),
                 @ArgumentHint(name = "partition", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
-            int bucketNum,
+            @Nullable Integer bucketNum,
             @Nullable String partition)
             throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
         String tableName = identifier.getObjectName();
 
-        RescalePostponeBucketAction action =
-                new RescalePostponeBucketAction(
-                        databaseName, tableName, catalog.options(), bucketNum);
+        RescaleAction action = new RescaleAction(databaseName, tableName, catalog.options());
+        if (bucketNum != null) {
+            action.withBucketNum(bucketNum);
+        }
         if (partition != null) {
             action.withPartition(ParameterUtils.getPartitions(partition).get(0));
         }
-        action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
 
-        action.run();
-        return new String[] {"OK"};
+        return execute(
+                procedureContext, action, "Rescale Postpone Bucket : " + identifier.getFullName());
     }
 
     @Override

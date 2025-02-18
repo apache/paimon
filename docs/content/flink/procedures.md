@@ -682,29 +682,14 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
-      <td>compact_postpone_bucket</td>
+      <td>rescale</td>
       <td>
-         CALL sys.compact_postpone_bucket(`table` => 'identifier', `default_bucket_num` => bucket_num, `parallelism` => parallelism)
+         CALL sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition')
       </td>
       <td>
-         Compact postpone bucket tables, which distributes records in bucket-postpone directory into real bucket directories. Arguments:
+         Rescale one partition of a table. Arguments:
          <li>identifier: The target table identifier. Cannot be empty.</li>
-         <li>bucket_num: Bucket number for the partitions compacted for the first time. Default value is 4.</li>
-         <li>parallelism: Parallelism of this job.</li>
-      </td>
-      <td>
-         CALL sys.compact_postpone_bucket(`table` => 'default.T')
-      </td>
-   </tr>
-   <tr>
-      <td>rescale_postpone_bucket</td>
-      <td>
-         CALL sys.rescale_postpone_bucket(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition')
-      </td>
-      <td>
-         Rescale one partition of postpone bucket tables. Arguments:
-         <li>identifier: The target table identifier. Cannot be empty.</li>
-         <li>bucket_num: Resulting bucket number after rescale. Cannot be empty.</li>
+         <li>bucket_num: Resulting bucket number after rescale. The default value of argument bucket_num is the current bucket number of the table. Cannot be empty for postpone bucket tables.</li>
          <li>partition: What partition to rescale. For partitioned table this argument cannot be empty.</li>
       </td>
       <td>

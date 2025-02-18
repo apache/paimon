@@ -20,10 +20,10 @@ package org.apache.paimon.flink.action;
 
 import java.util.Optional;
 
-/** Factory to create {@link RescalePostponeBucketAction}. */
-public class RescalePostponeBucketActionFactory implements ActionFactory {
+/** Factory to create {@link RescaleAction}. */
+public class RescaleActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "rescale_postpone_bucket";
+    public static final String IDENTIFIER = "rescale";
     private static final String BUCKET_NUM = "bucket_num";
     private static final String PARTITION = "partition";
 
@@ -34,12 +34,15 @@ public class RescalePostponeBucketActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        RescalePostponeBucketAction action =
-                new RescalePostponeBucketAction(
+        RescaleAction action =
+                new RescaleAction(
                         params.getRequired(DATABASE),
                         params.getRequired(TABLE),
-                        catalogConfigMap(params),
-                        Integer.parseInt(params.getRequired(BUCKET_NUM)));
+                        catalogConfigMap(params));
+
+        if (params.has(BUCKET_NUM)) {
+            action.withBucketNum(Integer.parseInt(params.get(BUCKET_NUM)));
+        }
 
         if (params.has(PARTITION)) {
             action.withPartition(getPartitions(params).get(0));
@@ -50,16 +53,18 @@ public class RescalePostponeBucketActionFactory implements ActionFactory {
 
     @Override
     public void printHelp() {
-        System.out.println(
-                "Action \"rescale_postpone_bucket\" rescales one partition of postpone bucket tables.");
+        System.out.println("Action \"rescale\" rescales one partition of a table.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  rescale_postpone_bucket --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --bucket_num <bucket_num> "
+                "  rescale --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> [--bucket_num <bucket_num>] "
                         + "[--partition <partition>]");
         System.out.println(
-                "Argument partition must be specified if the table is a partitioned table");
+                "The default value of argument bucket_num is the current bucket number of the table. "
+                        + "For postpone bucket tables, this argument must be specified.");
+        System.out.println(
+                "Argument partition must be specified if the table is a partitioned table.");
     }
 }

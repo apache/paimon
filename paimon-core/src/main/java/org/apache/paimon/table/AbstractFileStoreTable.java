@@ -308,11 +308,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                     String oldValue = oldOptions.get(k);
                     if (!Objects.equals(oldValue, newValue)) {
                         SchemaManager.checkAlterTableOption(k, oldValue, newValue, true);
+
+                        if (CoreOptions.BUCKET.key().equals(k)) {
+                            throw new UnsupportedOperationException(
+                                    "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
+                        }
                     }
                 });
     }
 
-    private FileStoreTable copyInternal(Map<String, String> dynamicOptions, boolean tryTimeTravel) {
+    protected FileStoreTable copyInternal(
+            Map<String, String> dynamicOptions, boolean tryTimeTravel) {
         Map<String, String> options = new HashMap<>(tableSchema.options());
 
         // merge non-null dynamic options into schema.options

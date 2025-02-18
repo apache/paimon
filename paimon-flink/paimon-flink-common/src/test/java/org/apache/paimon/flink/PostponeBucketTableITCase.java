@@ -23,6 +23,7 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
@@ -37,12 +38,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** IT cases for postpone bucket tables. */
 public class PostponeBucketTableITCase extends AbstractTestBase {
 
-    private static final int TIMEOUT = 60;
+    private static final int TIMEOUT = 120;
 
     @Test
     public void testWriteThenCompact() throws Exception {
         String warehouse = getTempDirPath();
-        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
 
         tEnv.executeSql(
                 "CREATE CATALOG mycat WITH (\n"
@@ -73,22 +78,17 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
 
-        List<String> expected = new ArrayList<>();
-        for (int i = 0; i < numPartitions; i++) {
-            expected.add(String.format("+I[%d]", i));
-        }
-        String sql = "CALL sys.compact_postpone_bucket(`table` => 'default.T')";
-        assertThat(collect(tEnv.executeSql(sql))).hasSameElementsAs(expected);
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
 
-        expected.clear();
+        List<String> expected = new ArrayList<>();
         for (int i = 0; i < numPartitions; i++) {
             expected.add(
                     String.format(
                             "+I[%d, %d]",
                             i, (i * numKeys + i * numKeys + numKeys - 1) * numKeys / 2));
         }
-        sql = "SELECT pt, SUM(v) FROM T GROUP BY pt";
-        assertThat(collect(tEnv.executeSql(sql))).hasSameElementsAs(expected);
+        String query = "SELECT pt, SUM(v) FROM T GROUP BY pt";
+        assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expected);
 
         values.clear();
         int changedPartition = 1;
@@ -99,12 +99,9 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                             changedPartition, j, -(changedPartition * numKeys + j)));
         }
         tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
-        sql = "SELECT pt, SUM(v) FROM T GROUP BY pt";
-        assertThat(collect(tEnv.executeSql(sql))).hasSameElementsAs(expected);
+        assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expected);
 
-        sql = "CALL sys.compact_postpone_bucket(`table` => 'default.T')";
-        assertThat(collect(tEnv.executeSql(sql)))
-                .containsExactly(String.format("+I[%d]", changedPartition));
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
 
         expected.clear();
         for (int i = 0; i < numPartitions; i++) {
@@ -114,14 +111,17 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
             }
             expected.add(String.format("+I[%d, %d]", i, val));
         }
-        sql = "SELECT pt, SUM(v) FROM T GROUP BY pt";
-        assertThat(collect(tEnv.executeSql(sql))).hasSameElementsAs(expected);
+        assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expected);
     }
 
     @Test
     public void testOverwrite() throws Exception {
         String warehouse = getTempDirPath();
-        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
 
         tEnv.executeSql(
                 "CREATE CATALOG mycat WITH (\n"
@@ -145,9 +145,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         "INSERT INTO T VALUES (1, 10, 110), (1, 20, 120), (2, 10, 210), (2, 20, 220)")
                 .await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
-        String callProcedureSql = "CALL sys.compact_postpone_bucket(`table` => 'default.T')";
-        assertThat(collect(tEnv.executeSql(callProcedureSql)))
-                .containsExactlyInAnyOrder("+I[1]", "+I[2]");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
         assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
                 .containsExactlyInAnyOrder(
                         "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[10, 210, 2]", "+I[20, 220, 2]");
@@ -161,7 +159,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         tEnv.executeSql("INSERT OVERWRITE T VALUES (2, 20, 221), (2, 30, 230)").await();
         assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
                 .containsExactlyInAnyOrder("+I[10, 110, 1]", "+I[20, 120, 1]");
-        assertThat(collect(tEnv.executeSql(callProcedureSql))).containsExactly("+I[2]");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
         // overwrite should also clean up files in bucket = -2 directory,
         // which the record with key = 40
         assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
@@ -173,7 +171,11 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     @Test
     public void testLookupChangelogProducer() throws Exception {
         String warehouse = getTempDirPath();
-        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
+        TableEnvironment bEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
 
         String createCatalogSql =
                 "CREATE CATALOG mycat WITH (\n"
@@ -207,9 +209,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         "INSERT INTO T VALUES (1, 10, 110), (1, 20, 120), (2, 10, 210), (2, 20, 220)")
                 .await();
         assertThat(collect(bEnv.executeSql("SELECT * FROM T"))).isEmpty();
-        String callProcedureSql = "CALL sys.compact_postpone_bucket(`table` => 'default.T')";
-        assertThat(collect(bEnv.executeSql(callProcedureSql)))
-                .containsExactlyInAnyOrder("+I[1]", "+I[2]");
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
         assertThat(collect(bEnv.executeSql("SELECT k, v, pt FROM T")))
                 .containsExactlyInAnyOrder(
                         "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[10, 210, 2]", "+I[20, 220, 2]");
@@ -218,8 +218,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[10, 210, 2]", "+I[20, 220, 2]");
 
         bEnv.executeSql("INSERT INTO T VALUES (1, 20, 121), (2, 30, 230)").await();
-        assertThat(collect(bEnv.executeSql(callProcedureSql)))
-                .containsExactlyInAnyOrder("+I[1]", "+I[2]");
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
         assertThat(collect(bEnv.executeSql("SELECT k, v, pt FROM T")))
                 .containsExactlyInAnyOrder(
                         "+I[10, 110, 1]",
@@ -236,7 +235,11 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     @Test
     public void testRescaleBucket() throws Exception {
         String warehouse = getTempDirPath();
-        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
 
         tEnv.executeSql(
                 "CREATE CATALOG mycat WITH (\n"
@@ -253,7 +256,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  v INT,\n"
                         + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
-                        + "  'bucket' = '-2'\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.default-bucket-num' = '2'\n"
                         + ")");
 
         int numPartitions = 3;
@@ -265,8 +269,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
             }
         }
         tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
-        tEnv.executeSql(
-                "CALL sys.compact_postpone_bucket(`table` => 'default.T', `default_bucket_num` => 2)");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
 
         List<String> expectedBuckets = new ArrayList<>();
         for (int i = 0; i < numPartitions; i++) {
@@ -299,7 +302,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
 
         tEnv.executeSql(
-                "CALL sys.rescale_postpone_bucket(`table` => 'default.T', `bucket_num` => 4, `partition` => 'pt="
+                "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 4, `partition` => 'pt="
                         + changedPartition
                         + "')");
         expectedBuckets.clear();
@@ -310,10 +313,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expectedData);
 
         // rescaling bucket should not touch the files in bucket = -2 directory
-        String compactSql =
-                "CALL sys.compact_postpone_bucket(`table` => 'default.T', `default_bucket_num` => 2)";
-        assertThat(collect(tEnv.executeSql(compactSql)))
-                .containsExactly(String.format("+I[%d]", changedPartition));
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
         assertThat(collect(tEnv.executeSql(bucketSql))).hasSameElementsAs(expectedBuckets);
 
         expectedData.clear();

@@ -838,7 +838,7 @@ public class SchemaManager implements Serializable {
                             : Integer.parseInt(oldValue);
             int newBucket = Integer.parseInt(newValue);
 
-            if (fromDynamicOptions && oldBucket != BucketMode.POSTPONE_BUCKET) {
+            if (fromDynamicOptions) {
                 throw new UnsupportedOperationException(
                         "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
             }
@@ -847,6 +847,10 @@ public class SchemaManager implements Serializable {
             }
             if (newBucket == -1) {
                 throw new UnsupportedOperationException("Cannot change bucket to -1.");
+            }
+            if (oldBucket == BucketMode.POSTPONE_BUCKET) {
+                throw new UnsupportedOperationException(
+                        "Cannot change bucket for postpone bucket tables.");
             }
         }
     }
