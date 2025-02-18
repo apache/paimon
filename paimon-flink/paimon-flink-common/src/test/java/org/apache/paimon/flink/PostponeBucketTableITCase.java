@@ -198,7 +198,11 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + ")");
 
         TableEnvironment sEnv =
-                tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(1000).build();
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(1)
+                        .checkpointIntervalMs(1000)
+                        .build();
         sEnv.executeSql(createCatalogSql);
         sEnv.executeSql("USE CATALOG mycat");
         TableResult streamingSelect = sEnv.executeSql("SELECT k, v, pt FROM T");
