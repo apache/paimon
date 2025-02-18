@@ -1,6 +1,6 @@
 ---
 title: "System Tables"
-weight: 6
+weight: 7
 type: docs
 aliases:
 - /concepts/system-tables.html

@@ -1,6 +1,6 @@
 ---
 title: "Data Types"
-weight: 7
+weight: 8
 type: docs
 aliases:
 - /concepts/data-types.html
