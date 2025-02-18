@@ -251,11 +251,21 @@ public abstract class AbstractSparkInternalRow extends SparkInternalRow {
             return false;
         }
         AbstractSparkInternalRow that = (AbstractSparkInternalRow) o;
-        return Objects.equals(rowType, that.rowType) && Objects.equals(row, that.row);
+        try {
+            return Objects.equals(rowType, that.rowType) && Objects.equals(row, that.row);
+        } catch (Exception e) {
+            // The underlying row may not support equals or hashcode, e.g., `ProjectedRow`,
+            // to be safe, we fallback to super.
+            return super.equals(o);
+        }
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(rowType, row);
+        try {
+            return Objects.hash(rowType, row);
+        } catch (Exception e) {
+            return super.hashCode();
+        }
     }
 }
