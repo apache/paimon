@@ -40,6 +40,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_ID;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_SECRET;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ROLE_SESSION_NAME;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
@@ -56,6 +57,7 @@ public class AuthSessionTest {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
+    private static final String roleSessionName = UUID.randomUUID().toString();
 
     @Test
     public void testBearToken() {
@@ -158,7 +160,8 @@ public class AuthSessionTest {
         Options options = new Options();
         String akId = UUID.randomUUID().toString();
         String akSecret = UUID.randomUUID().toString();
-        DLFToken token = new DLFToken(akId, akSecret, null, null);
+        String securityToken = UUID.randomUUID().toString();
+        DLFToken token = new DLFToken(akId, akSecret, securityToken, null);
         options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
         options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
         AuthProvider authProvider =
@@ -217,6 +220,7 @@ public class AuthSessionTest {
                 header.get(DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY));
         assertEquals(
                 token.getAccessKeyId(), header.get(DLFAuthProvider.DLF_ACCESSKEY_ID_HEADER_KEY));
+        assertEquals(roleSessionName, header.get(DLFAuthProvider.DLF_ROLE_SESSION_NAME_HEADER_KEY));
     }
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
@@ -233,6 +237,7 @@ public class AuthSessionTest {
             Optional<Long> tokenRefreshInMillsOpt, String fileName) {
         Options options = new Options();
         options.set(DLF_TOKEN_PATH.key(), folder.getRoot().getPath() + "/" + fileName);
+        options.set(DLF_ROLE_SESSION_NAME.key(), roleSessionName);
         tokenRefreshInMillsOpt.ifPresent(
                 tokenRefreshInMills ->
                         options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms"));

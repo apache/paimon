@@ -43,6 +43,7 @@ public class DLFAuthProvider implements AuthProvider {
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
     public static final String DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token";
     public static final String DLF_ACCESSKEY_ID_HEADER_KEY = "x-dlf-accesskey-id";
+    public static final String DLF_ROLE_SESSION_NAME_HEADER_KEY = "x-dlf-role-session-name";
     public static final double EXPIRED_FACTOR = 0.4;
 
     private static final DateTimeFormatter DATE_FORMATTER =
@@ -51,21 +52,26 @@ public class DLFAuthProvider implements AuthProvider {
     private final String tokenFilePath;
 
     protected DLFToken token;
+    private final String roleSessionName;
     private final boolean keepRefreshed;
     private Long expiresAtMillis;
     private final Long tokenRefreshInMills;
 
     public static DLFAuthProvider buildRefreshToken(
-            String tokenFilePath, Long tokenRefreshInMills) {
+            String tokenFilePath, Long tokenRefreshInMills, String roleSessionName) {
         DLFToken token = readToken(tokenFilePath);
         Long expiresAtMillis = getExpirationInMills(token.getExpiration());
         return new DLFAuthProvider(
-                tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills);
+                tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills, roleSessionName);
     }
 
-    public static DLFAuthProvider buildAKToken(String accessKeyId, String accessKeySecret) {
-        DLFToken token = new DLFToken(accessKeyId, accessKeySecret, null, null);
-        return new DLFAuthProvider(null, token, false, null, null);
+    public static DLFAuthProvider buildAKToken(
+            String accessKeyId,
+            String accessKeySecret,
+            String securityToken,
+            String roleSessionName) {
+        DLFToken token = new DLFToken(accessKeyId, accessKeySecret, securityToken, null);
+        return new DLFAuthProvider(null, token, false, null, null, roleSessionName);
     }
 
     public DLFAuthProvider(
@@ -73,12 +79,14 @@ public class DLFAuthProvider implements AuthProvider {
             DLFToken token,
             boolean keepRefreshed,
             Long expiresAtMillis,
-            Long tokenRefreshInMills) {
+            Long tokenRefreshInMills,
+            String roleSessionName) {
         this.tokenFilePath = tokenFilePath;
         this.token = token;
         this.keepRefreshed = keepRefreshed;
         this.expiresAtMillis = expiresAtMillis;
         this.tokenRefreshInMills = tokenRefreshInMills;
+        this.roleSessionName = roleSessionName;
     }
 
     @Override
@@ -97,6 +105,9 @@ public class DLFAuthProvider implements AuthProvider {
             if (token.getSecurityToken() != null) {
                 headersWithAuth.put(DLF_SECURITY_TOKEN_HEADER_KEY, token.getSecurityToken());
                 headersWithAuth.put(DLF_ACCESSKEY_ID_HEADER_KEY, token.getAccessKeyId());
+            }
+            if (roleSessionName != null) {
+                headersWithAuth.put(DLF_ROLE_SESSION_NAME_HEADER_KEY, roleSessionName);
             }
             return headersWithAuth;
         } catch (Exception e) {
