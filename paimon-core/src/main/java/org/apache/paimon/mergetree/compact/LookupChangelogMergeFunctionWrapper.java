@@ -21,7 +21,6 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.LookupLevels.PositionedKeyValue;
@@ -69,8 +68,6 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final Comparator<KeyValue> comparator;
 
     private final LinkedList<KeyValue> candidates = new LinkedList<>();
-    private final InternalRowSerializer keySerializer;
-    private final InternalRowSerializer valueSerializer;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
@@ -89,9 +86,6 @@ public class LookupChangelogMergeFunctionWrapper<T>
                     deletionVectorsMaintainer != null,
                     "deletionVectorsMaintainer should not be null, there is a bug.");
         }
-        LookupMergeFunction lookupMergeFunction = (LookupMergeFunction) mergeFunction;
-        this.keySerializer = lookupMergeFunction.getKeySerializer();
-        this.valueSerializer = lookupMergeFunction.getValueSerializer();
         this.mergeFunction = mergeFunctionFactory.create();
         this.lookup = lookup;
         this.valueEqualiser = valueEqualiser;
@@ -107,7 +101,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
 
     @Override
     public void add(KeyValue kv) {
-        candidates.add(kv.copy(keySerializer, valueSerializer));
+        candidates.add(kv);
     }
 
     @Override

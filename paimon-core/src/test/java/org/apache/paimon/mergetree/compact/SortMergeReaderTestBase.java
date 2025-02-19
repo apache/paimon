@@ -22,14 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReusingTestData;
 import org.apache.paimon.utils.TestReusingRecordReader;
 
-import org.assertj.core.util.Lists;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -127,10 +122,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            RowType keyType = new RowType(Lists.list(new DataField(0, "f0", new IntType())));
-            RowType valueType = new RowType(Lists.list(new DataField(1, "f1", new BigIntType())));
-            return new LookupMergeFunction(
-                    new FirstRowMergeFunction(keyType, valueType, false), keyType, valueType);
+            return new LookupMergeFunction(new FirstRowMergeFunction(false));
         }
     }
 }
