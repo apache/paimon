@@ -83,6 +83,9 @@ public class IcebergDataFileMeta {
     private final InternalMap lowerBounds;
     private final InternalMap upperBounds;
 
+    // only used for iceberg migrate
+    private long schemaId = 0;
+
     IcebergDataFileMeta(
             Content content,
             String filePath,
@@ -199,6 +202,15 @@ public class IcebergDataFileMeta {
 
     public InternalMap upperBounds() {
         return upperBounds;
+    }
+
+    public long schemaId() {
+        return schemaId;
+    }
+
+    public IcebergDataFileMeta withSchemaId(long schemaId) {
+        this.schemaId = schemaId;
+        return this;
     }
 
     public static RowType schema(RowType partitionType) {
