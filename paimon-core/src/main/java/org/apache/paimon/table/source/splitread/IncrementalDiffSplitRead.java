@@ -98,7 +98,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                                 split.bucket(),
                                 split.dataFiles(),
                                 split.deletionFiles().orElse(null),
-                                false),
+                                forceKeepDelete),
                         mergeRead.keyComparator(),
                         mergeRead.createUdsComparator(),
                         mergeRead.mergeSorter(),
