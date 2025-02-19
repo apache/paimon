@@ -230,7 +230,7 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
-        return new GetTableResponse(UUID.randomUUID().toString(), "", 1, schema(options));
+        return new GetTableResponse(UUID.randomUUID().toString(), "", false, 1, schema(options));
     }
 
     public static AlterPartitionsRequest alterPartitionsRequest() {

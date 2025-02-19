@@ -401,7 +401,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
-        return new TableMetadata(loadTableSchema(identifier), null);
+        return new TableMetadata(loadTableSchema(identifier), false, null);
     }
 
     protected abstract TableSchema loadTableSchema(Identifier identifier)
