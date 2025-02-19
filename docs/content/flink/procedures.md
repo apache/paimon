@@ -693,7 +693,7 @@ All available procedures are listed below.
          <li>partition: What partition to rescale. For partitioned table this argument cannot be empty.</li>
       </td>
       <td>
-         CALL sys.rescale_postpone_bucket(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08')
+         CALL sys.rescale(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08')
       </td>
    </tr>
    </tbody>
