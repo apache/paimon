@@ -111,10 +111,7 @@ public interface ReadonlyTable extends InnerTable {
 
     @Override
     default OptionalLong latestSnapshotId() {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support currentSnapshot.",
-                        this.getClass().getSimpleName()));
+        return OptionalLong.empty();
     }
 
     @Override
