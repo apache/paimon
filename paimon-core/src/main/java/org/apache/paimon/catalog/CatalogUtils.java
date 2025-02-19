@@ -185,7 +185,7 @@ public class CatalogUtils {
         TableSchema schema = metadata.schema();
         CoreOptions options = CoreOptions.fromMap(schema.options());
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema);
+            return toFormatTable(identifier, schema, dataFileIO);
         }
 
         CatalogEnvironment catalogEnv =
@@ -249,7 +249,8 @@ public class CatalogUtils {
         return table;
     }
 
-    private static FormatTable toFormatTable(Identifier identifier, TableSchema schema) {
+    private static FormatTable toFormatTable(
+            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -258,6 +259,7 @@ public class CatalogUtils {
                                 CoreOptions.FILE_FORMAT.defaultValue()));
         String location = options.get(CoreOptions.PATH.key());
         return FormatTable.builder()
+                .fileIO(fileIO.apply(new Path(location)))
                 .identifier(identifier)
                 .rowType(schema.logicalRowType())
                 .partitionKeys(schema.partitionKeys())

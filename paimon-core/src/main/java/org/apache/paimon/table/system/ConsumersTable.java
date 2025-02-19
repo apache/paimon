@@ -99,6 +99,11 @@ public class ConsumersTable implements ReadonlyTable {
     }
 
     @Override
+    public FileIO fileIO() {
+        return dataTable.fileIO();
+    }
+
+    @Override
     public InnerTableScan newScan() {
         return new ConsumersTable.ConsumersScan();
     }

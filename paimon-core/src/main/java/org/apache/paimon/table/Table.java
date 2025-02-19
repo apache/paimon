@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -85,6 +86,9 @@ public interface Table extends Serializable {
     Optional<Statistics> statistics();
 
     // ================= Table Operations ====================
+
+    /** File io of this table. */
+    FileIO fileIO();
 
     /** Copy this table with adding dynamic options. */
     Table copy(Map<String, String> dynamicOptions);
