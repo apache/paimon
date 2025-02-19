@@ -55,6 +55,56 @@ import java.util.Map;
 /** Utils for {@link InternalRow} structures. */
 public class InternalRowUtils {
 
+    public static boolean equals(InternalRow row1, InternalRow row2, RowType rowType) {
+        int i = 0;
+        int len = rowType.getFieldCount();
+        while (i < len) {
+            Object data1 = get(row1, i, rowType.getTypeAt(i));
+            Object data2 = get(row2, i, rowType.getTypeAt(i));
+
+            if ((data1 == null) != (data2 == null)) {
+                return false;
+            }
+            if (data1 != null) {
+                if (data1 instanceof byte[]) {
+                    if (!java.util.Arrays.equals((byte[]) data1, (byte[]) data2)) {
+                        return false;
+                    }
+                } else if (data1 instanceof Float && java.lang.Float.isNaN((Float) data1)) {
+                    if (!java.lang.Float.isNaN((Float) data2)) {
+                        return false;
+                    }
+                } else if (data1 instanceof Double && java.lang.Double.isNaN((Double) data1)) {
+                    if (!java.lang.Double.isNaN((Double) data2)) {
+                        return false;
+                    }
+                } else {
+                    if (!data1.equals(data2)) {
+                        return false;
+                    }
+                }
+            }
+            i += 1;
+        }
+        return true;
+    }
+
+    public static int hash(InternalRow row, RowType rowType) {
+        int result = 37;
+        int i = 0;
+        int len = rowType.getFieldCount();
+        while (i < len) {
+            int update = 0;
+            Object data = get(row, i, rowType.getTypeAt(i));
+            if (data != null) {
+                update = data.hashCode();
+            }
+            result = 37 * result + update;
+            i += 1;
+        }
+        return result;
+    }
+
     public static InternalRow copyInternalRow(InternalRow row, RowType rowType) {
         if (row instanceof BinaryRow) {
             return ((BinaryRow) row).copy();
