@@ -43,7 +43,6 @@ import org.apache.paimon.utils.ReusingTestData;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
-import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 
 import java.io.EOFException;
@@ -234,11 +233,7 @@ public abstract class SortBufferWriteBufferTestBase {
                             Collections.singletonList("value"),
                             Collections.singletonList(DataTypes.BIGINT()),
                             Collections.emptyList());
-            return LookupMergeFunction.wrap(
-                            aggMergeFunction,
-                            RowType.of(DataTypes.INT()),
-                            RowType.of(DataTypes.BIGINT()))
-                    .create();
+            return LookupMergeFunction.wrap(aggMergeFunction).create();
         }
     }
 
@@ -257,11 +252,7 @@ public abstract class SortBufferWriteBufferTestBase {
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            return FirstRowMergeFunction.factory(
-                            new Options(),
-                            new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
-                            new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))))
-                    .create();
+            return FirstRowMergeFunction.factory(new Options()).create();
         }
     }
 }

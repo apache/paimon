@@ -36,6 +36,7 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
     private static final long serialVersionUID = 1L;
 
     private final int keyArity;
+    private final int valueArity;
 
     private final GenericRow reusedMeta;
     private final JoinedRow reusedKeyWithMeta;
@@ -49,7 +50,7 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
         super(KeyValue.schema(keyType, valueType));
 
         this.keyArity = keyType.getFieldCount();
-        int valueArity = valueType.getFieldCount();
+        this.valueArity = valueType.getFieldCount();
 
         this.reusedMeta = new GenericRow(2);
         this.reusedKeyWithMeta = new JoinedRow();
@@ -84,5 +85,15 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
 
     public KeyValue getReusedKv() {
         return reusedKv;
+    }
+
+    public KeyValue getCopiedKv() {
+        InternalRow row = rowSerializer.copy(reusedKey.getOriginalRow());
+        return new KeyValue()
+                .replace(
+                        new OffsetRow(keyArity, 0).replace(row),
+                        reusedKv.sequenceNumber(),
+                        reusedKv.valueKind(),
+                        new OffsetRow(valueArity, keyArity + 2).replace(row));
     }
 }

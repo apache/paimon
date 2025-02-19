@@ -273,6 +273,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         return reused.replace(currentKey, latestSequenceNumber, rowKind, row);
     }
 
+    @Override
+    public boolean requireCopy() {
+        return false;
+    }
+
     public static MergeFunctionFactory<KeyValue> factory(
             Options options, RowType rowType, List<String> primaryKeys) {
         return new Factory(options, rowType, primaryKeys);

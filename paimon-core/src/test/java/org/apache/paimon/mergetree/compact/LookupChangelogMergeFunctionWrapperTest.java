@@ -28,17 +28,14 @@ import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
-import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -69,10 +66,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(
-                                DeduplicateMergeFunction.factory(),
-                                RowType.of(DataTypes.INT()),
-                                RowType.of(DataTypes.INT())),
+                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
                         highLevel::get,
                         changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
@@ -234,10 +228,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                 ValueEqualiserSupplier.fromIgnoreFields(valueType, ignoreFields);
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(
-                                DeduplicateMergeFunction.factory(),
-                                RowType.of(DataTypes.INT()),
-                                valueType),
+                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
                         highLevel::get,
                         logDedupEqualSupplier.get(),
                         LookupStrategy.from(false, true, false, false),
@@ -295,9 +286,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 new FieldAggregator[] {
                                                     new FieldSumAggFactory()
                                                             .create(DataTypes.INT(), null, null)
-                                                }),
-                                RowType.of(DataTypes.INT()),
-                                RowType.of(DataTypes.INT())),
+                                                })),
                         key -> null,
                         changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
@@ -384,9 +373,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 new FieldAggregator[] {
                                                     new FieldLastValueAggFactory()
                                                             .create(DataTypes.INT(), null, null)
-                                                }),
-                                RowType.of(DataTypes.INT()),
-                                RowType.of(DataTypes.INT())),
+                                                })),
                         highLevel::get,
                         null,
                         LookupStrategy.from(false, true, false, false),
@@ -454,14 +441,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
         Set<InternalRow> highLevel = new HashSet<>();
         FirstRowMergeFunctionWrapper function =
                 new FirstRowMergeFunctionWrapper(
-                        projection ->
-                                new FirstRowMergeFunction(
-                                        new RowType(
-                                                Lists.list(new DataField(0, "f0", new IntType()))),
-                                        new RowType(
-                                                Lists.list(new DataField(1, "f1", new IntType()))),
-                                        false),
-                        highLevel::contains);
+                        projection -> new FirstRowMergeFunction(false), highLevel::contains);
 
         // Without level-0
         function.reset();
