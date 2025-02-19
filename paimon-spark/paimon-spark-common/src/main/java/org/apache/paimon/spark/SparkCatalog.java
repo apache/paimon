@@ -66,6 +66,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import scala.collection.JavaConverters;
+
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
@@ -413,7 +415,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             schemaBuilder.column(
                     field.name(),
                     toPaimonType(field.dataType()).copy(field.nullable()),
-                    field.getComment().getOrElse(() -> null));
+                    field.getComment().getOrElse(() -> null),
+                    JavaConverters.mapAsJavaMap(field.metadata().map()));
         }
         return schemaBuilder.build();
     }
