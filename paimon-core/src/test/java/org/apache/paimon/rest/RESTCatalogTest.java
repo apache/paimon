@@ -24,6 +24,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.auth.AuthProviderEnum;
+import org.apache.paimon.rest.auth.BearTokenAuthProvider;
+import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -61,6 +64,7 @@ class RESTCatalogTest extends CatalogTestBase {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         this.catalog = new RESTCatalog(CatalogContext.create(options));
     }
@@ -74,6 +78,7 @@ class RESTCatalogTest extends CatalogTestBase {
     void testInitFailWhenDefineWarehouse() {
         Options options = new Options();
         options.set(CatalogOptions.WAREHOUSE, warehouse);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
@@ -83,10 +88,22 @@ class RESTCatalogTest extends CatalogTestBase {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, "aaaaa");
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
                 .isInstanceOf(NotAuthorizedException.class);
+    }
+
+    @Test
+    void testHeader() {
+        RESTCatalog restCatalog = (RESTCatalog) catalog;
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter("host", "/path", "method", "data");
+        Map<String, String> headers = restCatalog.headers(restAuthParameter);
+        assertEquals(
+                headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
+        assertEquals(headers.get("test-header"), "test-value");
     }
 
     @Test
@@ -115,6 +132,7 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         this.catalog = new RESTCatalog(CatalogContext.create(options));
         List<Identifier> identifiers =
                 Lists.newArrayList(

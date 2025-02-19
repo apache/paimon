@@ -19,28 +19,24 @@
 package org.apache.paimon.rest.auth;
 
 import java.util.Map;
-import java.util.Optional;
+import java.util.function.Function;
 
-/** Authentication provider. */
-public interface AuthProvider {
+/** The function used to generate auth header for the rest request. */
+public class RESTAuthFunction implements Function<RESTAuthParameter, Map<String, String>> {
 
-    Map<String, String> header(Map<String, String> baseHeader, RESTAuthParameter restAuthParameter);
+    private final Map<String, String> initHeader;
+    private final AuthSession authSession;
 
-    boolean refresh();
-
-    default boolean keepRefreshed() {
-        return false;
+    public RESTAuthFunction(Map<String, String> initHeader, AuthSession authSession) {
+        this.initHeader = initHeader;
+        this.authSession = authSession;
     }
 
-    default boolean willSoonExpire() {
-        return false;
-    }
-
-    default Optional<Long> expiresAtMillis() {
-        return Optional.empty();
-    }
-
-    default Optional<Long> tokenRefreshInMills() {
-        return Optional.empty();
+    @Override
+    public Map<String, String> apply(RESTAuthParameter restAuthParameter) {
+        if (authSession != null) {
+            return authSession.getAuthProvider().header(initHeader, restAuthParameter);
+        }
+        return initHeader;
     }
 }

@@ -38,3 +38,5 @@ org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldThetaSketchAggFactory
 org.apache.paimon.rest.RESTCatalogFactory
 org.apache.paimon.iceberg.migrate.IcebergMigrateHadoopMetadataFactory
+org.apache.paimon.rest.auth.BearTokenAuthProviderFactory
+org.apache.paimon.rest.auth.DLFAuthProviderFactory

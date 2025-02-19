@@ -18,29 +18,34 @@
 
 package org.apache.paimon.rest.auth;
 
-import java.util.Map;
-import java.util.Optional;
+/** RestAuthParameter for building rest auth header. */
+public class RESTAuthParameter {
 
-/** Authentication provider. */
-public interface AuthProvider {
+    private final String host;
+    private final String path;
+    private final String method;
+    private final String data;
 
-    Map<String, String> header(Map<String, String> baseHeader, RESTAuthParameter restAuthParameter);
-
-    boolean refresh();
-
-    default boolean keepRefreshed() {
-        return false;
+    public RESTAuthParameter(String host, String path, String method, String data) {
+        this.host = host;
+        this.path = path;
+        this.method = method;
+        this.data = data;
     }
 
-    default boolean willSoonExpire() {
-        return false;
+    public String host() {
+        return host;
     }
 
-    default Optional<Long> expiresAtMillis() {
-        return Optional.empty();
+    public String path() {
+        return path;
     }
 
-    default Optional<Long> tokenRefreshInMills() {
-        return Optional.empty();
+    public String method() {
+        return method;
+    }
+
+    public String data() {
+        return data;
     }
 }

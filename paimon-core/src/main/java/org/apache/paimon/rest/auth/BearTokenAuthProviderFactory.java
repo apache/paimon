@@ -18,29 +18,19 @@
 
 package org.apache.paimon.rest.auth;
 
-import java.util.Map;
-import java.util.Optional;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 
-/** Authentication provider. */
-public interface AuthProvider {
+/** Factory for {@link BearTokenAuthProvider}. */
+public class BearTokenAuthProviderFactory implements AuthProviderFactory {
 
-    Map<String, String> header(Map<String, String> baseHeader, RESTAuthParameter restAuthParameter);
-
-    boolean refresh();
-
-    default boolean keepRefreshed() {
-        return false;
+    @Override
+    public String identifier() {
+        return AuthProviderEnum.BEAR.identifier();
     }
 
-    default boolean willSoonExpire() {
-        return false;
-    }
-
-    default Optional<Long> expiresAtMillis() {
-        return Optional.empty();
-    }
-
-    default Optional<Long> tokenRefreshInMills() {
-        return Optional.empty();
+    @Override
+    public AuthProvider create(Options options) {
+        return new BearTokenAuthProvider(options.get(RESTCatalogOptions.TOKEN));
     }
 }
