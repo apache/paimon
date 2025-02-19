@@ -103,7 +103,7 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
                                             }
                                             return Objects.toString(entry.getValue());
                                         }));
-        evalComputedColumns(rowData, rowTypeBuilder);
+
         return rowData;
     }
 
@@ -123,6 +123,7 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
             JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
         RowType.Builder rowTypeBuilder = RowType.builder();
         Map<String, String> rowData = this.extractRowData(jsonNode, rowTypeBuilder);
+        evalComputedColumns(rowKind, rowData, rowTypeBuilder);
         records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
     }
 

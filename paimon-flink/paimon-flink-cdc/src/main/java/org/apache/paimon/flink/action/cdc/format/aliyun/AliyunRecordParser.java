@@ -179,7 +179,6 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
             rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
         }
 
-        evalComputedColumns(rowData, rowTypeBuilder);
         return rowData;
     }
 
