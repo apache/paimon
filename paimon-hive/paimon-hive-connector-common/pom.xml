@@ -621,6 +621,16 @@ under the License.
                                     <include>org.apache.paimon:paimon-bundle</include>
                                 </includes>
                             </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>*</artifact>
+                                        <excludes>
+                                            <exclude>com/github/luben/zstd/**</exclude>
+                                            <exclude>**/*libzstd-jni-*.so</exclude>
+                                            <exclude>**/*libzstd-jni-*.dll</exclude>
+                                        </excludes>
+                                </filter>
+                            </filters>
                         </configuration>
                     </execution>
                 </executions>
