@@ -44,10 +44,7 @@ public class MigrateIcebergTableProcedure extends ProcedureBase {
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "source_table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(
-                        name = "iceberg_options",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
+                @ArgumentHint(name = "iceberg_options", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
                         name = "parallelism",
