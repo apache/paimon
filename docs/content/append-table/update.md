@@ -26,7 +26,7 @@ under the License.
 
 # Update
 
-Now, only Spark SQL supports DELETE & UPDATE, you can take a look to [Spark Write]({{< ref "spark/sql-write" >}}).
+Now, only Spark SQL supports DELETE & UPDATE, you can take a look at [Spark Write]({{< ref "spark/sql-write" >}}).
 
 Example:
 ```sql
