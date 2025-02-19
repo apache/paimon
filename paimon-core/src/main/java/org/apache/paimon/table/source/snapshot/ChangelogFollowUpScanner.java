@@ -18,32 +18,24 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.source.ScanMode;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * {@link FollowUpScanner} for {@link CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog
- * producer.
- */
-public class CompactionChangelogFollowUpScanner implements FollowUpScanner {
+/** {@link FollowUpScanner} for tables with changelog producer. */
+public class ChangelogFollowUpScanner implements FollowUpScanner {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(CompactionChangelogFollowUpScanner.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ChangelogFollowUpScanner.class);
 
     @Override
     public boolean shouldScanSnapshot(Snapshot snapshot) {
-        if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+        if (snapshot.changelogManifestList() != null) {
             return true;
         }
 
-        LOG.debug(
-                "Next snapshot id {} is not COMPACT, but is {}, check next one.",
-                snapshot.id(),
-                snapshot.commitKind());
+        LOG.debug("Next snapshot id {} has no changelog, check next one.", snapshot.id());
         return false;
     }
 

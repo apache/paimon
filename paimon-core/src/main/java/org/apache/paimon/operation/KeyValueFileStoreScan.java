@@ -34,6 +34,7 @@ import org.apache.paimon.stats.SimpleStatsEvolution;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -54,16 +55,15 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final SimpleStatsEvolutions fieldKeyStatsConverters;
     private final SimpleStatsEvolutions fieldValueStatsConverters;
     private final BucketSelectConverter bucketSelectConverter;
-
-    private Predicate keyFilter;
-    private Predicate valueFilter;
     private final boolean deletionVectorsEnabled;
     private final MergeEngine mergeEngine;
     private final ChangelogProducer changelogProducer;
-
     private final boolean fileIndexReadEnabled;
-    private final Map<Long, Predicate> schemaId2DataFilter = new HashMap<>();
+    private final boolean onlyReadRealBuckets;
 
+    private Predicate keyFilter;
+    private Predicate valueFilter;
+    private final Map<Long, Predicate> schemaId2DataFilter = new HashMap<>();
     private boolean valueFilterForceEnabled = false;
 
     public KeyValueFileStoreScan(
@@ -78,7 +78,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             boolean deletionVectorsEnabled,
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer,
-            boolean fileIndexReadEnabled) {
+            boolean fileIndexReadEnabled,
+            boolean onlyReadRealBuckets) {
         super(
                 manifestsReader,
                 snapshotManager,
@@ -99,6 +100,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         this.mergeEngine = mergeEngine;
         this.changelogProducer = changelogProducer;
         this.fileIndexReadEnabled = fileIndexReadEnabled;
+        this.onlyReadRealBuckets = onlyReadRealBuckets;
+
+        if (onlyReadRealBuckets) {
+            super.withBucketFilter(bucket -> bucket >= 0);
+        }
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -110,6 +116,15 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     public KeyValueFileStoreScan withValueFilter(Predicate predicate) {
         this.valueFilter = predicate;
         return this;
+    }
+
+    @Override
+    public FileStoreScan withBucketFilter(Filter<Integer> bucketFilter) {
+        if (onlyReadRealBuckets) {
+            return super.withBucketFilter(bucket -> bucket >= 0 && bucketFilter.test(bucket));
+        } else {
+            return super.withBucketFilter(bucketFilter);
+        }
     }
 
     @Override

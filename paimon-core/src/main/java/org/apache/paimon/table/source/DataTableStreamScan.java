@@ -27,10 +27,9 @@ import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
-import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
+import org.apache.paimon.table.source.snapshot.ChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
-import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
@@ -264,11 +263,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 followUpScanner = new DeltaFollowUpScanner();
                 break;
             case INPUT:
-                followUpScanner = new InputChangelogFollowUpScanner();
-                break;
             case FULL_COMPACTION:
             case LOOKUP:
-                followUpScanner = new CompactionChangelogFollowUpScanner();
+                followUpScanner = new ChangelogFollowUpScanner();
                 break;
             default:
                 throw new UnsupportedOperationException(

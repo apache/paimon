@@ -42,6 +42,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.DataField;
@@ -245,7 +246,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             throw new IllegalArgumentException("This read cannot accept split with before files.");
         }
 
-        if (split.isStreaming()) {
+        if (split.isStreaming() || split.bucket() == BucketMode.POSTPONE_BUCKET) {
             return createNoMergeReader(
                     split.partition(),
                     split.bucket(),
