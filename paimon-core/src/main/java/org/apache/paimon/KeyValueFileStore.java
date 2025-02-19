@@ -28,11 +28,13 @@ import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.BucketSelectConverter;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
+import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -152,12 +154,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     @Override
-    public KeyValueFileStoreWrite newWrite(String commitUser) {
+    public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser) {
         return newWrite(commitUser, null);
     }
 
     @Override
-    public KeyValueFileStoreWrite newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+    public AbstractFileStoreWrite<KeyValue> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter) {
         IndexMaintainer.Factory<KeyValue> indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
@@ -167,27 +170,42 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             deletionVectorsMaintainerFactory =
                     new DeletionVectorsMaintainer.Factory(newIndexFileHandler());
         }
-        return new KeyValueFileStoreWrite(
-                fileIO,
-                schemaManager,
-                schema,
-                commitUser,
-                partitionType,
-                keyType,
-                valueType,
-                keyComparatorSupplier,
-                () -> UserDefinedSeqComparator.create(valueType, options),
-                logDedupEqualSupplier,
-                mfFactory,
-                pathFactory(),
-                format2PathFactory(),
-                snapshotManager(),
-                newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
-                indexFactory,
-                deletionVectorsMaintainerFactory,
-                options,
-                keyValueFieldsExtractor,
-                tableName);
+
+        if (options.bucket() == BucketMode.POSTPONE_BUCKET) {
+            return new PostponeBucketFileStoreWrite(
+                    fileIO,
+                    schema,
+                    partitionType,
+                    keyType,
+                    valueType,
+                    format2PathFactory(),
+                    snapshotManager(),
+                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
+                    options,
+                    tableName);
+        } else {
+            return new KeyValueFileStoreWrite(
+                    fileIO,
+                    schemaManager,
+                    schema,
+                    commitUser,
+                    partitionType,
+                    keyType,
+                    valueType,
+                    keyComparatorSupplier,
+                    () -> UserDefinedSeqComparator.create(valueType, options),
+                    logDedupEqualSupplier,
+                    mfFactory,
+                    pathFactory(),
+                    format2PathFactory(),
+                    snapshotManager(),
+                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
+                    indexFactory,
+                    deletionVectorsMaintainerFactory,
+                    options,
+                    keyValueFieldsExtractor,
+                    tableName);
+        }
     }
 
     private Map<String, FileStorePathFactory> format2PathFactory() {
