@@ -18,13 +18,19 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /** {@link TableWriteOperator} for writing records in postpone bucket table. */
 public class PostponeBucketTableWriteOperator extends TableWriteOperator<InternalRow> {
@@ -42,6 +48,21 @@ public class PostponeBucketTableWriteOperator extends TableWriteOperator<Interna
     @Override
     protected boolean containLogSystem() {
         return false;
+    }
+
+    @Override
+    public void initializeState(StateInitializationContext context) throws Exception {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(
+                CoreOptions.DATA_FILE_PREFIX.key(),
+                String.format(
+                        "%s-u-%s-s-%d-w-",
+                        table.coreOptions().dataFilePrefix(),
+                        getCommitUser(context),
+                        RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext())));
+        table = table.copy(dynamicOptions);
+
+        super.initializeState(context);
     }
 
     @Override

@@ -289,7 +289,8 @@ public class CompactAction extends TableActionBase {
                             realTable
                                     .newReadBuilder()
                                     .withPartitionFilter(partitionSpec)
-                                    .withBucketFilter(new PostponeBucketFilter()));
+                                    .withBucketFilter(new PostponeBucketFilter()),
+                            options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
             DataStream<InternalRow> partitioned =
                     FlinkStreamPartitioner.partition(

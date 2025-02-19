@@ -226,8 +226,6 @@ public class SchemaValidation {
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
         }
-
-        validatePostponeBucketTable(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -651,16 +649,5 @@ public class SchemaValidation {
 
     private static boolean isPostponeBucketTable(TableSchema schema, int bucket) {
         return !schema.primaryKeys().isEmpty() && bucket == BucketMode.POSTPONE_BUCKET;
-    }
-
-    private static void validatePostponeBucketTable(TableSchema schema, CoreOptions options) {
-        if (!isPostponeBucketTable(schema, options.bucket())) {
-            return;
-        }
-
-        checkArgument(
-                options.changelogProducer() == ChangelogProducer.NONE
-                        || options.changelogProducer() == ChangelogProducer.LOOKUP,
-                "Currently, postpone bucket tables (bucket = -2) only supports none or lookup changelog producer");
     }
 }

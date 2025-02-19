@@ -21,12 +21,14 @@ package org.apache.paimon.flink.postpone;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
+import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.operator.ReadOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -34,6 +36,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -43,13 +46,20 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Source for compacting postpone bucket tables. This source scans all files from {@code bucket =
@@ -86,9 +96,13 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
         public InputStatus pollNext(ReaderOutput<Split> output) throws Exception {
             try {
                 List<Split> splits = scan.plan().splits();
+
                 for (Split split : splits) {
                     DataSplit dataSplit = (DataSplit) split;
-                    for (DataFileMeta meta : dataSplit.dataFiles()) {
+                    List<DataFileMeta> files = new ArrayList<>(dataSplit.dataFiles());
+                    // we must replay the written records in exact order
+                    files.sort(Comparator.comparing(DataFileMeta::creationTime));
+                    for (DataFileMeta meta : files) {
                         DataSplit s =
                                 DataSplit.builder()
                                         .withPartition(dataSplit.partition())
@@ -109,7 +123,11 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
     }
 
     public static Pair<DataStream<RowData>, DataStream<Committable>> buildSource(
-            StreamExecutionEnvironment env, String name, RowType rowType, ReadBuilder readBuilder) {
+            StreamExecutionEnvironment env,
+            String name,
+            RowType rowType,
+            ReadBuilder readBuilder,
+            @Nullable Integer parallelism) {
         DataStream<Split> source =
                 env.fromSource(
                                 new PostponeBucketCompactSplitSource(readBuilder),
@@ -117,8 +135,17 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
                                 "Compact split generator: " + name,
                                 new JavaTypeInfo<>(Split.class))
                         .forceNonParallel();
+
+        FlinkStreamPartitioner<Split> partitioner =
+                new FlinkStreamPartitioner<>(new SplitChannelComputer());
+        PartitionTransformation<Split> partitioned =
+                new PartitionTransformation<>(source.getTransformation(), partitioner);
+        if (parallelism != null) {
+            partitioned.setParallelism(parallelism);
+        }
+
         return Pair.of(
-                source.rebalance()
+                new DataStream<>(source.getExecutionEnvironment(), partitioned)
                         .transform(
                                 "Compact split reader: " + name,
                                 InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(rowType)),
@@ -129,5 +156,34 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
                                 new CommittableTypeInfo(),
                                 new RemovePostponeBucketFilesOperator())
                         .forceNonParallel());
+    }
+
+    private static class SplitChannelComputer implements ChannelComputer<Split> {
+
+        private transient int numChannels;
+        private transient Pattern pattern;
+
+        @Override
+        public void setup(int numChannels) {
+            this.numChannels = numChannels;
+            // see PostponeBucketTableWriteOperator
+            this.pattern = Pattern.compile("-s-(\\d+?)-");
+        }
+
+        @Override
+        public int channel(Split record) {
+            DataSplit dataSplit = (DataSplit) record;
+            String fileName = dataSplit.dataFiles().get(0).fileName();
+
+            Matcher matcher = pattern.matcher(fileName);
+            Preconditions.checkState(
+                    matcher.find(),
+                    "Data file name does not match the pattern. This is unexpected.");
+            int subtaskId = Integer.parseInt(matcher.group(1));
+
+            // send records written by the same subtask to the same subtask
+            // to make sure we replay the written records in the exact order
+            return (Math.abs(dataSplit.partition().hashCode()) + subtaskId) % numChannels;
+        }
     }
 }

@@ -331,6 +331,72 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expectedData);
     }
 
+    @Timeout(TIMEOUT)
+    @Test
+    public void testInputChangelogProducer() throws Exception {
+        String warehouse = getTempDirPath();
+        System.out.println(warehouse);
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(1)
+                        .checkpointIntervalMs(500)
+                        .build();
+        String createCatalog =
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")";
+        sEnv.executeSql(createCatalog);
+        sEnv.executeSql("USE CATALOG mycat");
+        sEnv.executeSql(
+                "CREATE TEMPORARY TABLE S (\n"
+                        + "  i INT\n"
+                        + ") WITH (\n"
+                        + "  'connector' = 'datagen',\n"
+                        + "  'fields.i.kind' = 'sequence',\n"
+                        + "  'fields.i.start' = '0',\n"
+                        + "  'fields.i.end' = '199',\n"
+                        + "  'number-of-rows' = '200',\n"
+                        + "  'rows-per-second' = '50'\n"
+                        + ")");
+        sEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'changelog-producer' = 'input',\n"
+                        + "  'continuous.discovery-interval' = '1ms'\n"
+                        + ")");
+        sEnv.executeSql(
+                "CREATE TEMPORARY VIEW V AS SELECT MOD(i, 2) AS x, IF(MOD(i, 2) = 0, 1, 1000) AS y FROM S");
+        sEnv.executeSql("INSERT INTO T SELECT SUM(y), x FROM V GROUP BY x").await();
+
+        TableEnvironment bEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .parallelism(2)
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+        bEnv.executeSql(createCatalog);
+        bEnv.executeSql("USE CATALOG mycat");
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        // if the read order when compacting is wrong, this check will fail
+        assertThat(collect(bEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+U[100, 0]", "+U[100000, 1]");
+        TableResult streamingSelect =
+                sEnv.executeSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id' = '1') */");
+        JobClient client = streamingSelect.getJobClient().get();
+        CloseableIterator<Row> it = streamingSelect.collect();
+        // if the number of changelog is not sufficient, this call will fail
+        collect(client, it, 400 - 2);
+    }
+
     private List<String> collect(TableResult result) throws Exception {
         List<String> ret = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {
