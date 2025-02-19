@@ -143,12 +143,16 @@ CREATE TABLE customers (
 ```sql
 SELECT o.order_id, o.total, c.country, c.zip
 FROM orders AS o
-JOIN customers /*+ OPTIONS('lookup.dynamic-partition'='max_pt()', 'lookup.dynamic-partition.refresh-interval'='1 h') */
+JOIN customers /*+ OPTIONS('scan.partitions'='max_pt()', 'lookup.dynamic-partition.refresh-interval'='1 h') */
 FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
 The Lookup node will automatically refresh the latest partition and query the data of the latest partition.
+
+The option `scan.partitions` can also specify fixed partitions in the form of `key1=value1,key2=value2`.
+Multiple partitions should be separated by semicolon (`;`).
+When specifying fixed partitions, this option can also be used in batch joins.
 
 ## Query Service
 

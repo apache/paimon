@@ -24,6 +24,7 @@ import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -32,6 +33,7 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -83,6 +85,7 @@ public abstract class FlinkTableSource
             @Nullable int[][] projectFields,
             @Nullable Long limit) {
         this.table = table;
+
         this.predicate = predicate;
         this.projectFields = projectFields;
         this.limit = limit;
@@ -122,6 +125,33 @@ public abstract class FlinkTableSource
         return Result.of(filters, unConsumedFilters);
     }
 
+    /**
+     * This method is only used for normal source (not lookup source). Specified partitions in
+     * lookup sources are handled in {@link org.apache.paimon.flink.lookup.PartitionLoader}.
+     */
+    protected Predicate getPredicateWithScanPartitions() {
+        if (table.options().containsKey(FlinkConnectorOptions.SCAN_PARTITIONS.key())) {
+            Predicate partitionPredicate =
+                    PartitionPredicate.createPartitionPredicate(
+                            ParameterUtils.getPartitions(
+                                    table.options()
+                                            .get(FlinkConnectorOptions.SCAN_PARTITIONS.key())
+                                            .split(";")),
+                            table.rowType(),
+                            table.options()
+                                    .getOrDefault(
+                                            CoreOptions.PARTITION_DEFAULT_NAME.key(),
+                                            CoreOptions.PARTITION_DEFAULT_NAME.defaultValue()));
+            if (predicate == null) {
+                return partitionPredicate;
+            } else {
+                return PredicateBuilder.and(predicate, partitionPredicate);
+            }
+        } else {
+            return predicate;
+        }
+    }
+
     @Override
     public boolean supportsNestedProjection() {
         return true;
@@ -149,9 +179,18 @@ public abstract class FlinkTableSource
                     Boolean.parseBoolean(envConfig.toMap().get(FLINK_INFER_SCAN_PARALLELISM)));
         }
         Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
-        if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
+        if (parallelism == null
+                // Infer parallelism when parallelism is not set and infer scan parallelism is
+                // enabled.
+                && env.getParallelism() == -1
+                && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
             if (isUnbounded()) {
-                parallelism = Math.max(1, options.get(CoreOptions.BUCKET));
+                // In unaware bucket or dynamic bucket mode, we can't infer parallelism.
+                if (options.get(CoreOptions.BUCKET) == -1) {
+                    return null;
+                } else {
+                    parallelism = Math.max(1, options.get(CoreOptions.BUCKET));
+                }
             } else {
                 scanSplitsForInference();
                 parallelism = splitStatistics.splitNumber();
@@ -194,7 +233,10 @@ public abstract class FlinkTableSource
     }
 
     private TableScan newTableScan() {
-        return table.newReadBuilder().dropStats().withFilter(predicate).newScan();
+        return table.newReadBuilder()
+                .dropStats()
+                .withFilter(getPredicateWithScanPartitions())
+                .newScan();
     }
 
     /** Split statistics for inferring row count and parallelism size. */

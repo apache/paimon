@@ -118,3 +118,42 @@ CALL sys.reset_consumer(
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## Clear Consumers
+
+You can clear consumers in bulk with a given including consumers and excluding consumers(accept regular expression).
+
+Run the following command:
+
+{{< tabs "clear_consumers" >}}
+
+{{< tab "Flink SQL" >}}
+
+```sql
+CALL sys.clear_consumers(
+   `table` => 'database_name.table_name', 
+   `including_consumers` => 'including_consumers', 
+   `excluding_consumers` => 'excluding_consumers'
+);
+-- No including_consumers if you want to clear all consumers except excluding_consumers in the table
+```
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    clear_consumers \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table <table-name> \
+    [--including_consumers <including-consumers>] \
+    [--excluding_consumers <excluding-consumers>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+    
+## No including_consumers if you want to clear all consumers except excluding_consumers in the table
+```
+{{< /tab >}}
+
+{{< /tabs >}}

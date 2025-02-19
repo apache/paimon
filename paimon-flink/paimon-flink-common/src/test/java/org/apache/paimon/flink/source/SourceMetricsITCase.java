@@ -84,7 +84,9 @@ public class SourceMetricsITCase {
         tEnv.executeSql("INSERT INTO T VALUES (1, 10), (2, 20), (3, 30)").await();
         tEnv.executeSql(
                 "CREATE TEMPORARY TABLE B ( k INT, v INT ) WITH ( 'connector' = 'blackhole' )");
-        TableResult tableResult = tEnv.executeSql("INSERT INTO B SELECT * FROM T");
+        TableResult tableResult =
+                tEnv.executeSql(
+                        "INSERT INTO B SELECT * FROM T/*+ OPTIONS('scan.parallelism'='1')*/");
         JobClient client = tableResult.getJobClient().get();
         JobID jobId = client.getJobID();
         tableResult.await();

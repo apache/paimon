@@ -47,6 +47,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEM
 import static org.apache.paimon.flink.sink.FlinkSink.assertBatchAdaptiveParallelism;
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /** A sink for processing multi-tables in dedicated compaction job. */
 public class CombinedTableCompactorSink implements Serializable {
@@ -103,25 +104,23 @@ public class CombinedTableCompactorSink implements Serializable {
                         == RuntimeExecutionMode.STREAMING;
 
         SingleOutputStreamOperator<MultiTableCommittable> multiBucketTableRewriter =
-                awareBucketTableSource
-                        .transform(
-                                String.format("%s-%s", "Multi-Bucket-Table", WRITER_NAME),
-                                new MultiTableCommittableTypeInfo(),
-                                combinedMultiCompactionWriteOperator(
-                                        env.getCheckpointConfig(),
-                                        isStreaming,
-                                        fullCompaction,
-                                        commitUser))
-                        .setParallelism(awareBucketTableSource.getParallelism());
+                awareBucketTableSource.transform(
+                        String.format("%s-%s", "Multi-Bucket-Table", WRITER_NAME),
+                        new MultiTableCommittableTypeInfo(),
+                        combinedMultiCompactionWriteOperator(
+                                env.getCheckpointConfig(),
+                                isStreaming,
+                                fullCompaction,
+                                commitUser));
+        forwardParallelism(multiBucketTableRewriter, awareBucketTableSource);
 
         SingleOutputStreamOperator<MultiTableCommittable> unawareBucketTableRewriter =
-                unawareBucketTableSource
-                        .transform(
-                                String.format("%s-%s", "Unaware-Bucket-Table", WRITER_NAME),
-                                new MultiTableCommittableTypeInfo(),
-                                new AppendOnlyMultiTableCompactionWorkerOperator.Factory(
-                                        catalogLoader, commitUser, options))
-                        .setParallelism(unawareBucketTableSource.getParallelism());
+                unawareBucketTableSource.transform(
+                        String.format("%s-%s", "Unaware-Bucket-Table", WRITER_NAME),
+                        new MultiTableCommittableTypeInfo(),
+                        new AppendOnlyMultiTableCompactionWorkerOperator.Factory(
+                                catalogLoader, commitUser, options));
+        forwardParallelism(unawareBucketTableRewriter, unawareBucketTableSource);
 
         if (!isStreaming) {
             assertBatchAdaptiveParallelism(env, multiBucketTableRewriter.getParallelism());
@@ -156,18 +155,17 @@ public class CombinedTableCompactorSink implements Serializable {
                         new MultiTableCommittableChannelComputer(),
                         written.getParallelism());
         SingleOutputStreamOperator<?> committed =
-                partitioned
-                        .transform(
-                                GLOBAL_COMMITTER_NAME,
-                                new MultiTableCommittableTypeInfo(),
-                                new CommitterOperatorFactory<>(
-                                        streamingCheckpointEnabled,
-                                        false,
-                                        commitUser,
-                                        createCommitterFactory(isStreaming),
-                                        createCommittableStateManager(),
-                                        options.get(END_INPUT_WATERMARK)))
-                        .setParallelism(written.getParallelism());
+                partitioned.transform(
+                        GLOBAL_COMMITTER_NAME,
+                        new MultiTableCommittableTypeInfo(),
+                        new CommitterOperatorFactory<>(
+                                streamingCheckpointEnabled,
+                                false,
+                                commitUser,
+                                createCommitterFactory(isStreaming),
+                                createCommittableStateManager(),
+                                options.get(END_INPUT_WATERMARK)));
+        forwardParallelism(committed, written);
         if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
             committed = committed.startNewChain();
         }

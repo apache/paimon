@@ -62,6 +62,14 @@ public abstract class AbstractOrcColumnVector
 
     public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(
             ColumnVector vector, VectorizedRowBatch orcBatch, DataType dataType) {
+        return createPaimonVector(vector, orcBatch, dataType, false);
+    }
+
+    public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(
+            ColumnVector vector,
+            VectorizedRowBatch orcBatch,
+            DataType dataType,
+            boolean legacyTimestampLtzType) {
         if (vector instanceof LongColumnVector) {
             if (dataType.getTypeRoot() == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
                 return new OrcLegacyTimestampColumnVector((LongColumnVector) vector, orcBatch);
@@ -75,7 +83,7 @@ public abstract class AbstractOrcColumnVector
         } else if (vector instanceof DecimalColumnVector) {
             return new OrcDecimalColumnVector((DecimalColumnVector) vector, orcBatch);
         } else if (vector instanceof TimestampColumnVector) {
-            return new OrcTimestampColumnVector(vector, orcBatch);
+            return new OrcTimestampColumnVector(vector, orcBatch, dataType, legacyTimestampLtzType);
         } else if (vector instanceof ListColumnVector) {
             return new OrcArrayColumnVector(
                     (ListColumnVector) vector, orcBatch, (ArrayType) dataType);

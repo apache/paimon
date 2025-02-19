@@ -129,7 +129,11 @@ public class SnapshotManagerTest {
 
             if (millis.get(numSnapshots - 1) < time) {
                 if (isRaceCondition && millis.size() == 1) {
-                    assertThat(actual).isNull();
+                    if (tries == 0) {
+                        assertThat(actual).isLessThanOrEqualTo(firstSnapshotId);
+                    } else {
+                        assertThat(actual).isNull();
+                    }
                 } else {
                     assertThat(actual).isEqualTo(firstSnapshotId + numSnapshots - 1);
                 }
@@ -138,7 +142,7 @@ public class SnapshotManagerTest {
                     if (millis.get(i) >= time) {
                         if (isRaceCondition && i == 0) {
                             // The first snapshot expired during invocation
-                            if (millis.size() == 1) {
+                            if (millis.size() == 1 && tries > 0) {
                                 assertThat(actual).isNull();
                             } else {
                                 assertThat(actual).isLessThanOrEqualTo(firstSnapshotId);

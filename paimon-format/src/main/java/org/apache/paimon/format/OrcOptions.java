@@ -41,4 +41,11 @@ public class OrcOptions {
                                     + "fraction of the total number of non-null rows, turn off "
                                     + "dictionary encoding in orc. Use 0 to always disable dictionary encoding. "
                                     + "Use 1 to always use dictionary encoding.");
+
+    public static final ConfigOption<Boolean> ORC_TIMESTAMP_LTZ_LEGACY_TYPE =
+            key("orc.timestamp-ltz.legacy.type")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "This option is used to be compatible with the paimon-orc‘s old behavior for the `timestamp_ltz` data type.");
 }

@@ -38,5 +38,11 @@ under the License.
             <td>Double</td>
             <td>If the number of distinct keys in a dictionary is greater than this fraction of the total number of non-null rows, turn off dictionary encoding in orc. Use 0 to always disable dictionary encoding. Use 1 to always use dictionary encoding.</td>
         </tr>
+        <tr>
+            <td><h5>orc.timestamp-ltz.legacy.type</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>This option is used to be compatible with the paimon-orc‘s old behavior for the `timestamp_ltz` data type.</td>
+        </tr>
     </tbody>
 </table>

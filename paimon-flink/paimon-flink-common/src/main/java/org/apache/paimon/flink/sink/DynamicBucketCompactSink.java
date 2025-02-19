@@ -26,12 +26,14 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /** This class is only used for generate compact sink topology for dynamic bucket table. */
 public class DynamicBucketCompactSink extends RowDynamicBucketSink {
@@ -54,9 +56,9 @@ public class DynamicBucketCompactSink extends RowDynamicBucketSink {
                         initialCommitUser, table, null, extractorFunction(), true);
         TupleTypeInfo<Tuple2<InternalRow, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(input.getType(), BasicTypeInfo.INT_TYPE_INFO);
-        DataStream<Tuple2<InternalRow, Integer>> bucketAssigned =
-                input.transform("dynamic-bucket-assigner", rowWithBucketType, assignerOperator)
-                        .setParallelism(input.getParallelism());
+        SingleOutputStreamOperator<Tuple2<InternalRow, Integer>> bucketAssigned =
+                input.transform("dynamic-bucket-assigner", rowWithBucketType, assignerOperator);
+        forwardParallelism(bucketAssigned, input);
         return sinkFrom(bucketAssigned, initialCommitUser);
     }
 }
