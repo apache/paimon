@@ -55,6 +55,7 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -86,6 +87,12 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public AbstractDataTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         snapshotReader.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    @Override
+    public AbstractDataTableScan withBuckets(Collection<Integer> buckets) {
+        snapshotReader.withBuckets(buckets);
         return this;
     }
 
