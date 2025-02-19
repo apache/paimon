@@ -180,19 +180,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
             if (isRemoteServiceAvailable(table)) {
                 this.lookupTable =
-                        PrimaryKeyPartialLookupTable.createRemoteTable(
-                                table, projection, joinKeys);
+                        PrimaryKeyPartialLookupTable.createRemoteTable(table, projection, joinKeys);
                 LOG.info(
                         "Remote service is available. Created PrimaryKeyPartialLookupTable with remote service.");
             } else {
                 try {
                     this.lookupTable =
                             PrimaryKeyPartialLookupTable.createLocalTable(
-                                    table,
-                                    projection,
-                                    path,
-                                    joinKeys,
-                                    getRequireCachedBucketIds());
+                                    table, projection, path, joinKeys, getRequireCachedBucketIds());
                     LOG.info(
                             "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
                 } catch (UnsupportedOperationException ignore) {
