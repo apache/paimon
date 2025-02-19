@@ -572,7 +572,7 @@ public class RESTCatalogServer {
                             table.options(),
                             table.comment().orElse(null));
         }
-        return new GetTableResponse(table.uuid(), table.name(), schemaId, schema);
+        return new GetTableResponse(table.uuid(), table.name(), false, schemaId, schema);
     }
 
     private static MockResponse mockResponse(RESTResponse response, int httpCode) {

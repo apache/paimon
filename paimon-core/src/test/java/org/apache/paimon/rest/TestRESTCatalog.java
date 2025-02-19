@@ -253,7 +253,7 @@ public class TestRESTCatalog extends FileSystemCatalog {
     protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         if (tableFullName2Schema.containsKey(identifier.getFullName())) {
             TableSchema tableSchema = tableFullName2Schema.get(identifier.getFullName());
-            return new TableMetadata(tableSchema, "uuid");
+            return new TableMetadata(tableSchema, false, "uuid");
         }
         return super.loadTableMetadata(identifier);
     }

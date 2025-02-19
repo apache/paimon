@@ -172,8 +172,8 @@ public class CatalogUtils {
     public static Table loadTable(
             Catalog catalog,
             Identifier identifier,
-            Function<Path, FileIO> dataFileIO,
-            Function<Path, FileIO> objectFileIO,
+            Function<Path, FileIO> internalFileIO,
+            Function<Path, FileIO> externalFileIO,
             TableMetadata.Loader metadataLoader,
             SnapshotCommit.Factory commitFactory)
             throws Catalog.TableNotExistException {
@@ -184,6 +184,9 @@ public class CatalogUtils {
         TableMetadata metadata = metadataLoader.load(identifier);
         TableSchema schema = metadata.schema();
         CoreOptions options = CoreOptions.fromMap(schema.options());
+
+        Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
+
         if (options.type() == TableType.FORMAT_TABLE) {
             return toFormatTable(identifier, schema, dataFileIO);
         }
@@ -196,7 +199,7 @@ public class CatalogUtils {
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
 
         if (options.type() == TableType.OBJECT_TABLE) {
-            table = toObjectTable(objectFileIO, table);
+            table = toObjectTable(externalFileIO, table);
         }
 
         if (identifier.isSystemTable()) {

@@ -995,6 +995,8 @@ components:
           type: string
         name:
           type: string
+        isExternal:
+          type: boolean
         schemaId:
           type: integer
           format: int64

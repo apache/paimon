@@ -703,6 +703,7 @@ public class HiveCatalog extends AbstractCatalog {
             throws TableNotExistException {
         return new TableMetadata(
                 loadTableSchema(identifier, table),
+                isExternalTable(table),
                 identifier.getFullName() + "." + table.getCreateTime());
     }
 

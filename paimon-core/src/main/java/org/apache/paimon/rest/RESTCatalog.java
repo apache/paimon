@@ -321,7 +321,7 @@ public class RESTCatalog implements Catalog {
         }
 
         TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
-        return new TableMetadata(schema, response.getId());
+        return new TableMetadata(schema, response.isExternal(), response.getId());
     }
 
     @Override
