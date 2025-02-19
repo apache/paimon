@@ -24,10 +24,6 @@ import org.apache.paimon.types.RowKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
-
-import static org.apache.paimon.CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -58,18 +54,5 @@ public interface KeyAndBucketExtractor<T> {
     static int bucket(int hashcode, int numBuckets) {
         checkArgument(numBuckets > 0, "Num bucket is illegal: " + numBuckets);
         return Math.abs(hashcode % numBuckets);
-    }
-
-    static int bucketWithUpperBound(Set<Integer> bucketsSet, int hashcode, int maxBucketsNum) {
-        checkArgument(maxBucketsNum > 0, "Num max-buckets is illegal: " + maxBucketsNum);
-        LOG.debug(
-                "Assign record (hashcode '{}') to new bucket exceed upper bound '{}' defined in '{}', Stop creating new buckets.",
-                hashcode,
-                maxBucketsNum,
-                DYNAMIC_BUCKET_MAX_BUCKETS.key());
-        return bucketsSet.stream()
-                .skip(ThreadLocalRandom.current().nextInt(maxBucketsNum))
-                .findFirst()
-                .orElse(0);
     }
 }

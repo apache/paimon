@@ -20,13 +20,14 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.utils.Int2ShortHashMap;
 import org.apache.paimon.utils.IntIterator;
+import org.apache.paimon.utils.ListUtils;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -44,7 +45,8 @@ public class PartitionIndex {
 
     public final Map<Integer, Long> nonFullBucketInformation;
 
-    public final Set<Integer> totalBucket;
+    public final Set<Integer> totalBucketSet;
+    public final List<Integer> totalBucketArray;
 
     private final long targetBucketRowNumber;
 
@@ -58,7 +60,8 @@ public class PartitionIndex {
             long targetBucketRowNumber) {
         this.hash2Bucket = hash2Bucket;
         this.nonFullBucketInformation = bucketInformation;
-        this.totalBucket = new LinkedHashSet<>(bucketInformation.keySet());
+        this.totalBucketSet = new LinkedHashSet<>(bucketInformation.keySet());
+        this.totalBucketArray = new ArrayList<>(totalBucketSet);
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.lastAccessedCommitIdentifier = Long.MIN_VALUE;
         this.accessed = true;
@@ -88,14 +91,15 @@ public class PartitionIndex {
             }
         }
 
-        if (-1 == maxBucketsNum || totalBucket.isEmpty() || maxBucketId < maxBucketsNum - 1) {
+        if (-1 == maxBucketsNum || totalBucketSet.isEmpty() || maxBucketId < maxBucketsNum - 1) {
             // 3. create a new bucket
             for (int i = 0; i < Short.MAX_VALUE; i++) {
-                if (bucketFilter.test(i) && !totalBucket.contains(i)) {
+                if (bucketFilter.test(i) && !totalBucketSet.contains(i)) {
                     // The new bucketId may still be larger than the upper bound
                     if (-1 == maxBucketsNum || i <= maxBucketsNum - 1) {
                         nonFullBucketInformation.put(i, 1L);
-                        totalBucket.add(i);
+                        totalBucketSet.add(i);
+                        totalBucketArray.add(i);
                         hash2Bucket.put(hash, (short) i);
                         return i;
                     } else {
@@ -113,8 +117,7 @@ public class PartitionIndex {
         }
 
         // 4. exceed buckets upper bound
-        int bucket =
-                KeyAndBucketExtractor.bucketWithUpperBound(totalBucket, hash, totalBucket.size());
+        int bucket = ListUtils.pickRandomly(totalBucketArray);
         hash2Bucket.put(hash, (short) bucket);
         return bucket;
     }

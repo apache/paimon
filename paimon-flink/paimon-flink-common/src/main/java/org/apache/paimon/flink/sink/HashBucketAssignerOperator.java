@@ -49,7 +49,6 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
     private final Integer numAssigners;
     private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
     private final boolean overwrite;
-    private int[] maxBucketsArr;
 
     private transient BucketAssigner assigner;
     private transient PartitionKeyExtractor<T> extractor;

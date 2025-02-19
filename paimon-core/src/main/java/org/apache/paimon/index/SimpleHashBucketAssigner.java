@@ -20,11 +20,13 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.utils.Int2ShortHashMap;
+import org.apache.paimon.utils.ListUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -78,10 +80,12 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
 
         public final Int2ShortHashMap hash2Bucket = new Int2ShortHashMap();
         private final Map<Integer, Long> bucketInformation;
+        private final List<Integer> bucketList;
         private int currentBucket;
 
         private SimplePartitionIndex() {
             bucketInformation = new LinkedHashMap<>();
+            bucketList = new ArrayList<>();
             loadNewBucket();
         }
 
@@ -91,7 +95,13 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                 return hash2Bucket.get(hash);
             }
 
-            Long num = bucketInformation.computeIfAbsent(currentBucket, i -> 0L);
+            Long num =
+                    bucketInformation.computeIfAbsent(
+                            currentBucket,
+                            bucket -> {
+                                bucketList.add(bucket);
+                                return 0L;
+                            });
 
             if (num >= targetBucketRowNumber) {
                 if (-1 == maxBucketsNum
@@ -99,9 +109,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                         || maxBucketId < maxBucketsNum - 1) {
                     loadNewBucket();
                 } else {
-                    currentBucket =
-                            KeyAndBucketExtractor.bucketWithUpperBound(
-                                    bucketInformation.keySet(), hash, bucketInformation.size());
+                    currentBucket = ListUtils.pickRandomly(bucketList);
                 }
             }
             bucketInformation.compute(currentBucket, (i, l) -> l == null ? 1L : l + 1);
