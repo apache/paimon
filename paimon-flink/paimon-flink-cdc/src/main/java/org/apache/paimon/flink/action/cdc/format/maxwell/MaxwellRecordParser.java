@@ -27,6 +27,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -57,7 +58,12 @@ public class MaxwellRecordParser extends AbstractJsonRecordParser {
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
         String operation = getAndCheck(FIELD_TYPE).asText();
-        JsonNode data = getAndCheck(dataField());
+        JsonNode data;
+        try {
+            data = getAndCheck(dataField());
+        } catch (RuntimeException e) {
+            return Collections.emptyList();
+        }
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         switch (operation) {
             case OP_INSERT:
