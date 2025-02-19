@@ -34,19 +34,16 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
 
     @Override
     public AuthProvider create(Options options) {
-        String roleSessionName = options.get(RESTCatalogOptions.DLF_ROLE_SESSION_NAME);
         if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
             String tokenFilePath = options.get(DLF_TOKEN_PATH);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
-            return DLFAuthProvider.buildRefreshToken(
-                    tokenFilePath, tokenRefreshInMills, roleSessionName);
+            return DLFAuthProvider.buildRefreshToken(tokenFilePath, tokenRefreshInMills);
         } else if (options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_ID).isPresent()
                 && options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET).isPresent()) {
             return DLFAuthProvider.buildAKToken(
                     options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID),
                     options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET),
-                    options.get(RESTCatalogOptions.DLF_SECURITY_TOKEN),
-                    roleSessionName);
+                    options.get(RESTCatalogOptions.DLF_SECURITY_TOKEN));
         }
         throw new IllegalArgumentException("DLF token path or AK must be set for DLF Auth.");
     }

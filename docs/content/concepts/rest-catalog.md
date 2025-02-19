@@ -81,8 +81,7 @@ WITH (
 'token.provider' = 'dlf',
 'dlf.accessKeyId'='<accessKeyId>',
 'dlf.accessKeySecret'='<accessKeySecret>',
-'dlf.securityToken'='<securityToken>',
-'dlf.roleSessionName' = '<roleSessionName>',
+'dlf.securityToken'='<securityToken>'
 );
 ```
 
@@ -93,8 +92,7 @@ WITH (
 'type' = 'paimon',
 'uri' = '<catalog server url>',
 'metastore' = 'rest',
-'token.provider' = 'dlf',
-'dlf.roleSessionName' = '<roleSessionName>'
+'token.provider' = 'dlf'
 );
 ```
 
