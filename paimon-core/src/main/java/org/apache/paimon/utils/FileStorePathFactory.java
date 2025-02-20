@@ -171,6 +171,10 @@ public class FileStorePathFactory {
         return new ExternalPathProvider(externalPaths, relativeBucketPath(partition, bucket));
     }
 
+    public List<Path> getExternalPaths() {
+        return externalPaths;
+    }
+
     public Path bucketPath(BinaryRow partition, int bucket) {
         return new Path(root, relativeBucketPath(partition, bucket));
     }

@@ -210,10 +210,10 @@ public class MetadataInMemoryFileSystemCatalog extends FileSystemCatalog
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         if (tableMetadataStore.containsKey(identifier.getFullName())) {
             tableMetadataStore.remove(identifier.getFullName());
-            super.dropTableImpl(identifier);
+            super.dropTableImpl(identifier, externalPaths);
         }
     }
 

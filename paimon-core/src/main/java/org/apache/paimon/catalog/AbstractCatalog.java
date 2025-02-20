@@ -248,8 +248,13 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(identifier, "dropTable");
         checkNotSystemTable(identifier, "dropTable");
 
+        List<Path> externalPaths = new ArrayList<>();
         try {
-            getTable(identifier);
+            Table table = getTable(identifier);
+            if (table instanceof FileStoreTable) {
+                FileStoreTable fileStoreTable = (FileStoreTable) table;
+                externalPaths = fileStoreTable.store().pathFactory().getExternalPaths();
+            }
         } catch (TableNotExistException e) {
             if (ignoreIfNotExists) {
                 return;
@@ -257,10 +262,10 @@ public abstract class AbstractCatalog implements Catalog {
             throw new TableNotExistException(identifier);
         }
 
-        dropTableImpl(identifier);
+        dropTableImpl(identifier, externalPaths);
     }
 
-    protected abstract void dropTableImpl(Identifier identifier);
+    protected abstract void dropTableImpl(Identifier identifier, List<Path> externalPaths);
 
     @Override
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)

@@ -259,7 +259,7 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
             int deletedRecords =
                     execute(
@@ -277,6 +277,11 @@ public class JdbcCatalog extends AbstractCatalog {
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
+                }
+                for (Path externalPath : externalPaths) {
+                    if (fileIO.exists(externalPath)) {
+                        fileIO.deleteDirectoryQuietly(externalPath);
+                    }
                 }
             } catch (Exception ex) {
                 LOG.error("Delete directory[{}] fail for table {}", path, identifier, ex);

@@ -920,7 +920,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
             boolean externalTable = isExternalTable(getHmsTable(identifier));
             clients.execute(
@@ -945,6 +945,11 @@ public class HiveCatalog extends AbstractCatalog {
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
+                }
+                for (Path externalPath : externalPaths) {
+                    if (fileIO.exists(externalPath)) {
+                        fileIO.deleteDirectoryQuietly(externalPath);
+                    }
                 }
             } catch (Exception ee) {
                 LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
