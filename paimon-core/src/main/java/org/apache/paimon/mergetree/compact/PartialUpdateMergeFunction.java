@@ -82,6 +82,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private KeyValue reused;
     private boolean currentDeleteRow;
     private boolean notNullColumnFilled;
+    /**
+     * If the first value is retract, and no insert record is received, the row kind should be
+     * RowKind.DELETE. (Partial update sequence group may not correctly set currentDeleteRow if no
+     * RowKind.INSERT value is received)
+     */
     private boolean meetInsert;
 
     protected PartialUpdateMergeFunction(
