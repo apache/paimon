@@ -104,7 +104,9 @@ public class CoreOptions implements Serializable {
                                     .text("Bucket number for file store.")
                                     .linebreak()
                                     .text(
-                                            "It should either be equal to -1 (dynamic bucket mode), or it must be greater than 0 (fixed bucket mode).")
+                                            "It should either be equal to -1 (dynamic bucket mode), "
+                                                    + "-2 (postpone bucket mode), "
+                                                    + "or it must be greater than 0 (fixed bucket mode).")
                                     .build());
 
     @Immutable

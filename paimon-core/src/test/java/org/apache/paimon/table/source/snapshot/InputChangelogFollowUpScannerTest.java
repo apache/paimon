@@ -35,7 +35,10 @@ import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link InputChangelogFollowUpScanner}. */
+/**
+ * Tests for {@link ChangelogFollowUpScanner} when changelog producer is {@link
+ * CoreOptions.ChangelogProducer#INPUT}.
+ */
 public class InputChangelogFollowUpScannerTest extends ScannerTestBase {
 
     @Test
@@ -59,7 +62,7 @@ public class InputChangelogFollowUpScannerTest extends ScannerTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(3);
 
         TableRead read = table.newRead();
-        InputChangelogFollowUpScanner scanner = new InputChangelogFollowUpScanner();
+        ChangelogFollowUpScanner scanner = new ChangelogFollowUpScanner();
 
         Snapshot snapshot = snapshotManager.snapshot(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);

@@ -754,5 +754,20 @@ All available procedures are listed below.
          CALL sys.compact_manifest(`table` => 'default.T')
       </td>
    </tr>
+   <tr>
+      <td>rescale</td>
+      <td>
+         CALL sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition')
+      </td>
+      <td>
+         Rescale one partition of a table. Arguments:
+         <li>identifier: The target table identifier. Cannot be empty.</li>
+         <li>bucket_num: Resulting bucket number after rescale. The default value of argument bucket_num is the current bucket number of the table. Cannot be empty for postpone bucket tables.</li>
+         <li>partition: What partition to rescale. For partitioned table this argument cannot be empty.</li>
+      </td>
+      <td>
+         CALL sys.rescale(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08')
+      </td>
+   </tr>
    </tbody>
 </table>

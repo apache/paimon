@@ -317,7 +317,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 });
     }
 
-    private FileStoreTable copyInternal(Map<String, String> dynamicOptions, boolean tryTimeTravel) {
+    protected FileStoreTable copyInternal(
+            Map<String, String> dynamicOptions, boolean tryTimeTravel) {
         Map<String, String> options = new HashMap<>(tableSchema.options());
 
         // merge non-null dynamic options into schema.options

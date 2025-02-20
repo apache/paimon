@@ -87,6 +87,28 @@ If your upsert does not rely on too old data, you can consider configuring index
 
 But please note that this may also cause data duplication.
 
+## Postpone Bucket
+
+Postpone bucket mode is configured by `'bucket' = '-2'`.
+This mode aims to solve the difficulty to determine a fixed number of buckets
+and support different buckets for different partitions.
+
+Currently, only Flink supports this mode.
+
+When writing records into the table,
+all records will first be stored in the `bucket-postpone` directory of each partition
+and are not available to readers.
+
+To move the records into the correct bucket and make them readable,
+you need to run a compaction job.
+See `compact` [procedure]({{< ref "flink/procedures" >}}).
+The bucket number for the partitions compacted for the first time
+is configured by the option `postpone.default-bucket-num`, whose default value is `4`.
+
+Finally, when you feel that the bucket number of some partition is too small,
+you can also run a rescale job.
+See `rescale` [procedure]({{< ref "flink/procedures" >}}).
+
 ## Pick Partition Fields
 
 The following three types of fields may be defined as partition fields in the warehouse:
