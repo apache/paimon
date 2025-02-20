@@ -18,17 +18,26 @@
 
 package org.apache.paimon.rest.auth;
 
+import java.util.Map;
+
 /** RestAuthParameter for building rest auth header. */
 public class RESTAuthParameter {
 
     private final String host;
-    private final String path;
+    private final String resourcePath;
+    private final Map<String, String> parameters;
     private final String method;
     private final String data;
 
-    public RESTAuthParameter(String host, String path, String method, String data) {
+    public RESTAuthParameter(
+            String host,
+            String resourcePath,
+            Map<String, String> parameters,
+            String method,
+            String data) {
         this.host = host;
-        this.path = path;
+        this.resourcePath = resourcePath;
+        this.parameters = parameters;
         this.method = method;
         this.data = data;
     }
@@ -37,8 +46,12 @@ public class RESTAuthParameter {
         return host;
     }
 
-    public String path() {
-        return path;
+    public String resourcePath() {
+        return resourcePath;
+    }
+
+    public Map<String, String> parameters() {
+        return parameters;
     }
 
     public String method() {

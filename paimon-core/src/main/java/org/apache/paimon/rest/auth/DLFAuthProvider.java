@@ -20,6 +20,9 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.utils.FileIOUtils;
 
+import com.google.common.net.HttpHeaders;
+import okhttp3.MediaType;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -39,14 +42,19 @@ public class DLFAuthProvider implements AuthProvider {
 
     public static final String DLF_HOST_HEADER_KEY = "Host";
     public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
-    public static final String DLF_DATA_MD5_HEX_HEADER_KEY = "x-dlf-data-md5-hex";
+    public static final String DLF_CONTENT_MD5_HEADER_KEY = HttpHeaders.CONTENT_MD5.toLowerCase();
+    public static final String DLF_CONTENT_TYPE_KEY = HttpHeaders.CONTENT_TYPE.toLowerCase();
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
     public static final String DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token";
     public static final String DLF_ACCESSKEY_ID_HEADER_KEY = "x-dlf-accesskey-id";
     public static final double EXPIRED_FACTOR = 0.4;
-
-    private static final DateTimeFormatter DATE_FORMATTER =
+    public static final DateTimeFormatter TOKEN_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
+    public static final DateTimeFormatter AUTH_DATE_TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
+    public static final DateTimeFormatter AUTH_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyyMMdd");
+    private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
     private final String tokenFilePath;
 
@@ -86,15 +94,19 @@ public class DLFAuthProvider implements AuthProvider {
     public Map<String, String> header(
             Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
         try {
-            String date = getDate();
-            String dataMd5Hex = DLFAuthSignature.md5Hex(restAuthParameter.data());
+            ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+            String date = now.format(AUTH_DATE_FORMATTER);
+            String dateTime = now.format(AUTH_DATE_TIME_FORMATTER);
+            Map<String, String> signHeaders =
+                    generateSignHeaders(
+                            restAuthParameter.host(), restAuthParameter.data(), dateTime);
+            // todo: get region
             String authorization =
-                    DLFAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
+                    DLFAuthSignature.getAuthorization(
+                            restAuthParameter, token, "region", signHeaders, date);
             Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
+            headersWithAuth.putAll(signHeaders);
             headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
-            headersWithAuth.put(DLF_DATE_HEADER_KEY, date);
-            headersWithAuth.put(DLF_HOST_HEADER_KEY, restAuthParameter.host());
-            headersWithAuth.put(DLF_DATA_MD5_HEX_HEADER_KEY, dataMd5Hex);
             if (token.getSecurityToken() != null) {
                 headersWithAuth.put(DLF_SECURITY_TOKEN_HEADER_KEY, token.getSecurityToken());
                 headersWithAuth.put(DLF_ACCESSKEY_ID_HEADER_KEY, token.getAccessKeyId());
@@ -103,6 +115,17 @@ public class DLFAuthProvider implements AuthProvider {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public static Map<String, String> generateSignHeaders(String host, String data, String dateTime)
+            throws Exception {
+        String dataMd5 = DLFAuthSignature.md5(data);
+        Map<String, String> signHeaders = new HashMap<>();
+        signHeaders.put(DLF_DATE_HEADER_KEY, dateTime);
+        signHeaders.put(DLF_HOST_HEADER_KEY, host);
+        signHeaders.put(DLF_CONTENT_TYPE_KEY, "application/json");
+        signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, dataMd5);
+        return signHeaders;
     }
 
     @Override
@@ -142,11 +165,6 @@ public class DLFAuthProvider implements AuthProvider {
         return Optional.ofNullable(this.tokenRefreshInMills);
     }
 
-    static String getDate() {
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-        return now.format(DATE_FORMATTER);
-    }
-
     private static DLFToken readToken(String tokenFilePath) {
         try {
             File tokenFile = new File(tokenFilePath);
@@ -166,7 +184,7 @@ public class DLFAuthProvider implements AuthProvider {
             if (dateStr == null) {
                 return null;
             }
-            LocalDateTime dateTime = LocalDateTime.parse(dateStr, DATE_FORMATTER);
+            LocalDateTime dateTime = LocalDateTime.parse(dateStr, TOKEN_DATE_FORMATTER);
             return dateTime.atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
         } catch (Exception e) {
             throw new RuntimeException(e);

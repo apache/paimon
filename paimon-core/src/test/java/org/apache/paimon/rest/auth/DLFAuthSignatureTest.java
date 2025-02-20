@@ -21,25 +21,32 @@ package org.apache.paimon.rest.auth;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /** Test for {@link DLFAuthSignature}. */
 public class DLFAuthSignatureTest {
 
     @Test
     public void testGetAuthorization() throws Exception {
-        String date = DLFAuthProvider.getDate();
+        String region = "cn-hangzhou";
+        String dateTime = "20231203T121212Z";
+        String date = "20231203";
+        Map<String, String> parameters = new HashMap<>();
+        parameters.put("k1", "v1");
+        parameters.put("k2", "v2");
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter(
-                        "endpoint",
-                        "/v1/catalogs/test/databases/test/tables/test/commit",
-                        "POST",
-                        "");
+                new RESTAuthParameter("192.168.0.133", "/v1/config", parameters, "GET", "");
         DLFToken token =
-                new DLFToken("accessKeyId", "accessKeySecret", "securityToken", "expiration");
-        String dataMd5Hex = DLFAuthSignature.md5Hex(restAuthParameter.data());
+                new DLFToken("access-key-id", "access-key-secret", "securityToken", "expiration");
+        Map<String, String> signHeaders =
+                DLFAuthProvider.generateSignHeaders(
+                        restAuthParameter.host(), restAuthParameter.data(), dateTime);
         String authorization =
-                DLFAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date);
+                DLFAuthSignature.getAuthorization(
+                        restAuthParameter, token, region, signHeaders, date);
         Assertions.assertEquals(
-                DLFAuthSignature.getAuthorization(restAuthParameter, token, dataMd5Hex, date),
+                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,AdditionalHeaders=host,Signature=2cd7f160b930543e3fb6a3ebd6c6184aa953a84536d8c4e2e8e108b3215c0128",
                 authorization);
     }
 }

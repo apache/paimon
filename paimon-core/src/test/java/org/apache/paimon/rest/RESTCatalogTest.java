@@ -42,6 +42,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -98,8 +99,11 @@ class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testHeader() {
         RESTCatalog restCatalog = (RESTCatalog) catalog;
+        Map<String, String> parameters = new HashMap<>();
+        parameters.put("k1", "v1");
+        parameters.put("k2", "v2");
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter("host", "/path", "method", "data");
+                new RESTAuthParameter("host", "/path", parameters, "method", "data");
         Map<String, String> headers = restCatalog.headers(restAuthParameter);
         assertEquals(
                 headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");

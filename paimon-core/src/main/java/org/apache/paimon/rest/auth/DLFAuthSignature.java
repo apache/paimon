@@ -24,8 +24,17 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_MD5_HEADER_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_TYPE_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_DATE_HEADER_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_HOST_HEADER_KEY;
 
 /** generate authorization for <b>Ali CLoud</b> DLF. */
 public class DLFAuthSignature {
@@ -35,21 +44,35 @@ public class DLFAuthSignature {
     private static final String PRODUCT = "DlfNext";
     private static final String HMAC_SHA256 = "HmacSHA256";
     private static final String REQUEST_TYPE = "aliyun_v4_request";
-    private static final String ADDITIONAL_HEADERS = "AdditionalHeaders";
+    private static final String ADDITIONAL_HEADERS_KEY = "AdditionalHeaders";
     private static final String SIGNATURE_KEY = "Signature";
+    private static final String NEW_LINE = "\n";
+    private static final List<String> SIGNED_HEADERS =
+            Arrays.asList(
+                    DLF_CONTENT_MD5_HEADER_KEY.toLowerCase(),
+                    DLF_CONTENT_TYPE_KEY.toLowerCase(),
+                    DLF_HOST_HEADER_KEY.toLowerCase(),
+                    DLF_DATE_HEADER_KEY.toLowerCase());
+    private static final List<String> ADDITIONAL_HEADERS =
+            Arrays.asList(DLF_HOST_HEADER_KEY.toLowerCase());
 
     public static String getAuthorization(
-            RESTAuthParameter restAuthParameter, DLFToken dlfToken, String dataMd5Hex, String date)
+            RESTAuthParameter restAuthParameter,
+            DLFToken dlfToken,
+            String region,
+            Map<String, String> headers,
+            String date)
             throws Exception {
-        String canonicalRequest = getCanonicalRequest(restAuthParameter, dataMd5Hex, date);
+        String canonicalRequest = getCanonicalRequest(restAuthParameter, headers);
         String stringToSign =
-                Joiner.on("\n")
+                Joiner.on(NEW_LINE)
                         .join(
                                 SIGNATURE_ALGORITHM,
-                                String.format("%s/%s/%s", date, PRODUCT, REQUEST_TYPE),
+                                String.format("%s/%s/%s/%s", date, region, PRODUCT, REQUEST_TYPE),
                                 sha256Hex(canonicalRequest));
         byte[] dateKey = hmacSha256(("aliyun_v4" + dlfToken.getAccessKeySecret()).getBytes(), date);
-        byte[] dateRegionServiceKey = hmacSha256(dateKey, PRODUCT);
+        byte[] dateRegionKey = hmacSha256(dateKey, region);
+        byte[] dateRegionServiceKey = hmacSha256(dateRegionKey, PRODUCT);
         byte[] signingKey = hmacSha256(dateRegionServiceKey, REQUEST_TYPE);
         byte[] result = hmacSha256(signingKey, stringToSign);
         String signature = hexEncode(result);
@@ -57,23 +80,26 @@ public class DLFAuthSignature {
                 Joiner.on(",")
                         .join(
                                 String.format(
-                                        "%s Credential=%s/%s/%s/%s",
+                                        "%s Credential=%s/%s/%s/%s/%s",
                                         SIGNATURE_ALGORITHM,
                                         dlfToken.getAccessKeyId(),
                                         date,
+                                        region,
                                         PRODUCT,
                                         REQUEST_TYPE),
                                 String.format(
                                         "%s=%s",
-                                        ADDITIONAL_HEADERS, DLFAuthProvider.DLF_HOST_HEADER_KEY),
+                                        ADDITIONAL_HEADERS_KEY,
+                                        Joiner.on(",").join(ADDITIONAL_HEADERS)),
                                 String.format("%s=%s", SIGNATURE_KEY, signature));
         return authorization;
     }
 
-    public static String md5Hex(String raw) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("MD5");
-        byte[] hash = digest.digest(raw.getBytes(UTF_8.name()));
-        return hexEncode(hash);
+    public static String md5(String raw) throws Exception {
+        MessageDigest messageDigest = MessageDigest.getInstance("MD5");
+        messageDigest.update(raw.getBytes(UTF_8.name()));
+        byte[] md5 = messageDigest.digest();
+        return new String(Base64.getEncoder().encodeToString(md5));
     }
 
     private static byte[] hmacSha256(byte[] key, String data) {
@@ -88,20 +114,50 @@ public class DLFAuthSignature {
         }
     }
 
-    private static String getCanonicalRequest(
-            RESTAuthParameter restAuthParameter, String dataMd5Hex, String date) throws Exception {
-        return Joiner.on("\n")
-                .join(
-                        restAuthParameter.method(),
-                        restAuthParameter.path(),
-                        String.format(
-                                "%s:%s", DLFAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY, dataMd5Hex),
-                        String.format(
-                                "%s:%s",
-                                DLFAuthProvider.DLF_HOST_HEADER_KEY, restAuthParameter.host()),
-                        String.format("%s:%s", DLFAuthProvider.DLF_DATE_HEADER_KEY, date),
-                        DLFAuthProvider.DLF_HOST_HEADER_KEY,
-                        PAYLOAD);
+    public static String getCanonicalRequest(
+            RESTAuthParameter restAuthParameter, Map<String, String> headers) throws Exception {
+        String canonicalRequest =
+                Joiner.on("\n").join(restAuthParameter.method(), restAuthParameter.resourcePath());
+        // Canonical Query String + "\n" +
+        TreeMap<String, String> orderMap = new TreeMap<>();
+        if (restAuthParameter.parameters() != null) {
+            orderMap.putAll(restAuthParameter.parameters());
+        }
+        String separator = "";
+        StringBuilder canonicalPart = new StringBuilder();
+        for (Map.Entry<String, String> param : orderMap.entrySet()) {
+            canonicalPart.append(separator).append(param.getKey());
+            if (param.getValue() != null && !param.getValue().isEmpty()) {
+                canonicalPart.append("=").append(param.getValue());
+            }
+            separator = "&";
+        }
+        canonicalRequest = Joiner.on(NEW_LINE).join(canonicalRequest, canonicalPart);
+
+        // Canonical Headers + "\n" +
+        TreeMap<String, String> sortedSignedHeadersMap = buildSortedSignedHeadersMap(headers);
+        for (Map.Entry<String, String> header : sortedSignedHeadersMap.entrySet()) {
+            canonicalRequest =
+                    Joiner.on(NEW_LINE)
+                            .join(
+                                    canonicalRequest,
+                                    String.format("%s:%s", header.getKey(), header.getValue()));
+        }
+        return Joiner.on(NEW_LINE).join(canonicalRequest, PAYLOAD);
+    }
+
+    private static TreeMap<String, String> buildSortedSignedHeadersMap(
+            Map<String, String> headers) {
+        TreeMap<String, String> orderMap = new TreeMap<>();
+        if (headers != null) {
+            for (Map.Entry<String, String> header : headers.entrySet()) {
+                String key = header.getKey().toLowerCase();
+                if (SIGNED_HEADERS.contains(key) || ADDITIONAL_HEADERS.contains(key)) {
+                    orderMap.put(key, header.getValue());
+                }
+            }
+        }
+        return orderMap;
     }
 
     private static String sha256Hex(String raw) throws Exception {

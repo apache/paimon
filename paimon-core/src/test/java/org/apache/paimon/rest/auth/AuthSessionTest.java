@@ -32,6 +32,8 @@ import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +49,8 @@ import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
 import static org.apache.paimon.rest.auth.AuthSession.MAX_REFRESH_WINDOW_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.MIN_REFRESH_WAIT_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.REFRESH_NUM_RETRIES;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_AUTHORIZATION_HEADER_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.mockito.Mockito.verify;
@@ -218,18 +222,24 @@ public class AuthSessionTest {
         String tokenStr = tokenFile2Token.getRight();
         AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName);
         DLFToken token = OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DLFToken.class);
+        Map<String, String> parameters = new HashMap<>();
+        parameters.put("k1", "v1");
+        parameters.put("k2", "v2");
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter("host", "/path", "method", "data");
+                new RESTAuthParameter("host", "/path", parameters, "method", "data");
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
-        String date = header.get(DLFAuthProvider.DLF_DATE_HEADER_KEY);
-        String dateMd5Hex = header.get(DLFAuthProvider.DLF_DATA_MD5_HEX_HEADER_KEY);
-        String authorization =
+        String region = "cn-hangzhou";
+        String authorization = header.get(DLF_AUTHORIZATION_HEADER_KEY);
+        String[] credentials = authorization.split(",")[0].split(" ")[1].split("/");
+        String date = credentials[1];
+        String newAuthorization =
                 DLFAuthSignature.getAuthorization(
-                        new RESTAuthParameter("host", "/path", "method", "data"),
+                        new RESTAuthParameter("host", "/path", parameters, "method", "data"),
                         token,
-                        dateMd5Hex,
+                        region,
+                        header,
                         date);
-        assertEquals(authorization, header.get(DLFAuthProvider.DLF_AUTHORIZATION_HEADER_KEY));
+        assertEquals(newAuthorization, authorization);
         assertEquals(restAuthParameter.host(), header.get(DLFAuthProvider.DLF_HOST_HEADER_KEY));
         assertEquals(
                 token.getSecurityToken(),
@@ -240,7 +250,8 @@ public class AuthSessionTest {
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
         File tokenFile = folder.newFile(fileName);
-        String expiration = DLFAuthProvider.getDate();
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String expiration = now.format(TOKEN_DATE_FORMATTER);
         String secret = UUID.randomUUID().toString();
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);

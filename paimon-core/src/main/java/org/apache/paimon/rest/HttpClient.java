@@ -41,12 +41,14 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
@@ -241,8 +243,28 @@ public class HttpClient implements RESTClient {
             String method,
             String data,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
+        String[] paths = path.split("//?");
+        String resourcePath = paths[0];
+        Map<String, String> parameters =
+                paths.length > 1 ? parseQueryString(paths[1]) : Collections.emptyMap();
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter(URI.create(uri).getHost(), path, method, data);
+                new RESTAuthParameter(
+                        URI.create(uri).getHost(), resourcePath, parameters, method, data);
         return headerFunction.apply(restAuthParameter);
+    }
+
+    private static Map<String, String> parseQueryString(String query) {
+        if (query == null || query.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        return Arrays.stream(query.split("&"))
+                .map(pair -> pair.split("=", 2))
+                .collect(
+                        Collectors.toMap(
+                                pair -> pair[0].trim(), // key
+                                pair -> pair[1].trim(), // value
+                                (existing, replacement) -> existing // handle duplicates
+                                ));
     }
 }
