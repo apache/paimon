@@ -335,7 +335,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     @Test
     public void testInputChangelogProducer() throws Exception {
         String warehouse = getTempDirPath();
-        System.out.println(warehouse);
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()

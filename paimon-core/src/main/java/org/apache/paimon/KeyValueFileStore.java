@@ -235,23 +235,26 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     return Optional.empty();
                 };
 
-        boolean onlyReadRealBuckets =
-                options.bucket() == BucketMode.POSTPONE_BUCKET && scanType == ScanType.FOR_READ;
+        KeyValueFileStoreScan scan =
+                new KeyValueFileStoreScan(
+                        newManifestsReader(scanType == ScanType.FOR_WRITE),
+                        bucketSelectConverter,
+                        snapshotManager(),
+                        schemaManager,
+                        schema,
+                        keyValueFieldsExtractor,
+                        manifestFileFactory(scanType == ScanType.FOR_WRITE),
+                        options.scanManifestParallelism(),
+                        options.deletionVectorsEnabled(),
+                        options.mergeEngine(),
+                        options.changelogProducer(),
+                        options.fileIndexReadEnabled() && options.deletionVectorsEnabled());
 
-        return new KeyValueFileStoreScan(
-                newManifestsReader(scanType == ScanType.FOR_WRITE),
-                bucketSelectConverter,
-                snapshotManager(),
-                schemaManager,
-                schema,
-                keyValueFieldsExtractor,
-                manifestFileFactory(scanType == ScanType.FOR_WRITE),
-                options.scanManifestParallelism(),
-                options.deletionVectorsEnabled(),
-                options.mergeEngine(),
-                options.changelogProducer(),
-                options.fileIndexReadEnabled() && options.deletionVectorsEnabled(),
-                onlyReadRealBuckets);
+        if (options.bucket() == BucketMode.POSTPONE_BUCKET && scanType == ScanType.FOR_READ) {
+            scan.onlyReadRealBuckets();
+        }
+
+        return scan;
     }
 
     @Override
