@@ -76,6 +76,7 @@ public class TypeMapping implements Serializable {
         TO_STRING,
         CHAR_TO_STRING,
         LONGTEXT_TO_BYTES,
+        DECIMAL_NO_CHANGE,
         BIGINT_UNSIGNED_TO_BIGINT;
 
         private static final Map<String, TypeMappingMode> TYPE_MAPPING_OPTIONS =
