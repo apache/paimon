@@ -61,10 +61,10 @@ public class MigrateIcebergTableActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  migrate_iceberg_table"
-                        + "--table <database.table_name> "
-                        + "--iceberg_options <key>=<value>[,<key>=<value>,...]"
-                        + "[--catalog_conf <key>=<value] "
+                "  migrate_iceberg_table \\\n"
+                        + "--table <database.table_name> \\\n"
+                        + "--iceberg_options <key>=<value>[,<key>=<value>,...] \\\n"
+                        + "[--catalog_conf <key>=<value] \\\n"
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }
