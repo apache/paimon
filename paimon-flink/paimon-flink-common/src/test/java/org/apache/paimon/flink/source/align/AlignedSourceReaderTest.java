@@ -24,7 +24,6 @@ import org.apache.paimon.flink.source.FileStoreSourceReaderTest;
 import org.apache.paimon.flink.source.TestChangelogDataReadWrite;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 
-import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.table.data.RowData;
@@ -77,7 +76,6 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
                 new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
                 IOManager.create(tempDir.toString()),
                 null,
-                new FutureCompletingBlockingQueue<>(2),
                 null);
     }
 }
