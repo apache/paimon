@@ -344,6 +344,11 @@ public class MergeFileSplitReadTest {
                     GenericRow.of(total));
         }
 
+        @Override
+        public boolean requireCopy() {
+            return false;
+        }
+
         private long count(InternalRow value) {
             checkArgument(!value.isNullAt(0), "Value count should not be null.");
             return value.getLong(0);

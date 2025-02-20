@@ -178,6 +178,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         private final MutableObjectIterator<BinaryRow> kvIter;
         private final Comparator<InternalRow> keyComparator;
         private final ReducerMergeFunctionWrapper mergeFunctionWrapper;
+        private final boolean requireCopy;
 
         // previously read kv
         private KeyValueSerializer previous;
@@ -199,6 +200,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
             this.mergeFunctionWrapper = new ReducerMergeFunctionWrapper(mergeFunction);
+            this.requireCopy = mergeFunction.requireCopy();
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
             this.previous = new KeyValueSerializer(keyType, valueType);
@@ -235,7 +237,8 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                     return;
                 }
                 mergeFunctionWrapper.reset();
-                mergeFunctionWrapper.add(previous.getReusedKv());
+                mergeFunctionWrapper.add(
+                        requireCopy ? previous.getCopiedKv() : previous.getReusedKv());
 
                 while (readOnce()) {
                     if (keyComparator.compare(
@@ -243,7 +246,8 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                             != 0) {
                         break;
                     }
-                    mergeFunctionWrapper.add(current.getReusedKv());
+                    mergeFunctionWrapper.add(
+                            requireCopy ? current.getCopiedKv() : current.getReusedKv());
                     swapSerializers();
                 }
                 result = mergeFunctionWrapper.getResult();
