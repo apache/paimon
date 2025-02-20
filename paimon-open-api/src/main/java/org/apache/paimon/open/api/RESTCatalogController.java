@@ -252,6 +252,7 @@ public class RESTCatalogController {
         return new GetTableResponse(
                 UUID.randomUUID().toString(),
                 "",
+                false,
                 1,
                 new org.apache.paimon.schema.Schema(
                         ImmutableList.of(),
