@@ -261,10 +261,11 @@ public class MockRESTMessage {
                         new DataField(0, "f0", new IntType()),
                         new DataField(1, "f1", new IntType()));
         return new ViewSchema(
-                new RowType(fields),
-                Collections.singletonMap("pt", "1"),
+                fields,
+                "select * from t1",
+                Collections.emptyMap(),
                 "comment",
-                "select * from t1");
+                Collections.singletonMap("pt", "1"));
     }
 
     private static Partition partition() {

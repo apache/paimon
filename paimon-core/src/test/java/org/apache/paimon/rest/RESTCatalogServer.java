@@ -505,13 +505,15 @@ public class RESTCatalogServer {
                 CreateViewRequest requestBody =
                         OBJECT_MAPPER.readValue(
                                 request.getBody().readUtf8(), CreateViewRequest.class);
+                ViewSchema schema = requestBody.getSchema();
                 ViewImpl view =
                         new ViewImpl(
                                 requestBody.getIdentifier(),
-                                requestBody.getSchema().rowType(),
-                                requestBody.getSchema().query(),
-                                requestBody.getSchema().comment(),
-                                requestBody.getSchema().options());
+                                schema.fields(),
+                                schema.query(),
+                                schema.dialects(),
+                                schema.comment(),
+                                schema.options());
                 catalog.createView(requestBody.getIdentifier(), view, false);
                 return new MockResponse().setResponseCode(200);
             default:
@@ -529,10 +531,11 @@ public class RESTCatalogServer {
                 View view = catalog.getView(identifier);
                 ViewSchema schema =
                         new ViewSchema(
-                                view.rowType(),
-                                view.options(),
+                                view.rowType().getFields(),
+                                view.query(),
+                                view.dialects(),
                                 view.comment().orElse(null),
-                                view.query());
+                                view.options());
                 response = new GetViewResponse("id", identifier.getTableName(), schema);
                 return mockResponse(response, 200);
             case "DELETE":
