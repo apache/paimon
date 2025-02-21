@@ -25,6 +25,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
+import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 
 import java.util.ArrayList;
@@ -50,12 +51,22 @@ class HiveTableUtils {
         List<String> partitionKeys = getFieldNames(hiveTable.getPartitionKeys());
         RowType rowType = createRowType(hiveTable);
         String comment = options.remove(COMMENT_PROP);
-        String location = hiveTable.getSd().getLocation();
+        StorageDescriptor sd = hiveTable.getSd();
+        if (sd == null) {
+            throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
+        }
+        String location = sd.getLocation();
 
         Format format;
-        SerDeInfo serdeInfo = hiveTable.getSd().getSerdeInfo();
-        String serLib = serdeInfo.getSerializationLib().toLowerCase();
-        String inputFormat = hiveTable.getSd().getInputFormat();
+        SerDeInfo serdeInfo = sd.getSerdeInfo();
+        if (serdeInfo == null) {
+            throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
+        }
+        String serLib =
+                serdeInfo.getSerializationLib() == null
+                        ? ""
+                        : serdeInfo.getSerializationLib().toLowerCase();
+        String inputFormat = sd.getInputFormat() == null ? "" : sd.getInputFormat();
         if (serLib.contains("parquet")) {
             format = Format.PARQUET;
         } else if (serLib.contains("orc")) {
