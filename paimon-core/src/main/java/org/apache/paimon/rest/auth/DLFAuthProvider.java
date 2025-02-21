@@ -20,7 +20,6 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.utils.FileIOUtils;
 
-import com.google.common.net.HttpHeaders;
 import okhttp3.MediaType;
 
 import java.io.File;
@@ -42,8 +41,8 @@ public class DLFAuthProvider implements AuthProvider {
 
     public static final String DLF_HOST_HEADER_KEY = "Host";
     public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
-    public static final String DLF_CONTENT_MD5_HEADER_KEY = HttpHeaders.CONTENT_MD5.toLowerCase();
-    public static final String DLF_CONTENT_TYPE_KEY = HttpHeaders.CONTENT_TYPE.toLowerCase();
+    public static final String DLF_CONTENT_MD5_HEADER_KEY = "Content-MD5";
+    public static final String DLF_CONTENT_TYPE_KEY = "Content-Type";
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
     public static final String DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token";
     public static final String DLF_ACCESSKEY_ID_HEADER_KEY = "x-dlf-accesskey-id";
