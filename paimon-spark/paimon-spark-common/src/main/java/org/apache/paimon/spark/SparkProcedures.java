@@ -38,6 +38,7 @@ import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.PurgeFilesProcedure;
 import org.apache.paimon.spark.procedure.RefreshObjectTableProcedure;
+import org.apache.paimon.spark.procedure.RemoveNonExistingTableProcedure;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RemoveUnexistingFilesProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
@@ -102,6 +103,8 @@ public class SparkProcedures {
         procedureBuilders.put("compact_manifest", CompactManifestProcedure::builder);
         procedureBuilders.put("refresh_object_table", RefreshObjectTableProcedure::builder);
         procedureBuilders.put("clear_consumers", ClearConsumersProcedure::builder);
+        procedureBuilders.put(
+                "remove_non_existing_table", RemoveNonExistingTableProcedure::builder);
         return procedureBuilders.build();
     }
 }
