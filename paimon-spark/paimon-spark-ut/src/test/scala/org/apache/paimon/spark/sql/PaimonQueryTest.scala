@@ -80,11 +80,14 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                   |""".stripMargin)
 
       val res = spark.sql("""
-                            |SELECT __paimon_partition, __paimon_bucket FROM T
+                            |SELECT __paimon_partition, __paimon_bucket,
+                            |min(__paimon_row_index) as min_paimon_row_index,
+                            |max(__paimon_row_index) as max_paimon_row_index
+                            |FROM T
                             |GROUP BY __paimon_partition, __paimon_bucket
                             |ORDER BY __paimon_partition, __paimon_bucket
                             |""".stripMargin)
-      checkAnswer(res, Row(Row(), 0) :: Row(Row(), 1) :: Row(Row(), 2) :: Nil)
+      checkAnswer(res, Row(Row(), 0, 0, 1) :: Row(Row(), 1, 0, 1) :: Row(Row(), 2, 0, 1) :: Nil)
     }
   }
 
