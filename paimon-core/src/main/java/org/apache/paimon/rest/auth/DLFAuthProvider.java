@@ -47,6 +47,8 @@ public class DLFAuthProvider implements AuthProvider {
     public static final String DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token";
     public static final String DLF_ACCESSKEY_ID_HEADER_KEY = "x-dlf-accesskey-id";
     public static final String DLF_AUTH_VERSION_HEADER_KEY = "x-dlf-version";
+    public static final String DLF_CONTENT_SHA56_HEADER_KEY = "x-dlf-content-sha256";
+    public static final String DLF_CONTENT_SHA56_VALUE = "UNSIGNED-PAYLOAD";
     public static final double EXPIRED_FACTOR = 0.4;
     public static final DateTimeFormatter TOKEN_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
@@ -54,7 +56,7 @@ public class DLFAuthProvider implements AuthProvider {
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'");
     public static final DateTimeFormatter AUTH_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+    protected static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
     private final String tokenFilePath;
 
@@ -125,6 +127,7 @@ public class DLFAuthProvider implements AuthProvider {
         Map<String, String> signHeaders = new HashMap<>();
         signHeaders.put(DLF_DATE_HEADER_KEY, dateTime);
         signHeaders.put(DLF_HOST_HEADER_KEY, host);
+        signHeaders.put(DLF_CONTENT_SHA56_HEADER_KEY, DLF_CONTENT_SHA56_VALUE);
         if (data != null && !data.isEmpty()) {
             signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE.toString());
             signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, DLFAuthSignature.md5(data));

@@ -54,6 +54,7 @@ import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_AUTHORIZATION_HEAD
 import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -218,7 +219,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testDLFAuthProviderAuthHeader() throws Exception {
+    public void testDLFAuthProviderAuthHeaderWhenDataIsNotEmpty() throws Exception {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String tokenStr = tokenFile2Token.getRight();
@@ -228,6 +229,7 @@ public class AuthSessionTest {
         Map<String, String> parameters = new HashMap<>();
         parameters.put("k1", "v1");
         parameters.put("k2", "v2");
+        String data = "data";
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter(serverUrl, "/path", parameters, "method", "data");
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
@@ -248,6 +250,17 @@ public class AuthSessionTest {
                 header.get(DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY));
         assertEquals(
                 token.getAccessKeyId(), header.get(DLFAuthProvider.DLF_ACCESSKEY_ID_HEADER_KEY));
+        assertTrue(header.containsKey(DLFAuthProvider.DLF_DATE_HEADER_KEY));
+        assertEquals(
+                DLFAuthSignature.VERSION, header.get(DLFAuthProvider.DLF_AUTH_VERSION_HEADER_KEY));
+        assertEquals(
+                DLFAuthProvider.MEDIA_TYPE.toString(),
+                header.get(DLFAuthProvider.DLF_CONTENT_TYPE_KEY));
+        assertEquals(
+                DLFAuthSignature.md5(data), header.get(DLFAuthProvider.DLF_CONTENT_MD5_HEADER_KEY));
+        assertEquals(
+                DLFAuthProvider.DLF_CONTENT_SHA56_VALUE,
+                header.get(DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY));
     }
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {

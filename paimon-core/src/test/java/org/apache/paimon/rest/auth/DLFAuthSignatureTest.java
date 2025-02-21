@@ -42,7 +42,6 @@ public class DLFAuthSignatureTest {
         String data =
                 RESTObjectMapper.OBJECT_MAPPER.writeValueAsString(
                         MockRESTMessage.createDatabaseRequest("database"));
-        System.out.println(data);
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter(endpoint, "/v1/paimon/databases", parameters, "POST", data);
         DLFToken token = new DLFToken("access-key-id", "access-key-secret", "securityToken", null);

@@ -44,7 +44,6 @@ public class DLFAuthSignature {
     public static final String VERSION = "v1";
 
     private static final String SIGNATURE_ALGORITHM = "DLF4-HMAC-SHA256";
-    private static final String PAYLOAD = "UNSIGNED-PAYLOAD";
     private static final String PRODUCT = "DlfNext";
     private static final String HMAC_SHA256 = "HmacSHA256";
     private static final String REQUEST_TYPE = "aliyun_v4_request";
@@ -121,7 +120,8 @@ public class DLFAuthSignature {
     public static String getCanonicalRequest(
             RESTAuthParameter restAuthParameter, Map<String, String> headers) throws Exception {
         String canonicalRequest =
-                Joiner.on("\n").join(restAuthParameter.method(), restAuthParameter.resourcePath());
+                Joiner.on(NEW_LINE)
+                        .join(restAuthParameter.method(), restAuthParameter.resourcePath());
         // Canonical Query String + "\n" +
         TreeMap<String, String> orderMap = new TreeMap<>();
         if (restAuthParameter.parameters() != null) {
@@ -147,7 +147,11 @@ public class DLFAuthSignature {
                                     canonicalRequest,
                                     String.format("%s:%s", header.getKey(), header.getValue()));
         }
-        return Joiner.on(NEW_LINE).join(canonicalRequest, PAYLOAD);
+        String contentSha56 =
+                headers.getOrDefault(
+                        DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY,
+                        DLFAuthProvider.DLF_CONTENT_SHA56_VALUE);
+        return Joiner.on(NEW_LINE).join(canonicalRequest, contentSha56);
     }
 
     private static TreeMap<String, String> buildSortedSignedHeadersMap(
