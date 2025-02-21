@@ -25,6 +25,9 @@ import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
+import org.apache.paimon.utils.Pair;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.After;
 import org.junit.Before;
@@ -32,6 +35,7 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -137,5 +141,21 @@ public class HttpClientTest {
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 200);
         assertDoesNotThrow(() -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+    }
+
+    @Test
+    public void testParsePath() {
+        assertEquals(
+                Pair.of("/api/v1/tables", Collections.emptyMap()),
+                HttpClient.parsePath("/api/v1/tables"));
+        assertEquals(
+                Pair.of("/api/v1/tables/my_table$schemas", Collections.emptyMap()),
+                HttpClient.parsePath("/api/v1/tables/my_table$schemas"));
+        assertEquals(
+                Pair.of("/api/v1/tables", ImmutableMap.of("pageSize", "10", "pageNum", "1")),
+                HttpClient.parsePath("/api/v1/tables?pageSize=10&pageNum=1"));
+        assertEquals(
+                Pair.of("/api/v1/tables", ImmutableMap.of("tableName", "t1,t2")),
+                HttpClient.parsePath("/api/v1/tables?tableName=t1,t2"));
     }
 }

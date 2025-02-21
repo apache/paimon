@@ -24,6 +24,7 @@ import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -243,28 +244,34 @@ public class HttpClient implements RESTClient {
             String method,
             String data,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
-        String[] paths = path.split("//?");
-        String resourcePath = paths[0];
-        Map<String, String> parameters =
-                paths.length > 1 ? parseQueryString(paths[1]) : Collections.emptyMap();
+        Pair<String, Map<String, String>> resourcePath2Parameters = parsePath(path);
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter(
-                        URI.create(uri).getHost(), resourcePath, parameters, method, data);
+                        URI.create(uri).getHost(),
+                        resourcePath2Parameters.getLeft(),
+                        resourcePath2Parameters.getValue(),
+                        method,
+                        data);
         return headerFunction.apply(restAuthParameter);
     }
 
-    private static Map<String, String> parseQueryString(String query) {
-        if (query == null || query.isEmpty()) {
-            return Collections.emptyMap();
+    @VisibleForTesting
+    protected static Pair<String, Map<String, String>> parsePath(String path) {
+        String[] paths = path.split("\\?");
+        String resourcePath = paths[0];
+        if (paths.length == 1) {
+            return Pair.of(resourcePath, Collections.emptyMap());
         }
-
-        return Arrays.stream(query.split("&"))
-                .map(pair -> pair.split("=", 2))
-                .collect(
-                        Collectors.toMap(
-                                pair -> pair[0].trim(), // key
-                                pair -> pair[1].trim(), // value
-                                (existing, replacement) -> existing // handle duplicates
-                                ));
+        String query = paths[1];
+        Map<String, String> parameters =
+                Arrays.stream(query.split("&"))
+                        .map(pair -> pair.split("=", 2))
+                        .collect(
+                                Collectors.toMap(
+                                        pair -> pair[0].trim(), // key
+                                        pair -> pair[1].trim(), // value
+                                        (existing, replacement) -> existing // handle duplicates
+                                        ));
+        return Pair.of(resourcePath, parameters);
     }
 }

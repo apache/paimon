@@ -47,6 +47,7 @@ public class DLFAuthProvider implements AuthProvider {
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
     public static final String DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token";
     public static final String DLF_ACCESSKEY_ID_HEADER_KEY = "x-dlf-accesskey-id";
+    public static final String DLF_AUTH_VERSION_HEADER_KEY = "x-dlf-version";
     public static final double EXPIRED_FACTOR = 0.4;
     public static final DateTimeFormatter TOKEN_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
@@ -62,19 +63,20 @@ public class DLFAuthProvider implements AuthProvider {
     private final boolean keepRefreshed;
     private Long expiresAtMillis;
     private final Long tokenRefreshInMills;
+    private final String region;
 
     public static DLFAuthProvider buildRefreshToken(
-            String tokenFilePath, Long tokenRefreshInMills) {
+            String tokenFilePath, Long tokenRefreshInMills, String region) {
         DLFToken token = readToken(tokenFilePath);
         Long expiresAtMillis = getExpirationInMills(token.getExpiration());
         return new DLFAuthProvider(
-                tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills);
+                tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills, region);
     }
 
     public static DLFAuthProvider buildAKToken(
-            String accessKeyId, String accessKeySecret, String securityToken) {
+            String accessKeyId, String accessKeySecret, String securityToken, String region) {
         DLFToken token = new DLFToken(accessKeyId, accessKeySecret, securityToken, null);
-        return new DLFAuthProvider(null, token, false, null, null);
+        return new DLFAuthProvider(null, token, false, null, null, region);
     }
 
     public DLFAuthProvider(
@@ -82,12 +84,14 @@ public class DLFAuthProvider implements AuthProvider {
             DLFToken token,
             boolean keepRefreshed,
             Long expiresAtMillis,
-            Long tokenRefreshInMills) {
+            Long tokenRefreshInMills,
+            String region) {
         this.tokenFilePath = tokenFilePath;
         this.token = token;
         this.keepRefreshed = keepRefreshed;
         this.expiresAtMillis = expiresAtMillis;
         this.tokenRefreshInMills = tokenRefreshInMills;
+        this.region = region;
     }
 
     @Override
@@ -100,13 +104,13 @@ public class DLFAuthProvider implements AuthProvider {
             Map<String, String> signHeaders =
                     generateSignHeaders(
                             restAuthParameter.host(), restAuthParameter.data(), dateTime);
-            // todo: get region
             String authorization =
                     DLFAuthSignature.getAuthorization(
-                            restAuthParameter, token, "region", signHeaders, date);
+                            restAuthParameter, token, region, signHeaders, date);
             Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
             headersWithAuth.putAll(signHeaders);
             headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
+            headersWithAuth.put(DLF_AUTH_VERSION_HEADER_KEY, DLFAuthSignature.VERSION);
             if (token.getSecurityToken() != null) {
                 headersWithAuth.put(DLF_SECURITY_TOKEN_HEADER_KEY, token.getSecurityToken());
                 headersWithAuth.put(DLF_ACCESSKEY_ID_HEADER_KEY, token.getAccessKeyId());
@@ -123,7 +127,7 @@ public class DLFAuthProvider implements AuthProvider {
         Map<String, String> signHeaders = new HashMap<>();
         signHeaders.put(DLF_DATE_HEADER_KEY, dateTime);
         signHeaders.put(DLF_HOST_HEADER_KEY, host);
-        signHeaders.put(DLF_CONTENT_TYPE_KEY, "application/json");
+        signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE.toString());
         signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, dataMd5);
         return signHeaders;
     }

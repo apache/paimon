@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ThreadPoolUtils;
 
@@ -86,7 +87,7 @@ public class AuthSessionTest {
         File tokenFile = tokenFile2Token.getLeft();
         long tokenRefreshInMills = 1000;
         AuthProvider authProvider =
-                generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName);
+                generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName, "serverUrl");
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
@@ -109,7 +110,7 @@ public class AuthSessionTest {
         File tokenFile = tokenFile2Token.getLeft();
         long tokenRefreshInMills = 5000L;
         AuthProvider authProvider =
-                generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName);
+                generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName, "serverUrl");
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
         DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
@@ -197,7 +198,8 @@ public class AuthSessionTest {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
-        AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName);
+        AuthProvider authProvider =
+                generateDLFAuthProvider(Optional.empty(), fileName, "serverUrl");
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
@@ -220,23 +222,23 @@ public class AuthSessionTest {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String tokenStr = tokenFile2Token.getRight();
-        AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName);
+        String serverUrl = "https://dlf.cn-hangzhou.aliyuncs.com";
+        AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName, serverUrl);
         DLFToken token = OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DLFToken.class);
         Map<String, String> parameters = new HashMap<>();
         parameters.put("k1", "v1");
         parameters.put("k2", "v2");
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter("host", "/path", parameters, "method", "data");
+                new RESTAuthParameter(serverUrl, "/path", parameters, "method", "data");
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
-        String region = "cn-hangzhou";
         String authorization = header.get(DLF_AUTHORIZATION_HEADER_KEY);
         String[] credentials = authorization.split(",")[0].split(" ")[1].split("/");
         String date = credentials[1];
         String newAuthorization =
                 DLFAuthSignature.getAuthorization(
-                        new RESTAuthParameter("host", "/path", parameters, "method", "data"),
+                        new RESTAuthParameter(serverUrl, "/path", parameters, "method", "data"),
                         token,
-                        region,
+                        "cn-hangzhou",
                         header,
                         date);
         assertEquals(newAuthorization, authorization);
@@ -260,9 +262,10 @@ public class AuthSessionTest {
     }
 
     private AuthProvider generateDLFAuthProvider(
-            Optional<Long> tokenRefreshInMillsOpt, String fileName) {
+            Optional<Long> tokenRefreshInMillsOpt, String fileName, String serverUrl) {
         Options options = new Options();
         options.set(DLF_TOKEN_PATH.key(), folder.getRoot().getPath() + "/" + fileName);
+        options.set(RESTCatalogOptions.URI.key(), serverUrl);
         tokenRefreshInMillsOpt.ifPresent(
                 tokenRefreshInMills ->
                         options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms"));

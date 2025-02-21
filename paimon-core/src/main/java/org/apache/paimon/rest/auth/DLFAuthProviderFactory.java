@@ -23,6 +23,7 @@ import org.apache.paimon.rest.RESTCatalogOptions;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
+import static org.apache.paimon.rest.RESTCatalogOptions.URI;
 
 /** Factory for {@link DLFAuthProvider}. */
 public class DLFAuthProviderFactory implements AuthProviderFactory {
@@ -34,17 +35,31 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
 
     @Override
     public AuthProvider create(Options options) {
+        String region = getRegion(options);
         if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
             String tokenFilePath = options.get(DLF_TOKEN_PATH);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
-            return DLFAuthProvider.buildRefreshToken(tokenFilePath, tokenRefreshInMills);
+            return DLFAuthProvider.buildRefreshToken(tokenFilePath, tokenRefreshInMills, region);
         } else if (options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_ID).isPresent()
                 && options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET).isPresent()) {
             return DLFAuthProvider.buildAKToken(
                     options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID),
                     options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET),
-                    options.get(RESTCatalogOptions.DLF_SECURITY_TOKEN));
+                    options.get(RESTCatalogOptions.DLF_SECURITY_TOKEN),
+                    region);
         }
         throw new IllegalArgumentException("DLF token path or AK must be set for DLF Auth.");
+    }
+
+    private static String getRegion(Options options) {
+        String region = "undefined";
+        try {
+            String[] paths = options.get(URI).split("\\.");
+            if (paths.length > 1) {
+                region = paths[1];
+            }
+        } catch (Exception ignore) {
+        }
+        return region;
     }
 }

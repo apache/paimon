@@ -39,6 +39,8 @@ import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_HOST_HEADER_KEY;
 /** generate authorization for <b>Ali CLoud</b> DLF. */
 public class DLFAuthSignature {
 
+    public static final String VERSION = "v1";
+
     private static final String SIGNATURE_ALGORITHM = "DLF4-HMAC-SHA256";
     private static final String PAYLOAD = "UNSIGNED-PAYLOAD";
     private static final String PRODUCT = "DlfNext";
