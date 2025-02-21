@@ -18,6 +18,9 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.rest.MockRESTMessage;
+import org.apache.paimon.rest.RESTObjectMapper;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -29,16 +32,20 @@ public class DLFAuthSignatureTest {
 
     @Test
     public void testGetAuthorization() throws Exception {
+        String endpoint = "dlf.cn-hangzhou.aliyuncs.com";
         String region = "cn-hangzhou";
         String dateTime = "20231203T121212Z";
         String date = "20231203";
         Map<String, String> parameters = new HashMap<>();
         parameters.put("k1", "v1");
         parameters.put("k2", "v2");
+        String data =
+                RESTObjectMapper.OBJECT_MAPPER.writeValueAsString(
+                        MockRESTMessage.createDatabaseRequest("database"));
+        System.out.println(data);
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter("192.168.0.133", "/v1/config", parameters, "GET", "");
-        DLFToken token =
-                new DLFToken("access-key-id", "access-key-secret", "securityToken", "expiration");
+                new RESTAuthParameter(endpoint, "/v1/paimon/databases", parameters, "POST", data);
+        DLFToken token = new DLFToken("access-key-id", "access-key-secret", "securityToken", null);
         Map<String, String> signHeaders =
                 DLFAuthProvider.generateSignHeaders(
                         restAuthParameter.host(), restAuthParameter.data(), dateTime);
@@ -46,7 +53,7 @@ public class DLFAuthSignatureTest {
                 DLFAuthSignature.getAuthorization(
                         restAuthParameter, token, region, signHeaders, date);
         Assertions.assertEquals(
-                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,AdditionalHeaders=host,Signature=2cd7f160b930543e3fb6a3ebd6c6184aa953a84536d8c4e2e8e108b3215c0128",
+                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,AdditionalHeaders=host,Signature=846a6ac1f51bb657e91b3653e7d6e8578bcb4b82495a136a3b9b789b35072967",
                 authorization);
     }
 }

@@ -122,12 +122,13 @@ public class DLFAuthProvider implements AuthProvider {
 
     public static Map<String, String> generateSignHeaders(String host, String data, String dateTime)
             throws Exception {
-        String dataMd5 = DLFAuthSignature.md5(data);
         Map<String, String> signHeaders = new HashMap<>();
         signHeaders.put(DLF_DATE_HEADER_KEY, dateTime);
         signHeaders.put(DLF_HOST_HEADER_KEY, host);
-        signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE.toString());
-        signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, dataMd5);
+        if (data != null && !data.isEmpty()) {
+            signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE.toString());
+            signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, DLFAuthSignature.md5(data));
+        }
         return signHeaders;
     }
 
