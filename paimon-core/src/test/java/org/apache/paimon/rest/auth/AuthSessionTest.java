@@ -248,8 +248,6 @@ public class AuthSessionTest {
         assertEquals(
                 token.getSecurityToken(),
                 header.get(DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY));
-        assertEquals(
-                token.getAccessKeyId(), header.get(DLFAuthProvider.DLF_ACCESSKEY_ID_HEADER_KEY));
         assertTrue(header.containsKey(DLFAuthProvider.DLF_DATE_HEADER_KEY));
         assertEquals(
                 DLFAuthSignature.VERSION, header.get(DLFAuthProvider.DLF_AUTH_VERSION_HEADER_KEY));

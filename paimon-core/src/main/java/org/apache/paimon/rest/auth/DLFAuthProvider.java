@@ -45,7 +45,6 @@ public class DLFAuthProvider implements AuthProvider {
     public static final String DLF_CONTENT_TYPE_KEY = "Content-Type";
     public static final String DLF_DATE_HEADER_KEY = "x-dlf-date";
     public static final String DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token";
-    public static final String DLF_ACCESSKEY_ID_HEADER_KEY = "x-dlf-accesskey-id";
     public static final String DLF_AUTH_VERSION_HEADER_KEY = "x-dlf-version";
     public static final String DLF_CONTENT_SHA56_HEADER_KEY = "x-dlf-content-sha256";
     public static final String DLF_CONTENT_SHA56_VALUE = "UNSIGNED-PAYLOAD";
@@ -114,7 +113,6 @@ public class DLFAuthProvider implements AuthProvider {
             headersWithAuth.put(DLF_AUTH_VERSION_HEADER_KEY, DLFAuthSignature.VERSION);
             if (token.getSecurityToken() != null) {
                 headersWithAuth.put(DLF_SECURITY_TOKEN_HEADER_KEY, token.getSecurityToken());
-                headersWithAuth.put(DLF_ACCESSKEY_ID_HEADER_KEY, token.getAccessKeyId());
             }
             return headersWithAuth;
         } catch (Exception e) {
