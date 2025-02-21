@@ -47,7 +47,7 @@ You can use file index to table with Deletion Vectors enabled, it filters files 
 
 ```sql
 CREATE TABLE <PAIMON_TABLE> WITH (
-    'deletion-vectors' = 'true',
+    'deletion-vectors.enabled' = 'true',
     'file-index.bloom-filter.columns' = 'c1,c2',
     'file-index.bloom-filter.c1.items' = '200'
 );
