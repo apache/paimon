@@ -20,6 +20,7 @@ package org.apache.paimon.tests;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.util.UUID;
 
@@ -44,6 +45,7 @@ public class LogStoreE2eTest extends E2eTestBase {
     }
 
     @Test
+    @Timeout(240)
     public void testWithPk() throws Exception {
         String catalogDdl =
                 String.format(
