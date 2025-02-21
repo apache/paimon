@@ -81,7 +81,6 @@ public class TableWriterBenchmark extends TableBenchmark {
     public void testParquet() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET);
-        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
         innerTest("parquet", options);
         /*
          * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
