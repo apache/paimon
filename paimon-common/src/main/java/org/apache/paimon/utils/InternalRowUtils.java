@@ -62,28 +62,26 @@ public class InternalRowUtils {
         }
         if (data1 != null) {
             if (data1 instanceof InternalRow) {
-                int i = 0;
                 RowType rowType = (RowType) dataType;
                 int len = rowType.getFieldCount();
-                while (i < len) {
+                for (int i = 0; i < len; i++) {
                     Object value1 = get((InternalRow) data1, i, rowType.getTypeAt(i));
                     Object value2 = get((InternalRow) data2, i, rowType.getTypeAt(i));
                     if (!equals(value1, value2, rowType.getTypeAt(i))) {
                         return false;
                     }
-                    i += 1;
                 }
             } else if (data1 instanceof InternalArray) {
-                int i = 0;
+                if (((InternalArray) data1).size() != ((InternalArray) data2).size()) {
+                    return false;
+                }
                 ArrayType arrayType = (ArrayType) dataType;
-                int len = ((InternalArray) data1).size();
-                while (i < len) {
+                for (int i = 0; i < ((InternalArray) data1).size(); i++) {
                     Object value1 = get((InternalArray) data1, i, arrayType.getElementType());
                     Object value2 = get((InternalArray) data2, i, arrayType.getElementType());
                     if (!equals(value1, value2, arrayType.getElementType())) {
                         return false;
                     }
-                    i += 1;
                 }
             } else if (data1 instanceof InternalMap) {
                 if (((InternalMap) data1).size() != ((InternalMap) data2).size()) {
@@ -107,7 +105,6 @@ public class InternalRowUtils {
                                     mapType.getKeyType(),
                                     mapType.getValueType());
                 }
-
                 InternalArray keyArray1 = map1.keyArray();
                 for (int i = 0; i < map1.size(); i++) {
                     Object key = get(keyArray1, i, mapType.getKeyType());
@@ -144,21 +141,17 @@ public class InternalRowUtils {
         int result = 0;
         if (data instanceof InternalRow) {
             RowType rowType = (RowType) dataType;
-            int i = 0;
             int len = rowType.getFieldCount();
-            while (i < len) {
+            for (int i = 0; i < len; i++) {
                 Object v = get((InternalRow) data, i, rowType.getTypeAt(i));
                 result = 37 * result + hash(v, rowType.getTypeAt(i));
-                i += 1;
             }
         } else if (data instanceof InternalArray) {
             ArrayType arrayType = (ArrayType) dataType;
-            int i = 0;
             int len = ((InternalArray) data).size();
-            while (i < len) {
+            for (int i = 0; i < len; i++) {
                 Object v = get((InternalArray) data, i, arrayType.getElementType());
                 result = 37 * result + hash(v, arrayType.getElementType());
-                i += 1;
             }
         } else if (data instanceof InternalMap) {
             MapType mapType = (MapType) dataType;

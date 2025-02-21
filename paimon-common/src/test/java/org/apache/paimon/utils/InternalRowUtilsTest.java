@@ -186,12 +186,40 @@ public class InternalRowUtilsTest {
         row1.setField(4, new GenericArray(new GenericRow[] {GenericRow.of(1), GenericRow.of(10)}));
         Map<BinaryString, InternalRow> map = new HashMap<>();
         map.put(BinaryString.fromString("a"), GenericRow.of(1));
-        map.put(BinaryString.fromString("a"), GenericRow.of(2));
+        map.put(BinaryString.fromString("b"), GenericRow.of(2));
         row1.setField(5, new GenericMap(map));
         row1.setField(6, GenericRow.of(1));
         GenericRow row2 = (GenericRow) InternalRowUtils.copyInternalRow(row1, rowType);
         assertThat(InternalRowUtils.equals(row1, row2, rowType)).isTrue();
         assertThat(InternalRowUtils.hash(row1, rowType))
                 .isEqualTo(InternalRowUtils.hash(row2, rowType));
+    }
+
+    @Test
+    public void testEqualsAndHashCodeNegativeCase() {
+        // different array len
+        RowType rowType = RowType.builder().field("f1", DataTypes.ARRAY(DataTypes.INT())).build();
+        GenericRow rowWithArray1 = new GenericRow(1);
+        rowWithArray1.setField(
+                0, new GenericArray(new GenericRow[] {GenericRow.of(1), GenericRow.of(10)}));
+        GenericRow rowWithArray2 = new GenericRow(1);
+        rowWithArray2.setField(0, new GenericArray(new GenericRow[] {GenericRow.of(1)}));
+        assertThat(InternalRowUtils.equals(rowWithArray1, rowWithArray2, rowType)).isFalse();
+
+        // different map len
+        RowType rowType2 =
+                RowType.builder()
+                        .field("f1", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()))
+                        .build();
+        Map<BinaryString, InternalRow> map1 = new HashMap<>();
+        map1.put(BinaryString.fromString("a"), GenericRow.of(1));
+        map1.put(BinaryString.fromString("b"), GenericRow.of(2));
+        GenericRow rowWithMap1 = new GenericRow(1);
+        rowWithMap1.setField(0, new GenericMap(map1));
+        Map<BinaryString, InternalRow> map2 = new HashMap<>();
+        map2.put(BinaryString.fromString("a"), GenericRow.of(1));
+        GenericRow rowWithMap2 = new GenericRow(1);
+        rowWithMap2.setField(0, new GenericMap(map2));
+        assertThat(InternalRowUtils.equals(rowWithMap1, rowWithMap2, rowType2)).isFalse();
     }
 }
