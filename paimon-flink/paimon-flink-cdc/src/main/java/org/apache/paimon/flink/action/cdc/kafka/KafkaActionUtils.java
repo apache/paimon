@@ -92,9 +92,13 @@ public class KafkaActionUtils {
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
 
         Properties properties = createKafkaProperties(kafkaConfig);
-
-        StartupMode startupMode =
-                fromOption(kafkaConfig.get(KafkaConnectorOptions.SCAN_STARTUP_MODE));
+        // If it is not set by user, then we should set the default value to EARLIEST.
+        StartupMode startupMode = StartupMode.EARLIEST;
+        boolean containsScanStartupMode =
+                kafkaConfig.contains(KafkaConnectorOptions.SCAN_STARTUP_MODE);
+        if (containsScanStartupMode) {
+            startupMode = fromOption(kafkaConfig.get(KafkaConnectorOptions.SCAN_STARTUP_MODE));
+        }
         // see
         // https://github.com/apache/flink/blob/f32052a12309cfe38f66344cf6d4ab39717e44c8/flink-connectors/flink-connector-kafka/src/main/java/org/apache/flink/streaming/connectors/kafka/table/KafkaDynamicSource.java#L434
         switch (startupMode) {
