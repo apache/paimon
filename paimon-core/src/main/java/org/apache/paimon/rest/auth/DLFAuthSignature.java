@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.utils.StringUtils;
+
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 
 import javax.crypto.Mac;
@@ -128,9 +130,9 @@ public class DLFAuthSignature {
         String separator = "";
         StringBuilder canonicalPart = new StringBuilder();
         for (Map.Entry<String, String> param : orderMap.entrySet()) {
-            canonicalPart.append(separator).append(param.getKey());
+            canonicalPart.append(separator).append(StringUtils.trim(param.getKey()));
             if (param.getValue() != null && !param.getValue().isEmpty()) {
-                canonicalPart.append("=").append(param.getValue());
+                canonicalPart.append("=").append((StringUtils.trim(param.getValue())));
             }
             separator = "&";
         }
@@ -155,7 +157,7 @@ public class DLFAuthSignature {
             for (Map.Entry<String, String> header : headers.entrySet()) {
                 String key = header.getKey().toLowerCase();
                 if (SIGNED_HEADERS.contains(key) || ADDITIONAL_HEADERS.contains(key)) {
-                    orderMap.put(key, header.getValue());
+                    orderMap.put(key, StringUtils.trim(header.getValue()));
                 }
             }
         }
