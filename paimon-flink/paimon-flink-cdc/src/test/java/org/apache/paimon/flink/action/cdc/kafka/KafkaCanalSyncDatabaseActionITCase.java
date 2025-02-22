@@ -647,7 +647,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(120)
     public void testAuditTime() throws Exception {
         final String topic = "specify-keys";
         createTestTopic(topic, 1, 1);
