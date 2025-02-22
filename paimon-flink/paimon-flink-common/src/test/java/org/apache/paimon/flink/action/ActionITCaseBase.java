@@ -36,6 +36,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.api.TableEnvironment;
@@ -131,6 +132,27 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     protected FileStoreTable getFileStoreTable(String tableName) throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
         return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    protected AuditLogTable getAuditLogTable(String tableName) throws Exception {
+        Identifier identifier = Identifier.create(database, tableName + "$audit_log");
+        return (AuditLogTable) catalog.getTable(identifier);
+    }
+
+    protected List<InternalRow> getAuditLogData(String tableName) throws Exception {
+        List<InternalRow> result = new ArrayList<>();
+
+        AuditLogTable table = this.getAuditLogTable(tableName);
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<Split> splits = plan == null ? Collections.emptyList() : plan.splits();
+        TableRead read = readBuilder.newRead();
+        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
+            recordReader.forEachRemaining(result::add);
+        }
+
+        return result;
     }
 
     protected GenericRow rowData(Object... values) {
