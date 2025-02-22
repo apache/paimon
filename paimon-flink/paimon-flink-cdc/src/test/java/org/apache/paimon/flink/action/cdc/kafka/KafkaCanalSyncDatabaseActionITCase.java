@@ -53,7 +53,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
-    private static final Logger LOG = LoggerFactory.getLogger(KafkaCanalSyncDatabaseActionITCase.class);
+    private static final Logger LOG =
+            LoggerFactory.getLogger(KafkaCanalSyncDatabaseActionITCase.class);
 
     @Test
     @Timeout(60)
