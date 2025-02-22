@@ -677,7 +677,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.INT().notNull(),
                             DataTypes.VARCHAR(10),
                             DataTypes.TIMESTAMP(),
                             DataTypes.TIMESTAMP()
