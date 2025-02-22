@@ -765,13 +765,14 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Thread.sleep(1000);
 
         // DELETE
+        FileStoreTable auditLogTable1 = getFileStoreTable("t1$audit_log");
         LOG.info("audit delete");
         writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-4.txt");
         waitForResult(
                 true,
                 Collections.singletonList(
-                        "\\+I\\[1, B, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
-                table1,
+                        "\\-D\\[1, C, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                auditLogTable1,
                 rowType1,
                 Arrays.asList("k"));
 
@@ -780,7 +781,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Timestamp updateTime4 = data.get(0).getTimestamp(3, 3);
 
         assertThat(createTime4.equals(createTime1));
-        assertThat(updateTime3.toLocalDateTime().isAfter(updateTime2.toLocalDateTime()));
+        assertThat(updateTime4.toLocalDateTime().isAfter(updateTime3.toLocalDateTime()));
         assertThat(
                 updateTime3
                                 .toLocalDateTime()
