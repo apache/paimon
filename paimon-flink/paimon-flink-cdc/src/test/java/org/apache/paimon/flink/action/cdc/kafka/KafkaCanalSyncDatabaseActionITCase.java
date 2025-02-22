@@ -767,8 +767,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         // DELETE
         LOG.info("audit delete");
         data = getAuditLogData("t1");
-        Timestamp createTime4 = data.get(0).getTimestamp(2, 3);
-        Timestamp updateTime4 = data.get(0).getTimestamp(3, 3);
+        Timestamp createTime4 = data.get(0).getTimestamp(1, 3);
+        Timestamp updateTime4 = data.get(0).getTimestamp(2, 3);
 
         assertThat(createTime4.equals(createTime1));
         assertThat(updateTime4.toLocalDateTime().isAfter(updateTime3.toLocalDateTime()));
