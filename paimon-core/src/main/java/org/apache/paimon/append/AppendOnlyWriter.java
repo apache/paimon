@@ -215,6 +215,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         return compactManager.isCompacting();
     }
 
+    @Override
+    public boolean hasDelayedCompact() {
+        return compactManager.hasDelayedCompact();
+    }
+
     @VisibleForTesting
     void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction) throws Exception {
         List<DataFileMeta> flushedFiles = sinkWriter.flush();
