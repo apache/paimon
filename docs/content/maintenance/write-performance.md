@@ -160,3 +160,4 @@ You can use fine-grained-resource-management of Flink to increase committer heap
 1. Configure Flink Configuration `cluster.fine-grained-resource-management.enabled: true`. (This is default after Flink 1.18)
 2. Configure Paimon Table Options: `sink.committer-memory`, for example 300 MB, depends on your `TaskManager`.
    (`sink.committer-cpu` is also supported)
+3. If use Flink batch job write data into Paimon or run dedicated compaction, Configure Flink Configuration `fine-grained.shuffle-mode.all-blocking: true`.
