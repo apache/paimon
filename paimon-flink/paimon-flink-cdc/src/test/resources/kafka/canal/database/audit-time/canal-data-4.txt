@@ -16,5 +16,4 @@
  * limitations under the License.
  */
 
-{"data":[{"k":"1","v1":"D"}],"database":"test_audit_time","es":1684770072000,"id":81,"isDdl":false,"mysqlType":{"k":"INT","v1":"VARCHAR(10)"},"old":null,"pkNames":["k"],"sql":"","sqlType":{"k":4,"v1":12},"table":"t1","ts":1684770072286,"type":"DELETE"}
-
+{"data":[{"k":"1","v1":"C"}],"database":"test_audit_time","es":1684770072000,"id":81,"isDdl":false,"mysqlType":{"k":"INT","v1":"VARCHAR(10)"},"old":null,"pkNames":["k"],"sql":"","sqlType":{"k":4,"v1":12},"table":"t1","ts":1684770072286,"type":"DELETE"}
