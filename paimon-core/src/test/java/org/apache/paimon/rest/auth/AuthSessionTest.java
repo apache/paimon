@@ -51,6 +51,7 @@ import static org.apache.paimon.rest.auth.AuthSession.MAX_REFRESH_WINDOW_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.MIN_REFRESH_WAIT_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.REFRESH_NUM_RETRIES;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_AUTHORIZATION_HEADER_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_DATE_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
@@ -235,6 +236,7 @@ public class AuthSessionTest {
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
         String authorization = header.get(DLF_AUTHORIZATION_HEADER_KEY);
         String[] credentials = authorization.split(",")[0].split(" ")[1].split("/");
+        String dateTime = header.get(DLF_DATE_HEADER_KEY);
         String date = credentials[1];
         String newAuthorization =
                 DLFAuthSignature.getAuthorization(
@@ -242,13 +244,14 @@ public class AuthSessionTest {
                         token,
                         "cn-hangzhou",
                         header,
+                        dateTime,
                         date);
         assertEquals(newAuthorization, authorization);
         assertEquals(restAuthParameter.host(), header.get(DLFAuthProvider.DLF_HOST_HEADER_KEY));
         assertEquals(
                 token.getSecurityToken(),
                 header.get(DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY));
-        assertTrue(header.containsKey(DLFAuthProvider.DLF_DATE_HEADER_KEY));
+        assertTrue(header.containsKey(DLF_DATE_HEADER_KEY));
         assertEquals(
                 DLFAuthSignature.VERSION, header.get(DLFAuthProvider.DLF_AUTH_VERSION_HEADER_KEY));
         assertEquals(

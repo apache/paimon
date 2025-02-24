@@ -54,8 +54,8 @@ public class DLFAuthSignature {
             Arrays.asList(
                     DLF_CONTENT_MD5_HEADER_KEY.toLowerCase(),
                     DLF_CONTENT_TYPE_KEY.toLowerCase(),
-                    DLF_HOST_HEADER_KEY.toLowerCase(),
                     DLF_DATE_HEADER_KEY.toLowerCase());
+    // must be ordered by alphabetical
     private static final List<String> ADDITIONAL_HEADERS =
             Arrays.asList(DLF_HOST_HEADER_KEY.toLowerCase());
 
@@ -64,6 +64,7 @@ public class DLFAuthSignature {
             DLFToken dlfToken,
             String region,
             Map<String, String> headers,
+            String dateTime,
             String date)
             throws Exception {
         String canonicalRequest = getCanonicalRequest(restAuthParameter, headers);
@@ -71,6 +72,7 @@ public class DLFAuthSignature {
                 Joiner.on(NEW_LINE)
                         .join(
                                 SIGNATURE_ALGORITHM,
+                                dateTime,
                                 String.format("%s/%s/%s/%s", date, region, PRODUCT, REQUEST_TYPE),
                                 sha256Hex(canonicalRequest));
         byte[] dateKey = hmacSha256(("aliyun_v4" + dlfToken.getAccessKeySecret()).getBytes(), date);
@@ -147,6 +149,10 @@ public class DLFAuthSignature {
                                     canonicalRequest,
                                     String.format("%s:%s", header.getKey(), header.getValue()));
         }
+
+        // Additional Headers + "\n" +
+        String additionalSignedHeaders = Joiner.on(";").join(ADDITIONAL_HEADERS);
+        canonicalRequest = Joiner.on(NEW_LINE).join(canonicalRequest, additionalSignedHeaders);
         String contentSha56 =
                 headers.getOrDefault(
                         DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY,

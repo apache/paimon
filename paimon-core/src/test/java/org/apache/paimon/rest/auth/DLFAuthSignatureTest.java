@@ -50,9 +50,9 @@ public class DLFAuthSignatureTest {
                         restAuthParameter.host(), restAuthParameter.data(), dateTime);
         String authorization =
                 DLFAuthSignature.getAuthorization(
-                        restAuthParameter, token, region, signHeaders, date);
+                        restAuthParameter, token, region, signHeaders, dateTime, date);
         Assertions.assertEquals(
-                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,AdditionalHeaders=host,Signature=846a6ac1f51bb657e91b3653e7d6e8578bcb4b82495a136a3b9b789b35072967",
+                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,AdditionalHeaders=host,Signature=1e61cf9f4eb4ff0afed09165b808b0cb2c86bb1c71b1984a9dde010c42afea5e",
                 authorization);
     }
 }

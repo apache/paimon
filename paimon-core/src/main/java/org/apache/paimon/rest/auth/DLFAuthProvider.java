@@ -106,7 +106,7 @@ public class DLFAuthProvider implements AuthProvider {
                             restAuthParameter.host(), restAuthParameter.data(), dateTime);
             String authorization =
                     DLFAuthSignature.getAuthorization(
-                            restAuthParameter, token, region, signHeaders, date);
+                            restAuthParameter, token, region, signHeaders, dateTime, date);
             Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
             headersWithAuth.putAll(signHeaders);
             headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
