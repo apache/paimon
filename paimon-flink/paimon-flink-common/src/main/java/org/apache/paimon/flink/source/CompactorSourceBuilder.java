@@ -86,29 +86,24 @@ public class CompactorSourceBuilder {
     }
 
     private Source<RowData, ?, ?> buildSource(CompactBucketsTable compactBucketsTable) {
+        ReadBuilder readBuilder =
+                compactBucketsTable.newReadBuilder().withFilter(partitionPredicate);
+        if (compactBucketsTable.coreOptions().manifestDeleteFileDropStats()) {
+            readBuilder = readBuilder.dropStats();
+        }
         if (isContinuous) {
             compactBucketsTable = compactBucketsTable.copy(streamingCompactOptions());
-            return new ContinuousFileStoreSource(
-                    getReadBuilder(compactBucketsTable), compactBucketsTable.options(), null);
+            return new ContinuousFileStoreSource(readBuilder, compactBucketsTable.options(), null);
         } else {
             compactBucketsTable = compactBucketsTable.copy(batchCompactOptions());
             Options options = compactBucketsTable.coreOptions().toConfiguration();
 
             return new StaticFileStoreSource(
-                    getReadBuilder(compactBucketsTable),
+                    readBuilder,
                     null,
                     options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                     options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE));
         }
-    }
-
-    private ReadBuilder getReadBuilder(CompactBucketsTable compactBucketsTable) {
-        ReadBuilder readBuilder =
-                compactBucketsTable.newReadBuilder().withFilter(partitionPredicate);
-        if (CoreOptions.fromMap(table.options()).manifestDeleteFileDropStats()) {
-            readBuilder.dropStats();
-        }
-        return readBuilder;
     }
 
     public DataStreamSource<RowData> build() {
