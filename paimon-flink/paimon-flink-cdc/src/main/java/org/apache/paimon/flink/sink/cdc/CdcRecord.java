@@ -33,7 +33,7 @@ public class CdcRecord implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private RowKind kind;
+    private final RowKind kind;
 
     // field name -> value
     private final Map<String, String> data;
