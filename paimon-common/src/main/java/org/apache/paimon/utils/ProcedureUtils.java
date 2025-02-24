@@ -49,6 +49,7 @@ public class ProcedureUtils {
         putIfNotEmpty(
                 dynamicOptions, CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
         putIfNotEmpty(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
+        // Set check interval to 0 for dedicated partition expiration.
         putIfNotEmpty(dynamicOptions, CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "0");
         putIfNotEmpty(
                 dynamicOptions,
