@@ -132,23 +132,21 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
         blockSizeLimit =
                 MemorySize.parse(options.getString(BitmapFileIndex.INDEX_BLOCK_SIZE, "16kb"))
                         .getBytes();
-        if (enableNextOffsetToSize) {
-            bitmapLengths = new HashMap<>();
-            Object lastValue = null;
-            int lastOffset = nullValueOffset;
-            for (Map.Entry<Object, Integer> entry : bitmapOffsets.entrySet()) {
-                Object value = entry.getKey();
-                Integer offset = entry.getValue();
-                if (offset >= 0) {
-                    if (lastOffset >= 0) {
-                        bitmapLengths.put(lastValue, offset - lastOffset);
-                    }
-                    lastValue = value;
-                    lastOffset = offset;
+        bitmapLengths = new HashMap<>();
+        Object lastValue = null;
+        int lastOffset = nullValueOffset;
+        for (Map.Entry<Object, Integer> entry : bitmapOffsets.entrySet()) {
+            Object value = entry.getKey();
+            Integer offset = entry.getValue();
+            if (offset >= 0) {
+                if (lastOffset >= 0) {
+                    bitmapLengths.put(lastValue, offset - lastOffset);
                 }
+                lastValue = value;
+                lastOffset = offset;
             }
-            bitmapLengths.put(lastValue, finalOffset - lastOffset);
         }
+        bitmapLengths.put(lastValue, finalOffset - lastOffset);
     }
 
     public static Comparator<Object> getComparator(DataType dataType) {
@@ -289,10 +287,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
         indexBlockStart = seekableInputStream.getPos();
 
-        InputStream inputStream = seekableInputStream;
-        if (options.getBoolean(BitmapFileIndex.ENABLE_BUFFERED_INPUT, true)) {
-            inputStream = new BufferedInputStream(inputStream);
-        }
+        InputStream inputStream = new BufferedInputStream(seekableInputStream);
         DataInput in = new DataInputStream(inputStream);
         ThrowableSupplier valueReader = getValueReader(in);
         Function<Object, Integer> measure = getSerializeSizeMeasure();
@@ -349,10 +344,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
             if (entryList == null) {
                 try {
                     seekableInputStream.seek(indexBlockStart + offset);
-                    InputStream inputStream = seekableInputStream;
-                    if (options.getBoolean(BitmapFileIndex.ENABLE_BUFFERED_INPUT, true)) {
-                        inputStream = new BufferedInputStream(inputStream);
-                    }
+                    InputStream inputStream = new BufferedInputStream(seekableInputStream);
                     DataInputStream in = new DataInputStream(inputStream);
                     ThrowableSupplier valueReader = getValueReader(in);
                     int entryNum = in.readInt();

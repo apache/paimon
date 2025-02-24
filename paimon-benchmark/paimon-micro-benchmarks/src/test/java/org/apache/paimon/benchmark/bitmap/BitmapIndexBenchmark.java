@@ -125,53 +125,23 @@ public class BitmapIndexBenchmark {
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
 
-        benchmark.addCase("formatV1", 10, () -> query(approxCardinality, file1, "false", "false"));
-
-        benchmark.addCase(
-                "formatV1-bitmapByteBuffer",
-                10,
-                () -> query(approxCardinality, file1, "false", "true"));
-
-        benchmark.addCase(
-                "formatV1-bufferedInput",
-                10,
-                () -> query(approxCardinality, file1, "true", "false"));
-
         benchmark.addCase(
                 "formatV1-bufferedInput-bitmapByteBuffer",
                 10,
-                () -> query(approxCardinality, file1, "true", "true"));
-
-        benchmark.addCase("format-v2", 10, () -> query(approxCardinality, file2, "false", "false"));
-
-        benchmark.addCase(
-                "format-v2-bitmapByteBuffer",
-                10,
-                () -> query(approxCardinality, file2, "false", "true"));
-
-        benchmark.addCase(
-                "format-v2-bufferedInput",
-                10,
-                () -> query(approxCardinality, file2, "true", "false"));
+                () -> query(approxCardinality, file1));
 
         benchmark.addCase(
                 "format-v2-bufferedInput-bitmapByteBuffer",
                 10,
-                () -> query(approxCardinality, file2, "true", "true"));
+                () -> query(approxCardinality, file2));
 
         benchmark.run();
     }
 
-    private static void query(
-            int approxCardinality,
-            File file1,
-            String enableBufferedInput,
-            String enableNextOffsetToSize) {
+    private static void query(int approxCardinality, File file1) {
         try {
             FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
             Options options = new Options();
-            options.set(BitmapFileIndex.ENABLE_BUFFERED_INPUT, enableBufferedInput);
-            options.set(BitmapFileIndex.ENABLE_NEXT_OFFSET_TO_SIZE, enableNextOffsetToSize);
             LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
                     new LocalFileIO.LocalSeekableInputStream(file1);
             FileIndexReader reader =

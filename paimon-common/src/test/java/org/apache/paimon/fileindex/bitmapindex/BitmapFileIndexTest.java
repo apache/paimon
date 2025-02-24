@@ -45,7 +45,7 @@ import java.util.Arrays;
 import java.util.function.Consumer;
 
 /** test for {@link BitmapFileIndex}. */
-public class TestBitmapFileIndex {
+public class BitmapFileIndexTest {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 

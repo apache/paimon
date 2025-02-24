@@ -53,8 +53,6 @@ public class BitmapFileIndex implements FileIndexer {
 
     public static final String VERSION = "version";
     public static final String INDEX_BLOCK_SIZE = "index-block-size";
-    public static final String ENABLE_BUFFERED_INPUT = "enable-buffered-input";
-    public static final String ENABLE_NEXT_OFFSET_TO_SIZE = "enable-next-offset-to-size";
 
     private final DataType dataType;
     private final Options options;
@@ -197,7 +195,6 @@ public class BitmapFileIndex implements FileIndexer {
         private final SeekableInputStream seekableInputStream;
         private final int headStart;
         private final Map<Object, RoaringBitmap32> bitmaps = new LinkedHashMap<>();
-        private final boolean enableNextOffsetToSize;
 
         private BitmapFileIndexMeta bitmapFileIndexMeta;
         private Function<Object, Object> valueMapper;
@@ -208,8 +205,6 @@ public class BitmapFileIndex implements FileIndexer {
             this.seekableInputStream = seekableInputStream;
             this.headStart = start;
             this.options = options;
-            enableNextOffsetToSize =
-                    options.getBoolean(BitmapFileIndex.ENABLE_NEXT_OFFSET_TO_SIZE, true);
         }
 
         @Override
@@ -274,15 +269,13 @@ public class BitmapFileIndex implements FileIndexer {
                     } else {
                         seekableInputStream.seek(bitmapFileIndexMeta.getBodyStart() + offset);
                         RoaringBitmap32 bitmap = new RoaringBitmap32();
-                        if (enableNextOffsetToSize) {
-                            int length = entry.length;
-                            if (length != -1) {
-                                DataInputStream input = new DataInputStream(seekableInputStream);
-                                byte[] bytes = new byte[length];
-                                input.readFully(bytes);
-                                bitmap.deserialize(ByteBuffer.wrap(bytes));
-                                return bitmap;
-                            }
+                        int length = entry.length;
+                        if (length != -1) {
+                            DataInputStream input = new DataInputStream(seekableInputStream);
+                            byte[] bytes = new byte[length];
+                            input.readFully(bytes);
+                            bitmap.deserialize(ByteBuffer.wrap(bytes));
+                            return bitmap;
                         }
                         bitmap.deserialize(new DataInputStream(seekableInputStream));
                         return bitmap;

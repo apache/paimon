@@ -162,7 +162,7 @@ length:                        4 bytes int
   
 </pre>
 
-Bitmap file index format (V1):
+(Legacy) Bitmap file index format (V1):
 
 <pre>
 

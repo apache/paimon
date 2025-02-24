@@ -104,13 +104,10 @@ public class BitmapFileIndexMeta {
     protected LinkedHashMap<Object, Integer> bitmapOffsets;
     protected Map<Object, Integer> bitmapLengths;
     protected long bodyStart;
-    protected boolean enableNextOffsetToSize;
 
     public BitmapFileIndexMeta(DataType dataType, Options options) {
         this.dataType = dataType;
         this.options = options;
-        enableNextOffsetToSize =
-                options.getBoolean(BitmapFileIndex.ENABLE_NEXT_OFFSET_TO_SIZE, true);
     }
 
     public BitmapFileIndexMeta(
@@ -176,13 +173,8 @@ public class BitmapFileIndexMeta {
 
     public void deserialize(SeekableInputStream seekableInputStream) throws Exception {
         bodyStart = seekableInputStream.getPos();
-        InputStream inputStream = seekableInputStream;
-        if (options.getBoolean(BitmapFileIndex.ENABLE_BUFFERED_INPUT, true)) {
-            inputStream = new BufferedInputStream(inputStream);
-        }
-        if (enableNextOffsetToSize) {
-            this.bitmapLengths = new HashMap<>();
-        }
+        InputStream inputStream = new BufferedInputStream(seekableInputStream);
+        bitmapLengths = new HashMap<>();
         DataInput in = new DataInputStream(inputStream);
         ThrowableSupplier valueReader = getValueReader(in);
         Function<Object, Integer> measure = getSerializeSizeMeasure();
@@ -209,15 +201,13 @@ public class BitmapFileIndexMeta {
             int offset = in.readInt();
             bitmapOffsets.put(value, offset);
             bodyStart += measure.apply(value) + Integer.BYTES;
-            if (enableNextOffsetToSize) {
-                if (offset >= 0) {
-                    if (lastOffset >= 0) {
-                        int length = offset - lastOffset;
-                        bitmapLengths.put(lastValue, length);
-                    }
-                    lastValue = value;
-                    lastOffset = offset;
+            if (offset >= 0) {
+                if (lastOffset >= 0) {
+                    int length = offset - lastOffset;
+                    bitmapLengths.put(lastValue, length);
                 }
+                lastValue = value;
+                lastOffset = offset;
             }
         }
     }
