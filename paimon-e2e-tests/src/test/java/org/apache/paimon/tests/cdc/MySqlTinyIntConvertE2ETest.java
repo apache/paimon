@@ -24,6 +24,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.sql.Connection;
 import java.sql.Statement;
@@ -36,6 +37,7 @@ public class MySqlTinyIntConvertE2ETest extends MySqlCdcE2eTestBase {
     }
 
     @Test
+    @Timeout(360)
     public void testSyncTable() throws Exception {
         runAction(
                 ACTION_SYNC_TABLE,
