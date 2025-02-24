@@ -56,6 +56,7 @@ public class DLFAuthProvider implements AuthProvider {
     public static final DateTimeFormatter AUTH_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyyMMdd");
     protected static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+    private static final long[] READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS = {1_000, 3_000, 5_000};
 
     private final String tokenFilePath;
 
@@ -67,7 +68,7 @@ public class DLFAuthProvider implements AuthProvider {
 
     public static DLFAuthProvider buildRefreshToken(
             String tokenFilePath, Long tokenRefreshInMills, String region) {
-        DLFToken token = readToken(tokenFilePath);
+        DLFToken token = readToken(tokenFilePath, 0);
         Long expiresAtMillis = getExpirationInMills(token.getExpiration());
         return new DLFAuthProvider(
                 tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills, region);
@@ -139,7 +140,7 @@ public class DLFAuthProvider implements AuthProvider {
     @Override
     public boolean refresh() {
         long start = System.currentTimeMillis();
-        DLFToken newToken = readToken(tokenFilePath);
+        DLFToken newToken = readToken(tokenFilePath, 0);
         if (newToken == null) {
             return false;
         }
@@ -173,17 +174,22 @@ public class DLFAuthProvider implements AuthProvider {
         return Optional.ofNullable(this.tokenRefreshInMills);
     }
 
-    private static DLFToken readToken(String tokenFilePath) {
+    protected static DLFToken readToken(String tokenFilePath, int retryTimes) {
         try {
             File tokenFile = new File(tokenFilePath);
             if (tokenFile.exists()) {
                 String tokenStr = FileIOUtils.readFileUtf8(tokenFile);
                 return OBJECT_MAPPER.readValue(tokenStr, DLFToken.class);
+            } else if (retryTimes < READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS.length - 1) {
+                Thread.sleep(READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS[retryTimes]);
+                return readToken(tokenFilePath, retryTimes + 1);
             } else {
                 throw new FileNotFoundException(tokenFilePath);
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 
