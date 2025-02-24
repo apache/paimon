@@ -1827,7 +1827,7 @@ public class CoreOptions implements Serializable {
         if (keyString == null) {
             return Collections.emptyList();
         }
-        return Arrays.asList(keyString.split(","));
+        return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
     }
 
     public boolean fieldCollectAggDistinct(String fieldName) {
