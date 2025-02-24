@@ -20,8 +20,9 @@ package org.apache.paimon.rest;
 
 import java.util.Map;
 
-// test for data token refresh.
+/** Test for data token refresh. */
 public class DataTokenProvider {
+
     private Map<String, String> token;
     private long expiresAtMillis;
 
