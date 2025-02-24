@@ -20,8 +20,11 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.auth.RESTAuthFunction;
+import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -36,12 +39,17 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
@@ -82,32 +90,38 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T get(
-            String path, Class<T> responseType, Map<String, String> headers) {
+            String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
+        Map<String, String> authHeaders = getHeaders(path, "GET", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
                         .get()
-                        .headers(Headers.of(headers))
+                        .headers(Headers.of(authHeaders))
                         .build();
         return exec(request, responseType);
     }
 
     @Override
     public <T extends RESTResponse> T post(
-            String path, RESTRequest body, Map<String, String> headers) {
-        return post(path, body, null, headers);
+            String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
+        return post(path, body, null, restAuthFunction);
     }
 
     @Override
     public <T extends RESTResponse> T post(
-            String path, RESTRequest body, Class<T> responseType, Map<String, String> headers) {
+            String path,
+            RESTRequest body,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
         try {
-            RequestBody requestBody = buildRequestBody(body);
+            String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
+            Map<String, String> authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
+            RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
                             .url(getRequestUrl(path))
                             .post(requestBody)
-                            .headers(Headers.of(headers))
+                            .headers(Headers.of(authHeaders))
                             .build();
             return exec(request, responseType);
         } catch (JsonProcessingException e) {
@@ -116,26 +130,29 @@ public class HttpClient implements RESTClient {
     }
 
     @Override
-    public <T extends RESTResponse> T delete(String path, Map<String, String> headers) {
+    public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
+        Map<String, String> authHeaders = getHeaders(path, "DELETE", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
                         .delete()
-                        .headers(Headers.of(headers))
+                        .headers(Headers.of(authHeaders))
                         .build();
         return exec(request, null);
     }
 
     @Override
     public <T extends RESTResponse> T delete(
-            String path, RESTRequest body, Map<String, String> headers) {
+            String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
         try {
-            RequestBody requestBody = buildRequestBody(body);
+            String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
+            Map<String, String> authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
+            RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
                             .url(getRequestUrl(path))
                             .delete(requestBody)
-                            .headers(Headers.of(headers))
+                            .headers(Headers.of(authHeaders))
                             .build();
             return exec(request, null);
         } catch (JsonProcessingException e) {
@@ -182,12 +199,8 @@ public class HttpClient implements RESTClient {
         }
     }
 
-    private RequestBody buildRequestBody(RESTRequest body) throws JsonProcessingException {
-        return RequestBody.create(OBJECT_MAPPER.writeValueAsBytes(body), MEDIA_TYPE);
-    }
-
-    private String getRequestUrl(String path) {
-        return StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
+    private static RequestBody buildRequestBody(String body) throws JsonProcessingException {
+        return RequestBody.create(body.getBytes(StandardCharsets.UTF_8), MEDIA_TYPE);
     }
 
     private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {
@@ -220,5 +233,45 @@ public class HttpClient implements RESTClient {
                         });
 
         return builder.build();
+    }
+
+    private String getRequestUrl(String path) {
+        return StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
+    }
+
+    private Map<String, String> getHeaders(
+            String path,
+            String method,
+            String data,
+            Function<RESTAuthParameter, Map<String, String>> headerFunction) {
+        Pair<String, Map<String, String>> resourcePath2Parameters = parsePath(path);
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter(
+                        URI.create(uri).getHost(),
+                        resourcePath2Parameters.getLeft(),
+                        resourcePath2Parameters.getValue(),
+                        method,
+                        data);
+        return headerFunction.apply(restAuthParameter);
+    }
+
+    @VisibleForTesting
+    protected static Pair<String, Map<String, String>> parsePath(String path) {
+        String[] paths = path.split("\\?");
+        String resourcePath = paths[0];
+        if (paths.length == 1) {
+            return Pair.of(resourcePath, Collections.emptyMap());
+        }
+        String query = paths[1];
+        Map<String, String> parameters =
+                Arrays.stream(query.split("&"))
+                        .map(pair -> pair.split("=", 2))
+                        .collect(
+                                Collectors.toMap(
+                                        pair -> pair[0].trim(), // key
+                                        pair -> pair[1].trim(), // value
+                                        (existing, replacement) -> existing // handle duplicates
+                                        ));
+        return Pair.of(resourcePath, parameters);
     }
 }

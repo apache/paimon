@@ -70,7 +70,8 @@ WITH (
 'dlf.accessKeySecret'='<accessKeySecret>',
 );
 ```
-- DLF token path
+
+- DLF sts token
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
@@ -78,7 +79,20 @@ WITH (
 'uri' = '<catalog server url>',
 'metastore' = 'rest',
 'token.provider' = 'dlf',
-'dlf.token-path' = '<token-path>'
+'dlf.accessKeyId'='<accessKeyId>',
+'dlf.accessKeySecret'='<accessKeySecret>',
+'dlf.securityToken'='<securityToken>'
+);
+```
+
+- DLF sts token path
+```sql
+CREATE CATALOG `paimon-rest-catalog`
+WITH (
+'type' = 'paimon',
+'uri' = '<catalog server url>',
+'metastore' = 'rest',
+'token.provider' = 'dlf'
 );
 ```
 

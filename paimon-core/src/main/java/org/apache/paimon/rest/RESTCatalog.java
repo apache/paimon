@@ -32,6 +32,8 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthSession;
+import org.apache.paimon.rest.auth.RESTAuthFunction;
+import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -108,6 +110,7 @@ public class RESTCatalog implements Catalog {
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
     private final FileIO fileIO;
+    private RESTAuthFunction restAuthFunction;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
@@ -118,23 +121,25 @@ public class RESTCatalog implements Catalog {
     public RESTCatalog(CatalogContext context, boolean configRequired) {
         this.client = new HttpClient(context.options());
         this.catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
-
         Options options = context.options();
+        Map<String, String> baseHeaders = Collections.emptyMap();
         if (configRequired) {
             if (context.options().contains(WAREHOUSE)) {
                 throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
             }
 
-            Map<String, String> initHeaders =
-                    RESTUtil.merge(
-                            extractPrefixMap(context.options(), HEADER_PREFIX),
-                            catalogAuth.getHeaders());
+            baseHeaders = extractPrefixMap(context.options(), HEADER_PREFIX);
             options =
                     new Options(
-                            client.get(ResourcePaths.V1_CONFIG, ConfigResponse.class, initHeaders)
+                            client.get(
+                                            ResourcePaths.V1_CONFIG,
+                                            ConfigResponse.class,
+                                            new RESTAuthFunction(
+                                                    Collections.emptyMap(), catalogAuth))
                                     .merge(context.options().toMap()));
+            baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }
-
+        this.restAuthFunction = new RESTAuthFunction(baseHeaders, catalogAuth);
         context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
         this.context = context;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
@@ -156,7 +161,8 @@ public class RESTCatalog implements Catalog {
     @Override
     public List<String> listDatabases() {
         ListDatabasesResponse response =
-                client.get(resourcePaths.databases(), ListDatabasesResponse.class, headers());
+                client.get(
+                        resourcePaths.databases(), ListDatabasesResponse.class, restAuthFunction);
         if (response.getDatabases() != null) {
             return response.getDatabases();
         }
@@ -170,7 +176,10 @@ public class RESTCatalog implements Catalog {
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         try {
             client.post(
-                    resourcePaths.databases(), request, CreateDatabaseResponse.class, headers());
+                    resourcePaths.databases(),
+                    request,
+                    CreateDatabaseResponse.class,
+                    restAuthFunction);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new DatabaseAlreadyExistException(name);
@@ -187,7 +196,10 @@ public class RESTCatalog implements Catalog {
         }
         try {
             GetDatabaseResponse response =
-                    client.get(resourcePaths.database(name), GetDatabaseResponse.class, headers());
+                    client.get(
+                            resourcePaths.database(name),
+                            GetDatabaseResponse.class,
+                            restAuthFunction);
             return new Database.DatabaseImpl(
                     name, response.options(), response.comment().orElseGet(() -> null));
         } catch (NoSuchResourceException e) {
@@ -205,7 +217,7 @@ public class RESTCatalog implements Catalog {
             if (!cascade && !this.listTables(name).isEmpty()) {
                 throw new DatabaseNotEmptyException(name);
             }
-            client.delete(resourcePaths.database(name), headers());
+            client.delete(resourcePaths.database(name), restAuthFunction);
         } catch (NoSuchResourceException | DatabaseNotExistException e) {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name);
@@ -231,7 +243,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.databaseProperties(name),
                             request,
                             AlterDatabaseResponse.class,
-                            headers());
+                            restAuthFunction);
             if (response.getUpdated().isEmpty()) {
                 throw new IllegalStateException("Failed to update properties");
             }
@@ -251,7 +263,7 @@ public class RESTCatalog implements Catalog {
                     client.get(
                             resourcePaths.tables(databaseName),
                             ListTablesResponse.class,
-                            headers());
+                            restAuthFunction);
             if (response.getTables() != null) {
                 return response.getTables();
             }
@@ -290,7 +302,7 @@ public class RESTCatalog implements Catalog {
         return client.get(
                 resourcePaths.tableToken(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetTableTokenResponse.class,
-                catalogAuth.getHeaders());
+                restAuthFunction);
     }
 
     public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {
@@ -300,7 +312,7 @@ public class RESTCatalog implements Catalog {
                         resourcePaths.commitTable(identifier.getDatabaseName()),
                         request,
                         CommitTableResponse.class,
-                        headers());
+                        restAuthFunction);
         return response.isSuccess();
     }
 
@@ -312,7 +324,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.table(
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             GetTableResponse.class,
-                            headers());
+                            restAuthFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -331,7 +343,9 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateAutoCreateClose(schema.options());
             CreateTableRequest request = new CreateTableRequest(identifier, schema);
-            client.post(resourcePaths.tables(identifier.getDatabaseName()), request, headers());
+            client.post(
+                    resourcePaths.tables(identifier.getDatabaseName()), request, restAuthFunction);
+
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -356,7 +370,10 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(toTable, "renameTable");
         try {
             RenameTableRequest request = new RenameTableRequest(fromTable, toTable);
-            client.post(resourcePaths.renameTable(fromTable.getDatabaseName()), request, headers());
+            client.post(
+                    resourcePaths.renameTable(fromTable.getDatabaseName()),
+                    request,
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);
@@ -378,7 +395,7 @@ public class RESTCatalog implements Catalog {
             client.post(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    headers());
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 if (e.resourceType() == ErrorResponseResourceType.TABLE) {
@@ -408,7 +425,7 @@ public class RESTCatalog implements Catalog {
         try {
             client.delete(
                     resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
-                    headers());
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(identifier);
@@ -427,7 +444,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.partitions(
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    headers());
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
@@ -444,7 +461,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.dropPartitions(
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    headers());
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
@@ -470,7 +487,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.alterPartitions(
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    headers());
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
@@ -487,7 +504,7 @@ public class RESTCatalog implements Catalog {
                     resourcePaths.markDonePartitions(
                             identifier.getDatabaseName(), identifier.getTableName()),
                     request,
-                    headers());
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
@@ -503,7 +520,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.partitions(
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             ListPartitionsResponse.class,
-                            headers());
+                            restAuthFunction);
             if (response == null || response.getPartitions() == null) {
                 return Collections.emptyList();
             }
@@ -526,7 +543,7 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.view(
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             GetViewResponse.class,
-                            headers());
+                            restAuthFunction);
             ViewSchema schema = response.getSchema();
             return new ViewImpl(
                     identifier,
@@ -546,7 +563,7 @@ public class RESTCatalog implements Catalog {
         try {
             client.delete(
                     resourcePaths.view(identifier.getDatabaseName(), identifier.getTableName()),
-                    headers());
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new ViewNotExistException(identifier);
@@ -566,7 +583,9 @@ public class RESTCatalog implements Catalog {
                             view.comment().orElse(null),
                             view.options());
             CreateViewRequest request = new CreateViewRequest(identifier, schema);
-            client.post(resourcePaths.views(identifier.getDatabaseName()), request, headers());
+            client.post(
+                    resourcePaths.views(identifier.getDatabaseName()), request, restAuthFunction);
+
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         } catch (AlreadyExistsException e) {
@@ -581,7 +600,9 @@ public class RESTCatalog implements Catalog {
         try {
             ListViewsResponse response =
                     client.get(
-                            resourcePaths.views(databaseName), ListViewsResponse.class, headers());
+                            resourcePaths.views(databaseName),
+                            ListViewsResponse.class,
+                            restAuthFunction);
             return response.getViews();
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
@@ -593,7 +614,11 @@ public class RESTCatalog implements Catalog {
             throws ViewNotExistException, ViewAlreadyExistException {
         try {
             RenameTableRequest request = new RenameTableRequest(fromView, toView);
-            client.post(resourcePaths.renameView(fromView.getDatabaseName()), request, headers());
+            client.post(
+                    resourcePaths.renameView(fromView.getDatabaseName()),
+                    request,
+                    restAuthFunction);
+
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new ViewNotExistException(fromView);
@@ -618,8 +643,8 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    private Map<String, String> headers() {
-        return catalogAuth.getHeaders();
+    Map<String, String> headers(RESTAuthParameter restAuthParameter) {
+        return restAuthFunction.apply(restAuthParameter);
     }
 
     private ScheduledExecutorService tokenRefreshExecutor() {

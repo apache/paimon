@@ -19,10 +19,15 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.auth.AuthProvider;
+import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
+import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
+import org.apache.paimon.utils.Pair;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.After;
 import org.junit.Before;
@@ -30,6 +35,8 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -49,6 +56,7 @@ public class HttpClientTest {
     private String mockResponseDataStr;
     private String errorResponseStr;
     private Map<String, String> headers;
+    private RESTAuthFunction restAuthFunction;
 
     @Before
     public void setUp() throws Exception {
@@ -65,7 +73,9 @@ public class HttpClientTest {
         httpClient = new HttpClient(httpClientOptions);
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);
-        headers = authProvider.authHeader();
+        AuthSession authSession = new AuthSession(authProvider);
+        headers = new HashMap<>();
+        restAuthFunction = new RESTAuthFunction(headers, authSession);
     }
 
     @After
@@ -76,7 +86,7 @@ public class HttpClientTest {
     @Test
     public void testGetSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
-        MockRESTData response = httpClient.get(MOCK_PATH, MockRESTData.class, headers);
+        MockRESTData response = httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction);
         assertEquals(mockResponseData.data(), response.data());
     }
 
@@ -85,14 +95,14 @@ public class HttpClientTest {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
                 BadRequestException.class,
-                () -> httpClient.get(MOCK_PATH, MockRESTData.class, headers));
+                () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
     }
 
     @Test
     public void testPostSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
         MockRESTData response =
-                httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, headers);
+                httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, restAuthFunction);
         assertEquals(mockResponseData.data(), response.data());
     }
 
@@ -101,19 +111,25 @@ public class HttpClientTest {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
                 BadRequestException.class,
-                () -> httpClient.post(MOCK_PATH, mockResponseData, ErrorResponse.class, headers));
+                () ->
+                        httpClient.post(
+                                MOCK_PATH,
+                                mockResponseData,
+                                ErrorResponse.class,
+                                restAuthFunction));
     }
 
     @Test
     public void testDeleteSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
-        assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, headers));
+        assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, restAuthFunction));
     }
 
     @Test
     public void testDeleteFail() {
         server.enqueueResponse(errorResponseStr, 400);
-        assertThrows(BadRequestException.class, () -> httpClient.delete(MOCK_PATH, headers));
+        assertThrows(
+                BadRequestException.class, () -> httpClient.delete(MOCK_PATH, restAuthFunction));
     }
 
     @Test
@@ -124,6 +140,22 @@ public class HttpClientTest {
                                 server.getBaseUrl(), Duration.ofSeconds(30), 1, 10, 2));
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 200);
-        assertDoesNotThrow(() -> httpClient.get(MOCK_PATH, MockRESTData.class, headers));
+        assertDoesNotThrow(() -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+    }
+
+    @Test
+    public void testParsePath() {
+        assertEquals(
+                Pair.of("/api/v1/tables", Collections.emptyMap()),
+                HttpClient.parsePath("/api/v1/tables"));
+        assertEquals(
+                Pair.of("/api/v1/tables/my_table$schemas", Collections.emptyMap()),
+                HttpClient.parsePath("/api/v1/tables/my_table$schemas"));
+        assertEquals(
+                Pair.of("/api/v1/tables", ImmutableMap.of("pageSize", "10", "pageNum", "1")),
+                HttpClient.parsePath("/api/v1/tables?pageSize=10&pageNum=1"));
+        assertEquals(
+                Pair.of("/api/v1/tables", ImmutableMap.of("tableName", "t1,t2")),
+                HttpClient.parsePath("/api/v1/tables?tableName=t1,t2"));
     }
 }

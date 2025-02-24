@@ -28,6 +28,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
@@ -112,7 +113,8 @@ public class RESTCatalogServer {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
-                String token = request.getHeaders().get("Authorization");
+                String token =
+                        request.getHeaders().get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY);
                 RESTResponse response;
                 try {
                     if (!("Bearer " + authToken).equals(token)) {
@@ -591,10 +593,12 @@ public class RESTCatalogServer {
 
     private static String getConfigBody(String warehouseStr) {
         return String.format(
-                "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\"}}",
+                "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\", \"%s\": \"%s\"}}",
                 RESTCatalogInternalOptions.PREFIX.key(),
                 PREFIX,
                 CatalogOptions.WAREHOUSE.key(),
-                warehouseStr);
+                warehouseStr,
+                "header.test-header",
+                "test-value");
     }
 }

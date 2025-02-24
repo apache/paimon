@@ -18,29 +18,27 @@
 
 package org.apache.paimon.rest.auth;
 
-import java.util.Map;
-import java.util.Optional;
+/** AuthProviderEnum. */
+public enum AuthProviderEnum {
+    BEAR("bear"),
+    DLF("dlf");
 
-/** Authentication provider. */
-public interface AuthProvider {
+    private final String identifier;
 
-    Map<String, String> header(Map<String, String> baseHeader, RESTAuthParameter restAuthParameter);
-
-    boolean refresh();
-
-    default boolean keepRefreshed() {
-        return false;
+    AuthProviderEnum(String identifier) {
+        this.identifier = identifier;
     }
 
-    default boolean willSoonExpire() {
-        return false;
+    public String identifier() {
+        return identifier;
     }
 
-    default Optional<Long> expiresAtMillis() {
-        return Optional.empty();
-    }
-
-    default Optional<Long> tokenRefreshInMills() {
-        return Optional.empty();
+    public static AuthProviderEnum fromString(String identifier) {
+        for (AuthProviderEnum authProviderEnum : AuthProviderEnum.values()) {
+            if (authProviderEnum.identifier.equals(identifier)) {
+                return authProviderEnum;
+            }
+        }
+        throw new IllegalArgumentException("Unknown AuthProvider type: " + identifier);
     }
 }

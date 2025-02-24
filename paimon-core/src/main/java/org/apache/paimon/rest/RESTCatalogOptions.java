@@ -60,23 +60,49 @@ public class RESTCatalogOptions {
             ConfigOptions.key("token")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("REST Catalog auth token.");
+                    .withDescription("REST Catalog auth bear token.");
 
-    public static final ConfigOption<Duration> TOKEN_EXPIRATION_TIME =
-            ConfigOptions.key("token.expiration-time")
+    public static final ConfigOption<Duration> TOKEN_REFRESH_TIME =
+            ConfigOptions.key("token.refresh-time")
                     .durationType()
                     .defaultValue(Duration.ofHours(1))
-                    .withDescription(
-                            "REST Catalog auth token expires time.The token generates system refresh frequency is t1,"
-                                    + " the token expires time is t2, we need to guarantee that t2 > t1,"
-                                    + " the token validity time is [t2 - t1, t2],"
-                                    + " and the expires time defined here needs to be less than (t2 - t1)");
+                    .withDescription("REST Catalog auth token refresh time.");
 
-    public static final ConfigOption<String> TOKEN_PROVIDER_PATH =
-            ConfigOptions.key("token.provider.path")
+    public static final ConfigOption<String> TOKEN_PROVIDER =
+            ConfigOptions.key("token.provider")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("REST Catalog auth token provider path.");
+                    .withDescription("REST Catalog auth token provider.");
+
+    public static final ConfigOption<String> DLF_TOKEN_PATH =
+            ConfigOptions.key("dlf.token-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF token file path.");
+
+    public static final ConfigOption<String> DLF_ACCESS_KEY_ID =
+            ConfigOptions.key("dlf.accessKeyId")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF access key id");
+
+    public static final ConfigOption<String> DLF_ACCESS_KEY_SECRET =
+            ConfigOptions.key("dlf.accessKeySecret")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF access key secret");
+
+    public static final ConfigOption<String> DLF_SECURITY_TOKEN =
+            ConfigOptions.key("dlf.securityToken")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF security token");
+
+    public static final ConfigOption<String> DLF_ROLE_SESSION_NAME =
+            ConfigOptions.key("dlf.roleSessionName")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF role session name");
 
     public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
             ConfigOptions.key("data-token.enabled")
