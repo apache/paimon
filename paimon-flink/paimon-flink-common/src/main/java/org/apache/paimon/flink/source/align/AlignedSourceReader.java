@@ -29,9 +29,6 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.flink.api.connector.source.ExternallyInducedSourceReader;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SourceReaderContext;
-import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
-import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
@@ -46,9 +43,6 @@ import java.util.Optional;
 public class AlignedSourceReader extends FileStoreSourceReader
         implements ExternallyInducedSourceReader<RowData, FileStoreSourceSplit> {
 
-    private final FutureCompletingBlockingQueue<
-                    RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>>
-            elementsQueue;
     private Long nextCheckpointId;
 
     public AlignedSourceReader(
@@ -57,11 +51,8 @@ public class AlignedSourceReader extends FileStoreSourceReader
             FileStoreSourceReaderMetrics metrics,
             IOManager ioManager,
             @Nullable Long limit,
-            FutureCompletingBlockingQueue<RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>>
-                    elementsQueue,
             @Nullable NestedProjectedRowData rowData) {
         super(readerContext, tableRead, metrics, ioManager, limit, rowData);
-        this.elementsQueue = elementsQueue;
         this.nextCheckpointId = null;
     }
 
@@ -69,7 +60,6 @@ public class AlignedSourceReader extends FileStoreSourceReader
     public void handleSourceEvents(SourceEvent sourceEvent) {
         if (sourceEvent instanceof CheckpointEvent) {
             nextCheckpointId = ((CheckpointEvent) sourceEvent).getCheckpointId();
-            elementsQueue.notifyAvailable();
         } else {
             super.handleSourceEvents(sourceEvent);
         }

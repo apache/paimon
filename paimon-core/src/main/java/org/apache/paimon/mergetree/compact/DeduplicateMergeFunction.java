@@ -58,6 +58,11 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
         return latestKv;
     }
 
+    @Override
+    public boolean requireCopy() {
+        return false;
+    }
+
     public static MergeFunctionFactory<KeyValue> factory() {
         return new Factory(false);
     }

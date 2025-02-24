@@ -46,7 +46,6 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -252,6 +251,7 @@ public class RESTCatalogController {
         return new GetTableResponse(
                 UUID.randomUUID().toString(),
                 "",
+                false,
                 1,
                 new org.apache.paimon.schema.Schema(
                         ImmutableList.of(),
@@ -554,10 +554,11 @@ public class RESTCatalogController {
                         new DataField(1, "f1", new IntType()));
         ViewSchema schema =
                 new ViewSchema(
-                        new RowType(fields),
-                        Collections.singletonMap("pt", "1"),
+                        fields,
+                        "select * from t1",
+                        Collections.emptyMap(),
                         "comment",
-                        "select * from t1");
+                        Collections.singletonMap("pt", "1"));
         return new GetViewResponse("id", "name", schema);
     }
 

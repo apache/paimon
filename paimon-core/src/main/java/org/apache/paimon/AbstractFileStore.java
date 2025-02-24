@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.PartitionExpire;
@@ -257,6 +258,14 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         return schemaManager.mergeSchema(rowType, allowExplicitCast);
     }
 
+    protected abstract FileStoreScan newScan(ScanType scanType);
+
+    protected enum ScanType {
+        FOR_READ,
+        FOR_WRITE,
+        FOR_COMMIT
+    }
+
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
         return newCommit(commitUser, Collections.emptyList());
@@ -283,7 +292,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory(),
                 manifestListFactory(),
                 indexManifestFileFactory(),
-                newScan(),
+                newScan(ScanType.FOR_COMMIT),
                 options.bucket(),
                 options.manifestTargetSize(),
                 options.manifestFullCompactionThresholdSize(),
@@ -363,7 +372,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 partitionExpireTime,
                 options.partitionExpireCheckInterval(),
                 PartitionExpireStrategy.createPartitionExpireStrategy(options, partitionType()),
-                newScan(),
+                newScan(ScanType.FOR_COMMIT),
                 newCommit(commitUser),
                 partitionHandler,
                 options.endInputCheckPartitionExpire(),

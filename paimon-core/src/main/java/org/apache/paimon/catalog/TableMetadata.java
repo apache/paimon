@@ -26,15 +26,21 @@ import javax.annotation.Nullable;
 public class TableMetadata {
 
     private final TableSchema schema;
+    private final boolean isExternal;
     @Nullable private final String uuid;
 
-    public TableMetadata(TableSchema schema, @Nullable String uuid) {
+    public TableMetadata(TableSchema schema, boolean isExternal, @Nullable String uuid) {
         this.schema = schema;
+        this.isExternal = isExternal;
         this.uuid = uuid;
     }
 
     public TableSchema schema() {
         return schema;
+    }
+
+    public boolean isExternal() {
+        return isExternal;
     }
 
     @Nullable

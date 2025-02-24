@@ -198,11 +198,11 @@ To use this feature through `flink run`, run the following shell command.
     kafka_sync_database \
     --warehouse <warehouse-path> \
     --database <database-name> \
-    [--table_mapping <table-name>=<paimon-table-name>] \
+    [--table_mapping <table-name>=<paimon-table-name1> [--table_mapping <table-name2>=<paimon-table-name2> ...]] \
     [--table_prefix <paimon-table-prefix>] \
     [--table_suffix <paimon-table-suffix>] \
-    [--table_prefix_db <paimon-table-prefix-by-db>] \
-    [--table_suffix_db <paimon-table-suffix-by-db>] \
+    [--table_prefix_db <db-name1>=<table-prefix1> [--table_prefix_db <db-name2>=<table-prefix2> ...]] \
+    [--table_suffix_db <db-name1>=<table-suffix1> [--table_suffix_db <db-name2>=<table-suffix2> ...]] \
     [--including_tables <table-name|name-regular-expr>] \
     [--excluding_tables <table-name|name-regular-expr>] \
     [--including_dbs <database-name|name-regular-expr>] \

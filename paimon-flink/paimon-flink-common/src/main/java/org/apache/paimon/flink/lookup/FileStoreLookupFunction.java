@@ -30,7 +30,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
@@ -79,7 +78,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreLookupFunction.class);
 
-    private final Table table;
+    private final FileStoreTable table;
     @Nullable private final PartitionLoader partitionLoader;
     private final List<String> projectFields;
     private final List<String> joinKeys;
@@ -176,26 +175,19 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 projectFields,
                 joinKeys);
 
-        FileStoreTable storeTable = (FileStoreTable) table;
-
         LOG.info("Creating lookup table for {}.", table.name());
         if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
-            if (isRemoteServiceAvailable(storeTable)) {
+            if (isRemoteServiceAvailable(table)) {
                 this.lookupTable =
-                        PrimaryKeyPartialLookupTable.createRemoteTable(
-                                storeTable, projection, joinKeys);
+                        PrimaryKeyPartialLookupTable.createRemoteTable(table, projection, joinKeys);
                 LOG.info(
                         "Remote service is available. Created PrimaryKeyPartialLookupTable with remote service.");
             } else {
                 try {
                     this.lookupTable =
                             PrimaryKeyPartialLookupTable.createLocalTable(
-                                    storeTable,
-                                    projection,
-                                    path,
-                                    joinKeys,
-                                    getRequireCachedBucketIds());
+                                    table, projection, path, joinKeys, getRequireCachedBucketIds());
                     LOG.info(
                             "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
                 } catch (UnsupportedOperationException ignore) {
@@ -210,7 +202,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         if (lookupTable == null) {
             FullCacheLookupTable.Context context =
                     new FullCacheLookupTable.Context(
-                            storeTable,
+                            table,
                             projection,
                             predicate,
                             createProjectedPredicate(projection),

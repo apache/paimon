@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
@@ -34,12 +35,14 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FakeTicker;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,9 +50,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -384,8 +389,36 @@ class CachingCatalogTest extends CatalogTestBase {
         catalog.dropTable(tableIdent, true);
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
 
-        // write
+        // normal table
         Table table = catalog.getTable(tableIdent);
+        writeTableForTestManifestCache(table);
+        readTableForTestManifestCache(catalog, tableIdent);
+
+        // fallback branch table
+        tableIdent = new Identifier("db", "fallback_t");
+        Schema fallbackSchema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING()),
+                                new DataField(2, "col2", DataTypes.STRING())),
+                        Collections.singletonList("col2"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        catalog.createTable(tableIdent, fallbackSchema, false);
+        table = catalog.getTable(tableIdent);
+        table.createBranch("fallback");
+        catalog.alterTable(
+                tableIdent,
+                SchemaChange.setOption(CoreOptions.SCAN_FALLBACK_BRANCH.key(), "fallback"),
+                false);
+        table = catalog.getTable(new Identifier("db", "fallback_t$branch_fallback"));
+        writeTableForTestManifestCache(table);
+        readTableForTestManifestCache(catalog, tableIdent);
+    }
+
+    private static void writeTableForTestManifestCache(Table table) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
@@ -393,8 +426,11 @@ class CachingCatalogTest extends CatalogTestBase {
             write.write(GenericRow.of(2, fromString("2"), fromString("2")));
             commit.commit(write.prepareCommit());
         }
+    }
 
-        // repeat read
+    private void readTableForTestManifestCache(Catalog catalog, Identifier tableIdent)
+            throws Catalog.TableNotExistException, IOException {
+        Table table;
         for (int i = 0; i < 5; i++) {
             // test copy too
             table = catalog.getTable(tableIdent).copy(Collections.singletonMap("a", "b"));

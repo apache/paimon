@@ -19,19 +19,37 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
+import org.apache.paimon.flink.postpone.PostponeBucketCompactSplitSource;
+import org.apache.paimon.flink.postpone.RewritePostponeBucketCommittableOperator;
 import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
+import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
+import org.apache.paimon.flink.sink.FixedBucketSink;
+import org.apache.paimon.flink.sink.FlinkSinkBuilder;
+import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
+import org.apache.paimon.flink.sink.RowDataChannelComputer;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
@@ -40,8 +58,12 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -103,22 +125,23 @@ public class CompactAction extends TableActionBase {
 
     @Override
     public void build() throws Exception {
+        buildImpl();
+    }
+
+    private boolean buildImpl() throws Exception {
         ReadableConfig conf = env.getConfiguration();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        switch (fileStoreTable.bucketMode()) {
-            case BUCKET_UNAWARE:
-                {
-                    buildForUnawareBucketCompaction(env, fileStoreTable, isStreaming);
-                    break;
-                }
-            case HASH_FIXED:
-            case HASH_DYNAMIC:
-            default:
-                {
-                    buildForTraditionalCompaction(env, fileStoreTable, isStreaming);
-                }
+
+        if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
+            return buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
+        } else if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
+            buildForUnawareBucketCompaction(env, fileStoreTable, isStreaming);
+            return true;
+        } else {
+            buildForTraditionalCompaction(env, fileStoreTable, isStreaming);
+            return true;
         }
     }
 
@@ -207,9 +230,114 @@ public class CompactAction extends TableActionBase {
         return predicate;
     }
 
+    private boolean buildForPostponeBucketCompaction(
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
+        Preconditions.checkArgument(
+                !isStreaming, "Postpone bucket compaction currently only supports batch mode");
+        Preconditions.checkArgument(
+                partitions == null,
+                "Postpone bucket compaction currently does not support specifying partitions");
+        Preconditions.checkArgument(
+                whereSql == null,
+                "Postpone bucket compaction currently does not support predicates");
+
+        // change bucket to a positive value, so we can scan files from the bucket = -2 directory
+        Map<String, String> bucketOptions = new HashMap<>(table.options());
+        bucketOptions.put(CoreOptions.BUCKET.key(), "1");
+        FileStoreTable fileStoreTable = table.copy(table.schema().copy(bucketOptions));
+
+        List<BinaryRow> partitions =
+                fileStoreTable
+                        .newScan()
+                        .withBucketFilter(new PostponeBucketFilter())
+                        .listPartitions();
+        if (partitions.isEmpty()) {
+            return false;
+        }
+
+        Options options = new Options(fileStoreTable.options());
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        fileStoreTable.coreOptions().partitionDefaultName(),
+                        fileStoreTable.rowType(),
+                        fileStoreTable.partitionKeys().toArray(new String[0]),
+                        fileStoreTable.coreOptions().legacyPartitionName());
+        for (BinaryRow partition : partitions) {
+            int bucketNum = options.get(FlinkConnectorOptions.POSTPONE_DEFAULT_BUCKET_NUM);
+
+            Iterator<ManifestEntry> it =
+                    fileStoreTable
+                            .newSnapshotReader()
+                            .withPartitionFilter(Collections.singletonList(partition))
+                            .withBucketFilter(new NormalBucketFilter())
+                            .readFileIterator();
+            if (it.hasNext()) {
+                bucketNum = it.next().totalBuckets();
+            }
+
+            bucketOptions = new HashMap<>(table.options());
+            bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
+            FileStoreTable realTable = table.copy(table.schema().copy(bucketOptions));
+
+            LinkedHashMap<String, String> partitionSpec =
+                    partitionComputer.generatePartValues(partition);
+            Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
+                    PostponeBucketCompactSplitSource.buildSource(
+                            env,
+                            realTable.fullName() + partitionSpec,
+                            realTable.rowType(),
+                            realTable
+                                    .newReadBuilder()
+                                    .withPartitionFilter(partitionSpec)
+                                    .withBucketFilter(new PostponeBucketFilter()),
+                            options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
+
+            DataStream<InternalRow> partitioned =
+                    FlinkStreamPartitioner.partition(
+                            FlinkSinkBuilder.mapToInternalRow(
+                                    sourcePair.getLeft(), realTable.rowType()),
+                            new RowDataChannelComputer(realTable.schema(), false),
+                            null);
+            FixedBucketSink sink = new FixedBucketSink(realTable, null, null);
+            String commitUser =
+                    CoreOptions.createCommitUser(realTable.coreOptions().toConfiguration());
+            DataStream<Committable> written =
+                    sink.doWrite(partitioned, commitUser, partitioned.getParallelism())
+                            .forward()
+                            .transform(
+                                    "Rewrite compact committable",
+                                    new CommittableTypeInfo(),
+                                    new RewritePostponeBucketCommittableOperator(realTable));
+            sink.doCommit(written.union(sourcePair.getRight()), commitUser);
+        }
+
+        return true;
+    }
+
+    private static class PostponeBucketFilter implements Filter<Integer>, Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean test(Integer bucket) {
+            return bucket == BucketMode.POSTPONE_BUCKET;
+        }
+    }
+
+    private static class NormalBucketFilter implements Filter<Integer>, Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean test(Integer bucket) {
+            return bucket >= 0;
+        }
+    }
+
     @Override
     public void run() throws Exception {
-        build();
-        execute("Compact job");
+        if (buildImpl()) {
+            execute("Compact job : " + table.fullName());
+        }
     }
 }

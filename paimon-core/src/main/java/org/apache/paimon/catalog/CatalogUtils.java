@@ -172,8 +172,8 @@ public class CatalogUtils {
     public static Table loadTable(
             Catalog catalog,
             Identifier identifier,
-            Function<Path, FileIO> dataFileIO,
-            Function<Path, FileIO> objectFileIO,
+            Function<Path, FileIO> internalFileIO,
+            Function<Path, FileIO> externalFileIO,
             TableMetadata.Loader metadataLoader,
             SnapshotCommit.Factory commitFactory)
             throws Catalog.TableNotExistException {
@@ -184,8 +184,11 @@ public class CatalogUtils {
         TableMetadata metadata = metadataLoader.load(identifier);
         TableSchema schema = metadata.schema();
         CoreOptions options = CoreOptions.fromMap(schema.options());
+
+        Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
+
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema);
+            return toFormatTable(identifier, schema, dataFileIO);
         }
 
         CatalogEnvironment catalogEnv =
@@ -196,7 +199,7 @@ public class CatalogUtils {
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
 
         if (options.type() == TableType.OBJECT_TABLE) {
-            table = toObjectTable(objectFileIO, table);
+            table = toObjectTable(externalFileIO, table);
         }
 
         if (identifier.isSystemTable()) {
@@ -249,7 +252,8 @@ public class CatalogUtils {
         return table;
     }
 
-    private static FormatTable toFormatTable(Identifier identifier, TableSchema schema) {
+    private static FormatTable toFormatTable(
+            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -258,6 +262,7 @@ public class CatalogUtils {
                                 CoreOptions.FILE_FORMAT.defaultValue()));
         String location = options.get(CoreOptions.PATH.key());
         return FormatTable.builder()
+                .fileIO(fileIO.apply(new Path(location)))
                 .identifier(identifier)
                 .rowType(schema.logicalRowType())
                 .partitionKeys(schema.partitionKeys())

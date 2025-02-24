@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
@@ -116,6 +117,11 @@ public class ManifestsTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("file_name");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return dataTable.fileIO();
     }
 
     @Override

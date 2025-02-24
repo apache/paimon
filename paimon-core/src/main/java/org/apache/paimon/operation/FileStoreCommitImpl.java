@@ -775,12 +775,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
         List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
         if (latestSnapshot != null) {
-            List<ManifestEntry> currentEntries =
-                    scan.withSnapshot(latestSnapshot)
-                            .withPartitionFilter(partitionFilter)
-                            .withKind(ScanMode.ALL)
-                            .plan()
-                            .files();
+            scan.withSnapshot(latestSnapshot)
+                    .withPartitionFilter(partitionFilter)
+                    .withKind(ScanMode.ALL);
+            if (numBucket != BucketMode.POSTPONE_BUCKET) {
+                // bucket = -2 can only be overwritten in postpone bucket tables
+                scan.withBucketFilter(bucket -> bucket >= 0);
+            }
+            List<ManifestEntry> currentEntries = scan.plan().files();
             for (ManifestEntry entry : currentEntries) {
                 changesWithOverwrite.add(
                         new ManifestEntry(

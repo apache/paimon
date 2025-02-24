@@ -21,7 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.crosspartition.{GlobalIndexAssigner, KeyPartOrRow}
 import org.apache.paimon.data.{BinaryRow, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
 import org.apache.paimon.disk.IOManager
-import org.apache.paimon.index.HashBucketAssigner
+import org.apache.paimon.index.{HashBucketAssigner, PartitionIndex}
 import org.apache.paimon.spark.{DataConverter, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.util.EncoderUtils
@@ -111,7 +111,8 @@ case class DynamicBucketProcessor(
       numSparkPartitions,
       numAssigners,
       TaskContext.getPartitionId(),
-      targetBucketRowNumber
+      targetBucketRowNumber,
+      fileStoreTable.coreOptions.dynamicBucketMaxBuckets
     )
 
     new Iterator[Row]() {

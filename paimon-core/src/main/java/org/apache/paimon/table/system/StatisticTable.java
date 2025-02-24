@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyRecordReader;
@@ -91,6 +92,11 @@ public class StatisticTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("snapshot_id");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return dataTable.fileIO();
     }
 
     @Override

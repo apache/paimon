@@ -483,4 +483,9 @@ public class HiveCatalogTest extends CatalogTestBase {
     protected boolean supportsAlterDatabase() {
         return true;
     }
+
+    @Override
+    protected boolean supportsViewDialects() {
+        return false;
+    }
 }
