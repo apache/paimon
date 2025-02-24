@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.roaringbitmap.RoaringBitmap;
 
+import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -72,6 +73,21 @@ public class RoaringBitmapBenchmark {
                     try (LocalFileIO.LocalSeekableInputStream seekableStream =
                                     new LocalFileIO.LocalSeekableInputStream(file);
                             DataInputStream input = new DataInputStream(seekableStream)) {
+                        new RoaringBitmap().deserialize(input);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+        benchmark.addCase(
+                "deserialize(DataInputStream(BufferedInputStream))",
+                10,
+                () -> {
+                    try {
+                        LocalFileIO.LocalSeekableInputStream seekableStream =
+                                new LocalFileIO.LocalSeekableInputStream(file);
+                        DataInputStream input =
+                                new DataInputStream(new BufferedInputStream(seekableStream));
                         new RoaringBitmap().deserialize(input);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
