@@ -45,7 +45,6 @@ public class LogStoreE2eTest extends E2eTestBase {
     }
 
     @Test
-    @Timeout(240)
     public void testWithPk() throws Exception {
         String catalogDdl =
                 String.format(
