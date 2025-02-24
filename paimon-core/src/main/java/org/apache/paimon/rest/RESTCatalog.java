@@ -106,11 +106,10 @@ public class RESTCatalog implements Catalog {
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
-    private final AuthSession catalogAuth;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
     private final FileIO fileIO;
-    private RESTAuthFunction restAuthFunction;
+    private final RESTAuthFunction restAuthFunction;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
 
@@ -120,7 +119,7 @@ public class RESTCatalog implements Catalog {
 
     public RESTCatalog(CatalogContext context, boolean configRequired) {
         this.client = new HttpClient(context.options());
-        this.catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
+        AuthSession catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
         Options options = context.options();
         Map<String, String> baseHeaders = Collections.emptyMap();
         if (configRequired) {

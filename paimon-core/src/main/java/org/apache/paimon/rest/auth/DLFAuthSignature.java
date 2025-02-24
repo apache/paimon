@@ -28,6 +28,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -63,7 +64,7 @@ public class DLFAuthSignature {
                     DLF_SECURITY_TOKEN_HEADER_KEY.toLowerCase());
     // must be ordered by alphabetical
     private static final List<String> ADDITIONAL_HEADERS =
-            Arrays.asList(DLF_HOST_HEADER_KEY.toLowerCase());
+            Collections.singletonList(DLF_HOST_HEADER_KEY.toLowerCase());
 
     public static String getAuthorization(
             RESTAuthParameter restAuthParameter,
@@ -87,30 +88,27 @@ public class DLFAuthSignature {
         byte[] signingKey = hmacSha256(dateRegionServiceKey, REQUEST_TYPE);
         byte[] result = hmacSha256(signingKey, stringToSign);
         String signature = hexEncode(result);
-        String authorization =
-                Joiner.on(",")
-                        .join(
-                                String.format(
-                                        "%s Credential=%s/%s/%s/%s/%s",
-                                        SIGNATURE_ALGORITHM,
-                                        dlfToken.getAccessKeyId(),
-                                        date,
-                                        region,
-                                        PRODUCT,
-                                        REQUEST_TYPE),
-                                String.format(
-                                        "%s=%s",
-                                        ADDITIONAL_HEADERS_KEY,
-                                        Joiner.on(",").join(ADDITIONAL_HEADERS)),
-                                String.format("%s=%s", SIGNATURE_KEY, signature));
-        return authorization;
+        return Joiner.on(",")
+                .join(
+                        String.format(
+                                "%s Credential=%s/%s/%s/%s/%s",
+                                SIGNATURE_ALGORITHM,
+                                dlfToken.getAccessKeyId(),
+                                date,
+                                region,
+                                PRODUCT,
+                                REQUEST_TYPE),
+                        String.format(
+                                "%s=%s",
+                                ADDITIONAL_HEADERS_KEY, Joiner.on(",").join(ADDITIONAL_HEADERS)),
+                        String.format("%s=%s", SIGNATURE_KEY, signature));
     }
 
     public static String md5(String raw) throws Exception {
         MessageDigest messageDigest = MessageDigest.getInstance("MD5");
-        messageDigest.update(raw.getBytes(UTF_8.name()));
+        messageDigest.update(raw.getBytes(UTF_8));
         byte[] md5 = messageDigest.digest();
-        return new String(Base64.getEncoder().encodeToString(md5));
+        return Base64.getEncoder().encodeToString(md5);
     }
 
     private static byte[] hmacSha256(byte[] key, String data) {
@@ -118,8 +116,7 @@ public class DLFAuthSignature {
             SecretKeySpec secretKeySpec = new SecretKeySpec(key, HMAC_SHA256);
             Mac mac = Mac.getInstance(HMAC_SHA256);
             mac.init(secretKeySpec);
-            byte[] hmacBytes = mac.doFinal(data.getBytes());
-            return hmacBytes;
+            return mac.doFinal(data.getBytes());
         } catch (Exception e) {
             throw new RuntimeException("Failed to calculate HMAC-SHA256", e);
         }
@@ -181,7 +178,7 @@ public class DLFAuthSignature {
 
     private static String sha256Hex(String raw) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] hash = digest.digest(raw.getBytes(UTF_8.name()));
+        byte[] hash = digest.digest(raw.getBytes(UTF_8));
         return hexEncode(hash);
     }
 
