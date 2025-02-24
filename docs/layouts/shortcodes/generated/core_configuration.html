@@ -147,6 +147,24 @@ under the License.
             <td>Specifies the commit user prefix.</td>
         </tr>
         <tr>
+            <td><h5>compaction.lookup-delay.l0-file-trigger</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>The L0 file trigger for a delayed lookup compaction. A delayed lookup compaction will only be performed when L0 files reach this config value.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.lookup-delay.partition-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The threshold of partitioned pk table to perform delayed lookup compaction. Delayed lookup compaction can be configured with a less frequent compaction strategy to sacrifice timeliness for overall resource usage saving. This option is only valid for a partitioned pk table when CoreOptions#needLookup() is true.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.lookup-delay.stop-trigger</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>The stop trigger for a delayed lookup compaction. For every stop trigger, a forced lookup compaction will be performed to flush L0 files to higher level.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>

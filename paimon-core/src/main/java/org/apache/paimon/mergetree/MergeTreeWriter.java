@@ -142,7 +142,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @VisibleForTesting
-    CompactManager compactManager() {
+    public CompactManager compactManager() {
         return compactManager;
     }
 

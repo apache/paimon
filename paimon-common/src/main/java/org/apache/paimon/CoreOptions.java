@@ -627,6 +627,33 @@ public class CoreOptions implements Serializable {
                                             text("Default value of Bucketed Append Table is '5'."))
                                     .build());
 
+    public static final ConfigOption<Duration> LOOKUP_DELAY_PARTITION_THRESHOLD =
+            key("compaction.lookup-delay.partition-threshold")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The threshold of partitioned pk table to perform delayed lookup compaction. "
+                                    + "Delayed lookup compaction can be configured with a less frequent "
+                                    + "compaction strategy to sacrifice timeliness for overall resource usage saving. "
+                                    + "This option is only valid for a partitioned pk table when "
+                                    + "CoreOptions#needLookup() is true.");
+
+    public static final ConfigOption<Integer> LOOKUP_DELAY_L0_FILE_TRIGGER =
+            key("compaction.lookup-delay.l0-file-trigger")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "The L0 file trigger for a delayed lookup compaction. A delayed lookup compaction "
+                                    + "will only be performed when L0 files reach this config value.");
+
+    public static final ConfigOption<Integer> LOOKUP_DELAY_STOP_TRIGGER =
+            key("compaction.lookup-delay.stop-trigger")
+                    .intType()
+                    .defaultValue(LOOKUP_DELAY_L0_FILE_TRIGGER.defaultValue() * 2)
+                    .withDescription(
+                            "The stop trigger for a delayed lookup compaction. For every stop trigger, "
+                                    + "a forced lookup compaction will be performed to flush L0 files to higher level.");
+
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
                     .enumType(ChangelogProducer.class)
@@ -2041,6 +2068,19 @@ public class CoreOptions implements Serializable {
     @Nullable
     public Duration optimizedCompactionInterval() {
         return options.get(COMPACTION_OPTIMIZATION_INTERVAL);
+    }
+
+    @Nullable
+    public Duration lookupDelayPartitionThreshold() {
+        return options.get(LOOKUP_DELAY_PARTITION_THRESHOLD);
+    }
+
+    public int lookupDelayL0FileTrigger() {
+        return options.get(LOOKUP_DELAY_L0_FILE_TRIGGER);
+    }
+
+    public int lookupDelayStopTrigger() {
+        return options.get(LOOKUP_DELAY_STOP_TRIGGER);
     }
 
     public int numSortedRunStopTrigger() {

@@ -142,20 +142,36 @@ public abstract class FlinkSink<T> implements Serializable {
             }
         }
 
-        if (coreOptions.needLookup() && !coreOptions.prepareCommitWaitCompaction()) {
-            return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
-                assertNoSinkMaterializer.run();
-                return new AsyncLookupSinkWrite(
-                        table,
-                        commitUser,
-                        state,
-                        ioManager,
-                        ignorePreviousFiles,
-                        waitCompaction,
-                        isStreaming,
-                        memoryPool,
-                        metricGroup);
-            };
+        if (coreOptions.needLookup()) {
+            if (coreOptions.lookupDelayPartitionThreshold() != null) {
+                return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
+                    assertNoSinkMaterializer.run();
+                    return new DelayedCompactStoreSinkWrite(
+                            table,
+                            commitUser,
+                            state,
+                            ioManager,
+                            ignorePreviousFiles,
+                            waitCompaction,
+                            isStreaming,
+                            memoryPool,
+                            metricGroup);
+                };
+            } else if (!coreOptions.prepareCommitWaitCompaction()) {
+                return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
+                    assertNoSinkMaterializer.run();
+                    return new AsyncLookupSinkWrite(
+                            table,
+                            commitUser,
+                            state,
+                            ioManager,
+                            ignorePreviousFiles,
+                            waitCompaction,
+                            isStreaming,
+                            memoryPool,
+                            metricGroup);
+                };
+            }
         }
 
         return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {

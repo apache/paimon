@@ -217,7 +217,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public boolean hasDelayedCompact() {
-        return compactManager.hasDelayedCompact();
+        return false;
     }
 
     @VisibleForTesting
