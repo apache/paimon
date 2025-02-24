@@ -103,32 +103,35 @@ public class DLFAuthProvider implements AuthProvider {
             String dateTime = now.format(AUTH_DATE_TIME_FORMATTER);
             Map<String, String> signHeaders =
                     generateSignHeaders(
-                            restAuthParameter.host(), restAuthParameter.data(), dateTime);
+                            restAuthParameter.host(),
+                            restAuthParameter.data(),
+                            dateTime,
+                            token.getSecurityToken());
             String authorization =
                     DLFAuthSignature.getAuthorization(
                             restAuthParameter, token, region, signHeaders, dateTime, date);
             Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
             headersWithAuth.putAll(signHeaders);
             headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
-            headersWithAuth.put(DLF_AUTH_VERSION_HEADER_KEY, DLFAuthSignature.VERSION);
-            if (token.getSecurityToken() != null) {
-                headersWithAuth.put(DLF_SECURITY_TOKEN_HEADER_KEY, token.getSecurityToken());
-            }
             return headersWithAuth;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    public static Map<String, String> generateSignHeaders(String host, String data, String dateTime)
-            throws Exception {
+    public static Map<String, String> generateSignHeaders(
+            String host, String data, String dateTime, String securityToken) throws Exception {
         Map<String, String> signHeaders = new HashMap<>();
         signHeaders.put(DLF_DATE_HEADER_KEY, dateTime);
         signHeaders.put(DLF_HOST_HEADER_KEY, host);
         signHeaders.put(DLF_CONTENT_SHA56_HEADER_KEY, DLF_CONTENT_SHA56_VALUE);
+        signHeaders.put(DLF_AUTH_VERSION_HEADER_KEY, DLFAuthSignature.VERSION);
         if (data != null && !data.isEmpty()) {
             signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE.toString());
             signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, DLFAuthSignature.md5(data));
+        }
+        if (securityToken != null) {
+            signHeaders.put(DLF_SECURITY_TOKEN_HEADER_KEY, securityToken);
         }
         return signHeaders;
     }

@@ -33,10 +33,13 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_AUTH_VERSION_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_MD5_HEADER_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_TYPE_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_DATE_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_HOST_HEADER_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY;
 
 /** generate authorization for <b>Ali CLoud</b> DLF. */
 public class DLFAuthSignature {
@@ -54,7 +57,10 @@ public class DLFAuthSignature {
             Arrays.asList(
                     DLF_CONTENT_MD5_HEADER_KEY.toLowerCase(),
                     DLF_CONTENT_TYPE_KEY.toLowerCase(),
-                    DLF_DATE_HEADER_KEY.toLowerCase());
+                    DLF_CONTENT_SHA56_HEADER_KEY.toLowerCase(),
+                    DLF_DATE_HEADER_KEY.toLowerCase(),
+                    DLF_AUTH_VERSION_HEADER_KEY.toLowerCase(),
+                    DLF_SECURITY_TOKEN_HEADER_KEY.toLowerCase());
     // must be ordered by alphabetical
     private static final List<String> ADDITIONAL_HEADERS =
             Arrays.asList(DLF_HOST_HEADER_KEY.toLowerCase());
@@ -155,8 +161,7 @@ public class DLFAuthSignature {
         canonicalRequest = Joiner.on(NEW_LINE).join(canonicalRequest, additionalSignedHeaders);
         String contentSha56 =
                 headers.getOrDefault(
-                        DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY,
-                        DLFAuthProvider.DLF_CONTENT_SHA56_VALUE);
+                        DLF_CONTENT_SHA56_HEADER_KEY, DLFAuthProvider.DLF_CONTENT_SHA56_VALUE);
         return Joiner.on(NEW_LINE).join(canonicalRequest, contentSha56);
     }
 

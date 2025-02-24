@@ -47,12 +47,15 @@ public class DLFAuthSignatureTest {
         DLFToken token = new DLFToken("access-key-id", "access-key-secret", "securityToken", null);
         Map<String, String> signHeaders =
                 DLFAuthProvider.generateSignHeaders(
-                        restAuthParameter.host(), restAuthParameter.data(), dateTime);
+                        restAuthParameter.host(),
+                        restAuthParameter.data(),
+                        dateTime,
+                        "securityToken");
         String authorization =
                 DLFAuthSignature.getAuthorization(
                         restAuthParameter, token, region, signHeaders, dateTime, date);
         Assertions.assertEquals(
-                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,AdditionalHeaders=host,Signature=1e61cf9f4eb4ff0afed09165b808b0cb2c86bb1c71b1984a9dde010c42afea5e",
+                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,AdditionalHeaders=host,Signature=5afbdad67b52f17c47e202da2222bff9f5cf2f86c3ed973bb919a8216d086fb7",
                 authorization);
     }
 }
