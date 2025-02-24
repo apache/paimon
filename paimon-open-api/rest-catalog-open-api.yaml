@@ -1310,16 +1310,22 @@ components:
     ViewSchema:
       type: object
       properties:
-        rowType:
-          $ref: '#/components/schemas/RowType'
-        options:
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        query:
+          type: string
+        dialects:
           type: object
           additionalProperties:
             type: string
         comment:
           type: string
-        query:
-          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     Partition:
       type: object
       properties:

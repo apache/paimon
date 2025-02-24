@@ -749,7 +749,13 @@ public class HiveCatalog extends AbstractCatalog {
         RowType rowType = HiveTableUtils.createRowType(table);
         Map<String, String> options = new HashMap<>(table.getParameters());
         String comment = options.remove(COMMENT_PROP);
-        return new ViewImpl(identifier, rowType, table.getViewExpandedText(), comment, options);
+        return new ViewImpl(
+                identifier,
+                rowType.getFields(),
+                table.getViewExpandedText(),
+                Collections.emptyMap(),
+                comment,
+                options);
     }
 
     @Override

@@ -38,6 +38,14 @@ public interface View {
     /** Returns the view representation. */
     String query();
 
+    /** Returns the view representation for dialects. */
+    Map<String, String> dialects();
+
+    /** Returns the view representation for given dialect. */
+    default String query(String dialect) {
+        return dialects().getOrDefault(dialect, query());
+    }
+
     /** Optional comment of this view. */
     Optional<String> comment();
 
