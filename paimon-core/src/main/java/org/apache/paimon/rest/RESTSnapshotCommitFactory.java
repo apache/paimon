@@ -21,7 +21,10 @@ package org.apache.paimon.rest;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.utils.SnapshotManager;
+
+import java.util.List;
 
 /** Factory to create {@link SnapshotCommit} for REST Catalog. */
 public class RESTSnapshotCommitFactory implements SnapshotCommit.Factory {
@@ -39,11 +42,11 @@ public class RESTSnapshotCommitFactory implements SnapshotCommit.Factory {
         RESTCatalog catalog = loader.load();
         return new SnapshotCommit() {
             @Override
-            public boolean commit(Snapshot snapshot, String branch) {
+            public boolean commit(Snapshot snapshot, String branch, List<Partition> statistics) {
                 Identifier newIdentifier =
                         new Identifier(
                                 identifier.getDatabaseName(), identifier.getTableName(), branch);
-                return catalog.commitSnapshot(newIdentifier, snapshot);
+                return catalog.commitSnapshot(newIdentifier, snapshot, statistics);
             }
 
             @Override

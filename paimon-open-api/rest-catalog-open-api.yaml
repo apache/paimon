@@ -1186,6 +1186,10 @@ components:
           $ref: '#/components/schemas/Identifier'
         snapshot:
           $ref: '#/components/schemas/Snapshot'
+        statistics:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partition'
     Snapshot:
       type: object
       properties:

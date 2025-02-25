@@ -23,10 +23,12 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
@@ -49,7 +51,8 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
     }
 
     @Override
-    public boolean commit(Snapshot snapshot, String branch) throws Exception {
+    public boolean commit(Snapshot snapshot, String branch, List<Partition> statistics)
+            throws Exception {
         Path newSnapshotPath =
                 snapshotManager.branch().equals(branch)
                         ? snapshotManager.snapshotPath(snapshot.id())
