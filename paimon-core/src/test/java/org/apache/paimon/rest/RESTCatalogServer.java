@@ -352,8 +352,7 @@ public class RESTCatalogServer {
                         } else if (isTableRename) {
                             return renameTableApiHandler(catalog, request);
                         } else if (isTableCommit) {
-                            return commitTableApiHandler(
-                                    catalog, request, databaseName, resources[2]);
+                            return commitTableApiHandler(catalog, request);
                         } else if (isTable) {
                             String tableName = resources[2];
                             return tableApiHandler(catalog, request, databaseName, tableName);
@@ -476,13 +475,11 @@ public class RESTCatalogServer {
         return Optional.empty();
     }
 
-    private static MockResponse commitTableApiHandler(
-            Catalog catalog, RecordedRequest request, String databaseName, String tableName)
+    private static MockResponse commitTableApiHandler(Catalog catalog, RecordedRequest request)
             throws Exception {
         CommitTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
-        FileStoreTable table =
-                (FileStoreTable) catalog.getTable(Identifier.create(databaseName, tableName));
+        FileStoreTable table = (FileStoreTable) catalog.getTable(requestBody.getIdentifier());
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
         String branchName = requestBody.getIdentifier().getBranchName();
