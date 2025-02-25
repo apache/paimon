@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
@@ -53,6 +54,7 @@ import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -70,12 +72,13 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
-import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -83,16 +86,29 @@ public class RESTCatalogServer {
     private static final String PREFIX = "paimon";
     private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
 
-    private final Catalog catalog;
+    private final InMemoryCatalog catalog;
     private final Dispatcher dispatcher;
     private final MockWebServer server;
     private final String authToken;
+
+    public final Map<String, Database> databaseStore = new HashMap<>();
+    public final Map<String, TableSchema> tableSchemaStore = new HashMap<>();
+    public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
+    public final Map<String, View> viewStore = new HashMap<>();
+    public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
 
     public RESTCatalogServer(String warehouse, String initToken) {
         authToken = initToken;
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
-        this.catalog = TestRESTCatalog.create(CatalogContext.create(conf));
+        this.catalog =
+                InMemoryCatalog.create(
+                        CatalogContext.create(conf),
+                        databaseStore,
+                        tableSchemaStore,
+                        tableSnapshotStore,
+                        tablePartitionsStore,
+                        viewStore);
         this.dispatcher = initDispatcher(catalog, warehouse, authToken);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -111,7 +127,12 @@ public class RESTCatalogServer {
         server.shutdown();
     }
 
-    public static Dispatcher initDispatcher(Catalog catalog, String warehouse, String authToken) {
+    public void setTableSnapshot(Identifier identifier, Snapshot snapshot) {
+        tableSnapshotStore.put(identifier.getFullName(), snapshot);
+    }
+
+    public static Dispatcher initDispatcher(
+            InMemoryCatalog catalog, String warehouse, String authToken) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
@@ -250,7 +271,11 @@ public class RESTCatalogServer {
                                             OBJECT_MAPPER.writeValueAsString(
                                                     getTableTokenResponse));
                         } else if (isTableSnapshot) {
-                            if (!"my_snapshot_table".equals(resources[2])) {
+                            String tableName = resources[2];
+                            Optional<Snapshot> snapshotOptional =
+                                    catalog.loadSnapshot(
+                                            Identifier.create(databaseName, tableName));
+                            if (!snapshotOptional.isPresent()) {
                                 response =
                                         new ErrorResponse(
                                                 ErrorResponseResourceType.SNAPSHOT,
@@ -260,8 +285,7 @@ public class RESTCatalogServer {
                                 return mockResponse(response, 404);
                             }
                             GetTableSnapshotResponse getTableSnapshotResponse =
-                                    new GetTableSnapshotResponse(
-                                            createSnapshotWithMillis(10086, 100));
+                                    new GetTableSnapshotResponse(snapshotOptional.get());
                             return new MockResponse()
                                     .setResponseCode(200)
                                     .setBody(

@@ -50,6 +50,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -158,12 +159,14 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options));
-
-        Optional<Snapshot> snapshot =
-                catalog.loadSnapshot(Identifier.create("test_db_a", "my_snapshot_table"));
+        Identifier hasSnapshotTable = Identifier.create("test_db_a", "my_snapshot_table");
+        long id = 10086;
+        long millis = System.currentTimeMillis();
+        restCatalogServer.setTableSnapshot(hasSnapshotTable, createSnapshotWithMillis(id, millis));
+        Optional<Snapshot> snapshot = catalog.loadSnapshot(hasSnapshotTable);
         assertThat(snapshot).isPresent();
-        assertThat(snapshot.get().id()).isEqualTo(10086);
-        assertThat(snapshot.get().timeMillis()).isEqualTo(100);
+        assertThat(snapshot.get().id()).isEqualTo(id);
+        assertThat(snapshot.get().timeMillis()).isEqualTo(millis);
 
         snapshot = catalog.loadSnapshot(Identifier.create("test_db_a", "unknown"));
         assertThat(snapshot).isEmpty();
