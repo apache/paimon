@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest;
 
+import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
+
 import java.util.Map;
 
 /** Test for data token refresh. */
@@ -45,5 +47,15 @@ public class DataTokenProvider {
 
     public void setToken(Map<String, String> token) {
         this.token = token;
+    }
+
+    public void refresh() {
+        this.token =
+                ImmutableMap.of(
+                        "ak",
+                        "ak-" + System.currentTimeMillis(),
+                        "sk",
+                        "sk-" + System.currentTimeMillis());
+        this.expiresAtMillis = System.currentTimeMillis();
     }
 }
