@@ -73,6 +73,7 @@ import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -430,7 +431,8 @@ public class RESTCatalogServer {
         if (branchName == null) {
             branchName = "main";
         }
-        boolean success = commit.commit(requestBody.getSnapshot(), branchName);
+        boolean success =
+                commit.commit(requestBody.getSnapshot(), branchName, Collections.emptyList());
         CommitTableResponse response = new CommitTableResponse(success);
         return mockResponse(response, 200);
     }
