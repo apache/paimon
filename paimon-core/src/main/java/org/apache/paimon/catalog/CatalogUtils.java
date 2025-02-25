@@ -193,7 +193,11 @@ public class CatalogUtils {
 
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
-                        identifier, metadata.uuid(), catalog.catalogLoader(), commitFactory);
+                        identifier,
+                        metadata.uuid(),
+                        catalog.catalogLoader(),
+                        commitFactory,
+                        catalog instanceof SupportsSnapshots);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);

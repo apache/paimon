@@ -16,13 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.catalog;
 
-/** The type of resource that caused the error. */
-public enum ErrorResponseResourceType {
-    DATABASE,
-    TABLE,
-    COLUMN,
-    VIEW,
-    SNAPSHOT
+import org.apache.paimon.Snapshot;
+
+import java.util.Optional;
+
+/** A {@link Catalog} supports loading table snapshots. */
+public interface SupportsSnapshots {
+
+    /**
+     * Return the snapshot of table identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @return The requested snapshot of the table
+     * @throws Catalog.TableNotExistException if the target does not exist
+     */
+    Optional<Snapshot> loadSnapshot(Identifier identifier) throws Catalog.TableNotExistException;
 }

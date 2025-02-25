@@ -16,13 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.utils;
 
-/** The type of resource that caused the error. */
-public enum ErrorResponseResourceType {
-    DATABASE,
-    TABLE,
-    COLUMN,
-    VIEW,
-    SNAPSHOT
+import org.apache.paimon.Snapshot;
+
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.Optional;
+
+/** Loader to load latest snapshot. */
+public interface SnapshotLoader extends Serializable {
+
+    Optional<Snapshot> load() throws IOException;
+
+    SnapshotLoader copyWithBranch(String branch);
 }

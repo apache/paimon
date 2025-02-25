@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -58,6 +59,7 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -83,6 +85,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -100,7 +103,7 @@ import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
-public class RESTCatalog implements Catalog {
+public class RESTCatalog implements Catalog, SupportsSnapshots {
 
     public static final String HEADER_PREFIX = "header.";
 
@@ -297,11 +300,44 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    protected GetTableTokenResponse loadTableToken(Identifier identifier) {
-        return client.get(
-                resourcePaths.tableToken(identifier.getDatabaseName(), identifier.getObjectName()),
-                GetTableTokenResponse.class,
-                restAuthFunction);
+    protected GetTableTokenResponse loadTableToken(Identifier identifier)
+            throws TableNotExistException {
+        GetTableTokenResponse response;
+        try {
+            response =
+                    client.get(
+                            resourcePaths.tableToken(
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
+                            GetTableTokenResponse.class,
+                            restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+        return response;
+    }
+
+    @Override
+    public Optional<Snapshot> loadSnapshot(Identifier identifier) throws TableNotExistException {
+        GetTableSnapshotResponse response;
+        try {
+            response =
+                    client.get(
+                            resourcePaths.tableSnapshot(
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
+                            GetTableSnapshotResponse.class,
+                            restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            if (e.resourceType() == ErrorResponseResourceType.SNAPSHOT) {
+                return Optional.empty();
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+
+        return Optional.of(response.getSnapshot());
     }
 
     public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {

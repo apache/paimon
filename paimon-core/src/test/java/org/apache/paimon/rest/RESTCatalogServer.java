@@ -45,6 +45,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
@@ -74,6 +75,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
+import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -159,6 +161,10 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && "tables".equals(resources[1])
                                         && "token".equals(resources[3]);
+                        boolean isTableSnapshot =
+                                resources.length == 4
+                                        && "tables".equals(resources[1])
+                                        && "snapshot".equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
@@ -243,6 +249,24 @@ public class RESTCatalogServer {
                                     .setBody(
                                             OBJECT_MAPPER.writeValueAsString(
                                                     getTableTokenResponse));
+                        } else if (isTableSnapshot) {
+                            if (!"my_snapshot_table".equals(resources[2])) {
+                                response =
+                                        new ErrorResponse(
+                                                ErrorResponseResourceType.SNAPSHOT,
+                                                databaseName,
+                                                "No Snapshot",
+                                                404);
+                                return mockResponse(response, 404);
+                            }
+                            GetTableSnapshotResponse getTableSnapshotResponse =
+                                    new GetTableSnapshotResponse(
+                                            createSnapshotWithMillis(10086, 100));
+                            return new MockResponse()
+                                    .setResponseCode(200)
+                                    .setBody(
+                                            OBJECT_MAPPER.writeValueAsString(
+                                                    getTableSnapshotResponse));
                         } else if (isTableRename) {
                             return renameTableApiHandler(catalog, request);
                         } else if (isTableCommit) {

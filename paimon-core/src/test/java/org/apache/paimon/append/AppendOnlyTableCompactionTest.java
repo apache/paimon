@@ -48,6 +48,7 @@ import java.util.Random;
 import java.util.UUID;
 
 import static java.util.Collections.singletonMap;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for append table compaction. */
@@ -69,7 +70,7 @@ public class AppendOnlyTableCompactionTest {
         FileIO fileIO = new LocalFileIO();
         path = new org.apache.paimon.fs.Path(tempDir.toString());
         tableSchema = new SchemaManager(fileIO, path).createTable(schema());
-        snapshotManager = new SnapshotManager(fileIO, path);
+        snapshotManager = newSnapshotManager(fileIO, path);
         recreate();
     }
 
