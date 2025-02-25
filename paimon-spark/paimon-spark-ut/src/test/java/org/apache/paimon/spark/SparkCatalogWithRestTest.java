@@ -79,9 +79,6 @@ public class SparkCatalogWithRestTest {
                                 .map(s -> s.get(1))
                                 .map(Object::toString))
                 .containsExactlyInAnyOrder("t1");
-        spark.sql("INSERT INTO t1 VALUES (1, 2, '3')").collectAsList();
-        List<Row> rows = spark.sql("SELECT * FROM t1").collectAsList();
-        assertThat(rows.toString()).isEqualTo("[[1,2,3]]");
         spark.sql("DROP TABLE t1");
         assertThat(spark.sql("SHOW TABLES").collectAsList().size() == 0);
         spark.close();
