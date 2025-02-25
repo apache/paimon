@@ -22,7 +22,7 @@ import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.util.Map;
 
-/** Test for data token refresh. */
+/** Refresh data token in test mode. */
 public class DataTokenProvider {
 
     private Map<String, String> token;
