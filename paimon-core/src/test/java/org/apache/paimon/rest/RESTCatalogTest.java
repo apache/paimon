@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
@@ -151,7 +152,7 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testSnapshotFromREST() throws Exception {
+    void testSnapshotFromREST() throws Catalog.TableNotExistException {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);

@@ -26,24 +26,20 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import javax.annotation.Nullable;
-
 /** Response for table snapshot. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GetTableSnapshotResponse implements RESTResponse {
 
     private static final String FIELD_SNAPSHOT = "snapshot";
 
-    @Nullable
     @JsonProperty(FIELD_SNAPSHOT)
     private final Snapshot snapshot;
 
     @JsonCreator
-    public GetTableSnapshotResponse(@Nullable @JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot) {
+    public GetTableSnapshotResponse(@JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot) {
         this.snapshot = snapshot;
     }
 
-    @Nullable
     @JsonGetter(FIELD_SNAPSHOT)
     public Snapshot getSnapshot() {
         return snapshot;

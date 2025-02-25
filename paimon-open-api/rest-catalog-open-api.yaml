@@ -1256,8 +1256,7 @@ components:
       type: object
       properties:
         snapshot:
-          nullable: true
-          allOf: '#/components/schemas/Snapshot'
+          $ref: '#/components/schemas/Snapshot'
     AlterDatabaseRequest:
       type: object
       properties:

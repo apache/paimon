@@ -19,7 +19,6 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
@@ -251,15 +250,18 @@ public class RESTCatalogServer {
                                             OBJECT_MAPPER.writeValueAsString(
                                                     getTableTokenResponse));
                         } else if (isTableSnapshot) {
-                            String tableName = resources[2];
-                            Snapshot snapshot;
-                            if ("my_snapshot_table".equals(tableName)) {
-                                snapshot = createSnapshotWithMillis(10086, 100);
-                            } else {
-                                snapshot = null;
+                            if (!"my_snapshot_table".equals(resources[2])) {
+                                response =
+                                        new ErrorResponse(
+                                                ErrorResponseResourceType.SNAPSHOT,
+                                                databaseName,
+                                                "No Snapshot",
+                                                404);
+                                return mockResponse(response, 404);
                             }
                             GetTableSnapshotResponse getTableSnapshotResponse =
-                                    new GetTableSnapshotResponse(snapshot);
+                                    new GetTableSnapshotResponse(
+                                            createSnapshotWithMillis(10086, 100));
                             return new MockResponse()
                                     .setResponseCode(200)
                                     .setBody(

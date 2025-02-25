@@ -329,12 +329,15 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
                             GetTableSnapshotResponse.class,
                             restAuthFunction);
         } catch (NoSuchResourceException e) {
+            if (e.resourceType() == ErrorResponseResourceType.SNAPSHOT) {
+                return Optional.empty();
+            }
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
 
-        return Optional.ofNullable(response.getSnapshot());
+        return Optional.of(response.getSnapshot());
     }
 
     public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {
