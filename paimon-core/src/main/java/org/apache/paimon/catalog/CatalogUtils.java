@@ -147,13 +147,7 @@ public class CatalogUtils {
                 table.newReadBuilder().newScan().listPartitionEntries();
         List<Partition> partitions = new ArrayList<>(partitionEntries.size());
         for (PartitionEntry entry : partitionEntries) {
-            partitions.add(
-                    new Partition(
-                            computer.generatePartValues(entry.partition()),
-                            entry.recordCount(),
-                            entry.fileSizeInBytes(),
-                            entry.fileCount(),
-                            entry.lastFileCreationTime()));
+            partitions.add(entry.toPartition(computer));
         }
         return partitions;
     }

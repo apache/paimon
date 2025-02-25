@@ -340,8 +340,9 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
         return Optional.of(response.getSnapshot());
     }
 
-    public boolean commitSnapshot(Identifier identifier, Snapshot snapshot) {
-        CommitTableRequest request = new CommitTableRequest(identifier, snapshot);
+    public boolean commitSnapshot(
+            Identifier identifier, Snapshot snapshot, List<Partition> statistics) {
+        CommitTableRequest request = new CommitTableRequest(identifier, snapshot, statistics);
         CommitTableResponse response =
                 client.post(
                         resourcePaths.commitTable(identifier.getDatabaseName()),

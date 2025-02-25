@@ -20,6 +20,7 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -27,12 +28,15 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+
 /** Request for committing snapshot to table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CommitTableRequest implements RESTRequest {
 
     private static final String FIELD_IDENTIFIER = "identifier";
     private static final String FIELD_SNAPSHOT = "snapshot";
+    private static final String FIELD_STATISTICS = "statistics";
 
     @JsonProperty(FIELD_IDENTIFIER)
     private final Identifier identifier;
@@ -40,12 +44,17 @@ public class CommitTableRequest implements RESTRequest {
     @JsonProperty(FIELD_SNAPSHOT)
     private final Snapshot snapshot;
 
+    @JsonProperty(FIELD_STATISTICS)
+    private final List<Partition> statistics;
+
     @JsonCreator
     public CommitTableRequest(
             @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
-            @JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot) {
+            @JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot,
+            @JsonProperty(FIELD_STATISTICS) List<Partition> statistics) {
         this.identifier = identifier;
         this.snapshot = snapshot;
+        this.statistics = statistics;
     }
 
     @JsonGetter(FIELD_IDENTIFIER)
@@ -56,5 +65,10 @@ public class CommitTableRequest implements RESTRequest {
     @JsonGetter(FIELD_SNAPSHOT)
     public Snapshot getSnapshot() {
         return snapshot;
+    }
+
+    @JsonGetter(FIELD_STATISTICS)
+    public List<Partition> getStatistics() {
+        return statistics;
     }
 }
