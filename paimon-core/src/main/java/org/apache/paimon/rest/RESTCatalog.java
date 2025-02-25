@@ -118,7 +118,7 @@ public class RESTCatalog implements Catalog {
     }
 
     public RESTCatalog(CatalogContext context, boolean configRequired) {
-        this.client = new HttpClient(context.options());
+        this.client = new HttpClient(context.options().get(RESTCatalogOptions.URI));
         AuthSession catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
         Options options = context.options();
         Map<String, String> baseHeaders = Collections.emptyMap();

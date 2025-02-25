@@ -66,7 +66,6 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         this.catalog = new RESTCatalog(CatalogContext.create(options));
     }
 
@@ -90,7 +89,6 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, "aaaaa");
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
                 .isInstanceOf(NotAuthorizedException.class);
@@ -134,7 +132,6 @@ class RESTCatalogTest extends CatalogTestBase {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.THREAD_POOL_SIZE, 1);
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         this.catalog = new RESTCatalog(CatalogContext.create(options));

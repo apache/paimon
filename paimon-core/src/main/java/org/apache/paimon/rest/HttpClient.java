@@ -19,7 +19,6 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
@@ -29,8 +28,6 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
-import okhttp3.ConnectionPool;
-import okhttp3.Dispatcher;
 import okhttp3.Headers;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -38,16 +35,12 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -55,31 +48,31 @@ import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
-import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
-    private static final String THREAD_NAME = "REST-CATALOG-HTTP-CLIENT-THREAD-POOL";
-    private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
-    private static final int CONNECTION_KEEP_ALIVE_DURATION_MS = 300_000;
+    private static final OkHttpClient HTTP_CLIENT =
+            new OkHttpClient.Builder()
+                    .retryOnConnectionFailure(true)
+                    .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
+                    .addInterceptor(new ExponentialHttpRetryInterceptor(5))
+                    .connectTimeout(Duration.ofMinutes(3))
+                    .readTimeout(Duration.ofMinutes(3))
+                    .build();
 
-    private final OkHttpClient okHttpClient;
+    private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
+
     private final String uri;
 
     private ErrorHandler errorHandler;
 
-    public HttpClient(Options options) {
-        this(HttpClientOptions.create(options));
-    }
-
-    public HttpClient(HttpClientOptions httpClientOptions) {
-        if (httpClientOptions.uri() != null && httpClientOptions.uri().endsWith("/")) {
-            this.uri = httpClientOptions.uri().substring(0, httpClientOptions.uri().length() - 1);
+    public HttpClient(String uri) {
+        if (uri != null && uri.endsWith("/")) {
+            this.uri = uri.substring(0, uri.length() - 1);
         } else {
-            this.uri = httpClientOptions.uri();
+            this.uri = uri;
         }
-        this.okHttpClient = createHttpClient(httpClientOptions);
         this.errorHandler = DefaultErrorHandler.getInstance();
     }
 
@@ -160,14 +153,8 @@ public class HttpClient implements RESTClient {
         }
     }
 
-    @Override
-    public void close() throws IOException {
-        okHttpClient.dispatcher().cancelAll();
-        okHttpClient.connectionPool().evictAll();
-    }
-
     private <T extends RESTResponse> T exec(Request request, Class<T> responseType) {
-        try (Response response = okHttpClient.newCall(request).execute()) {
+        try (Response response = HTTP_CLIENT.newCall(request).execute()) {
             String responseBodyStr = response.body() != null ? response.body().string() : null;
             if (!response.isSuccessful()) {
                 ErrorResponse error;
@@ -201,38 +188,6 @@ public class HttpClient implements RESTClient {
 
     private static RequestBody buildRequestBody(String body) throws JsonProcessingException {
         return RequestBody.create(body.getBytes(StandardCharsets.UTF_8), MEDIA_TYPE);
-    }
-
-    private static OkHttpClient createHttpClient(HttpClientOptions httpClientOptions) {
-        BlockingQueue<Runnable> workQueue = new SynchronousQueue<>();
-        ExecutorService executorService =
-                createCachedThreadPool(httpClientOptions.threadPoolSize(), THREAD_NAME, workQueue);
-        ConnectionPool connectionPool =
-                new ConnectionPool(
-                        httpClientOptions.maxConnections(),
-                        CONNECTION_KEEP_ALIVE_DURATION_MS,
-                        TimeUnit.MILLISECONDS);
-        Dispatcher dispatcher = new Dispatcher(executorService);
-        // set max requests per host use max connections
-        dispatcher.setMaxRequestsPerHost(httpClientOptions.maxConnections());
-        OkHttpClient.Builder builder =
-                new OkHttpClient.Builder()
-                        .dispatcher(dispatcher)
-                        .retryOnConnectionFailure(true)
-                        .connectionPool(connectionPool)
-                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
-                        .addInterceptor(
-                                new ExponentialHttpRetryInterceptor(
-                                        httpClientOptions.maxRetries()));
-        httpClientOptions
-                .connectTimeout()
-                .ifPresent(
-                        timeoutDuration -> {
-                            builder.connectTimeout(timeoutDuration);
-                            builder.readTimeout(timeoutDuration);
-                        });
-
-        return builder.build();
     }
 
     private String getRequestUrl(String path) {
@@ -274,4 +229,7 @@ public class HttpClient implements RESTClient {
                                         ));
         return Pair.of(resourcePath, parameters);
     }
+
+    @Override
+    public void close() {}
 }

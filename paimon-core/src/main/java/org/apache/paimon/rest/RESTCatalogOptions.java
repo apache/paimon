@@ -32,30 +32,6 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
 
-    public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
-            ConfigOptions.key("rest.client.connection-timeout")
-                    .durationType()
-                    .defaultValue(Duration.ofSeconds(180))
-                    .withDescription("REST Catalog http client connect timeout.");
-
-    public static final ConfigOption<Integer> MAX_CONNECTIONS =
-            ConfigOptions.key("rest.client.max-connections")
-                    .intType()
-                    .defaultValue(100)
-                    .withDescription("REST Catalog http client's max connections.");
-
-    public static final ConfigOption<Integer> MAX_RETIES =
-            ConfigOptions.key("rest.client.max-retries")
-                    .intType()
-                    .defaultValue(5)
-                    .withDescription("REST Catalog http client's max retry times.");
-
-    public static final ConfigOption<Integer> THREAD_POOL_SIZE =
-            ConfigOptions.key("rest.client.num-threads")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription("REST Catalog http client thread num.");
-
     public static final ConfigOption<String> TOKEN =
             ConfigOptions.key("token")
                     .stringType()
@@ -97,12 +73,6 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth DLF security token");
-
-    public static final ConfigOption<String> DLF_ROLE_SESSION_NAME =
-            ConfigOptions.key("dlf.roleSessionName")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("REST Catalog auth DLF role session name");
 
     public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
             ConfigOptions.key("data-token.enabled")

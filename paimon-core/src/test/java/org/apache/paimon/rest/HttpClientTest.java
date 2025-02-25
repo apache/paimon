@@ -34,7 +34,6 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -63,14 +62,12 @@ public class HttpClientTest {
         server = new TestHttpWebServer(MOCK_PATH);
         server.start();
         errorHandler = DefaultErrorHandler.getInstance();
-        HttpClientOptions httpClientOptions =
-                new HttpClientOptions(server.getBaseUrl(), Duration.ofSeconds(3), 1, 10, 2);
         mockResponseData = new MockRESTData(MOCK_PATH);
         mockResponseDataStr = server.createResponseBody(mockResponseData);
         errorResponseStr =
                 server.createResponseBody(
                         new ErrorResponse(ErrorResponseResourceType.DATABASE, "test", "test", 400));
-        httpClient = new HttpClient(httpClientOptions);
+        httpClient = new HttpClient(server.getBaseUrl());
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);
         AuthSession authSession = new AuthSession(authProvider);
@@ -134,10 +131,7 @@ public class HttpClientTest {
 
     @Test
     public void testRetry() {
-        HttpClient httpClient =
-                new HttpClient(
-                        new HttpClientOptions(
-                                server.getBaseUrl(), Duration.ofSeconds(30), 1, 10, 2));
+        HttpClient httpClient = new HttpClient(server.getBaseUrl());
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 200);
         assertDoesNotThrow(() -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
