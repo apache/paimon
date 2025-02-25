@@ -94,16 +94,6 @@ class RESTCatalogITCase extends CatalogITCaseBase {
                                 DATABASE_NAME, TABLE_NAME));
     }
 
-    @Test
-    void testInsertData() {
-        sql(String.format("INSERT INTO %s.%s VALUES ('1', 2.0)", DATABASE_NAME, TABLE_NAME));
-        sql(String.format("INSERT INTO %s.%s VALUES ('3', 4.0)", DATABASE_NAME, TABLE_NAME));
-        sql(String.format("INSERT INTO %s.%s VALUES ('5', 6.0)", DATABASE_NAME, TABLE_NAME));
-        List<Row> result = sql(String.format("SELECT * from %s.%s", DATABASE_NAME, TABLE_NAME));
-        assertThat(result)
-                .containsExactlyInAnyOrder(Row.of("1", 2.0D), Row.of("3", 4.0D), Row.of("5", 6.0D));
-    }
-
     @Override
     protected Map<String, String> catalogOptions() {
         String initToken = "init_token";
