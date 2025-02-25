@@ -86,18 +86,18 @@ public class CompactorSourceBuilder {
     }
 
     private Source<RowData, ?, ?> buildSource(CompactBucketsTable compactBucketsTable) {
+        compactBucketsTable =
+                compactBucketsTable.copy(
+                        isContinuous ? streamingCompactOptions() : batchCompactOptions());
         ReadBuilder readBuilder =
                 compactBucketsTable.newReadBuilder().withFilter(partitionPredicate);
-        if (compactBucketsTable.coreOptions().manifestDeleteFileDropStats()) {
+        if (CoreOptions.fromMap(table.options()).manifestDeleteFileDropStats()) {
             readBuilder = readBuilder.dropStats();
         }
         if (isContinuous) {
-            compactBucketsTable = compactBucketsTable.copy(streamingCompactOptions());
             return new ContinuousFileStoreSource(readBuilder, compactBucketsTable.options(), null);
         } else {
-            compactBucketsTable = compactBucketsTable.copy(batchCompactOptions());
             Options options = compactBucketsTable.coreOptions().toConfiguration();
-
             return new StaticFileStoreSource(
                     readBuilder,
                     null,
