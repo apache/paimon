@@ -18,9 +18,16 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.SnapshotManager;
+
 import org.junit.jupiter.api.Test;
 
-class SnapshotTest {
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+
+/** Test for snapshots. */
+public class SnapshotTest {
 
     @Test
     public void testJsonIgnoreProperties() {
@@ -40,5 +47,13 @@ class SnapshotTest {
                         + "  \"deltaRecordCount\" : null,\n"
                         + "  \"unknownKey\" : 22222\n"
                         + "}");
+    }
+
+    public static SnapshotManager newSnapshotManager(FileIO fileIO, Path tablePath) {
+        return newSnapshotManager(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
+    }
+
+    public static SnapshotManager newSnapshotManager(FileIO fileIO, Path tablePath, String branch) {
+        return new SnapshotManager(fileIO, tablePath, branch, null, null);
     }
 }

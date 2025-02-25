@@ -469,6 +469,43 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/snapshot:
+    get:
+      tags:
+        - table
+      summary: Get table snapshot
+      operationId: getTableSnapshot
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableSnapshotResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}/partitions:
     get:
       tags:
@@ -1215,6 +1252,12 @@ components:
         expiresAt:
           type: integer
           format: int64
+    GetTableSnapshotResponse:
+      type: object
+      properties:
+        snapshot:
+          nullable: true
+          allOf: '#/components/schemas/Snapshot'
     AlterDatabaseRequest:
       type: object
       properties:

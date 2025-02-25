@@ -22,6 +22,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.tag.SnapshotLoaderImpl;
+import org.apache.paimon.utils.SnapshotLoader;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -37,20 +39,23 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final String uuid;
     @Nullable private final CatalogLoader catalogLoader;
     @Nullable private final SnapshotCommit.Factory commitFactory;
+    private final boolean supportsSnapshots;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
             @Nullable String uuid,
             @Nullable CatalogLoader catalogLoader,
-            @Nullable SnapshotCommit.Factory commitFactory) {
+            @Nullable SnapshotCommit.Factory commitFactory,
+            boolean supportsSnapshots) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
         this.commitFactory = commitFactory;
+        this.supportsSnapshots = supportsSnapshots;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null);
+        return new CatalogEnvironment(null, null, null, null, false);
     }
 
     @Nullable
@@ -77,6 +82,14 @@ public class CatalogEnvironment implements Serializable {
             return null;
         }
         return PartitionHandler.create(catalogLoader.load(), identifier);
+    }
+
+    @Nullable
+    public SnapshotLoader snapshotLoader() {
+        if (catalogLoader == null || !supportsSnapshots) {
+            return null;
+        }
+        return new SnapshotLoaderImpl(catalogLoader, identifier);
     }
 
     @VisibleForTesting

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
@@ -182,7 +183,11 @@ public class RESTTokenFileIO implements FileIO {
     private void refreshToken() {
         GetTableTokenResponse response;
         if (catalogInstance != null) {
-            response = catalogInstance.loadTableToken(identifier);
+            try {
+                response = catalogInstance.loadTableToken(identifier);
+            } catch (Catalog.TableNotExistException e) {
+                throw new RuntimeException(e);
+            }
         } else {
             try (RESTCatalog catalog = catalogLoader.load()) {
                 response = catalog.loadTableToken(identifier);
