@@ -190,16 +190,6 @@ public class HttpClient implements RESTClient {
         return RequestBody.create(body.getBytes(StandardCharsets.UTF_8), MEDIA_TYPE);
     }
 
-    private static OkHttpClient createHttpClient() {
-        return new OkHttpClient.Builder()
-                .retryOnConnectionFailure(true)
-                .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
-                .addInterceptor(new ExponentialHttpRetryInterceptor(5))
-                .connectTimeout(Duration.ofMinutes(3))
-                .readTimeout(Duration.ofMinutes(3))
-                .build();
-    }
-
     private String getRequestUrl(String path) {
         return StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
     }
