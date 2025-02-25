@@ -101,7 +101,6 @@ class RESTCatalogITCase extends CatalogITCaseBase {
         options.put("metastore", "rest");
         options.put(RESTCatalogOptions.URI.key(), serverUrl);
         options.put(RESTCatalogOptions.TOKEN.key(), initToken);
-        options.put(RESTCatalogOptions.THREAD_POOL_SIZE.key(), "" + 1);
         options.put(RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.BEAR.identifier());
         return options;
     }
