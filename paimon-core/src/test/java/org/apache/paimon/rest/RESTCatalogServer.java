@@ -36,11 +36,13 @@ import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -53,6 +55,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
+import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -62,6 +65,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
@@ -217,6 +221,11 @@ public class RESTCatalogServer {
                                         && "tables".equals(resources[1])
                                         && "partitions".equals(resources[3])
                                         && "mark".equals(resources[4]);
+
+                        boolean isBranches =
+                                resources.length >= 4
+                                        && "tables".equals(resources[1])
+                                        && "branches".equals(resources[3]);
                         if (isDropPartitions) {
                             String tableName = resources[2];
                             Identifier identifier = Identifier.create(databaseName, tableName);
@@ -271,6 +280,43 @@ public class RESTCatalogServer {
                                 return error.get();
                             }
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
+                        } else if (isBranches) {
+                            String tableName = resources[2];
+                            Identifier identifier = Identifier.create(databaseName, tableName);
+                            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+                            BranchManager branchManager = table.branchManager();
+                            switch (request.getMethod()) {
+                                case "DELETE":
+                                    String branch = resources[4];
+                                    table.deleteBranch(branch);
+                                    return new MockResponse().setResponseCode(200);
+                                case "GET":
+                                    List<String> branches = branchManager.branches();
+                                    response = new ListBranchesResponse(branches);
+                                    return mockResponse(response, 200);
+                                case "POST":
+                                    if (resources.length == 5) {
+                                        ForwardBranchRequest requestBody =
+                                                OBJECT_MAPPER.readValue(
+                                                        request.getBody().readUtf8(),
+                                                        ForwardBranchRequest.class);
+                                        branchManager.fastForward(requestBody.branch());
+                                    } else {
+                                        CreateBranchRequest requestBody =
+                                                OBJECT_MAPPER.readValue(
+                                                        request.getBody().readUtf8(),
+                                                        CreateBranchRequest.class);
+                                        if (requestBody.fromTag() == null) {
+                                            branchManager.createBranch(requestBody.branch());
+                                        } else {
+                                            branchManager.createBranch(
+                                                    requestBody.branch(), requestBody.fromTag());
+                                        }
+                                    }
+                                    return new MockResponse().setResponseCode(200);
+                                default:
+                                    return new MockResponse().setResponseCode(404);
+                            }
                         } else if (isTableToken) {
                             RESTToken dataToken =
                                     catalog.getToken(Identifier.create(databaseName, resources[2]));
@@ -393,6 +439,7 @@ public class RESTCatalogServer {
                     response = new ErrorResponse(null, null, e.getMessage(), 400);
                     return mockResponse(response, 400);
                 } catch (Exception e) {
+                    e.printStackTrace();
                     if (e.getCause() instanceof IllegalArgumentException) {
                         response =
                                 new ErrorResponse(

@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.SupportsBranches;
 import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
@@ -45,11 +46,13 @@ import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -62,6 +65,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
+import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -78,6 +82,8 @@ import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -103,7 +109,7 @@ import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
-public class RESTCatalog implements Catalog, SupportsSnapshots {
+public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches {
 
     public static final String HEADER_PREFIX = "header.";
 
@@ -575,6 +581,73 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
         } catch (NotImplementedException e) {
             // not a metastore partitioned table
             return listPartitionsFromFileSystem(getTable(identifier));
+        }
+    }
+
+    @Override
+    public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
+            throws TableNotExistException, DatabaseNotExistException {
+        try {
+            CreateBranchRequest request = new CreateBranchRequest(branch, fromTag);
+            client.post(
+                    resourcePaths.branches(identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public void dropBranch(Identifier identifier, String branch) throws TableNotExistException {
+        try {
+            client.delete(
+                    resourcePaths.branch(
+                            identifier.getDatabaseName(), identifier.getTableName(), branch),
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public void fastForward(Identifier identifier, String branch)
+            throws TableNotExistException, DatabaseNotExistException {
+        try {
+            ForwardBranchRequest request = new ForwardBranchRequest(branch);
+            client.post(
+                    resourcePaths.forwardBranch(
+                            identifier.getDatabaseName(), identifier.getTableName()),
+                    request,
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public List<String> listBranches(Identifier identifier) throws TableNotExistException {
+        try {
+            ListBranchesResponse response =
+                    client.get(
+                            resourcePaths.branches(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            ListBranchesResponse.class,
+                            restAuthFunction);
+            if (response == null || response.branches() == null) {
+                return Collections.emptyList();
+            }
+            return response.branches();
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
         }
     }
 

@@ -100,6 +100,20 @@ public class ResourcePaths {
                 V1, prefix, DATABASES, databaseName, TABLES, tableName, "partitions", "mark");
     }
 
+    public String branches(String databaseName, String tableName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "branches");
+    }
+
+    public String branch(String databaseName, String tableName, String branchName) {
+        return SLASH.join(
+                V1, prefix, DATABASES, databaseName, TABLES, tableName, "branches", branchName);
+    }
+
+    public String forwardBranch(String databaseName, String tableName) {
+        return SLASH.join(
+                V1, prefix, DATABASES, databaseName, TABLES, tableName, "branches", "forward");
+    }
+
     public String views(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, databaseName, "views");
     }
