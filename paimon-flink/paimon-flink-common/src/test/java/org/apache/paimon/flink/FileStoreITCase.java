@@ -33,8 +33,8 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.BlockingIterator;
-import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FileSystemBranchManager;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
@@ -139,7 +139,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     @BeforeAll
     public static void before() {
-        branch = BranchManager.DEFAULT_MAIN_BRANCH;
+        branch = FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
     }
 
     @Parameters(name = "isBatch-{0}")

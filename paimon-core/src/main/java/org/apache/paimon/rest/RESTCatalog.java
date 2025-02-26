@@ -283,7 +283,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
                 path -> fileIOForData(path, identifier),
                 this::fileIOFromOptions,
                 this::loadTableMetadata,
-                new RESTSnapshotCommitFactory(catalogLoader()));
+                null,
+                null);
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {
@@ -340,15 +341,26 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
         return Optional.of(response.getSnapshot());
     }
 
+    @Override
     public boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<Partition> statistics) {
+            Identifier identifier, Snapshot snapshot, List<Partition> statistics)
+            throws TableNotExistException {
         CommitTableRequest request = new CommitTableRequest(identifier, snapshot, statistics);
-        CommitTableResponse response =
-                client.post(
-                        resourcePaths.commitTable(identifier.getDatabaseName()),
-                        request,
-                        CommitTableResponse.class,
-                        restAuthFunction);
+        CommitTableResponse response;
+
+        try {
+            response =
+                    client.post(
+                            resourcePaths.commitTable(identifier.getDatabaseName()),
+                            request,
+                            CommitTableResponse.class,
+                            restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+
         return response.isSuccess();
     }
 
