@@ -60,6 +60,8 @@ import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanne
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.CatalogBranchManager;
+import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
@@ -676,7 +678,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void deleteBranch(String branchName) {
-        branchManager().deleteBranch(branchName);
+        branchManager().dropBranch(branchName);
     }
 
     @Override
@@ -717,7 +719,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public BranchManager branchManager() {
-        return new BranchManager(fileIO, path, snapshotManager(), tagManager(), schemaManager());
+        if (catalogEnvironment.catalogLoader() != null && catalogEnvironment.supportsBranches()) {
+            return new CatalogBranchManager(catalogEnvironment.catalogLoader(), identifier());
+        }
+        return new FileSystemBranchManager(
+                fileIO, path, snapshotManager(), tagManager(), schemaManager());
     }
 
     @Override

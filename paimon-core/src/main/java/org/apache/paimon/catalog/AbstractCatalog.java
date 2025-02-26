@@ -59,7 +59,7 @@ import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSyste
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
@@ -366,16 +366,14 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        SnapshotCommit.Factory commitFactory =
-                new RenamingSnapshotCommit.Factory(
-                        lockFactory().orElse(null), lockContext().orElse(null));
         return CatalogUtils.loadTable(
                 this,
                 identifier,
                 p -> fileIO(),
                 this::fileIO,
                 this::loadTableMetadata,
-                commitFactory);
+                lockFactory().orElse(null),
+                lockContext().orElse(null));
     }
 
     /**
