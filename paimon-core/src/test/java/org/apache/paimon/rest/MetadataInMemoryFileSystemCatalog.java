@@ -56,7 +56,8 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.PATH;
 
 /** A catalog for testing RESTCatalog. */
-public class InMemoryMetadataCatalog extends FileSystemCatalog implements SupportsSnapshots {
+public class MetadataInMemoryFileSystemCatalog extends FileSystemCatalog
+        implements SupportsSnapshots {
 
     public final Map<String, Database> databaseStore;
     public final Map<String, TableMetadata> tableMetadataStore;
@@ -64,8 +65,9 @@ public class InMemoryMetadataCatalog extends FileSystemCatalog implements Suppor
     public final Map<String, View> viewStore;
     public final Map<String, Snapshot> tableSnapshotStore;
     public final Map<String, RESTToken> dataTokenStore;
+    public FileSystemCatalog fileSystemCatalog;
 
-    public InMemoryMetadataCatalog(
+    public MetadataInMemoryFileSystemCatalog(
             FileIO fileIO,
             Path warehouse,
             Options options,
@@ -76,6 +78,7 @@ public class InMemoryMetadataCatalog extends FileSystemCatalog implements Suppor
             Map<String, View> viewStore,
             Map<String, RESTToken> dataTokenStore) {
         super(fileIO, warehouse, options);
+        this.fileSystemCatalog = new FileSystemCatalog(fileIO, warehouse, options);
         this.databaseStore = databaseStore;
         this.tableMetadataStore = tableMetadataStore;
         this.tablePartitionsStore = tablePartitionsStore;
@@ -84,7 +87,7 @@ public class InMemoryMetadataCatalog extends FileSystemCatalog implements Suppor
         this.dataTokenStore = dataTokenStore;
     }
 
-    public static InMemoryMetadataCatalog create(
+    public static MetadataInMemoryFileSystemCatalog create(
             CatalogContext context,
             Map<String, Database> databaseStore,
             Map<String, TableMetadata> tableMetadataStore,
@@ -104,7 +107,7 @@ public class InMemoryMetadataCatalog extends FileSystemCatalog implements Suppor
             throw new UncheckedIOException(e);
         }
 
-        return new InMemoryMetadataCatalog(
+        return new MetadataInMemoryFileSystemCatalog(
                 fileIO,
                 warehousePath,
                 context.options(),
@@ -114,12 +117,6 @@ public class InMemoryMetadataCatalog extends FileSystemCatalog implements Suppor
                 tablePartitionsStore,
                 viewStore,
                 dataTokenStore);
-    }
-
-    // todo: overview
-    @Override
-    public FileIO fileIO() {
-        return fileIO;
     }
 
     @Override
@@ -147,22 +144,26 @@ public class InMemoryMetadataCatalog extends FileSystemCatalog implements Suppor
         databaseStore.remove(name);
     }
 
-    @Override
-    protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
-        Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
-                PropertyChange.getSetPropertiesToRemoveKeys(changes);
-        Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
-        Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
-        Database database = databaseStore.get(name);
-        Map<String, String> parameter = database.options();
-        if (!setProperties.isEmpty()) {
-            parameter.putAll(setProperties);
+    protected void alterDatabaseImpl(String name, List<PropertyChange> changes)
+            throws DatabaseNotExistException {
+        if (databaseStore.containsKey(name)) {
+            Pair<Map<String, String>, Set<String>> setPropertiesToRemoveKeys =
+                    PropertyChange.getSetPropertiesToRemoveKeys(changes);
+            Map<String, String> setProperties = setPropertiesToRemoveKeys.getLeft();
+            Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
+            Database database = databaseStore.get(name);
+            Map<String, String> parameter = new HashMap<>(database.options());
+            if (!setProperties.isEmpty()) {
+                parameter.putAll(setProperties);
+            }
+            if (!removeKeys.isEmpty()) {
+                parameter.keySet().removeAll(removeKeys);
+            }
+            Database alterDatabase = Database.of(name, parameter, null);
+            databaseStore.put(name, alterDatabase);
+        } else {
+            throw new DatabaseNotExistException(name);
         }
-        if (!removeKeys.isEmpty()) {
-            parameter.keySet().removeAll(removeKeys);
-        }
-        Database alterDatabase = Database.of(name, parameter, null);
-        databaseStore.put(name, alterDatabase);
     }
 
     @Override
