@@ -54,6 +54,7 @@ WITH (
     'type' = 'paimon',
     'uri' = '<catalog server url>',
     'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
     'token.provider' = 'bear'
     'token' = '<token>'
 );
@@ -65,6 +66,7 @@ WITH (
     'type' = 'paimon',
     'uri' = '<catalog server url>',
     'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
     'dlf.accessKeyId'='<accessKeyId>',
     'dlf.accessKeySecret'='<accessKeySecret>',
@@ -78,6 +80,7 @@ WITH (
     'type' = 'paimon',
     'uri' = '<catalog server url>',
     'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
     'dlf.accessKeyId'='<accessKeyId>',
     'dlf.accessKeySecret'='<accessKeySecret>',
@@ -92,7 +95,9 @@ WITH (
     'type' = 'paimon',
     'uri' = '<catalog server url>',
     'metastore' = 'rest',
-    'token.provider' = 'dlf'
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.token-path' = 'my_token_path_in_disk'
 );
 ```
 

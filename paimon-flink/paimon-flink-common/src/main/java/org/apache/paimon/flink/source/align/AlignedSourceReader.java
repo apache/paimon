@@ -25,10 +25,14 @@ import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.FileStoreSourceSplitState;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.utils.ReflectionUtils;
 
 import org.apache.flink.api.connector.source.ExternallyInducedSourceReader;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SourceReaderContext;
+import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
+import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
+import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
@@ -43,7 +47,12 @@ import java.util.Optional;
 public class AlignedSourceReader extends FileStoreSourceReader
         implements ExternallyInducedSourceReader<RowData, FileStoreSourceSplit> {
 
+    private static final String ELEMENTS_QUEUE_FIELD = "elementsQueue";
+
     private Long nextCheckpointId;
+    private final FutureCompletingBlockingQueue<
+                    RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>>
+            elementsQueue;
 
     public AlignedSourceReader(
             SourceReaderContext readerContext,
@@ -54,12 +63,34 @@ public class AlignedSourceReader extends FileStoreSourceReader
             @Nullable NestedProjectedRowData rowData) {
         super(readerContext, tableRead, metrics, ioManager, limit, rowData);
         this.nextCheckpointId = null;
+        try {
+            // In lower versions of Flink, the SplitFetcherManager does not provide the getQueue
+            // method. To reduce code redundancy, we use reflection to access the elementsQueue
+            // object.
+            this.elementsQueue =
+                    ReflectionUtils.getPrivateFieldValue(splitFetcherManager, ELEMENTS_QUEUE_FIELD);
+        } catch (Exception e) {
+            throw new RuntimeException("The elementsQueue object cannot be accessed.", e);
+        }
     }
 
     @Override
     public void handleSourceEvents(SourceEvent sourceEvent) {
         if (sourceEvent instanceof CheckpointEvent) {
             nextCheckpointId = ((CheckpointEvent) sourceEvent).getCheckpointId();
+            // The ExternallyInducedSourceReader has two scenarios:
+            // 1.When the JM triggers a checkpoint, the external messages have not yet
+            // arrived(common case).
+            // 2.Before the JM triggers the checkpoint, the external messages have already
+            // arrived(rare case).
+            //
+            // In case 2, if the AlignedSourceReader has finished consuming the split, the
+            // shouldTriggerCheckpoint method will return empty. Since the
+            // AlignedSourceReader depends on the CheckpointEvent sent by the
+            // AlignedContinuousFileSplitEnumerator to decide whether to trigger a checkpoint, upon
+            // receiving the CheckpointEvent, it should explicitly call
+            // elementsQueue.notifyAvailable() to trigger shouldTriggerCheckpoint again.
+            elementsQueue.notifyAvailable();
         } else {
             super.handleSourceEvents(sourceEvent);
         }

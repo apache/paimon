@@ -19,11 +19,25 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.partition.Partition;
 
+import java.util.List;
 import java.util.Optional;
 
-/** A {@link Catalog} supports loading table snapshots. */
-public interface SupportsSnapshots {
+/** A {@link Catalog} supports committing and loading table snapshots. */
+public interface SupportsSnapshots extends Catalog {
+
+    /**
+     * Commit the {@link Snapshot} for table identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @param snapshot Snapshot to be committed
+     * @param statistics statistics information of this change
+     * @return Success or not
+     * @throws Catalog.TableNotExistException if the target does not exist
+     */
+    boolean commitSnapshot(Identifier identifier, Snapshot snapshot, List<Partition> statistics)
+            throws Catalog.TableNotExistException;
 
     /**
      * Return the snapshot of table identified by the given {@link Identifier}.

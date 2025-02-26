@@ -19,7 +19,6 @@
 package org.apache.paimon.open.api;
 
 import org.apache.paimon.partition.Partition;
-import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -64,6 +63,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Arrays;
@@ -72,6 +72,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import static org.apache.paimon.rest.ResourcePaths.QUERY_PARAMETER_WAREHOUSE_KEY;
 
 /** RESTCatalog management APIs. */
 @CrossOrigin(origins = "http://localhost:8081")
@@ -89,8 +91,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @GetMapping(ResourcePaths.V1_CONFIG)
-    public ConfigResponse getConfig() {
+    @GetMapping("/v1/config")
+    public ConfigResponse getConfig(@RequestParam(QUERY_PARAMETER_WAREHOUSE_KEY) String warehouse) {
         Map<String, String> defaults = new HashMap<>();
         Map<String, String> overrides = new HashMap<>();
         return new ConfigResponse(defaults, overrides);
