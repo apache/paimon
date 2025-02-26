@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -54,7 +55,6 @@ import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -69,7 +69,6 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -93,10 +92,11 @@ public class RESTCatalogServer {
     private final String authToken;
 
     public final Map<String, Database> databaseStore = new HashMap<>();
-    public final Map<String, TableSchema> tableSchemaStore = new HashMap<>();
+    public final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
     public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
     public final Map<String, View> viewStore = new HashMap<>();
     public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
+    Map<String, RESTToken> dataTokenStore = new HashMap<>();
 
     public RESTCatalogServer(String warehouse, String initToken) {
         authToken = initToken;
@@ -106,10 +106,11 @@ public class RESTCatalogServer {
                 InMemoryCatalog.create(
                         CatalogContext.create(conf),
                         databaseStore,
-                        tableSchemaStore,
+                        tableMetadataStore,
                         tableSnapshotStore,
                         tablePartitionsStore,
-                        viewStore);
+                        viewStore,
+                        dataTokenStore);
         this.dispatcher = initDispatcher(catalog, warehouse, authToken);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -130,6 +131,10 @@ public class RESTCatalogServer {
 
     public void setTableSnapshot(Identifier identifier, Snapshot snapshot) {
         tableSnapshotStore.put(identifier.getFullName(), snapshot);
+    }
+
+    public void setDataToken(Identifier identifier, RESTToken token) {
+        dataTokenStore.put(identifier.getFullName(), token);
     }
 
     public static Dispatcher initDispatcher(
@@ -262,10 +267,11 @@ public class RESTCatalogServer {
                             }
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTableToken) {
+                            RESTToken dataToken =
+                                    catalog.getToken(Identifier.create(databaseName, resources[2]));
                             GetTableTokenResponse getTableTokenResponse =
                                     new GetTableTokenResponse(
-                                            ImmutableMap.of("key", "value"),
-                                            System.currentTimeMillis());
+                                            dataToken.token(), dataToken.expireAtMillis());
                             return new MockResponse()
                                     .setResponseCode(200)
                                     .setBody(

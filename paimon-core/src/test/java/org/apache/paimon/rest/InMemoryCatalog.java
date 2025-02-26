@@ -35,9 +35,12 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
+
+import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -47,41 +50,48 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.CoreOptions.PATH;
 
 /** A catalog for testing RESTCatalog. */
 public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapshots {
 
     public final Map<String, Database> databaseStore;
-    public final Map<String, TableSchema> tableSchemaStore;
+    public final Map<String, TableMetadata> tableMetadataStore;
     public final Map<String, List<Partition>> tablePartitionsStore;
     public final Map<String, View> viewStore;
     public final Map<String, Snapshot> tableSnapshotStore;
+    public final Map<String, RESTToken> dataTokenStore;
 
     public InMemoryCatalog(
             FileIO fileIO,
             Path warehouse,
             Options options,
             Map<String, Database> databaseStore,
-            Map<String, TableSchema> tableSchemaStore,
+            Map<String, TableMetadata> tableMetadataStore,
             Map<String, Snapshot> tableSnapshotStore,
             Map<String, List<Partition>> tablePartitionsStore,
-            Map<String, View> viewStore) {
+            Map<String, View> viewStore,
+            Map<String, RESTToken> dataTokenStore) {
         super(fileIO, warehouse, options);
         this.databaseStore = databaseStore;
-        this.tableSchemaStore = tableSchemaStore;
+        this.tableMetadataStore = tableMetadataStore;
         this.tablePartitionsStore = tablePartitionsStore;
         this.tableSnapshotStore = tableSnapshotStore;
         this.viewStore = viewStore;
+        this.dataTokenStore = dataTokenStore;
     }
 
     public static InMemoryCatalog create(
             CatalogContext context,
             Map<String, Database> databaseStore,
-            Map<String, TableSchema> tableSchemaStore,
+            Map<String, TableMetadata> tableMetadataStore,
             Map<String, Snapshot> tableSnapshotStore,
             Map<String, List<Partition>> tablePartitionsStore,
-            Map<String, View> viewStore) {
+            Map<String, View> viewStore,
+            Map<String, RESTToken> dataTokenStore) {
         String warehouse = CatalogFactory.warehouse(context).toUri().toString();
 
         Path warehousePath = new Path(warehouse);
@@ -99,10 +109,11 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
                 warehousePath,
                 context.options(),
                 databaseStore,
-                tableSchemaStore,
+                tableMetadataStore,
                 tableSnapshotStore,
                 tablePartitionsStore,
-                viewStore);
+                viewStore,
+                dataTokenStore);
     }
 
     // todo: overview
@@ -124,7 +135,10 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
 
     @Override
     public Database getDatabaseImpl(String name) throws DatabaseNotExistException {
-        return databaseStore.get(name);
+        if (databaseStore.containsKey(name)) {
+            return databaseStore.get(name);
+        }
+        throw new DatabaseNotExistException(name);
     }
 
     @Override
@@ -154,7 +168,7 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
     @Override
     protected List<String> listTablesImpl(String databaseName) {
         List<String> tables = new ArrayList<>();
-        for (Map.Entry<String, TableSchema> entry : tableSchemaStore.entrySet()) {
+        for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if (databaseName.equals(identifier.getDatabaseName())) {
                 tables.add(identifier.getTableName());
@@ -164,63 +178,113 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
     }
 
     @Override
+    public void createTableImpl(Identifier identifier, Schema schema) {
+        super.createTableImpl(identifier, schema);
+        try {
+            TableMetadata tableMetadata =
+                    createTableMetadata(
+                            identifier, 1L, schema, UUID.randomUUID().toString(), false);
+            tableMetadataStore.put(identifier.getFullName(), tableMetadata);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private TableMetadata createTableMetadata(
+            Identifier identifier, long schemaId, Schema schema, String uuid, boolean isExternal) {
+        Map<String, String> options = new HashMap<>(schema.options());
+        Path path = getTableLocation(identifier);
+        options.put(PATH.key(), path.toString());
+        TableSchema tableSchema =
+                new TableSchema(
+                        schemaId,
+                        schema.fields(),
+                        schema.fields().size() - 1,
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment());
+        TableMetadata tableMetadata = new TableMetadata(tableSchema, isExternal, uuid);
+        return tableMetadata;
+    }
+
+    @Override
     protected void dropTableImpl(Identifier identifier) {
-        if (tableSchemaStore.containsKey(identifier.getFullName())) {
-            tableSchemaStore.remove(identifier.getFullName());
-        } else {
+        if (tableMetadataStore.containsKey(identifier.getFullName())) {
+            tableMetadataStore.remove(identifier.getFullName());
             super.dropTableImpl(identifier);
         }
     }
 
     @Override
     public void renameTableImpl(Identifier fromTable, Identifier toTable) {
-        if (tableSchemaStore.containsKey(fromTable.getFullName())) {
-            TableSchema tableSchema = tableSchemaStore.get(fromTable.getFullName());
-            tableSchemaStore.remove(fromTable.getFullName());
-            tableSchemaStore.put(toTable.getFullName(), tableSchema);
-        } else {
+        if (tableMetadataStore.containsKey(fromTable.getFullName())) {
             super.renameTableImpl(fromTable, toTable);
+            TableMetadata tableMetadata = tableMetadataStore.get(fromTable.getFullName());
+            tableMetadataStore.remove(fromTable.getFullName());
+            tableMetadataStore.put(toTable.getFullName(), tableMetadata);
         }
     }
 
     @Override
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        if (tableSchemaStore.containsKey(identifier.getFullName())) {
-            TableSchema schema = tableSchemaStore.get(identifier.getFullName());
+        if (tableMetadataStore.containsKey(identifier.getFullName())) {
+            TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+            TableSchema schema = tableMetadata.schema();
             Options options = Options.fromMap(schema.options());
             if (options.get(CoreOptions.TYPE) == TableType.FORMAT_TABLE) {
                 throw new UnsupportedOperationException("Only data table support alter table.");
             }
-        } else {
-            super.alterTableImpl(identifier, changes);
+            SchemaManager schemaManager = schemaManager(identifier);
+            try {
+                TableSchema newSchema =
+                        runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+                TableMetadata newTableMetadata =
+                        createTableMetadata(
+                                identifier,
+                                newSchema.id(),
+                                newSchema.toSchema(),
+                                tableMetadata.uuid(),
+                                tableMetadata.isExternal());
+                tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
+            } catch (TableNotExistException
+                    | ColumnAlreadyExistException
+                    | ColumnNotExistException
+                    | RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
+    }
+
+    private SchemaManager schemaManager(Identifier identifier) {
+        Path path = getTableLocation(identifier);
+        return new SchemaManager(fileIO, path, identifier.getBranchNameOrDefault());
     }
 
     @Override
     public void createFormatTable(Identifier identifier, Schema schema) {
-        Map<String, String> options = new HashMap<>(schema.options());
-        // todo: whether need fix
-        options.put("path", "/tmp/format_table");
-        TableSchema tableSchema =
-                new TableSchema(
-                        1L,
-                        schema.fields(),
-                        1,
-                        schema.partitionKeys(),
-                        schema.primaryKeys(),
-                        options,
-                        schema.comment());
-        tableSchemaStore.put(identifier.getFullName(), tableSchema);
+        TableMetadata tableMetadata =
+                createTableMetadata(identifier, 1L, schema, UUID.randomUUID().toString(), true);
+        tableMetadataStore.put(identifier.getFullName(), tableMetadata);
+    }
+
+    @Override
+    public TableSchema loadTableSchema(Identifier identifier) throws TableNotExistException {
+        if (tableMetadataStore.containsKey(identifier.getFullName())) {
+            return tableMetadataStore.get(identifier.getFullName()).schema();
+        }
+        throw new TableNotExistException(identifier);
     }
 
     @Override
     protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
-        if (tableSchemaStore.containsKey(identifier.getFullName())) {
-            TableSchema tableSchema = tableSchemaStore.get(identifier.getFullName());
-            return new TableMetadata(tableSchema, false, "uuid");
+        if (tableMetadataStore.containsKey(identifier.getFullName())) {
+            return tableMetadataStore.get(identifier.getFullName());
         }
-        return super.loadTableMetadata(identifier);
+        throw new TableNotExistException(identifier);
     }
 
     @Override
@@ -319,9 +383,9 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
         getDatabase(databaseName);
         return viewStore.keySet().stream()
-                .map(v -> Identifier.fromString(v))
+                .map(Identifier::fromString)
                 .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
-                .map(identifier -> identifier.getTableName())
+                .map(Identifier::getTableName)
                 .collect(Collectors.toList());
     }
 
@@ -341,13 +405,30 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
         }
     }
 
-    private Partition spec2Partition(Map<String, String> spec) {
-        //todo: need update
-        return new Partition(spec, 123, 456, 789, 123);
-    }
-
     @Override
     public Optional<Snapshot> loadSnapshot(Identifier identifier) throws TableNotExistException {
         return Optional.ofNullable(tableSnapshotStore.get(identifier.getFullName()));
+    }
+
+    public RESTToken getToken(Identifier identifier) {
+        if (dataTokenStore.containsKey(identifier.getFullName())) {
+            return dataTokenStore.get(identifier.getFullName());
+        }
+        long currentTimeMillis = System.currentTimeMillis();
+        RESTToken token =
+                new RESTToken(
+                        ImmutableMap.of(
+                                "akId",
+                                "akId" + currentTimeMillis,
+                                "akSecret",
+                                "akSecret" + currentTimeMillis),
+                        currentTimeMillis);
+        dataTokenStore.put(identifier.getFullName(), token);
+        return dataTokenStore.get(identifier.getFullName());
+    }
+
+    private Partition spec2Partition(Map<String, String> spec) {
+        // todo: need update
+        return new Partition(spec, 123, 456, 789, 123);
     }
 }
