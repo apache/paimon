@@ -42,7 +42,7 @@ import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
-import java.util.TreeSet;
+import java.util.PriorityQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
@@ -57,7 +57,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
 
     private final ExecutorService executor;
     private final DeletionVectorsMaintainer dvMaintainer;
-    private final TreeSet<DataFileMeta> toCompact;
+    private final PriorityQueue<DataFileMeta> toCompact;
     private final int minFileNum;
     private final int maxFileNum;
     private final long targetFileSize;
@@ -78,7 +78,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             @Nullable CompactionMetrics.Reporter metricsReporter) {
         this.executor = executor;
         this.dvMaintainer = dvMaintainer;
-        this.toCompact = new TreeSet<>(fileComparator(false));
+        this.toCompact = new PriorityQueue<>(fileComparator(false));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
@@ -197,7 +197,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         LinkedList<DataFileMeta> candidates = new LinkedList<>();
 
         while (!toCompact.isEmpty()) {
-            DataFileMeta file = toCompact.pollFirst();
+            DataFileMeta file = toCompact.poll();
             candidates.add(file);
             totalFileSize += file.fileSize();
             fileNum++;
@@ -217,7 +217,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     }
 
     @VisibleForTesting
-    TreeSet<DataFileMeta> getToCompact() {
+    PriorityQueue<DataFileMeta> getToCompact() {
         return toCompact;
     }
 
