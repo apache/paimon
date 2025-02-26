@@ -399,7 +399,13 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   }
 
   private def repartitionByPartitionsAndBucket(df: DataFrame): DataFrame = {
-    val partitionCols = tableSchema.partitionKeys().asScala.map(col).toSeq
+    val inputSchema = df.schema
+    val partitionCols = tableSchema
+      .partitionKeys()
+      .asScala
+      .map(tableSchema.fieldNames().indexOf(_))
+      .map(x => col(inputSchema.fieldNames(x)))
+      .toSeq
     df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
   }
 
