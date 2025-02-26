@@ -122,7 +122,8 @@ public class CompactionMetrics {
         return compactionTimes.stream().mapToDouble(Long::doubleValue);
     }
 
-    private LongStream getTotalFileSizeStream() {
+    @VisibleForTesting
+    public LongStream getTotalFileSizeStream() {
         return reporters.values().stream().mapToLong(r -> r.totalFileSize);
     }
 

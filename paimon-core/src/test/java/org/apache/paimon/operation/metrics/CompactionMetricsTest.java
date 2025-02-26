@@ -165,6 +165,7 @@ public class CompactionMetricsTest {
 
             CompactionMetrics metrics =
                     ((AbstractFileStoreWrite<?>) write.getWrite()).compactionMetrics();
+            assertThat(metrics.getTotalFileSizeStream()).hasSize(bucketNum);
             assertThat(getMetric(metrics, CompactionMetrics.MAX_TOTAL_FILE_SIZE))
                     .isEqualTo(Arrays.stream(totalFileSizes).max().orElse(0));
             assertThat(getMetric(metrics, CompactionMetrics.AVG_TOTAL_FILE_SIZE))
