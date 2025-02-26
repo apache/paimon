@@ -61,6 +61,26 @@ public interface TagPeriodHandler {
                     .toFormatter()
                     .withResolverStyle(ResolverStyle.LENIENT);
 
+    DateTimeFormatter HOUR_FORMATTER_WITHOUT_SPACES =
+            new DateTimeFormatterBuilder()
+                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendLiteral('-')
+                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
+                    .appendLiteral('-')
+                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .toFormatter()
+                    .withResolverStyle(ResolverStyle.LENIENT);
+
+    DateTimeFormatter HOUR_FORMATTER_WITHOUT_DASHES_AND_SPACES =
+            new DateTimeFormatterBuilder()
+                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
+                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .toFormatter()
+                    .withResolverStyle(ResolverStyle.LENIENT);
+
     DateTimeFormatter MINUTE_FORMATTER =
             new DateTimeFormatterBuilder()
                     .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
@@ -179,6 +199,10 @@ public interface TagPeriodHandler {
                     return HOUR_FORMATTER;
                 case WITHOUT_DASHES:
                     return HOUR_FORMATTER_WITHOUT_DASHES;
+                case WITH_DASHES_WITHOUT_SPACES:
+                    return HOUR_FORMATTER_WITHOUT_SPACES;
+                case WITHOUT_DASHES_AND_SPACES:
+                    return HOUR_FORMATTER_WITHOUT_DASHES_AND_SPACES;
                 default:
                     throw new IllegalArgumentException("Unsupported date format type");
             }
@@ -205,8 +229,10 @@ public interface TagPeriodHandler {
         protected DateTimeFormatter formatter() {
             switch (formatter) {
                 case WITH_DASHES:
+                case WITH_DASHES_WITHOUT_SPACES:
                     return DAY_FORMATTER;
                 case WITHOUT_DASHES:
+                case WITHOUT_DASHES_AND_SPACES:
                     return DAY_FORMATTER_WITHOUT_DASHES;
                 default:
                     throw new IllegalArgumentException("Unsupported date format type");
