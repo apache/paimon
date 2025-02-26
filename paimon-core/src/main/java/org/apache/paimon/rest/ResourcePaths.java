@@ -29,8 +29,11 @@ public class ResourcePaths {
     private static final String V1 = "/v1";
     private static final String DATABASES = "databases";
     private static final String TABLES = "tables";
+    public static final String QUERY_PARAMETER_WAREHOUSE_KEY = "warehouse";
 
-    public static final String V1_CONFIG = V1 + "/config";
+    public static String config(String warehouse) {
+        return String.format("%s/config?%s=%s", V1, QUERY_PARAMETER_WAREHOUSE_KEY, warehouse);
+    }
 
     public static ResourcePaths forCatalogProperties(Options options) {
         return new ResourcePaths(options.get(RESTCatalogInternalOptions.PREFIX));

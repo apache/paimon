@@ -111,7 +111,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
     private final ResourcePaths resourcePaths;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
-    private final FileIO fileIO;
     private final RESTAuthFunction restAuthFunction;
 
     private volatile ScheduledExecutorService refreshExecutor = null;
@@ -126,15 +125,12 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
         Options options = context.options();
         Map<String, String> baseHeaders = Collections.emptyMap();
         if (configRequired) {
-            if (context.options().contains(WAREHOUSE)) {
-                throw new IllegalArgumentException("Can not config warehouse in RESTCatalog.");
-            }
-
+            String warehouse = options.get(WAREHOUSE);
             baseHeaders = extractPrefixMap(context.options(), HEADER_PREFIX);
             options =
                     new Options(
                             client.get(
-                                            ResourcePaths.V1_CONFIG,
+                                            ResourcePaths.config(warehouse),
                                             ConfigResponse.class,
                                             new RESTAuthFunction(
                                                     Collections.emptyMap(), catalogAuth))
@@ -147,7 +143,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
 
         this.dataTokenEnabled = options.get(RESTCatalogOptions.DATA_TOKEN_ENABLED);
-        this.fileIO = dataTokenEnabled ? null : fileIOFromOptions(new Path(options.get(WAREHOUSE)));
     }
 
     @Override
@@ -290,7 +285,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
     private FileIO fileIOForData(Path path, Identifier identifier) {
         return dataTokenEnabled
                 ? new RESTTokenFileIO(catalogLoader(), this, identifier, path)
-                : this.fileIO;
+                : fileIOFromOptions(path);
     }
 
     private FileIO fileIOFromOptions(Path path) {

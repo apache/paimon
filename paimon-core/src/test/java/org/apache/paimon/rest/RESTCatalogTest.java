@@ -79,15 +79,6 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testInitFailWhenDefineWarehouse() {
-        Options options = new Options();
-        options.set(CatalogOptions.WAREHOUSE, warehouse);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
     void testAuthFail() {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());

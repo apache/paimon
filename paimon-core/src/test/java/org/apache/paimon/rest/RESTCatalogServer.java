@@ -123,7 +123,7 @@ public class RESTCatalogServer {
                     if (!("Bearer " + authToken).equals(token)) {
                         return new MockResponse().setResponseCode(401);
                     }
-                    if ("/v1/config".equals(request.getPath())) {
+                    if (request.getPath().startsWith("/v1/config")) {
                         return new MockResponse()
                                 .setResponseCode(200)
                                 .setBody(getConfigBody(warehouse));

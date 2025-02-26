@@ -34,6 +34,13 @@ paths:
         - config
       summary: Get Config
       operationId: getConfig
+      parameters:
+        - name: warehouse
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Warehouse location or identifier to request from the service
       responses:
         "200":
           description: OK
