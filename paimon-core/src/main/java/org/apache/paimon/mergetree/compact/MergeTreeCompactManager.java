@@ -86,7 +86,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.dvMaintainer = dvMaintainer;
         this.lazyGenDeletionFile = lazyGenDeletionFile;
 
-        MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
+        MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 
     @Override
@@ -103,7 +103,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Override
     public void addNewFile(DataFileMeta file) {
         levels.addLevel0File(file);
-        MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
+        MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 
     @Override
@@ -230,7 +230,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                 r.after());
                     }
                     levels.update(r.before(), r.after());
-                    MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
+                    MetricUtils.safeCall(this::reportMetrics, LOG);
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
                                 "Levels in compact manager updated. Current runs are\n{}",
@@ -240,9 +240,10 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         return result;
     }
 
-    private void reportLevel0FileCount() {
+    private void reportMetrics() {
         if (metricsReporter != null) {
             metricsReporter.reportLevel0FileCount(levels.level0().size());
+            metricsReporter.reportTotalFileSize(levels.totalFileSize());
         }
     }
 

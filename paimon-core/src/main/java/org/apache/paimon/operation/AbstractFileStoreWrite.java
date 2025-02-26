@@ -555,4 +555,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers() {
         return writers;
     }
+
+    @VisibleForTesting
+    public CompactionMetrics compactionMetrics() {
+        return compactionMetrics;
+    }
 }
