@@ -407,6 +407,14 @@ public class MetadataInMemoryFileSystemCatalog extends FileSystemCatalog
     }
 
     @Override
+    public boolean commitSnapshot(
+            Identifier identifier, Snapshot snapshot, List<Partition> statistics)
+            throws TableNotExistException {
+        tableSnapshotStore.put(identifier.getFullName(), snapshot);
+        return false;
+    }
+
+    @Override
     public Optional<Snapshot> loadSnapshot(Identifier identifier) throws TableNotExistException {
         return Optional.ofNullable(tableSnapshotStore.get(identifier.getFullName()));
     }
