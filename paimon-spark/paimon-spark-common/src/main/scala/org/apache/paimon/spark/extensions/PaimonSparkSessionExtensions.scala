@@ -21,6 +21,7 @@ package org.apache.paimon.spark.extensions
 import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonIncompatiblePHRRules, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable, PaimonViewResolver, ReplacePaimonFunctions}
 import org.apache.paimon.spark.catalyst.optimizer.{EvalSubqueriesForDeleteTable, MergePaimonScalarSubqueries}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
+import org.apache.paimon.spark.commands.BucketExpression
 import org.apache.paimon.spark.execution.PaimonStrategy
 import org.apache.paimon.spark.execution.adaptive.DisableUnnecessaryPaimonBucketedScan
 
@@ -57,6 +58,11 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
       fnName =>
         extensions.injectTableFunction(
           PaimonTableValuedFunctions.getTableValueFunctionInjection(fnName))
+    }
+
+    // scalar function extensions
+    BucketExpression.supportedFnNames.foreach {
+      fnName => extensions.injectFunction(BucketExpression.getFunctionInjection(fnName))
     }
 
     // optimization rules
