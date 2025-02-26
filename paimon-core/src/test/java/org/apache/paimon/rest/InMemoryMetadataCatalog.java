@@ -56,7 +56,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.PATH;
 
 /** A catalog for testing RESTCatalog. */
-public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapshots {
+public class InMemoryMetadataCatalog extends FileSystemCatalog implements SupportsSnapshots {
 
     public final Map<String, Database> databaseStore;
     public final Map<String, TableMetadata> tableMetadataStore;
@@ -65,7 +65,7 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
     public final Map<String, Snapshot> tableSnapshotStore;
     public final Map<String, RESTToken> dataTokenStore;
 
-    public InMemoryCatalog(
+    public InMemoryMetadataCatalog(
             FileIO fileIO,
             Path warehouse,
             Options options,
@@ -84,7 +84,7 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
         this.dataTokenStore = dataTokenStore;
     }
 
-    public static InMemoryCatalog create(
+    public static InMemoryMetadataCatalog create(
             CatalogContext context,
             Map<String, Database> databaseStore,
             Map<String, TableMetadata> tableMetadataStore,
@@ -104,7 +104,7 @@ public class InMemoryCatalog extends FileSystemCatalog implements SupportsSnapsh
             throw new UncheckedIOException(e);
         }
 
-        return new InMemoryCatalog(
+        return new InMemoryMetadataCatalog(
                 fileIO,
                 warehousePath,
                 context.options(),

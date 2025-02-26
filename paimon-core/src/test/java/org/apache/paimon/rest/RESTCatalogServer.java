@@ -71,8 +71,8 @@ import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -86,7 +86,7 @@ public class RESTCatalogServer {
     private static final String PREFIX = "paimon";
     private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
 
-    private final InMemoryCatalog catalog;
+    private final InMemoryMetadataCatalog catalog;
     private final Dispatcher dispatcher;
     private final MockWebServer server;
     private final String authToken;
@@ -103,7 +103,7 @@ public class RESTCatalogServer {
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
         this.catalog =
-                InMemoryCatalog.create(
+                InMemoryMetadataCatalog.create(
                         CatalogContext.create(conf),
                         databaseStore,
                         tableMetadataStore,
@@ -138,7 +138,7 @@ public class RESTCatalogServer {
     }
 
     public static Dispatcher initDispatcher(
-            InMemoryCatalog catalog, String warehouse, String authToken) {
+            InMemoryMetadataCatalog catalog, String warehouse, String authToken) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
