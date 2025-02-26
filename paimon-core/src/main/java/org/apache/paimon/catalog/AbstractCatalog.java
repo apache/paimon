@@ -216,7 +216,7 @@ public abstract class AbstractCatalog implements Catalog {
             if (changes == null || changes.isEmpty()) {
                 return;
             }
-            alterDatabaseImpl(name, changes);
+            this.alterDatabaseImpl(name, changes);
         } catch (DatabaseNotExistException e) {
             if (ignoreIfNotExists) {
                 return;

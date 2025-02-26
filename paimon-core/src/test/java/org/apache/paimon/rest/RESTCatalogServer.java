@@ -19,16 +19,20 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
+import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
@@ -39,6 +43,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
@@ -67,16 +72,18 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
-import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -84,16 +91,31 @@ public class RESTCatalogServer {
     private static final String PREFIX = "paimon";
     private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
 
-    private final Catalog catalog;
+    private final MetadataInMemoryFileSystemCatalog catalog;
     private final Dispatcher dispatcher;
     private final MockWebServer server;
     private final String authToken;
+
+    public final Map<String, Database> databaseStore = new HashMap<>();
+    public final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
+    public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
+    public final Map<String, View> viewStore = new HashMap<>();
+    public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
+    Map<String, RESTToken> dataTokenStore = new HashMap<>();
 
     public RESTCatalogServer(String warehouse, String initToken) {
         authToken = initToken;
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
-        this.catalog = TestRESTCatalog.create(CatalogContext.create(conf));
+        this.catalog =
+                MetadataInMemoryFileSystemCatalog.create(
+                        CatalogContext.create(conf),
+                        databaseStore,
+                        tableMetadataStore,
+                        tableSnapshotStore,
+                        tablePartitionsStore,
+                        viewStore,
+                        dataTokenStore);
         this.dispatcher = initDispatcher(catalog, warehouse, authToken);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -112,7 +134,16 @@ public class RESTCatalogServer {
         server.shutdown();
     }
 
-    public static Dispatcher initDispatcher(Catalog catalog, String warehouse, String authToken) {
+    public void setTableSnapshot(Identifier identifier, Snapshot snapshot) {
+        tableSnapshotStore.put(identifier.getFullName(), snapshot);
+    }
+
+    public void setDataToken(Identifier identifier, RESTToken token) {
+        dataTokenStore.put(identifier.getFullName(), token);
+    }
+
+    public static Dispatcher initDispatcher(
+            MetadataInMemoryFileSystemCatalog catalog, String warehouse, String authToken) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
@@ -241,17 +272,22 @@ public class RESTCatalogServer {
                             }
                             return partitionsApiHandler(catalog, request, databaseName, tableName);
                         } else if (isTableToken) {
+                            RESTToken dataToken =
+                                    catalog.getToken(Identifier.create(databaseName, resources[2]));
                             GetTableTokenResponse getTableTokenResponse =
                                     new GetTableTokenResponse(
-                                            ImmutableMap.of("key", "value"),
-                                            System.currentTimeMillis());
+                                            dataToken.token(), dataToken.expireAtMillis());
                             return new MockResponse()
                                     .setResponseCode(200)
                                     .setBody(
                                             OBJECT_MAPPER.writeValueAsString(
                                                     getTableTokenResponse));
                         } else if (isTableSnapshot) {
-                            if (!"my_snapshot_table".equals(resources[2])) {
+                            String tableName = resources[2];
+                            Optional<Snapshot> snapshotOptional =
+                                    catalog.loadSnapshot(
+                                            Identifier.create(databaseName, tableName));
+                            if (!snapshotOptional.isPresent()) {
                                 response =
                                         new ErrorResponse(
                                                 ErrorResponseResourceType.SNAPSHOT,
@@ -261,8 +297,7 @@ public class RESTCatalogServer {
                                 return mockResponse(response, 404);
                             }
                             GetTableSnapshotResponse getTableSnapshotResponse =
-                                    new GetTableSnapshotResponse(
-                                            createSnapshotWithMillis(10086, 100));
+                                    new GetTableSnapshotResponse(snapshotOptional.get());
                             return new MockResponse()
                                     .setResponseCode(200)
                                     .setBody(
@@ -447,6 +482,25 @@ public class RESTCatalogServer {
             case "DELETE":
                 catalog.dropDatabase(databaseName, false, true);
                 return new MockResponse().setResponseCode(200);
+            case "POST":
+                AlterDatabaseRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), AlterDatabaseRequest.class);
+                List<PropertyChange> changes = new ArrayList<>();
+                for (String property : requestBody.getRemovals()) {
+                    changes.add(PropertyChange.removeProperty(property));
+                }
+                for (Map.Entry<String, String> entry : requestBody.getUpdates().entrySet()) {
+                    changes.add(PropertyChange.setProperty(entry.getKey(), entry.getValue()));
+                }
+                catalog.alterDatabase(databaseName, changes, false);
+                AlterDatabaseResponse alterDatabaseResponse =
+                        new AlterDatabaseResponse(
+                                requestBody.getRemovals(),
+                                requestBody.getUpdates().keySet().stream()
+                                        .collect(Collectors.toList()),
+                                Collections.emptyList());
+                return mockResponse(alterDatabaseResponse, 200);
             default:
                 return new MockResponse().setResponseCode(404);
         }

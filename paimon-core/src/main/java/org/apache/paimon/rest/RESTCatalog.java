@@ -241,9 +241,9 @@ public class RESTCatalog implements Catalog, SupportsSnapshots {
                             request,
                             AlterDatabaseResponse.class,
                             restAuthFunction);
-            if (response.getUpdated().isEmpty()) {
-                throw new IllegalStateException("Failed to update properties");
-            }
+            //            if (response.getUpdated().isEmpty()) {
+            //                throw new IllegalStateException("Failed to update properties");
+            //            }
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name);
