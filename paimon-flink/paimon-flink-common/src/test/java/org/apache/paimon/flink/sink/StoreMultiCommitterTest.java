@@ -81,6 +81,7 @@ class StoreMultiCommitterTest {
     private Path warehouse;
     private CatalogLoader catalogLoader;
     private Catalog catalog;
+    private String databaseName;
     private Identifier firstTable;
     private Identifier secondTable;
     private Path firstTablePath;
@@ -99,7 +100,7 @@ class StoreMultiCommitterTest {
     public void beforeEach() throws Exception {
         initialCommitUser = UUID.randomUUID().toString();
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
-        String databaseName = "test_db";
+        databaseName = "test_db";
         firstTable = Identifier.create(databaseName, "test_table1");
         secondTable = Identifier.create(databaseName, "test_table2");
 

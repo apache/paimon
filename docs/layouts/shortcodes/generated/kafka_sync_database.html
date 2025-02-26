@@ -90,6 +90,11 @@ under the License.
         </td>
     </tr>
     <tr>
+        <td><h5>--eager_init</h5></td>
+        <td>It is default false. If true, all relevant tables commiter will be initialized eagerly, which means those tables could be forced to create snapshot.</td>
+    </tr>
+    <tr>
+    <tr>
         <td><h5>--partition_keys</h5></td>
         <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".
             If the keys are not in source table, the sink table won't set partition keys.</td>
