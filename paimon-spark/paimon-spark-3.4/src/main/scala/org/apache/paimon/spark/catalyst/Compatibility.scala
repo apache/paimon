@@ -42,7 +42,7 @@ object Compatibility {
   }
 
   def castByTableInsertionTag: TreeNodeTag[Unit] = {
-    TreeNodeTag[Unit]("by_table_insertion")
+    Cast.BY_TABLE_INSERTION
   }
 
   def cast(
@@ -56,4 +56,5 @@ object Compatibility {
   def callFunction(name: String, args: Seq[Column]): Column = {
     call_udf(name, args: _*)
   }
+
 }

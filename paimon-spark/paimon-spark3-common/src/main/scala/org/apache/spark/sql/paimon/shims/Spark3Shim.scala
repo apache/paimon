@@ -25,10 +25,12 @@ import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, SparkAr
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.{Column, SparkSession}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.types.StructType
@@ -78,5 +80,11 @@ class Spark3Shim extends SparkShim {
     throw new UnsupportedOperationException()
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType =
+    throw new UnsupportedOperationException()
+
+  override def toPaimonVariant(row: InternalRow, pos: Int): Variant =
+    throw new UnsupportedOperationException()
+
+  override def toPaimonVariant(array: ArrayData, pos: Int): Variant =
     throw new UnsupportedOperationException()
 }
