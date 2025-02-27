@@ -29,7 +29,10 @@ import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 
-/** Entry representing a partition. */
+/**
+ * Statistics of a partition, fields inside may be negative, indicating that some data has been
+ * removed.
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @Public
 public class Partition implements Serializable {

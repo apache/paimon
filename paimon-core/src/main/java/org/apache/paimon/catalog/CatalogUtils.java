@@ -39,6 +39,8 @@ import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -147,13 +149,7 @@ public class CatalogUtils {
                 table.newReadBuilder().newScan().listPartitionEntries();
         List<Partition> partitions = new ArrayList<>(partitionEntries.size());
         for (PartitionEntry entry : partitionEntries) {
-            partitions.add(
-                    new Partition(
-                            computer.generatePartValues(entry.partition()),
-                            entry.recordCount(),
-                            entry.fileSizeInBytes(),
-                            entry.fileCount(),
-                            entry.lastFileCreationTime()));
+            partitions.add(entry.toPartition(computer));
         }
         return partitions;
     }
@@ -175,7 +171,8 @@ public class CatalogUtils {
             Function<Path, FileIO> internalFileIO,
             Function<Path, FileIO> externalFileIO,
             TableMetadata.Loader metadataLoader,
-            SnapshotCommit.Factory commitFactory)
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext)
             throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
@@ -193,7 +190,13 @@ public class CatalogUtils {
 
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
-                        identifier, metadata.uuid(), catalog.catalogLoader(), commitFactory);
+                        identifier,
+                        metadata.uuid(),
+                        catalog.catalogLoader(),
+                        lockFactory,
+                        lockContext,
+                        catalog instanceof SupportsSnapshots,
+                        catalog instanceof SupportsBranches);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);

@@ -933,7 +933,14 @@ public abstract class CatalogTestBase {
         Map<String, String> options = new HashMap<>();
         options.put("key1", "v1");
         options.put("key2", "v2");
-        View view = new ViewImpl(identifier, rowType, query, comment, options);
+
+        Map<String, String> dialects = new HashMap<>();
+        if (supportsViewDialects()) {
+            dialects.put("flink", "SELECT * FROM FLINK_TABLE");
+            dialects.put("spark", "SELECT * FROM SPARK_TABLE");
+        }
+        View view =
+                new ViewImpl(identifier, rowType.getFields(), query, dialects, comment, options);
 
         assertThatThrownBy(() -> catalog.createView(identifier, view, false))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
@@ -952,6 +959,7 @@ public abstract class CatalogTestBase {
         assertThat(catalogView.fullName()).isEqualTo(view.fullName());
         assertThat(catalogView.rowType()).isEqualTo(view.rowType());
         assertThat(catalogView.query()).isEqualTo(view.query());
+        assertThat(catalogView.dialects()).isEqualTo(view.dialects());
         assertThat(catalogView.comment()).isEqualTo(view.comment());
         assertThat(catalogView.options()).containsAllEntriesOf(view.options());
 
@@ -1136,6 +1144,10 @@ public abstract class CatalogTestBase {
 
     protected boolean supportsView() {
         return false;
+    }
+
+    protected boolean supportsViewDialects() {
+        return true;
     }
 
     protected void checkPartition(Partition expected, Partition actual) {

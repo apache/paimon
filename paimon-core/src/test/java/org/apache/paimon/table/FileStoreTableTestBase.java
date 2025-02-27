@@ -66,7 +66,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -117,6 +117,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -667,7 +668,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         SnapshotManager snapshotManager =
-                new SnapshotManager(FileIOFinder.find(tablePath), table.location());
+                newSnapshotManager(FileIOFinder.find(tablePath), table.location());
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         assertThat(latestSnapshotId).isNotNull();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -1111,7 +1112,7 @@ public abstract class FileStoreTableTestBase {
             // snapshot 2
             write.write(rowData(2, 20, 200L));
             commit.commit(1, write.prepareCommit(false, 2));
-            SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+            SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), tablePath);
             // The snapshot 1 is expired.
             assertThat(snapshotManager.snapshotExists(1)).isFalse();
             table.createTag("test-tag-2", 1);
@@ -1174,7 +1175,7 @@ public abstract class FileStoreTableTestBase {
         table.createBranch("test-branch", "test-tag");
 
         // verify that branch file exist
-        BranchManager branchManager = table.branchManager();
+        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
         assertThat(branchManager.branchExists("test-branch")).isTrue();
 
         // verify test-tag in test-branch is equal to snapshot 2
@@ -1186,7 +1187,7 @@ public abstract class FileStoreTableTestBase {
 
         // verify snapshot in test-branch is equal to snapshot 2
         SnapshotManager snapshotManager =
-                new SnapshotManager(new TraceableFileIO(), tablePath, "test-branch");
+                newSnapshotManager(new TraceableFileIO(), tablePath, "test-branch");
         Snapshot branchSnapshot =
                 Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
@@ -1258,7 +1259,7 @@ public abstract class FileStoreTableTestBase {
         table.deleteBranch("branch1");
 
         // verify that branch file not exist
-        BranchManager branchManager = table.branchManager();
+        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
         assertThat(branchManager.branchExists("branch1")).isFalse();
 
         assertThatThrownBy(() -> table.deleteBranch("branch1"))
@@ -1334,7 +1335,7 @@ public abstract class FileStoreTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // verify snapshot in branch1 and main branch is same
-        SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), tablePath);
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
                         new TraceableFileIO(),
@@ -1923,7 +1924,7 @@ public abstract class FileStoreTableTestBase {
         table.createBranch(BRANCH_NAME, "tag1");
 
         // verify that branch1 file exist
-        BranchManager branchManager = table.branchManager();
+        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
         assertThat(branchManager.branchExists(BRANCH_NAME)).isTrue();
 
         // Verify branch1 and the main branch have the same data

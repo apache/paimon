@@ -61,7 +61,7 @@ Supported filter types:
 * `file-index.bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
 
 `Bitmap`:
-* `file-index.bitmap.columns`: specify the columns that need bitmap index.
+* `file-index.bitmap.columns`: specify the columns that need bitmap index. See [Index Bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}}).
 
 `Bit-Slice Index Bitmap`
 * `file-index.bsi.columns`: specify the columns that need bsi index.

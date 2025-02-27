@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
+import org.apache.paimon.rest.auth.AuthProviderEnum;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.AfterEach;
@@ -100,7 +101,7 @@ class RESTCatalogITCase extends CatalogITCaseBase {
         options.put("metastore", "rest");
         options.put(RESTCatalogOptions.URI.key(), serverUrl);
         options.put(RESTCatalogOptions.TOKEN.key(), initToken);
-        options.put(RESTCatalogOptions.THREAD_POOL_SIZE.key(), "" + 1);
+        options.put(RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.BEAR.identifier());
         return options;
     }
 

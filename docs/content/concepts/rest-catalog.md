@@ -51,34 +51,53 @@ Paimon REST Catalog provides a lightweight implementation to access the catalog 
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
-'type' = 'paimon',
-'uri' = '<catalog server url>',
-'metastore' = 'rest',
-'token.provider' = 'bear'
-'token' = '<token>'
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'bear'
+    'token' = '<token>'
 );
 ```
 - DLF ak
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
-'type' = 'paimon',
-'uri' = '<catalog server url>',
-'metastore' = 'rest',
-'token.provider' = 'dlf',
-'dlf.accessKeyId'='<accessKeyId>',
-'dlf.accessKeySecret'='<accessKeySecret>',
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.accessKeyId'='<accessKeyId>',
+    'dlf.accessKeySecret'='<accessKeySecret>',
 );
 ```
-- DLF token path
+
+- DLF sts token
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
-'type' = 'paimon',
-'uri' = '<catalog server url>',
-'metastore' = 'rest',
-'token.provider' = 'dlf',
-'dlf.token-path' = '<token-path>'
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.accessKeyId'='<accessKeyId>',
+    'dlf.accessKeySecret'='<accessKeySecret>',
+    'dlf.securityToken'='<securityToken>'
+);
+```
+
+- DLF sts token path
+```sql
+CREATE CATALOG `paimon-rest-catalog`
+WITH (
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.token-path' = 'my_token_path_in_disk'
 );
 ```
 

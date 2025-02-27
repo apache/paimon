@@ -119,7 +119,7 @@ import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -749,7 +749,13 @@ public class HiveCatalog extends AbstractCatalog {
         RowType rowType = HiveTableUtils.createRowType(table);
         Map<String, String> options = new HashMap<>(table.getParameters());
         String comment = options.remove(COMMENT_PROP);
-        return new ViewImpl(identifier, rowType, table.getViewExpandedText(), comment, options);
+        return new ViewImpl(
+                identifier,
+                rowType.getFields(),
+                table.getViewExpandedText(),
+                Collections.emptyMap(),
+                comment,
+                options);
     }
 
     @Override

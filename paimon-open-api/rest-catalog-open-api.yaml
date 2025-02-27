@@ -34,6 +34,13 @@ paths:
         - config
       summary: Get Config
       operationId: getConfig
+      parameters:
+        - name: warehouse
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Warehouse location or identifier to request from the service
       responses:
         "200":
           description: OK
@@ -339,6 +346,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: Success, no content
@@ -461,6 +473,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetTableDataTokenResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/snapshot:
+    get:
+      tags:
+        - table
+      summary: Get table snapshot
+      operationId: getTableSnapshot
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableSnapshotResponse'
         "404":
           description: Resource not found
           content:
@@ -651,6 +700,162 @@ paths:
           description: Success, no content
         "404":
           description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/branches:
+    get:
+      tags:
+        - branch
+      summary: List branches
+      operationId: listBranches
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListBranchesResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    post:
+      tags:
+        - branch
+      summary: Create branch
+      operationId: createBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}:
+    delete:
+      tags:
+        - branch
+      summary: Drop branch
+      operationId: dropBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/forward:
+    post:
+      tags:
+        - branch
+      summary: forward branch
+      operationId: forwardBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForwardBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
           content:
             application/json:
               schema:
@@ -1149,6 +1354,10 @@ components:
           $ref: '#/components/schemas/Identifier'
         snapshot:
           $ref: '#/components/schemas/Snapshot'
+        statistics:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partition'
     Snapshot:
       type: object
       properties:
@@ -1215,6 +1424,11 @@ components:
         expiresAt:
           type: integer
           format: int64
+    GetTableSnapshotResponse:
+      type: object
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
     AlterDatabaseRequest:
       type: object
       properties:
@@ -1291,6 +1505,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
+    CreateBranchRequest:
+      type: object
+      properties:
+        branch:
+          type: string
+        fromTag:
+          nullable: true
+          type: string
+    ForwardBranchRequest:
+      type: object
+      properties:
+        branch:
+          type: string
+    ListBranchesResponse:
+      type: object
+      properties:
+        branches:
+          type: array
+          items:
+            type: string
     GetViewResponse:
       type: object
       properties:
@@ -1310,16 +1544,22 @@ components:
     ViewSchema:
       type: object
       properties:
-        rowType:
-          $ref: '#/components/schemas/RowType'
-        options:
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        query:
+          type: string
+        dialects:
           type: object
           additionalProperties:
             type: string
         comment:
           type: string
-        query:
-          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     Partition:
       type: object
       properties:

@@ -67,6 +67,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
@@ -158,7 +159,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.snapshot(cpId, 1);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
 
         // should create 10 snapshots
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(cpId);

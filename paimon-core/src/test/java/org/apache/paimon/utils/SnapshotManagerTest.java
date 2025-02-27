@@ -41,6 +41,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -53,7 +55,7 @@ public class SnapshotManagerTest {
     @Test
     public void testSnapshotPath() {
         SnapshotManager snapshotManager =
-                new SnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
+                newSnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
         for (int i = 0; i < 20; i++) {
             assertThat(snapshotManager.snapshotPath(i))
                     .isEqualTo(new Path(tempDir.toString() + "/snapshot/snapshot-" + i));
@@ -203,7 +205,7 @@ public class SnapshotManagerTest {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
@@ -239,7 +241,7 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.laterOrEqualWatermark(millis + 999)).isNull();
     }
 
-    private Snapshot createSnapshotWithMillis(long id, long millis) {
+    public static Snapshot createSnapshotWithMillis(long id, long millis) {
         return new Snapshot(
                 id,
                 0L,
@@ -304,7 +306,7 @@ public class SnapshotManagerTest {
     public void testLatestSnapshotOfUser() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 100 snapshots using user "lastCommitUser"
         for (long i = 0; i < 100; i++) {
             Snapshot snapshot =
@@ -353,7 +355,7 @@ public class SnapshotManagerTest {
     public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
         Path path = new Path(tempDir.toString());
-        SnapshotManager snapshotManager = new SnapshotManager(localFileIO, path);
+        SnapshotManager snapshotManager = newSnapshotManager(localFileIO, path);
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot =
@@ -449,7 +451,7 @@ public class SnapshotManagerTest {
     public void testLongLivedChangelog() throws Exception {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         long millis = 1L;
         for (long i = 1; i <= 5; i++) {
             Changelog changelog = createChangelogWithMillis(i, millis + i * 1000);
@@ -474,7 +476,7 @@ public class SnapshotManagerTest {
     public void testCommitChangelogWhenSameChangelogCommitTwice() throws IOException {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         long id = 1L;
         Changelog changelog = createChangelogWithMillis(id, 1L);
         snapshotManager.commitChangelog(changelog, id);
@@ -492,7 +494,7 @@ public class SnapshotManagerTest {
         private boolean deleteEarliestSnapshot = false;
 
         public TestSnapshotManager(FileIO fileIO, Path tablePath, boolean isRaceCondition) {
-            super(fileIO, tablePath);
+            super(fileIO, tablePath, DEFAULT_MAIN_BRANCH, null, null);
             this.isRaceCondition = isRaceCondition;
         }
 

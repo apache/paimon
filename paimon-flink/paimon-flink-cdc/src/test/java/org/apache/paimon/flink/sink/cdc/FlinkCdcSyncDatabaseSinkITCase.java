@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -172,6 +173,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                 // each table can only get 2 slots
                 .withTableOptions(Collections.singletonMap(SINK_PARALLELISM.key(), "2"))
                 .withDatabase(DATABASE_NAME)
+                .withTypeMapping(TypeMapping.defaultMapping())
                 .withCatalogLoader(catalogLoader)
                 .build();
 

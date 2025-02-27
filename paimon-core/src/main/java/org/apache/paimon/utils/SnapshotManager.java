@@ -35,6 +35,7 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -54,7 +55,6 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -78,30 +78,28 @@ public class SnapshotManager implements Serializable {
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
+    @Nullable private final SnapshotLoader snapshotLoader;
     @Nullable private final Cache<Path, Snapshot> cache;
-
-    public SnapshotManager(FileIO fileIO, Path tablePath) {
-        this(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
-    }
-
-    /** Specify the default branch for data writing. */
-    public SnapshotManager(FileIO fileIO, Path tablePath, @Nullable String branchName) {
-        this(fileIO, tablePath, branchName, null);
-    }
 
     public SnapshotManager(
             FileIO fileIO,
             Path tablePath,
             @Nullable String branchName,
+            @Nullable SnapshotLoader snapshotLoader,
             @Nullable Cache<Path, Snapshot> cache) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
         this.branch = BranchManager.normalizeBranch(branchName);
+        this.snapshotLoader = snapshotLoader;
         this.cache = cache;
     }
 
     public SnapshotManager copyWithBranch(String branchName) {
-        return new SnapshotManager(fileIO, tablePath, branchName);
+        SnapshotLoader newSnapshotLoader = null;
+        if (snapshotLoader != null) {
+            newSnapshotLoader = snapshotLoader.copyWithBranch(branchName);
+        }
+        return new SnapshotManager(fileIO, tablePath, branchName, newSnapshotLoader, cache);
     }
 
     public FileIO fileIO() {
@@ -209,12 +207,22 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot latestSnapshot() {
+        if (snapshotLoader != null) {
+            try {
+                return snapshotLoader.load().orElse(null);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
         Long snapshotId = latestSnapshotId();
         return snapshotId == null ? null : snapshot(snapshotId);
     }
 
     public @Nullable Long latestSnapshotId() {
         try {
+            if (snapshotLoader != null) {
+                return snapshotLoader.load().map(Snapshot::id).orElse(null);
+            }
             return findLatest(snapshotDirectory(), SNAPSHOT_PREFIX, this::snapshotPath);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest snapshot id", e);

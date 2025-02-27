@@ -270,7 +270,8 @@ public class SchemaManager implements Serializable {
     public TableSchema commitChanges(List<SchemaChange> changes)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
-        SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, branch);
+        SnapshotManager snapshotManager =
+                new SnapshotManager(fileIO, tableRoot, branch, null, null);
         boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
 
         while (true) {
@@ -770,7 +771,7 @@ public class SchemaManager implements Serializable {
     }
 
     @VisibleForTesting
-    boolean commit(TableSchema newSchema) throws Exception {
+    public boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
