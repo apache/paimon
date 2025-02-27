@@ -241,15 +241,11 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             Set<String> removeKeys = setPropertiesToRemoveKeys.getRight();
             AlterDatabaseRequest request =
                     new AlterDatabaseRequest(new ArrayList<>(removeKeys), updateProperties);
-            AlterDatabaseResponse response =
-                    client.post(
-                            resourcePaths.databaseProperties(name),
-                            request,
-                            AlterDatabaseResponse.class,
-                            restAuthFunction);
-            //            if (response.getUpdated().isEmpty()) {
-            //                throw new IllegalStateException("Failed to update properties");
-            //            }
+            client.post(
+                    resourcePaths.databaseProperties(name),
+                    request,
+                    AlterDatabaseResponse.class,
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name);
@@ -586,7 +582,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
 
     @Override
     public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
-            throws TableNotExistException, DatabaseNotExistException {
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
         try {
             CreateBranchRequest request = new CreateBranchRequest(branch, fromTag);
             client.post(
@@ -594,29 +590,36 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+            if (e.resourceType() == ErrorResponseResourceType.TABLE) {
+                throw new TableNotExistException(identifier, e);
+            } else if (e.resourceType() == ErrorResponseResourceType.TAG) {
+                throw new TagNotExistException(identifier, fromTag, e);
+            } else {
+                throw e;
+            }
+        } catch (AlreadyExistsException e) {
+            throw new BranchAlreadyExistException(identifier, branch, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
     }
 
     @Override
-    public void dropBranch(Identifier identifier, String branch) throws TableNotExistException {
+    public void dropBranch(Identifier identifier, String branch) throws BranchNotExistException {
         try {
             client.delete(
                     resourcePaths.branch(
                             identifier.getDatabaseName(), identifier.getTableName(), branch),
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+            throw new BranchNotExistException(identifier, branch, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
     }
 
     @Override
-    public void fastForward(Identifier identifier, String branch)
-            throws TableNotExistException, DatabaseNotExistException {
+    public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
         try {
             ForwardBranchRequest request = new ForwardBranchRequest(branch);
             client.post(
@@ -625,7 +628,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+            throw new BranchNotExistException(identifier, branch, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
