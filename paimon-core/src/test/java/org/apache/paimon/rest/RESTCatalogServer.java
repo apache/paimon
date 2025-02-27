@@ -475,8 +475,8 @@ public class RESTCatalogServer {
         return Optional.empty();
     }
 
-    private static MockResponse commitTableApiHandler(Catalog catalog, RecordedRequest request)
-            throws Exception {
+    private static MockResponse commitTableApiHandler(
+            MetadataInMemoryFileSystemCatalog catalog, RecordedRequest request) throws Exception {
         CommitTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
         FileStoreTable table = (FileStoreTable) catalog.getTable(requestBody.getIdentifier());
@@ -488,6 +488,7 @@ public class RESTCatalogServer {
         }
         boolean success =
                 commit.commit(requestBody.getSnapshot(), branchName, Collections.emptyList());
+        catalog.commitSnapshot(requestBody.getIdentifier(), requestBody.getSnapshot(), null);
         CommitTableResponse response = new CommitTableResponse(success);
         return mockResponse(response, 200);
     }

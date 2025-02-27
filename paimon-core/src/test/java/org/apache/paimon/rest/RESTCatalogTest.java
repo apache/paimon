@@ -18,20 +18,33 @@
 
 package org.apache.paimon.rest;
 
+import java.util.ArrayList;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -204,6 +217,58 @@ class RESTCatalogTest extends CatalogTestBase {
         assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
         restCatalog.dropBranch(identifier, "my_branch");
         assertThat(restCatalog.listBranches(identifier)).isEmpty();
+    }
+
+    @Test
+    public void testBatchRecordsWrite() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.primaryKey("f0", "f1");
+        schemaBuilder.partitionKeys("f1");
+        schemaBuilder.column("f0", DataTypes.STRING());
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.options(ImmutableMap.of(CoreOptions.BUCKET.key(), "1"));
+        Schema schema = schemaBuilder.build();
+
+        Identifier tableIdentifier = Identifier.create("my_db", "my_table");
+        catalog.createDatabase(tableIdentifier.getDatabaseName(), true);
+        catalog.createTable(tableIdentifier, schema, true);
+        FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(tableIdentifier);
+
+        // write
+        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        GenericRow record1 = GenericRow.of(BinaryString.fromString("Alice"), 12);
+        GenericRow record2 = GenericRow.of(BinaryString.fromString("Bob"), 5);
+        GenericRow record3 = GenericRow.of(BinaryString.fromString("Emily"), 18);
+        write.write(record1);
+        write.write(record2);
+        write.write(record3);
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // read
+        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<String> actual = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    String rowStr =
+                            String.format(
+                                    "%s[%s, %d]",
+                                    row.getRowKind().shortString(),
+                                    row.getString(0),
+                                    row.getInt(1));
+                    System.out.println(rowStr);
+                    actual.add(rowStr);
+                });
+
+        assertThat(actual)
+                .containsExactlyInAnyOrder("+I[Bob, 5]", "+I[Alice, 12]", "+I[Emily, 18]");
     }
 
     @Override

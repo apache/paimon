@@ -27,16 +27,19 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
 
@@ -45,6 +48,7 @@ import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -180,8 +184,8 @@ public class MetadataInMemoryFileSystemCatalog extends FileSystemCatalog
 
     @Override
     public void createTableImpl(Identifier identifier, Schema schema) {
-        super.createTableImpl(identifier, schema);
         try {
+            super.createTableImpl(identifier, schema);
             TableMetadata tableMetadata =
                     createTableMetadata(
                             identifier, 1L, schema, UUID.randomUUID().toString(), false);
@@ -410,8 +414,20 @@ public class MetadataInMemoryFileSystemCatalog extends FileSystemCatalog
     public boolean commitSnapshot(
             Identifier identifier, Snapshot snapshot, List<Partition> statistics)
             throws TableNotExistException {
-        tableSnapshotStore.put(identifier.getFullName(), snapshot);
-        return false;
+        FileStoreTable table = (FileStoreTable) this.getTable(identifier);
+        RenamingSnapshotCommit commit =
+                new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
+        String branchName = identifier.getBranchName();
+        if (branchName == null) {
+            branchName = "main";
+        }
+        try {
+            boolean success = commit.commit(snapshot, branchName, Collections.emptyList());
+            tableSnapshotStore.put(identifier.getFullName(), snapshot);
+            return success;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
