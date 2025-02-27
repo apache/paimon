@@ -229,7 +229,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     @VisibleForTesting
     public boolean bufferSpillable() {
-        return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
+        return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode, true);
     }
 
     private CompactManager createCompactManager(
