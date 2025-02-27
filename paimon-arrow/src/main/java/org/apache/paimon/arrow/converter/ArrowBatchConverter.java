@@ -44,10 +44,10 @@ public abstract class ArrowBatchConverter {
     }
 
     /**
-     * Write and get at most {@code maxBatchRows} data. Return null when finishing writing current
+     * Write and get at most {@code maxBatchRows} data. Return null when finishing writing the current
      * iterator.
      *
-     * <p>NOTE: the returned value will be reused, and it's lifecycle is managed by this writer.
+     * <p>NOTE: The returned value will be reused, and its lifecycle is managed by this writer.
      */
     @Nullable
     public VectorSchemaRoot next(int maxBatchRows) {
