@@ -150,7 +150,7 @@ case class MergeIntoPaimonTable(
           case _ => false
         }
       }
-      if (hasUpdate(matchedActions)) {
+      if (hasUpdate(matchedActions) || notMatchedActions.nonEmpty) {
         touchedFilePathsSet ++= findTouchedFiles(
           targetDS.join(sourceDS, toColumn(mergeCondition), "inner"),
           sparkSession)
