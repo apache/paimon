@@ -23,6 +23,7 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mongodb.BsonValueConvertor;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.TypeUtils;
@@ -80,7 +81,8 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(
+            RowKind rowKind, JsonNode record, RowType.Builder rowTypeBuilder) {
         // bson record should be a string
         Preconditions.checkArgument(
                 record.isTextual(),
@@ -95,8 +97,7 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
             rowTypeBuilder.field(fieldName, DataTypes.STRING());
         }
 
-        evalComputedColumns(resultMap, rowTypeBuilder);
-
+        evalComputedColumns(rowKind, resultMap, rowTypeBuilder);
         return resultMap;
     }
 

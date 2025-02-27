@@ -81,7 +81,8 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
                 .forEachRemaining(name -> rowTypeBuilder.field(name, DataTypes.STRING()));
     }
 
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(
+            RowKind rowKind, JsonNode record, RowType.Builder rowTypeBuilder) {
         fillDefaultTypes(record, rowTypeBuilder);
         Map<String, Object> recordMap =
                 convertValue(record, new TypeReference<Map<String, Object>>() {});
@@ -103,7 +104,8 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
                                             }
                                             return Objects.toString(entry.getValue());
                                         }));
-        evalComputedColumns(rowData, rowTypeBuilder);
+
+        evalComputedColumns(rowKind, rowData, rowTypeBuilder);
         return rowData;
     }
 
@@ -122,7 +124,7 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
     protected void processRecord(
             JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
         RowType.Builder rowTypeBuilder = RowType.builder();
-        Map<String, String> rowData = this.extractRowData(jsonNode, rowTypeBuilder);
+        Map<String, String> rowData = this.extractRowData(rowKind, jsonNode, rowTypeBuilder);
         records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
     }
 

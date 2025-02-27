@@ -32,8 +32,11 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.api.TableEnvironment;
@@ -45,6 +48,7 @@ import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -130,6 +134,27 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         return (FileStoreTable) catalog.getTable(identifier);
     }
 
+    protected AuditLogTable getAuditLogTable(String tableName) throws Exception {
+        Identifier identifier = Identifier.create(database, tableName + "$audit_log");
+        return (AuditLogTable) catalog.getTable(identifier);
+    }
+
+    protected List<InternalRow> getAuditLogData(String tableName) throws Exception {
+        List<InternalRow> result = new ArrayList<>();
+
+        AuditLogTable table = this.getAuditLogTable(tableName);
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<Split> splits = plan == null ? Collections.emptyList() : plan.splits();
+        TableRead read = readBuilder.newRead();
+        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
+            recordReader.forEachRemaining(result::add);
+        }
+
+        return result;
+    }
+
     protected GenericRow rowData(Object... values) {
         return GenericRow.of(values);
     }
@@ -140,6 +165,22 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         }
         commit.commit(incrementalIdentifier, write.prepareCommit(true, incrementalIdentifier));
         incrementalIdentifier++;
+    }
+
+    protected List<InternalRow> getData(String tableName) throws Exception {
+        List<InternalRow> result = new ArrayList<>();
+
+        FileStoreTable table = this.getFileStoreTable(tableName);
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<Split> splits = plan == null ? Collections.emptyList() : plan.splits();
+        TableRead read = readBuilder.newRead();
+        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
+            recordReader.forEachRemaining(result::add);
+        }
+
+        return result;
     }
 
     protected List<String> getResult(TableRead read, List<Split> splits, RowType rowType)

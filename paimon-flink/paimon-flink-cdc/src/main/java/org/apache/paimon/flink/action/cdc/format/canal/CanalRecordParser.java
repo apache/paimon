@@ -152,7 +152,8 @@ public class CanalRecordParser extends AbstractJsonRecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(
+            RowKind rowKind, JsonNode record, RowType.Builder rowTypeBuilder) {
         LinkedHashMap<String, String> originalFieldTypes = tryExtractOriginalFieldTypes();
         Map<String, Object> recordMap =
                 JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
@@ -180,7 +181,7 @@ public class CanalRecordParser extends AbstractJsonRecordParser {
             }
         }
 
-        evalComputedColumns(rowData, rowTypeBuilder);
+        evalComputedColumns(rowKind, rowData, rowTypeBuilder);
         return rowData;
     }
 

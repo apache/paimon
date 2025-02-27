@@ -24,6 +24,7 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -37,6 +38,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -114,12 +116,17 @@ public abstract class AbstractRecordParser
 
     /** generate values for computed columns. */
     protected void evalComputedColumns(
-            Map<String, String> rowData, RowType.Builder rowTypeBuilder) {
+            RowKind rowKind, Map<String, String> rowData, RowType.Builder rowTypeBuilder) {
         computedColumns.forEach(
                 computedColumn -> {
-                    rowData.put(
-                            computedColumn.columnName(),
-                            computedColumn.eval(rowData.get(computedColumn.fieldReference())));
+                    String argVal;
+                    if (Objects.equals(
+                            computedColumn.fieldReference(), SpecialFields.VALUE_KIND.name())) {
+                        argVal = rowKind.shortString();
+                    } else {
+                        argVal = rowData.get(computedColumn.fieldReference());
+                    }
+                    rowData.put(computedColumn.columnName(), computedColumn.eval(argVal));
                     rowTypeBuilder.field(computedColumn.columnName(), computedColumn.columnType());
                 });
     }

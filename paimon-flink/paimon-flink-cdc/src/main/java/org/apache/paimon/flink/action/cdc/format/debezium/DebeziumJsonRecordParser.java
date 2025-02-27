@@ -181,9 +181,10 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(
+            RowKind rowKind, JsonNode record, RowType.Builder rowTypeBuilder) {
         if (!hasSchema) {
-            return super.extractRowData(record, rowTypeBuilder);
+            return super.extractRowData(rowKind, record, rowTypeBuilder);
         }
 
         Map<String, Object> recordMap =
@@ -210,8 +211,6 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
                     DebeziumSchemaUtils.toDataType(
                             debeziumType, className, parameters.get(fieldName)));
         }
-
-        evalComputedColumns(resultMap, rowTypeBuilder);
 
         return resultMap;
     }

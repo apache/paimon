@@ -168,7 +168,8 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(
+            RowKind rowKind, JsonNode record, RowType.Builder rowTypeBuilder) {
 
         Map<String, Object> recordMap =
                 JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
@@ -179,7 +180,7 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
             rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
         }
 
-        evalComputedColumns(rowData, rowTypeBuilder);
+        evalComputedColumns(rowKind, rowData, rowTypeBuilder);
         return rowData;
     }
 

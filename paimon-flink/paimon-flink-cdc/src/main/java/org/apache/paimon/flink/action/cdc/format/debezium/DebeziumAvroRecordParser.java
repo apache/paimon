@@ -114,7 +114,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
     private void processRecord(
             GenericRecord record, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
         RowType.Builder rowTypeBuilder = RowType.builder();
-        Map<String, String> rowData = this.extractRowData(record, rowTypeBuilder);
+        Map<String, String> rowData = this.extractRowData(rowKind, record, rowTypeBuilder);
         records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
     }
 
@@ -128,7 +128,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
     }
 
     private Map<String, String> extractRowData(
-            GenericRecord record, RowType.Builder rowTypeBuilder) {
+            RowKind rowKind, GenericRecord record, RowType.Builder rowTypeBuilder) {
         Schema payloadSchema = sanitizedSchema(record.getSchema());
 
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
@@ -158,7 +158,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
             rowTypeBuilder.field(fieldName, avroToPaimonDataType(schema));
         }
 
-        evalComputedColumns(resultMap, rowTypeBuilder);
+        evalComputedColumns(rowKind, resultMap, rowTypeBuilder);
         return resultMap;
     }
 
