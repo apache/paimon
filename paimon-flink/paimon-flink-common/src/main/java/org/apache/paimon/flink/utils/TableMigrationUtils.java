@@ -80,7 +80,8 @@ public class TableMigrationUtils {
                 sourceDatabase,
                 sourceTableName,
                 icebergConf,
-                parallelism);
+                parallelism,
+                options);
     }
 
     public static List<Migrator> getImporters(
