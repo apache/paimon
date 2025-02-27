@@ -184,15 +184,10 @@ public class MetadataInMemoryFileSystemCatalog extends FileSystemCatalog
 
     @Override
     public void createTableImpl(Identifier identifier, Schema schema) {
-        try {
-            super.createTableImpl(identifier, schema);
-            TableMetadata tableMetadata =
-                    createTableMetadata(
-                            identifier, 1L, schema, UUID.randomUUID().toString(), false);
-            tableMetadataStore.put(identifier.getFullName(), tableMetadata);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        super.createTableImpl(identifier, schema);
+        TableMetadata tableMetadata =
+                createTableMetadata(identifier, 1L, schema, UUID.randomUUID().toString(), false);
+        tableMetadataStore.put(identifier.getFullName(), tableMetadata);
     }
 
     private TableMetadata createTableMetadata(

@@ -18,14 +18,11 @@
 
 package org.apache.paimon.rest;
 
-import java.util.ArrayList;
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.CatalogOptions;
@@ -204,30 +201,8 @@ class RESTCatalogTest extends CatalogTestBase {
         assertThat(snapshot).isEmpty();
     }
 
-    void testBranches() throws Exception {
-        String databaseName = "testBranchTable";
-        catalog.dropDatabase(databaseName, true, true);
-        catalog.createDatabase(databaseName, true);
-        Identifier identifier = Identifier.create(databaseName, "table");
-        catalog.createTable(
-                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
-
-        RESTCatalog restCatalog = (RESTCatalog) catalog;
-        restCatalog.createBranch(identifier, "my_branch", null);
-        assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
-        restCatalog.dropBranch(identifier, "my_branch");
-        assertThat(restCatalog.listBranches(identifier)).isEmpty();
-    }
-
     @Test
     public void testBatchRecordsWrite() throws Exception {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.primaryKey("f0", "f1");
-        schemaBuilder.partitionKeys("f1");
-        schemaBuilder.column("f0", DataTypes.STRING());
-        schemaBuilder.column("f1", DataTypes.INT());
-        schemaBuilder.options(ImmutableMap.of(CoreOptions.BUCKET.key(), "1"));
-        Schema schema = schemaBuilder.build();
 
         Identifier tableIdentifier = Identifier.create("my_db", "my_table");
         createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
@@ -261,9 +236,22 @@ class RESTCatalogTest extends CatalogTestBase {
                     actual.add(rowStr);
                 });
 
-        assertThat(actual)
-                .containsExactlyInAnyOrder("+I[Bob, 5]", "+I[Alice, 12]", "+I[Emily, 18]");
         assertThat(actual).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
+    }
+
+    void testBranches() throws Exception {
+        String databaseName = "testBranchTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
+
+        RESTCatalog restCatalog = (RESTCatalog) catalog;
+        restCatalog.createBranch(identifier, "my_branch", null);
+        assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
+        restCatalog.dropBranch(identifier, "my_branch");
+        assertThat(restCatalog.listBranches(identifier)).isEmpty();
     }
 
     @Override
