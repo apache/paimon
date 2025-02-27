@@ -150,6 +150,12 @@ public class FileSystemBranchManager implements BranchManager {
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
 
         Long earliestSnapshotId = snapshotManager.copyWithBranch(branchName).earliestSnapshotId();
+        if (earliestSnapshotId == null) {
+            throw new RuntimeException(
+                    "Cannot fast forward branch "
+                            + branchName
+                            + ", because it does not have snapshot.");
+        }
         Snapshot earliestSnapshot =
                 snapshotManager.copyWithBranch(branchName).snapshot(earliestSnapshotId);
         long earliestSchemaId = earliestSnapshot.schemaId();

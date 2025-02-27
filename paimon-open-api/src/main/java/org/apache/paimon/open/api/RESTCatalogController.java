@@ -23,11 +23,13 @@ import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -40,6 +42,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
+import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -518,6 +521,83 @@ public class RESTCatalogController {
             @PathVariable String database,
             @PathVariable String table,
             @RequestBody MarkDonePartitionsRequest request) {}
+
+    @Operation(
+            summary = "List branches",
+            tags = {"branch"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = ListBranchesResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches")
+    public ListBranchesResponse listBranches(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table) {
+        return new ListBranchesResponse(ImmutableList.of("branch"));
+    }
+
+    @Operation(
+            summary = "Create branch",
+            tags = {"branch"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches")
+    public void createBranch(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody CreateBranchRequest request) {}
+
+    @Operation(
+            summary = "Forward branch",
+            tags = {"branch"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches/forward")
+    public void forwardBranch(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody ForwardBranchRequest request) {}
+
+    @Operation(
+            summary = "Drop branch",
+            tags = {"branch"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @DeleteMapping("/v1/{prefix}/databases/{database}/tables/table/branches/branch")
+    public void dropBranch(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @PathVariable String branch) {}
 
     @Operation(
             summary = "List views",

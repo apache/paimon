@@ -163,6 +163,22 @@ class RESTCatalogTest extends CatalogTestBase {
         assertThat(snapshot).isEmpty();
     }
 
+    @Test
+    void testBranches() throws Exception {
+        String databaseName = "testBranchTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
+
+        RESTCatalog restCatalog = (RESTCatalog) catalog;
+        restCatalog.createBranch(identifier, "my_branch", null);
+        assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
+        restCatalog.dropBranch(identifier, "my_branch");
+        assertThat(restCatalog.listBranches(identifier)).isEmpty();
+    }
+
     @Override
     protected boolean supportsFormatTable() {
         return true;

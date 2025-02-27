@@ -34,40 +34,116 @@ public interface SupportsBranches extends Catalog {
      * @param branch the branch name
      * @param fromTag from the tag
      * @throws TableNotExistException if the table in identifier doesn't exist
-     * @throws DatabaseNotExistException if the database in identifier doesn't exist
+     * @throws BranchAlreadyExistException if the branch already exists
+     * @throws TagNotExistException if the tag doesn't exist
      */
     void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
-            throws TableNotExistException, DatabaseNotExistException;
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException;
 
     /**
      * Drop the branch for this table.
      *
      * @param identifier path of the table, cannot be system or branch name.
      * @param branch the branch name
-     * @throws TableNotExistException if the table in identifier doesn't exist
-     * @throws DatabaseNotExistException if the database in identifier doesn't exist
+     * @throws BranchNotExistException if the branch doesn't exist
      */
-    void dropBranch(Identifier identifier, String branch)
-            throws TableNotExistException, DatabaseNotExistException;
+    void dropBranch(Identifier identifier, String branch) throws BranchNotExistException;
 
     /**
      * Fast-forward a branch to main branch.
      *
      * @param identifier path of the table, cannot be system or branch name.
      * @param branch the branch name
-     * @throws TableNotExistException if the table in identifier doesn't exist
-     * @throws DatabaseNotExistException if the database in identifier doesn't exist
+     * @throws BranchNotExistException if the branch doesn't exist
      */
-    void fastForward(Identifier identifier, String branch)
-            throws TableNotExistException, DatabaseNotExistException;
+    void fastForward(Identifier identifier, String branch) throws BranchNotExistException;
 
     /**
      * List all branches of the table.
      *
      * @param identifier path of the table, cannot be system or branch name.
      * @throws TableNotExistException if the table in identifier doesn't exist
-     * @throws DatabaseNotExistException if the database in identifier doesn't exist
      */
-    List<String> listBranches(Identifier identifier)
-            throws TableNotExistException, DatabaseNotExistException;
+    List<String> listBranches(Identifier identifier) throws TableNotExistException;
+
+    /** Exception for trying to create a branch that already exists. */
+    class BranchAlreadyExistException extends Exception {
+
+        private static final String MSG = "Branch %s in table %s already exists.";
+
+        private final Identifier identifier;
+        private final String branch;
+
+        public BranchAlreadyExistException(Identifier identifier, String branch) {
+            this(identifier, branch, null);
+        }
+
+        public BranchAlreadyExistException(Identifier identifier, String branch, Throwable cause) {
+            super(String.format(MSG, branch, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.branch = branch;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String branch() {
+            return branch;
+        }
+    }
+
+    /** Exception for trying to operate on a branch that doesn't exist. */
+    class BranchNotExistException extends Exception {
+
+        private static final String MSG = "Branch %s in table %s doesn't exist.";
+
+        private final Identifier identifier;
+        private final String branch;
+
+        public BranchNotExistException(Identifier identifier, String branch) {
+            this(identifier, branch, null);
+        }
+
+        public BranchNotExistException(Identifier identifier, String branch, Throwable cause) {
+            super(String.format(MSG, branch, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.branch = branch;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String branch() {
+            return branch;
+        }
+    }
+
+    /** Exception for trying to operate on a tag that doesn't exist. */
+    class TagNotExistException extends Exception {
+
+        private static final String MSG = "Tag %s in table %s doesn't exist.";
+
+        private final Identifier identifier;
+        private final String tag;
+
+        public TagNotExistException(Identifier identifier, String tag) {
+            this(identifier, tag, null);
+        }
+
+        public TagNotExistException(Identifier identifier, String tag, Throwable cause) {
+            super(String.format(MSG, tag, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.tag = tag;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String tag() {
+            return tag;
+        }
+    }
 }
