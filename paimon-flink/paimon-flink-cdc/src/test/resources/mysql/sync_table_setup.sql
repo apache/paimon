@@ -57,7 +57,7 @@ CREATE TABLE schema_evolution_comment (
     _id INT comment 'primary',
     v1 VARCHAR(10) comment 'v1',
     PRIMARY KEY (_id)
-);
+) COMMENT 'schema_evolution_comment';
 
 -- ################################################################################
 --  testAllTypes
