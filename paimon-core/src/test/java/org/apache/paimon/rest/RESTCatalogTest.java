@@ -48,6 +48,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
@@ -125,12 +126,7 @@ class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testRefreshFileIO() throws Exception {
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        this.catalog = new RESTCatalog(CatalogContext.create(options));
+        this.catalog = initDataTokenCatalog();
         List<Identifier> identifiers =
                 Lists.newArrayList(
                         Identifier.create("test_db_a", "test_table_a"),
@@ -140,7 +136,38 @@ class RESTCatalogTest extends CatalogTestBase {
             createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
             FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             assertEquals(true, fileStoreTable.fileIO().exists(fileStoreTable.location()));
+
+            RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+            RESTToken fileDataToken = fileIO.validToken();
+            RESTToken serverDataToken =
+                    restCatalogServer.dataTokenStore.get(identifier.getFullName());
+            assertEquals(serverDataToken, fileDataToken);
         }
+    }
+
+    @Test
+    void testRefreshFileIOWhenExpired() throws Exception {
+        this.catalog = initDataTokenCatalog();
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_testing_date_token");
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis());
+        restCatalogServer.setDataToken(identifier, expiredDataToken);
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+        assertEquals(expiredDataToken, fileDataToken);
+        RESTToken newDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 100_000);
+        restCatalogServer.setDataToken(identifier, newDataToken);
+        RESTToken nextFileDataToken = fileIO.validToken();
+        assertEquals(newDataToken, nextFileDataToken);
+        assertEquals(true, nextFileDataToken.expireAtMillis() - fileDataToken.expireAtMillis() > 0);
     }
 
     @Test
@@ -199,6 +226,11 @@ class RESTCatalogTest extends CatalogTestBase {
         return true;
     }
 
+    // TODO implement this
+    @Override
+    @Test
+    public void testTableUUID() {}
+
     private void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {
@@ -214,8 +246,12 @@ class RESTCatalogTest extends CatalogTestBase {
                 true);
     }
 
-    // TODO implement this
-    @Override
-    @Test
-    public void testTableUUID() {}
+    private Catalog initDataTokenCatalog() {
+        Options options = new Options();
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
+        return new RESTCatalog(CatalogContext.create(options));
+    }
 }
