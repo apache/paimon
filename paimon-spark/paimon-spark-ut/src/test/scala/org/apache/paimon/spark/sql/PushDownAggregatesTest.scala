@@ -26,6 +26,8 @@ import org.apache.spark.sql.execution.LocalTableScanExec
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
 
+import java.sql.Date
+
 class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
 
   private def runAndCheckAggregate(
@@ -170,5 +172,43 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
             }
           })
       })
+  }
+
+  test("Push down aggregate: group by sub-columns of multiple partition columns") {
+    sql(s"""
+           |CREATE TABLE T (
+           |c1 STRING,
+           |c2 STRING,
+           |c3 STRING,
+           |c4 STRING,
+           |c5 DATE)
+           |TBLPROPERTIES ('primary-key' = 'c5, c1, c3')
+           |PARTITIONED BY (c5, c1)
+           |""".stripMargin)
+
+    sql("INSERT INTO T VALUES ('t1', 'k1', 'v1', 'r1', date'2025-01-01')")
+    sql("INSERT INTO T VALUES ('t3', 'k1', 'v1', 'r1', date'2025-01-01')")
+    sql("INSERT INTO T VALUES ('t2', 'k1', 'v1', 'r1', date'2025-01-02')")
+    sql("INSERT INTO T VALUES ('t3', 'k1', 'v1', 'r1', date'2025-01-02')")
+
+    checkAnswer(
+      sql("SELECT c1, COUNT(*) FROM T GROUP BY c1 ORDER BY c1"),
+      Seq(Row("t1", 1), Row("t2", 1), Row("t3", 2))
+    )
+
+    checkAnswer(
+      sql("SELECT COUNT(*), c5 FROM T GROUP BY c5 ORDER BY c5"),
+      Seq(Row(2, Date.valueOf("2025-01-01")), Row(2, Date.valueOf("2025-01-02")))
+    )
+
+    checkAnswer(
+      sql("SELECT c5, COUNT(*), c1 FROM T GROUP BY c1, c5 ORDER BY c1, c5"),
+      Seq(
+        Row(Date.valueOf("2025-01-01"), 1, "t1"),
+        Row(Date.valueOf("2025-01-02"), 1, "t2"),
+        Row(Date.valueOf("2025-01-01"), 1, "t3"),
+        Row(Date.valueOf("2025-01-02"), 1, "t3")
+      )
+    )
   }
 }
