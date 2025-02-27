@@ -48,6 +48,9 @@ public class CompactionMetrics {
     public static final String MAX_COMPACTION_OUTPUT_SIZE = "maxCompactionOutputSize";
     public static final String AVG_COMPACTION_INPUT_SIZE = "avgCompactionInputSize";
     public static final String AVG_COMPACTION_OUTPUT_SIZE = "avgCompactionOutputSize";
+    public static final String MAX_TOTAL_FILE_SIZE = "maxTotalFileSize";
+    public static final String AVG_TOTAL_FILE_SIZE = "avgTotalFileSize";
+
     private static final long BUSY_MEASURE_MILLIS = 60_000;
     private static final int COMPACTION_TIME_WINDOW = 100;
 
@@ -93,6 +96,9 @@ public class CompactionMetrics {
 
         compactionsCompletedCounter = metricGroup.counter(COMPACTION_COMPLETED_COUNT);
         compactionsQueuedCounter = metricGroup.counter(COMPACTION_QUEUED_COUNT);
+
+        metricGroup.gauge(MAX_TOTAL_FILE_SIZE, () -> getTotalFileSizeStream().max().orElse(-1));
+        metricGroup.gauge(AVG_TOTAL_FILE_SIZE, () -> getTotalFileSizeStream().average().orElse(-1));
     }
 
     private LongStream getLevel0FileCountStream() {
@@ -114,6 +120,11 @@ public class CompactionMetrics {
 
     private DoubleStream getCompactionTimeStream() {
         return compactionTimes.stream().mapToDouble(Long::doubleValue);
+    }
+
+    @VisibleForTesting
+    public LongStream getTotalFileSizeStream() {
+        return reporters.values().stream().mapToLong(r -> r.totalFileSize);
     }
 
     public void close() {
@@ -139,6 +150,8 @@ public class CompactionMetrics {
 
         void reportCompactionOutputSize(long bytes);
 
+        void reportTotalFileSize(long bytes);
+
         void unregister();
     }
 
@@ -148,6 +161,7 @@ public class CompactionMetrics {
         private long level0FileCount;
         private long compactionInputSize = 0;
         private long compactionOutputSize = 0;
+        private long totalFileSize = 0;
 
         private ReporterImpl(PartitionAndBucket key) {
             this.key = key;
@@ -179,6 +193,11 @@ public class CompactionMetrics {
         @Override
         public void reportCompactionOutputSize(long bytes) {
             this.compactionOutputSize = bytes;
+        }
+
+        @Override
+        public void reportTotalFileSize(long bytes) {
+            this.totalFileSize = bytes;
         }
 
         @Override
