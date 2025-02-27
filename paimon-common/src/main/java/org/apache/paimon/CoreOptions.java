@@ -3001,7 +3001,8 @@ public class CoreOptions implements Serializable {
         WITH_DASHES("with_dashes", "Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'"),
         WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'"),
         WITHOUT_DASHES_AND_SPACES(
-                "without_dashes_and_spaces", "Dates and hours without dashes, e.g., 'yyyyMMddHH'");
+                "without_dashes_and_spaces",
+                "Dates and hours without dashes and spaces, e.g., 'yyyyMMddHH'");
 
         private final String value;
         private final String description;
