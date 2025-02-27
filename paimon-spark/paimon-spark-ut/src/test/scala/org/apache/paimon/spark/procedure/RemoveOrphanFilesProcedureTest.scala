@@ -278,7 +278,7 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     fileIO.writeFile(orphanFile2, "b", true)
 
     checkAnswer(
-      spark.sql("CALL paimon.sys.expire_snapshots(table => 'T', retain_max => 1)"),
+      spark.sql("CALL paimon.sys.expire_snapshots(table => 'T', retain_max => 1, retain_min => 1)"),
       Row(2) :: Nil)
 
     val older_than1 = new java.sql.Timestamp(
