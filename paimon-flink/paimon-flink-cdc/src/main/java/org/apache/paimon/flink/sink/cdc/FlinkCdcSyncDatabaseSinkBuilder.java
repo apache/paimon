@@ -24,6 +24,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.FlinkWriteSink;
+import org.apache.paimon.flink.sink.TableFilter;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -79,8 +80,10 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
     // database to sync, currently only support single database
     private String database;
+    private boolean eagerInit;
     private MultiTablesSinkMode mode;
     private String commitUser;
+    private TableFilter tableFilter;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -122,6 +125,16 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(MultiTablesSinkMode mode) {
         this.mode = mode;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withEagerInit(boolean eagerInit) {
+        this.eagerInit = eagerInit;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withTableFilter(TableFilter tableFilter) {
+        this.tableFilter = tableFilter;
         return this;
     }
 
@@ -176,7 +189,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
-                        catalogLoader, committerCpu, committerMemory, commitUser);
+                        catalogLoader,
+                        committerCpu,
+                        committerMemory,
+                        commitUser,
+                        eagerInit,
+                        tableFilter);
         sink.sinkFrom(partitioned);
     }
 

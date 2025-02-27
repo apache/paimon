@@ -57,6 +57,8 @@ public class StoreMultiCommitter
     private final boolean ignoreEmptyCommit;
     private final Map<String, String> dynamicOptions;
 
+    private final TableFilter tableFilter;
+
     public StoreMultiCommitter(CatalogLoader catalogLoader, Context context) {
         this(catalogLoader, context, false, Collections.emptyMap());
     }
@@ -66,11 +68,28 @@ public class StoreMultiCommitter
             Context context,
             boolean ignoreEmptyCommit,
             Map<String, String> dynamicOptions) {
+        this(catalogLoader, context, ignoreEmptyCommit, dynamicOptions, false, null);
+    }
+
+    public StoreMultiCommitter(
+            CatalogLoader catalogLoader,
+            Context context,
+            boolean ignoreEmptyCommit,
+            Map<String, String> dynamicOptions,
+            boolean eagerInit,
+            TableFilter tableFilter) {
         this.catalog = catalogLoader.load();
         this.context = context;
         this.ignoreEmptyCommit = ignoreEmptyCommit;
         this.dynamicOptions = dynamicOptions;
         this.tableCommitters = new HashMap<>();
+
+        this.tableFilter = tableFilter;
+
+        if (eagerInit) {
+            List<Identifier> tableIds = filterTables();
+            tableIds.stream().forEach(this::getStoreCommitter);
+        }
     }
 
     @Override
@@ -217,5 +236,20 @@ public class StoreMultiCommitter
         if (catalog != null) {
             catalog.close();
         }
+    }
+
+    private List<Identifier> filterTables() {
+        // Get all tables in the catalog
+        List<String> allTables = null;
+        try {
+            allTables = catalog.listTables(this.tableFilter.getDbName());
+        } catch (Catalog.DatabaseNotExistException e) {
+            allTables = Collections.emptyList();
+        }
+
+        List<String> tblList = tableFilter.filterTables(allTables);
+        return tblList.stream()
+                .map(t -> Identifier.create(tableFilter.getDbName(), t))
+                .collect(Collectors.toList());
     }
 }
