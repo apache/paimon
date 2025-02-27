@@ -61,6 +61,26 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
     Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
   }
 
+  test("Paimon: DataFrameWrite partition table") {
+    withTable("t") {
+      spark.sql(s"""
+                   |CREATE TABLE t (a INT, b STRING, dt STRING) PARTITIONED BY(dt)
+                   |TBLPROPERTIES ('file.format' = 'avro', 'bucket' = 2, 'bucket-key' = 'b')
+                   |""".stripMargin)
+
+      val table = loadTable("t")
+      val location = table.location().toString
+
+      Seq((1, "x1", "a"), (2, "x2", "b"))
+        .toDF("a", "b", "c")
+        .write
+        .format("paimon")
+        .mode("append")
+        .save(location)
+      checkAnswer(sql("SELECT * FROM t"), Row(1, "x1", "a") :: Row(2, "x2", "b") :: Nil)
+    }
+  }
+
   fileFormats.foreach {
     fileFormat =>
       test(s"Paimon: DataFrameWrite.saveAsTable in ByName mode, file.format: $fileFormat") {
