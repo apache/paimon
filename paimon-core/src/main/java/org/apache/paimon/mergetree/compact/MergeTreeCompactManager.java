@@ -240,6 +240,11 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         return result;
     }
 
+    @Override
+    public boolean hasDelayedCompact() {
+        return false;
+    }
+
     private void reportLevel0FileCount() {
         if (metricsReporter != null) {
             metricsReporter.reportLevel0FileCount(levels.level0().size());

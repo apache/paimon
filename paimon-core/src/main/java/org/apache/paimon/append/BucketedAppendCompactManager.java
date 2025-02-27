@@ -186,6 +186,11 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         return result;
     }
 
+    @Override
+    public boolean hasDelayedCompact() {
+        return false;
+    }
+
     @VisibleForTesting
     Optional<List<DataFileMeta>> pickCompactBefore() {
         if (toCompact.isEmpty()) {

@@ -52,6 +52,7 @@ import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
+import org.apache.paimon.mergetree.compact.DelayedLookupCompactManager;
 import org.apache.paimon.mergetree.compact.ForceUpLevel0Compaction;
 import org.apache.paimon.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
@@ -62,6 +63,7 @@ import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -79,6 +81,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -107,6 +110,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     private final RowType partitionType;
+    private final PartitionTimeExtractor partitionTimeExtractor;
     private final String commitUser;
     @Nullable private final RecordLevelExpire recordLevelExpire;
     @Nullable private Cache<String, LookupFile> lookupFileCache;
@@ -142,6 +146,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 tableName);
         this.fileIO = fileIO;
         this.partitionType = partitionType;
+        this.partitionTimeExtractor = new PartitionTimeExtractor(options);
         this.keyType = keyType;
         this.valueType = valueType;
         this.commitUser = commitUser;
@@ -252,19 +257,42 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             userDefinedSeqComparator,
                             levels,
                             dvMaintainer);
-            return new MergeTreeCompactManager(
-                    compactExecutor,
-                    levels,
-                    compactStrategy,
-                    keyComparator,
-                    options.compactionFileSize(true),
-                    options.numSortedRunStopTrigger(),
-                    rewriter,
-                    compactionMetrics == null
-                            ? null
-                            : compactionMetrics.createReporter(partition, bucket),
-                    dvMaintainer,
-                    options.prepareCommitWaitCompaction());
+
+            if (options.needLookup() && options.lookupDelayPartitionThreshold() != null) {
+                LocalDateTime partitionTime =
+                        partitionTimeExtractor.extract(partition, partitionType);
+                return new DelayedLookupCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        compactionMetrics == null
+                                ? null
+                                : compactionMetrics.createReporter(partition, bucket),
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction(),
+                        partitionTime,
+                        options.lookupDelayPartitionThreshold(),
+                        options.lookupDelayL0FileTrigger(),
+                        options.lookupDelayStopTrigger());
+            } else {
+                return new MergeTreeCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        compactionMetrics == null
+                                ? null
+                                : compactionMetrics.createReporter(partition, bucket),
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction());
+            }
         }
     }
 

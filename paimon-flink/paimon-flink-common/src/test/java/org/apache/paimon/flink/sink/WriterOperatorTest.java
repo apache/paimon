@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
@@ -56,6 +57,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -240,6 +244,141 @@ public class WriterOperatorTest {
                                         row.getInt(2))));
         assertThat(actual)
                 .containsExactlyInAnyOrder("+I[1, 10, 101]", "+I[2, 20, 200]", "+I[3, 30, 301]");
+    }
+
+    @Test
+    public void testDelayedLookupWithFailure() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+
+        String partitionFormatter = "yyyyMMdd";
+        Duration partitionThreshold = Duration.ofDays(1);
+        int lookupStopTrigger = 5;
+
+        Options options = new Options();
+        options.set("bucket", "1");
+        options.set("changelog-producer", "lookup");
+        options.set(CoreOptions.LOOKUP_DELAY_PARTITION_THRESHOLD, Duration.ofDays(1));
+        options.set(CoreOptions.LOOKUP_DELAY_STOP_TRIGGER, lookupStopTrigger);
+        options.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, partitionFormatter);
+        options.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$k");
+
+        FileStoreTable fileStoreTable =
+                createFileStoreTable(
+                        rowType, Arrays.asList("pt", "k"), Collections.singletonList("k"), options);
+
+        // compaction will be triggered immediately since this is delayed lookup compaction
+        RowDataStoreWriteOperator.Factory operatorFactory =
+                getDelayedCompactWriteOperatorFactory(fileStoreTable, false);
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(operatorFactory);
+
+        TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
+
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(serializer);
+        harness.open();
+
+        String partition1 =
+                generatePartitionValue(partitionFormatter, partitionThreshold.minusDays(1));
+        String partition2 = generatePartitionValue(partitionFormatter, partitionThreshold);
+        String partition3 =
+                generatePartitionValue(partitionFormatter, partitionThreshold.plusDays(1));
+
+        // write basic records
+        harness.processElement(GenericRow.of(1, BinaryString.fromString(partition1), 100), 1);
+        harness.processElement(GenericRow.of(2, BinaryString.fromString(partition2), 200), 2);
+        harness.processElement(GenericRow.of(3, BinaryString.fromString(partition3), 300), 3);
+        harness.prepareSnapshotPreBarrier(1);
+        harness.snapshot(1, 10);
+        harness.notifyOfCompletedCheckpoint(1);
+        commitAll(harness, commit, 1);
+
+        harness.processElement(GenericRow.of(1, BinaryString.fromString(partition1), 101), 11);
+        harness.processElement(GenericRow.of(3, BinaryString.fromString(partition3), 301), 13);
+        harness.prepareSnapshotPreBarrier(2);
+        OperatorSubtaskState state = harness.snapshot(2, 20);
+        harness.notifyOfCompletedCheckpoint(2);
+        commitAll(harness, commit, 2);
+
+        // operator is closed due to failure
+        harness.close();
+
+        // restore operator to trigger not delayed compaction
+        operatorFactory = getDelayedCompactWriteOperatorFactory(fileStoreTable, true);
+        harness = createHarness(operatorFactory);
+        harness.setup(serializer);
+        harness.initializeState(state);
+        harness.open();
+
+        // write nothing, wait for compaction
+        harness.prepareSnapshotPreBarrier(3);
+        harness.snapshot(3, 30);
+        harness.notifyOfCompletedCheckpoint(3);
+        commitAll(harness, commit, 3);
+
+        harness.close();
+
+        // check partition1 result
+        ReadBuilder readBuilder = fileStoreTable.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+        List<Split> splits = scan.plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<String> actual = new ArrayList<>();
+        reader.forEachRemaining(
+                row ->
+                        actual.add(
+                                String.format(
+                                        "%s[%d, %s, %d]",
+                                        row.getRowKind().shortString(),
+                                        row.getInt(0),
+                                        row.getString(1).toString(),
+                                        row.getInt(2))));
+        assertThat(actual).containsExactlyInAnyOrder(String.format("+I[1, %s, 101]", partition1));
+
+        // restore operator to trigger delayed compaction
+        operatorFactory = getDelayedCompactWriteOperatorFactory(fileStoreTable, true);
+        harness = createHarness(operatorFactory);
+        harness.setup(serializer);
+        harness.initializeState(state);
+        harness.open();
+
+        // trigger delayed compaction by stop trigger
+        for (int i = 0; i <= lookupStopTrigger; i++) {
+            harness.prepareSnapshotPreBarrier(i + 4);
+            harness.snapshot(i + 4, i + 40);
+            harness.notifyOfCompletedCheckpoint(i + 4);
+            commitAll(harness, commit, i + 4);
+        }
+
+        harness.close();
+        commit.close();
+
+        // check all partition result
+        readBuilder = fileStoreTable.newReadBuilder();
+        scan = readBuilder.newStreamScan();
+        splits = scan.plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+        List<String> finalResult = new ArrayList<>();
+        reader.forEachRemaining(
+                row ->
+                        finalResult.add(
+                                String.format(
+                                        "%s[%d, %s, %d]",
+                                        row.getRowKind().shortString(),
+                                        row.getInt(0),
+                                        row.getString(1).toString(),
+                                        row.getInt(2))));
+        assertThat(finalResult)
+                .containsExactlyInAnyOrder(
+                        String.format("+I[1, %s, 101]", partition1),
+                        String.format("+I[2, %s, 200]", partition2),
+                        String.format("+I[3, %s, 301]", partition3));
     }
 
     @Test
@@ -449,6 +588,25 @@ public class WriterOperatorTest {
                 commitUser);
     }
 
+    private RowDataStoreWriteOperator.Factory getDelayedCompactWriteOperatorFactory(
+            FileStoreTable fileStoreTable, boolean waitCompaction) {
+        return new RowDataStoreWriteOperator.Factory(
+                fileStoreTable,
+                null,
+                (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                        new DelayedCompactStoreSinkWrite(
+                                table,
+                                commitUser,
+                                state,
+                                ioManager,
+                                false,
+                                waitCompaction,
+                                true,
+                                memoryPool,
+                                metricGroup),
+                commitUser);
+    }
+
     @SuppressWarnings("unchecked")
     private void commitAll(
             OneInputStreamOperatorTestHarness<InternalRow, Committable> harness,
@@ -481,5 +639,11 @@ public class WriterOperatorTest {
         return new OneInputStreamOperatorTestHarness<>(
                 operatorFactory,
                 internalRowInternalTypeInfo.createSerializer(new ExecutionConfig()));
+    }
+
+    private String generatePartitionValue(String partitionFormatter, Duration minusDays) {
+        return LocalDateTime.now()
+                .minus(minusDays)
+                .format(DateTimeFormatter.ofPattern(partitionFormatter));
     }
 }

@@ -142,7 +142,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @VisibleForTesting
-    CompactManager compactManager() {
+    public CompactManager compactManager() {
         return compactManager;
     }
 
@@ -281,6 +281,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public boolean isCompacting() {
         compactManager.triggerCompaction(false);
         return compactManager.isCompacting();
+    }
+
+    @Override
+    public boolean hasDelayedCompact() {
+        return compactManager.hasDelayedCompact();
     }
 
     @Override

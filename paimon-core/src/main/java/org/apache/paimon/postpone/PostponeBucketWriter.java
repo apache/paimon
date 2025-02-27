@@ -89,6 +89,11 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
     }
 
     @Override
+    public boolean hasDelayedCompact() {
+        return false;
+    }
+
+    @Override
     public void sync() throws Exception {}
 
     @Override

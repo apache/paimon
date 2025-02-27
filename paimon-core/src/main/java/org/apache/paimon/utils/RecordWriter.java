@@ -68,6 +68,11 @@ public interface RecordWriter<T> {
     boolean isCompacting();
 
     /**
+     * Check if the {@code RecordWriter} has delayed compacts need to be triggered in the future.
+     */
+    boolean hasDelayedCompact();
+
+    /**
      * Sync the writer. The structure related to file reading and writing is thread unsafe, there
      * are asynchronous threads inside the writer, which should be synced before reading data.
      */

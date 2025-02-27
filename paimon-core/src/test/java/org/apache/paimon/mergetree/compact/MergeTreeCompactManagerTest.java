@@ -49,9 +49,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link MergeTreeCompactManager}. */
 public class MergeTreeCompactManagerTest {
 
-    private final Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
+    final Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
 
-    private static ExecutorService service;
+    static ExecutorService service;
 
     @BeforeAll
     public static void before() {
@@ -223,11 +223,11 @@ public class MergeTreeCompactManagerTest {
         return (numLevels, runs) -> Optional.of(CompactUnit.fromLevelRuns(numLevels - 1, runs));
     }
 
-    private static class TestRewriter extends AbstractCompactRewriter {
+    static class TestRewriter extends AbstractCompactRewriter {
 
         private final boolean expectedDropDelete;
 
-        private TestRewriter(boolean expectedDropDelete) {
+        TestRewriter(boolean expectedDropDelete) {
             this.expectedDropDelete = expectedDropDelete;
         }
 
@@ -262,25 +262,25 @@ public class MergeTreeCompactManagerTest {
         }
     }
 
-    private static class LevelMinMax {
+    static class LevelMinMax {
 
-        private final int level;
-        private final int min;
-        private final int max;
+        protected final int level;
+        protected final int min;
+        protected final int max;
 
-        private LevelMinMax(DataFileMeta file) {
+        LevelMinMax(DataFileMeta file) {
             this.level = file.level();
             this.min = file.minKey().getInt(0);
             this.max = file.maxKey().getInt(0);
         }
 
-        private LevelMinMax(int level, int min, int max) {
+        LevelMinMax(int level, int min, int max) {
             this.level = level;
             this.min = min;
             this.max = max;
         }
 
-        private DataFileMeta toFile(long maxSequence) {
+        DataFileMeta toFile(long maxSequence) {
             return newFile(level, min, max, maxSequence);
         }
 

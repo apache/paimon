@@ -290,9 +290,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         //
         // Condition 2: No compaction is in progress. That is, no more changelog will be
         // produced.
+        //
+        // Condition 3: The writer has no delayed compaction.
         return writerContainer ->
                 writerContainer.lastModifiedCommitIdentifier < latestCommittedIdentifier
-                        && !writerContainer.writer.isCompacting();
+                        && !writerContainer.writer.isCompacting()
+                        && !writerContainer.writer.hasDelayedCompact();
     }
 
     protected static <T>
@@ -397,7 +400,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return result;
     }
 
-    protected WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
+    public WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
         Map<Integer, WriterContainer<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
@@ -552,7 +555,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @VisibleForTesting
-    Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers() {
+    public Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers() {
         return writers;
     }
 }
