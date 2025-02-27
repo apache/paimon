@@ -119,6 +119,50 @@ spark-sql ... \
 ```sql
 USE paimon.default;
 ```
+#### Creating REST Catalog
+
+By using the Paimon REST catalog, changes to the catalog will be directly stored in remote server.
+
+##### bear token
+```bash
+spark-sql ... \
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon.metastore=rest \
+    --conf spark.sql.catalog.paimon.uri=<catalog server url> \
+    --conf spark.sql.catalog.paimon.token.provider=bear \
+    --conf spark.sql.catalog.paimon.token=<token>
+    
+```
+
+##### dlf ak
+```bash
+spark-sql ... \
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon.metastore=rest \
+    --conf spark.sql.catalog.paimon.uri=<catalog server url> \
+    --conf spark.sql.catalog.paimon.token.provider=dlf \
+    --conf spark.sql.catalog.paimon.dlf.accessKeyId=<accessKeyId> \
+    --conf spark.sql.catalog.paimon.dlf.accessKeySecret=<accessKeySecret>
+    
+```
+
+##### dlf sts token
+```bash
+spark-sql ... \
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon.metastore=rest \
+    --conf spark.sql.catalog.paimon.uri=<catalog server url> \
+    --conf spark.sql.catalog.paimon.token.provider=dlf \
+    --conf spark.sql.catalog.paimon.dlf.accessKeyId=<accessKeyId> \
+    --conf spark.sql.catalog.paimon.dlf.accessKeySecret=<accessKeySecret> \
+    --conf spark.sql.catalog.paimon.dlf.securityToken=<securityToken> 
+    
+    
+```
+
+```sql
+USE paimon.default;
+```
 
 ## Table
 
