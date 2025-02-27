@@ -718,6 +718,13 @@ public class IcebergMigrateTest {
 
     @Test
     public void testNestedDataTypes() throws Exception {
+        // iceberg nested schema
+        // table {
+        //  1: c1: required list<string>
+        //  2: c2: required map<string, int>
+        //  3: c3: required struct<11: c31: required int, 12: c32: required string>
+        //  4: c4: required map<int, list<struct<13: c41: required int, 14: c42: required string>>>
+        // }
         Schema innerType1 =
                 new Schema(
                         Types.NestedField.required(11, "c31", Types.IntegerType.get()),
@@ -781,7 +788,8 @@ public class IcebergMigrateTest {
                         iceDatabase,
                         iceTable,
                         new Options(icebergProperties),
-                        1);
+                        1,
+                        Collections.emptyMap());
         icebergMigrator.executeMigrate();
 
         FileStoreTable paimonTable =
