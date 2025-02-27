@@ -242,6 +242,7 @@ class RESTCatalogTest extends CatalogTestBase {
         assertThat(actual).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
     }
 
+    @Test
     void testBranches() throws Exception {
         String databaseName = "testBranchTable";
         catalog.dropDatabase(databaseName, true, true);
