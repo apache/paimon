@@ -182,22 +182,25 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testSnapshotFromREST() throws Catalog.TableNotExistException {
+    void testSnapshotFromREST() throws Exception {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options));
-        Identifier hasSnapshotTable = Identifier.create("test_db_a", "my_snapshot_table");
+        Identifier hasSnapshotTableIdentifier = Identifier.create("test_db_a", "my_snapshot_table");
+        createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
         long millis = System.currentTimeMillis();
-        restCatalogServer.setTableSnapshot(hasSnapshotTable, createSnapshotWithMillis(id, millis));
-        Optional<Snapshot> snapshot = catalog.loadSnapshot(hasSnapshotTable);
+        restCatalogServer.setTableSnapshot(
+                hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis));
+        Optional<Snapshot> snapshot = catalog.loadSnapshot(hasSnapshotTableIdentifier);
         assertThat(snapshot).isPresent();
         assertThat(snapshot.get().id()).isEqualTo(id);
         assertThat(snapshot.get().timeMillis()).isEqualTo(millis);
-
-        snapshot = catalog.loadSnapshot(Identifier.create("test_db_a", "unknown"));
+        Identifier noSnapshotTableIdentifier = Identifier.create("test_db_a_1", "unknown");
+        createTable(noSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        snapshot = catalog.loadSnapshot(noSnapshotTableIdentifier);
         assertThat(snapshot).isEmpty();
     }
 
