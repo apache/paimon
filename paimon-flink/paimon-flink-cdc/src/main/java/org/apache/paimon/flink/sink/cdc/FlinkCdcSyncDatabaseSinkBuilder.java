@@ -128,7 +128,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-
     public FlinkCdcSyncDatabaseSinkBuilder<T> withEagerInit(boolean eagerInit) {
         this.eagerInit = eagerInit;
         return this;
@@ -136,6 +135,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withTableFilter(TableFilter tableFilter) {
         this.tableFilter = tableFilter;
+        return this;
     }
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withTypeMapping(TypeMapping typeMapping) {
