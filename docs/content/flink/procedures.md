@@ -273,13 +273,13 @@ All available procedures are listed below.
       <td>merge_into</td>
       <td>
          -- for Flink 1.18<br/>
-         CALL [catalog].sys.merge_into('identifier','targetAlias',<br/>
+         CALL [catalog.]sys.merge_into('identifier','targetAlias',<br/>
             'sourceSqls','sourceTable','mergeCondition',<br/>
             'matchedUpsertCondition','matchedUpsertSetting',<br/>
             'notMatchedInsertCondition','notMatchedInsertValues',<br/>
             'matchedDeleteCondition')<br/><br/>
          -- for Flink 1.19 and later <br/>
-         CALL [catalog].sys.merge_into(<br/>
+         CALL [catalog.]sys.merge_into(<br/>
             target_table => 'identifier',<br/>
             target_alias => 'targetAlias',<br/>
             source_sqls => 'sourceSqls',<br/>
@@ -305,7 +305,7 @@ All available procedures are listed below.
          -- insert the order from<br/>
          -- the source table<br/>
          -- for Flink 1.18<br/>
-         CALL [catalog].sys.merge_into('default.T','','','default.S','T.id=S.order_id','','price=T.price+20','','*','')<br/><br/>
+         CALL sys.merge_into('default.T','','','default.S','T.id=S.order_id','','price=T.price+20','','*','')<br/><br/>
          -- for Flink 1.19 and later <br/>
          CALL sys.merge_into(<br/>
             target_table => 'default.T',<br/>
@@ -418,14 +418,14 @@ All available procedures are listed below.
       <td>
          -- for Flink 1.18<br/>
          -- rollback to a snapshot<br/>
-         CALL sys.rollback_to('identifier', snapshotId)<br/><br/>
+         CALL [catalog.]sys.rollback_to('identifier', snapshotId)<br/><br/>
          -- rollback to a tag<br/>
-         CALL sys.rollback_to('identifier', 'tagName')<br/><br/>
+         CALL [catalog.]sys.rollback_to('identifier', 'tagName')<br/><br/>
          -- for Flink 1.19 and later<br/>
          -- rollback to a snapshot<br/>
-         CALL sys.rollback_to(`table` => 'identifier', snapshot_id => snapshotId)<br/><br/>
+         CALL [catalog.]sys.rollback_to(`table` => 'identifier', snapshot_id => snapshotId)<br/><br/>
          -- rollback to a tag<br/>
-         CALL sys.rollback_to(`table` => 'identifier', tag => 'tagName')
+         CALL [catalog.]sys.rollback_to(`table` => 'identifier', tag => 'tagName')
       </td>
       <td>
          To rollback to a specific version of target table. Argument:
@@ -445,10 +445,10 @@ All available procedures are listed below.
       <td>
          -- for Flink 1.18<br/>
          -- rollback to the snapshot which earlier or equal than timestamp.<br/>
-         CALL sys.rollback_to_timestamp('identifier', timestamp)<br/><br/>
+         CALL [catalog.]sys.rollback_to_timestamp('identifier', timestamp)<br/><br/>
          -- for Flink 1.19 and later<br/>
          -- rollback to the snapshot which earlier or equal than timestamp.<br/>
-         CALL sys.rollback_to_timestamp(`table` => 'default.T', `timestamp` => timestamp)<br/><br/>
+         CALL [catalog.]sys.rollback_to_timestamp(`table` => 'default.T', `timestamp` => timestamp)<br/><br/>
       </td>
       <td>
          To rollback to the snapshot which earlier or equal than timestamp. Argument:
@@ -467,10 +467,10 @@ All available procedures are listed below.
       <td>
          -- for Flink 1.18<br/>
          -- rollback to the snapshot which earlier or equal than watermark.<br/>
-         CALL sys.rollback_to_watermark('identifier', watermark)<br/><br/>
+         CALL [catalog.]sys.rollback_to_watermark('identifier', watermark)<br/><br/>
          -- for Flink 1.19 and later<br/>
          -- rollback to the snapshot which earlier or equal than watermark.<br/>
-         CALL sys.rollback_to_watermark(`table` => 'default.T', `watermark` => watermark)<br/><br/>
+         CALL [catalog.]sys.rollback_to_watermark(`table` => 'default.T', `watermark` => watermark)<br/><br/>
       </td>
       <td>
          To rollback to the snapshot which earlier or equal than watermark. Argument:
@@ -489,10 +489,10 @@ All available procedures are listed below.
       <td>
          -- for Flink 1.18<br/>
          -- clear table with purge files directly.<br/>
-         CALL sys.purge_files('identifier')<br/><br/>
+         CALL [catalog.]sys.purge_files('identifier')<br/><br/>
          -- for Flink 1.19 and later<br/>
          -- clear table with purge files directly.<br/>
-         CALL sys.purge_files(`table` => 'default.T')<br/><br/>
+         CALL [catalog.]sys.purge_files(`table` => 'default.T')<br/><br/>
       </td>
       <td>
          To clear table with purge files directly. Argument:
@@ -510,10 +510,10 @@ All available procedures are listed below.
       <td>
          -- for Flink 1.18<br/>
          -- migrate all hive tables in database to paimon tables.<br/>
-         CALL [catalog].sys.migrate_database('connector', 'dbIdentifier', 'options'[, &ltparallelism&gt])<br/><br/>
+         CALL [catalog.]sys.migrate_database('connector', 'dbIdentifier', 'options'[, &ltparallelism&gt])<br/><br/>
          -- for Flink 1.19 and later<br/>
          -- migrate all hive tables in database to paimon tables.<br/>
-         CALL [catalog].sys.migrate_database(connector => 'connector', source_database => 'dbIdentifier', options => 'options'[, &ltparallelism => parallelism&gt])<br/><br/>
+         CALL [catalog.]sys.migrate_database(connector => 'connector', source_database => 'dbIdentifier', options => 'options'[, &ltparallelism => parallelism&gt])<br/><br/>
       </td>
       <td>
          To migrate all hive tables in database to paimon table. Argument:
@@ -534,10 +534,10 @@ All available procedures are listed below.
       <td>
          -- for Flink 1.18<br/>
          -- migrate hive table to a paimon table.<br/>
-         CALL [catalog].sys.migrate_table('connector', 'tableIdentifier', 'options'[, &ltparallelism&gt])<br/><br/>
+         CALL [catalog.]sys.migrate_table('connector', 'tableIdentifier', 'options'[, &ltparallelism&gt])<br/><br/>
          -- for Flink 1.19 and later<br/>
          -- migrate hive table to a paimon table.<br/>
-         CALL [catalog].sys.migrate_table(connector => 'connector', source_table => 'tableIdentifier', options => 'options'[, &ltparallelism => parallelism&gt])<br/><br/>
+         CALL [catalog.]sys.migrate_table(connector => 'connector', source_table => 'tableIdentifier', options => 'options'[, &ltparallelism => parallelism&gt])<br/><br/>
       </td>
       <td>
          To migrate hive table to a paimon table. Argument:
@@ -558,10 +558,10 @@ All available procedures are listed below.
       <td>
          -- for Flink 1.18<br/>
          -- migrate files from hive table to a paimon table.<br/>
-         CALL [catalog].sys.migrate_file('connector', 'srcTableIdentifier', 'destTableIdentifier', [, &ltdelete_origin&gt, &ltparallelism&gt])<br/><br/>
+         CALL [catalog.]sys.migrate_file('connector', 'srcTableIdentifier', 'destTableIdentifier', [, &ltdelete_origin&gt, &ltparallelism&gt])<br/><br/>
          -- for Flink 1.19 and later<br/>
          -- migrate hive table to a paimon table.<br/>
-         CALL [catalog].sys.migrate_file(connector => 'connector', source_table => 'srcTableIdentifier', target_table => 'destTableIdentifier'[, &ltdelete_origin => bool&gt, &ltparallelism => parallelism&gt])<br/><br/>
+         CALL [catalog.]sys.migrate_file(connector => 'connector', source_table => 'srcTableIdentifier', target_table => 'destTableIdentifier'[, &ltdelete_origin => bool&gt, &ltparallelism => parallelism&gt])<br/><br/>
       </td>
       <td>
          To migrate files from hive table to a paimon table. Argument:
@@ -590,9 +590,9 @@ All available procedures are listed below.
             max_deletes => 'max_deletes') <br/><br/>
          -- Use indexed argument<br/>
          -- for Flink 1.18<br/>
-         CALL sys.expire_snapshots(table, retain_max)<br/><br/>
+         CALL [catalog.]sys.expire_snapshots(table, retain_max)<br/><br/>
          -- for Flink 1.19 and later<br/>
-         CALL sys.expire_snapshots(table, retain_max, retain_min, older_than, max_deletes)<br/><br/>
+         CALL [catalog.]sys.expire_snapshots(table, retain_max, retain_min, older_than, max_deletes)<br/><br/>
       </td>
       <td>
          To expire snapshots. Argument:
@@ -615,7 +615,7 @@ All available procedures are listed below.
 <tr>
       <td>expire_partitions</td>
       <td>
-         CALL sys.expire_partitions(table, expiration_time, timestamp_formatter, expire_strategy)<br/><br/>
+         CALL [catalog.]sys.expire_partitions(table, expiration_time, timestamp_formatter, expire_strategy)<br/><br/>
       </td>
       <td>
          To expire partitions. Argument:
@@ -637,13 +637,13 @@ All available procedures are listed below.
       <td>repair</td>
       <td>
          -- repair all databases and tables in catalog<br/>
-         CALL sys.repair()<br/><br/>
+         CALL [catalog.]sys.repair()<br/><br/>
          -- repair all tables in a specific database<br/>
-         CALL sys.repair('databaseName')<br/><br/>
+         CALL [catalog.]sys.repair('databaseName')<br/><br/>
          -- repair a table<br/>
-         CALL sys.repair('databaseName.tableName')<br/><br/>
+         CALL [catalog.]sys.repair('databaseName.tableName')<br/><br/>
          -- repair database and table in a string if you specify multiple tags, delimiter is ','<br/>
-         CALL sys.repair('databaseName01,database02.tableName01,database03')
+         CALL [catalog.]sys.repair('databaseName01,database02.tableName01,database03')
       </td>
       <td>
          Synchronize information from the file system to Metastore. Argument:
@@ -657,9 +657,9 @@ All available procedures are listed below.
       <td>rewrite_file_index</td>
       <td>
          -- Use named argument<br/>
-         CALL sys.rewrite_file_index(&lt`table` => identifier&gt [, &ltpartitions => partitions&gt])<br/><br/>
+         CALL [catalog.]sys.rewrite_file_index(&lt`table` => identifier&gt [, &ltpartitions => partitions&gt])<br/><br/>
          -- Use indexed argument<br/>
-         CALL sys.rewrite_file_index(&ltidentifier&gt [, &ltpartitions&gt])<br/><br/>
+         CALL [catalog.]sys.rewrite_file_index(&ltidentifier&gt [, &ltpartitions&gt])<br/><br/>
       </td>
       <td>
          Rewrite the file index for the table. Argument:
@@ -731,7 +731,7 @@ All available procedures are listed below.
    <tr>
       <td>refresh_object_table</td>
       <td>
-         CALL sys.refresh_object_table('identifier')
+         CALL [catalog.]sys.refresh_object_table('identifier')
       </td>
       <td>
          To refresh_object_table a object table. Arguments:
@@ -744,7 +744,7 @@ All available procedures are listed below.
    <tr>
       <td>compact_manifest</td>
       <td>
-         CALL sys.compact_manifest(`table` => 'identifier')
+         CALL [catalog.]sys.compact_manifest(`table` => 'identifier')
       </td>
       <td>
          To compact_manifest the manifests. Arguments:
@@ -757,7 +757,7 @@ All available procedures are listed below.
    <tr>
       <td>rescale</td>
       <td>
-         CALL sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition')
+         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition')
       </td>
       <td>
          Rescale one partition of a table. Arguments:
