@@ -23,15 +23,25 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -43,11 +53,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
@@ -125,12 +137,7 @@ class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testRefreshFileIO() throws Exception {
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        this.catalog = new RESTCatalog(CatalogContext.create(options));
+        this.catalog = initDataTokenCatalog();
         List<Identifier> identifiers =
                 Lists.newArrayList(
                         Identifier.create("test_db_a", "test_table_a"),
@@ -140,27 +147,99 @@ class RESTCatalogTest extends CatalogTestBase {
             createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
             FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             assertEquals(true, fileStoreTable.fileIO().exists(fileStoreTable.location()));
+
+            RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+            RESTToken fileDataToken = fileIO.validToken();
+            RESTToken serverDataToken =
+                    restCatalogServer.dataTokenStore.get(identifier.getFullName());
+            assertEquals(serverDataToken, fileDataToken);
         }
     }
 
     @Test
-    void testSnapshotFromREST() throws Catalog.TableNotExistException {
+    void testRefreshFileIOWhenExpired() throws Exception {
+        this.catalog = initDataTokenCatalog();
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_testing_date_token");
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis());
+        restCatalogServer.setDataToken(identifier, expiredDataToken);
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+        assertEquals(expiredDataToken, fileDataToken);
+        RESTToken newDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 100_000);
+        restCatalogServer.setDataToken(identifier, newDataToken);
+        RESTToken nextFileDataToken = fileIO.validToken();
+        assertEquals(newDataToken, nextFileDataToken);
+        assertEquals(true, nextFileDataToken.expireAtMillis() - fileDataToken.expireAtMillis() > 0);
+    }
+
+    @Test
+    void testSnapshotFromREST() throws Exception {
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options));
-        Identifier hasSnapshotTable = Identifier.create("test_db_a", "my_snapshot_table");
+        Identifier hasSnapshotTableIdentifier = Identifier.create("test_db_a", "my_snapshot_table");
+        createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
         long millis = System.currentTimeMillis();
-        restCatalogServer.setTableSnapshot(hasSnapshotTable, createSnapshotWithMillis(id, millis));
-        Optional<Snapshot> snapshot = catalog.loadSnapshot(hasSnapshotTable);
+        restCatalogServer.setTableSnapshot(
+                hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis));
+        Optional<Snapshot> snapshot = catalog.loadSnapshot(hasSnapshotTableIdentifier);
         assertThat(snapshot).isPresent();
         assertThat(snapshot.get().id()).isEqualTo(id);
         assertThat(snapshot.get().timeMillis()).isEqualTo(millis);
-
-        snapshot = catalog.loadSnapshot(Identifier.create("test_db_a", "unknown"));
+        Identifier noSnapshotTableIdentifier = Identifier.create("test_db_a_1", "unknown");
+        createTable(noSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        snapshot = catalog.loadSnapshot(noSnapshotTableIdentifier);
         assertThat(snapshot).isEmpty();
+    }
+
+    @Test
+    public void testBatchRecordsWrite() throws Exception {
+
+        Identifier tableIdentifier = Identifier.create("my_db", "my_table");
+        createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(tableIdentifier);
+
+        // write
+        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        GenericRow record1 = GenericRow.of(12);
+        GenericRow record2 = GenericRow.of(5);
+        GenericRow record3 = GenericRow.of(18);
+        write.write(record1);
+        write.write(record2);
+        write.write(record3);
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // read
+        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<String> actual = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    String rowStr =
+                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
+                    actual.add(rowStr);
+                });
+
+        assertThat(actual).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
     }
 
     @Test
@@ -199,6 +278,11 @@ class RESTCatalogTest extends CatalogTestBase {
         return true;
     }
 
+    // TODO implement this
+    @Override
+    @Test
+    public void testTableUUID() {}
+
     private void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {
@@ -214,8 +298,12 @@ class RESTCatalogTest extends CatalogTestBase {
                 true);
     }
 
-    // TODO implement this
-    @Override
-    @Test
-    public void testTableUUID() {}
+    private Catalog initDataTokenCatalog() {
+        Options options = new Options();
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
+        return new RESTCatalog(CatalogContext.create(options));
+    }
 }
