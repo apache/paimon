@@ -224,7 +224,7 @@ public class AuthSessionTest {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String tokenStr = tokenFile2Token.getRight();
-        String serverUrl = "https://dlf.cn-hangzhou.aliyuncs.com";
+        String serverUrl = "https://dlf-cn-hangzhou.aliyuncs.com";
         AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName, serverUrl);
         DLFToken token = OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DLFToken.class);
         Map<String, String> parameters = new HashMap<>();

@@ -21,6 +21,9 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
 import static org.apache.paimon.rest.RESTCatalogOptions.URI;
@@ -35,7 +38,7 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
 
     @Override
     public AuthProvider create(Options options) {
-        String region = getRegion(options);
+        String region = getRegion(options.get(URI));
         if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
             String tokenFilePath = options.get(DLF_TOKEN_PATH);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
@@ -51,15 +54,18 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
         throw new IllegalArgumentException("DLF token path or AK must be set for DLF Auth.");
     }
 
-    private static String getRegion(Options options) {
-        String region = "undefined";
+    protected static String getRegion(String uri) {
         try {
-            String[] paths = options.get(URI).split("\\.");
-            if (paths.length > 1) {
-                region = paths[1];
+            String regex = "dlf-(?:pre-)?([a-z]+-[a-z]+(?:-\\d+)?)(?:-internal)?";
+
+            Pattern pattern = Pattern.compile(regex);
+            Matcher matcher = pattern.matcher(uri);
+
+            if (matcher.find()) {
+                return matcher.group(1);
             }
         } catch (Exception ignore) {
         }
-        return region;
+        return "undefined";
     }
 }
