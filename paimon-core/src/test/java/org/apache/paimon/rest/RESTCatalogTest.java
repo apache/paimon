@@ -33,6 +33,7 @@ import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -72,12 +73,25 @@ class RESTCatalogTest extends CatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
     private String initToken = "init_token";
+    private String serverDefineHeaderName = "test-header";
+    private String serverDefineHeaderValue = "test-value";
+    private ConfigResponse config;
 
     @BeforeEach
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken);
+        this.config =
+                new ConfigResponse(
+                        ImmutableMap.of(
+                                RESTCatalogInternalOptions.PREFIX.key(),
+                                "paimon",
+                                CatalogOptions.WAREHOUSE.key(),
+                                warehouse,
+                                "header." + serverDefineHeaderName,
+                                serverDefineHeaderValue),
+                        ImmutableMap.of());
+        restCatalogServer = new RESTCatalogServer(warehouse, initToken, this.config);
         restCatalogServer.start();
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
@@ -113,7 +127,7 @@ class RESTCatalogTest extends CatalogTestBase {
         Map<String, String> headers = restCatalog.headers(restAuthParameter);
         assertEquals(
                 headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
-        assertEquals(headers.get("test-header"), "test-value");
+        assertEquals(headers.get(serverDefineHeaderName), serverDefineHeaderValue);
     }
 
     @Test

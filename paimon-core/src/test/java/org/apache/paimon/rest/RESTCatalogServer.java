@@ -31,7 +31,6 @@ import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -50,6 +49,7 @@ import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
+import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
@@ -101,8 +101,8 @@ import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
 
-    private static final String PREFIX = "paimon";
-    private static final String DATABASE_URI = String.format("/v1/%s/databases", PREFIX);
+    private final String prefix;
+    private final String databaseUri;
 
     private final FileSystemCatalog catalog;
     private final Dispatcher dispatcher;
@@ -114,9 +114,14 @@ public class RESTCatalogServer {
     public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
     public final Map<String, View> viewStore = new HashMap<>();
     public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
-    Map<String, RESTToken> dataTokenStore = new HashMap<>();
+    public final Map<String, RESTToken> dataTokenStore = new HashMap<>();
+    public final ConfigResponse configResponse;
 
-    public RESTCatalogServer(String warehouse, String initToken) {
+    public RESTCatalogServer(String warehouse, String initToken, ConfigResponse config) {
+        this.configResponse = config;
+        this.prefix =
+                this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
+        this.databaseUri = String.format("/v1/%s/databases", prefix);
         authToken = initToken;
         Options conf = new Options();
         conf.setString("warehouse", warehouse);
@@ -130,7 +135,7 @@ public class RESTCatalogServer {
             throw new UncheckedIOException(e);
         }
         this.catalog = new FileSystemCatalog(fileIO, warehousePath, context.options());
-        this.dispatcher = initDispatcher(warehouse, authToken);
+        this.dispatcher = initDispatcher(authToken);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
         server = mockWebServer;
@@ -156,7 +161,7 @@ public class RESTCatalogServer {
         dataTokenStore.put(identifier.getFullName(), token);
     }
 
-    public Dispatcher initDispatcher(String warehouse, String authToken) {
+    public Dispatcher initDispatcher(String authToken) {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
@@ -168,22 +173,13 @@ public class RESTCatalogServer {
                         return new MockResponse().setResponseCode(401);
                     }
                     if (request.getPath().startsWith("/v1/config")) {
-                        String body =
-                                String.format(
-                                        "{\"defaults\": {\"%s\": \"%s\", \"%s\": \"%s\", \"%s\": \"%s\"}}",
-                                        RESTCatalogInternalOptions.PREFIX.key(),
-                                        PREFIX,
-                                        CatalogOptions.WAREHOUSE.key(),
-                                        warehouse,
-                                        "header.test-header",
-                                        "test-value");
-                        return new MockResponse().setResponseCode(200).setBody(body);
-                    } else if (DATABASE_URI.equals(request.getPath())) {
+                        return mockResponse(configResponse, 200);
+                    } else if (databaseUri.equals(request.getPath())) {
                         return databasesApiHandler(request);
-                    } else if (request.getPath().startsWith(DATABASE_URI)) {
+                    } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
                                 request.getPath()
-                                        .substring((DATABASE_URI + "/").length())
+                                        .substring((databaseUri + "/").length())
                                         .split("/");
                         String databaseName = resources[0];
                         if (!databaseStore.containsKey(databaseName)) {
