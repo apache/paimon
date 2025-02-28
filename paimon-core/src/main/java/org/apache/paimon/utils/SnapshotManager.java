@@ -21,7 +21,6 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -37,7 +36,6 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -67,8 +65,8 @@ public class SnapshotManager implements Serializable {
 
     private static final Logger LOG = LoggerFactory.getLogger(SnapshotManager.class);
 
-    private static final String SNAPSHOT_PREFIX = "snapshot-";
-    private static final String CHANGELOG_PREFIX = "changelog-";
+    public static final String SNAPSHOT_PREFIX = "snapshot-";
+    public static final String CHANGELOG_PREFIX = "changelog-";
     public static final String EARLIEST = "EARLIEST";
     public static final String LATEST = "LATEST";
     private static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 3;
@@ -693,54 +691,6 @@ public class SnapshotManager implements Serializable {
         } finally {
             executor.shutdown();
         }
-    }
-
-    /**
-     * Try to get non snapshot files. If any error occurred, just ignore it and return an empty
-     * result.
-     */
-    public List<Pair<Path, Long>> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
-        return listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
-    }
-
-    public List<Pair<Path, Long>> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
-        return listPathWithFilter(changelogDirectory(), fileStatusFilter, nonChangelogFileFilter());
-    }
-
-    private List<Pair<Path, Long>> listPathWithFilter(
-            Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
-        try {
-            FileStatus[] statuses = fileIO.listStatus(directory);
-            if (statuses == null) {
-                return Collections.emptyList();
-            }
-
-            return Arrays.stream(statuses)
-                    .filter(fileStatusFilter)
-                    .filter(status -> fileFilter.test(status.getPath()))
-                    .map(status -> Pair.of(status.getPath(), status.getLen()))
-                    .collect(Collectors.toList());
-        } catch (IOException ignored) {
-            return Collections.emptyList();
-        }
-    }
-
-    private Predicate<Path> nonSnapshotFileFilter() {
-        return path -> {
-            String name = path.getName();
-            return !name.startsWith(SNAPSHOT_PREFIX)
-                    && !name.equals(EARLIEST)
-                    && !name.equals(LATEST);
-        };
-    }
-
-    private Predicate<Path> nonChangelogFileFilter() {
-        return path -> {
-            String name = path.getName();
-            return !name.startsWith(CHANGELOG_PREFIX)
-                    && !name.equals(EARLIEST)
-                    && !name.equals(LATEST);
-        };
     }
 
     public Optional<Snapshot> latestSnapshotOfUser(String user) {
