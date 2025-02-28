@@ -41,6 +41,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -647,6 +648,7 @@ public class FileDeletionTest {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
+        ChangelogManager changelogManager = store.changelogManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         BinaryRow partition = gen.getPartition(gen.next());
@@ -674,7 +676,8 @@ public class FileDeletionTest {
         // action: expire snapshot 1 -> delete tag1 -> expire snapshot 2
         // result: exist A & B (because of tag2)
         ExpireSnapshots expireSnapshots =
-                new ExpireSnapshotsImpl(snapshotManager, store.newSnapshotDeletion(), tagManager);
+                new ExpireSnapshotsImpl(
+                        snapshotManager, changelogManager, store.newSnapshotDeletion(), tagManager);
         expireSnapshots
                 .config(
                         ExpireConfig.builder()

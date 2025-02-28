@@ -55,6 +55,7 @@ import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -174,6 +175,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.branch(),
                 catalogEnvironment.snapshotLoader(),
                 snapshotCache);
+    }
+
+    @Override
+    public ChangelogManager changelogManager() {
+        return new ChangelogManager(fileIO, options.path(), options.branch());
     }
 
     @Override

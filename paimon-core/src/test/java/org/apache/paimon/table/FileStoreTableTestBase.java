@@ -119,6 +119,8 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
+import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
+import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -1485,8 +1487,8 @@ public abstract class FileStoreTableTestBase {
                         .filter(Files::isRegularFile)
                         .filter(p -> !p.getFileName().toString().startsWith("snapshot"))
                         .filter(p -> !p.getFileName().toString().startsWith("schema"))
-                        .filter(p -> !p.getFileName().toString().equals(SnapshotManager.LATEST))
-                        .filter(p -> !p.getFileName().toString().equals(SnapshotManager.EARLIEST))
+                        .filter(p -> !p.getFileName().toString().equals(LATEST))
+                        .filter(p -> !p.getFileName().toString().equals(EARLIEST))
                         .map(p -> new Path(TraceableFileIO.SCHEME + "://" + p.toString()))
                         .filter(p -> !filesInUse.contains(p))
                         .collect(Collectors.toList());

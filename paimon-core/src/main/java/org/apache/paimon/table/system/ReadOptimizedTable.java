@@ -38,6 +38,7 @@ import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -147,6 +148,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
+                changelogManager(),
                 wrapped.supportStreamingReadOverwrite(),
                 DefaultValueAssigner.create(wrapped.schema()));
     }
@@ -164,6 +166,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public ChangelogManager changelogManager() {
+        return wrapped.changelogManager();
     }
 
     @Override

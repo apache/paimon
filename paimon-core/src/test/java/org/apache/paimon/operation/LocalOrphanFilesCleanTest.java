@@ -368,7 +368,7 @@ public class LocalOrphanFilesCleanTest {
         // validate changelog
         if (table.coreOptions().changelogProducer() == CoreOptions.ChangelogProducer.INPUT) {
             List<Changelog> changelogs = new ArrayList<>();
-            table.snapshotManager().changelogs().forEachRemaining(changelogs::add);
+            table.changelogManager().changelogs().forEachRemaining(changelogs::add);
             validateChangelog(
                     changelogs.stream()
                             .sorted(Comparator.comparingLong(Changelog::id))

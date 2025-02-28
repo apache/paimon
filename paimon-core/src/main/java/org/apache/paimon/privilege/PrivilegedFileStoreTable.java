@@ -37,6 +37,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -63,6 +64,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public SnapshotManager snapshotManager() {
         privilegeChecker.assertCanSelectOrInsert(identifier);
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public ChangelogManager changelogManager() {
+        privilegeChecker.assertCanSelectOrInsert(identifier);
+        return wrapped.changelogManager();
     }
 
     @Override

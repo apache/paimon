@@ -85,6 +85,7 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
+import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -165,7 +166,7 @@ public class FileStoreCommitTest {
         testRandomConcurrentNoConflict(1, false, CoreOptions.ChangelogProducer.NONE);
         SnapshotManager snapshotManager = createStore(false, 1).snapshotManager();
         Path snapshotDir = snapshotManager.snapshotDirectory();
-        Path latest = new Path(snapshotDir, SnapshotManager.LATEST);
+        Path latest = new Path(snapshotDir, LATEST);
 
         assertThat(new LocalFileIO().exists(latest)).isTrue();
 

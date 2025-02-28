@@ -61,6 +61,7 @@ import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.CatalogBranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
@@ -259,6 +260,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 tableSchema,
                 coreOptions(),
                 snapshotManager(),
+                changelogManager(),
                 splitGenerator(),
                 nonPartitionFilterConsumer(),
                 DefaultValueAssigner.create(tableSchema),
@@ -282,6 +284,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
+                changelogManager(),
                 supportStreamingReadOverwrite(),
                 DefaultValueAssigner.create(tableSchema));
     }
@@ -420,15 +423,26 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public ChangelogManager changelogManager() {
+        return store().changelogManager();
+    }
+
+    @Override
     public ExpireSnapshots newExpireSnapshots() {
         return new ExpireSnapshotsImpl(
-                snapshotManager(), store().newSnapshotDeletion(), store().newTagManager());
+                snapshotManager(),
+                changelogManager(),
+                store().newSnapshotDeletion(),
+                store().newTagManager());
     }
 
     @Override
     public ExpireSnapshots newExpireChangelog() {
         return new ExpireChangelogImpl(
-                snapshotManager(), tagManager(), store().newChangelogDeletion());
+                snapshotManager(),
+                changelogManager(),
+                tagManager(),
+                store().newChangelogDeletion());
     }
 
     @Override
@@ -750,6 +764,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     private RollbackHelper rollbackHelper() {
         return new RollbackHelper(
                 snapshotManager(),
+                changelogManager(),
                 tagManager(),
                 fileIO,
                 store().newSnapshotDeletion(),
