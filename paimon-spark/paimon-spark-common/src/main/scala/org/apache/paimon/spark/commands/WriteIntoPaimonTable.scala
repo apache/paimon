@@ -89,8 +89,7 @@ case class WriteIntoPaimonTable(
   }
 
   private def preFinish(commitMessages: Seq[CommitMessage]): Unit = {
-    val coreOptions = table.coreOptions();
-    if (coreOptions.tagCreationMode() == TagCreationMode.BATCH) {
+    if (table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {
       val tagCreation = new TagBatchCreation(table)
       tagCreation.createTag()
     }
