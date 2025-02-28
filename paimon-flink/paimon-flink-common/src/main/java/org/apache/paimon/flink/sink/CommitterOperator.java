@@ -130,8 +130,8 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
         // parallelism of commit operator is always 1, so commitUser will never be null
-        int parallelism = getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks();
-        int index = getRuntimeContext().getTaskInfo().getIndexOfThisSubtask();
+        int parallelism = getRuntimeContext().getNumberOfParallelSubtasks();
+        int index = getRuntimeContext().getIndexOfThisSubtask();
 
         committer =
                 committerFactory.create(
