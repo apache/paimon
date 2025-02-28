@@ -101,7 +101,7 @@ public class AuthSessionTest {
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
         Thread.sleep(tokenRefreshInMills * 2);
-        if (dlfAuthProvider.refreshResult) {
+        if (dlfAuthProvider.refreshSuccess) {
             authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
             assertEquals(authToken, token);
         }

@@ -61,7 +61,7 @@ public class DLFAuthProvider implements AuthProvider {
     private final String tokenFilePath;
 
     protected DLFToken token;
-    protected boolean refreshResult;
+    protected boolean refreshSuccess;
     private final boolean keepRefreshed;
     private Long expiresAtMillis;
     private final Long tokenRefreshInMills;
@@ -143,12 +143,12 @@ public class DLFAuthProvider implements AuthProvider {
         long start = System.currentTimeMillis();
         DLFToken newToken = readToken(tokenFilePath, 0);
         if (newToken == null) {
-            this.refreshResult = false;
+            this.refreshSuccess = false;
             return false;
         }
         this.expiresAtMillis = start + this.tokenRefreshInMills;
         this.token = newToken;
-        this.refreshResult = true;
+        this.refreshSuccess = true;
         return true;
     }
 
