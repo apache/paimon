@@ -20,7 +20,10 @@ package org.apache.paimon.rest.auth;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link DLFAuthProviderFactory}. */
 class DLFAuthProviderFactoryTest {
@@ -28,14 +31,21 @@ class DLFAuthProviderFactoryTest {
     @Test
     void getRegion() {
         String region = "cn-hangzhou";
+        String ipPortUri = "http://127.0.0.1:8080";
+        assertEquals(region, DLFAuthProviderFactory.getRegion(Optional.of(region), ipPortUri));
         String url = "https://dlf-" + region + "-internal.aliyuncs.com";
-        assertEquals(region, DLFAuthProviderFactory.getRegion(url));
+        assertEquals(region, DLFAuthProviderFactory.getRegion(Optional.empty(), url));
         url = "https://dlf-" + region + ".aliyuncs.com";
-        assertEquals(region, DLFAuthProviderFactory.getRegion(url));
+        assertEquals(region, DLFAuthProviderFactory.getRegion(Optional.empty(), url));
+        url = "https://dlf-pre-" + region + ".aliyuncs.com";
+        assertEquals(region, DLFAuthProviderFactory.getRegion(Optional.empty(), url));
         region = "us-east-1";
         url = "https://dlf-" + region + ".aliyuncs.com";
-        assertEquals(region, DLFAuthProviderFactory.getRegion(url));
+        assertEquals(region, DLFAuthProviderFactory.getRegion(Optional.empty(), url));
         url = "https://dlf-" + region + "-internal.aliyuncs.com";
-        assertEquals(region, DLFAuthProviderFactory.getRegion(url));
+        assertEquals(region, DLFAuthProviderFactory.getRegion(Optional.empty(), url));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> DLFAuthProviderFactory.getRegion(Optional.empty(), ipPortUri));
     }
 }

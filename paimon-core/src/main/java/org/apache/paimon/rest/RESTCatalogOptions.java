@@ -50,6 +50,12 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token provider.");
 
+    public static final ConfigOption<String> DLF_REGION =
+            ConfigOptions.key("dlf.region")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF region.");
+
     public static final ConfigOption<String> DLF_TOKEN_PATH =
             ConfigOptions.key("dlf.token-path")
                     .stringType()
