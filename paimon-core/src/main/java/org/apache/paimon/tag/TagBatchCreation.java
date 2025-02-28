@@ -78,7 +78,11 @@ public class TagBatchCreation {
                     table.store().createTagCallbacks(),
                     false);
         } catch (Exception e) {
-            LOG.warn("Failed to create tag", e);
+            LOG.warn(
+                    "Failed to create tag '{}' from '${}', you can create this tag manually.",
+                    tagName,
+                    snapshot.id(),
+                    e);
             if (tagManager.tagExists(tagName)) {
                 tagManager.deleteTag(
                         tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
