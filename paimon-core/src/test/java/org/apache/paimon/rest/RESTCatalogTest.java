@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.iceberg.migrate.IcebergMigrateHadoopMetadataTest;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -62,7 +61,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import org.junit.jupiter.api.io.TempDir;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
@@ -83,7 +81,8 @@ class RESTCatalogTest extends CatalogTestBase {
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        warehouse =  RESTFileIOTestLoader.SCHEME + "://" + tmpFilePath;
+        warehouse = RESTFileIOTestLoader.SCHEME + "://" + tmpFilePath;
+        String serverId = UUID.randomUUID().toString();
         this.config =
                 new ConfigResponse(
                         ImmutableMap.of(
@@ -94,9 +93,11 @@ class RESTCatalogTest extends CatalogTestBase {
                                 "header." + serverDefineHeaderName,
                                 serverDefineHeaderValue,
                                 RESTCatalogOptions.DATA_TOKEN_ENABLED.key(),
-                                "true"),
+                                "true",
+                                "catalog-server-id",
+                                serverId),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken, this.config);
+        restCatalogServer = new RESTCatalogServer(warehouse, initToken, this.config, serverId);
         restCatalogServer.start();
         Options options = new Options();
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
@@ -169,8 +170,7 @@ class RESTCatalogTest extends CatalogTestBase {
 
             RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
             RESTToken fileDataToken = fileIO.validToken();
-            RESTToken serverDataToken =
-                    restCatalogServer.dataTokenStore.get(identifier.getFullName());
+            RESTToken serverDataToken = restCatalogServer.getDataToken(identifier);
             assertEquals(serverDataToken, fileDataToken);
         }
     }

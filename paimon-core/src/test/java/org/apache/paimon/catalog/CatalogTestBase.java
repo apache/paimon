@@ -72,7 +72,7 @@ public abstract class CatalogTestBase {
     protected String warehouse;
     protected FileIO fileIO;
     protected Catalog catalog;
-    protected  String tmpFilePath;
+    protected String tmpFilePath;
 
     protected static final Schema DEFAULT_TABLE_SCHEMA =
             new Schema(

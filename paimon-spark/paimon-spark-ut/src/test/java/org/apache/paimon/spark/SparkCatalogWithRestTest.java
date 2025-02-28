@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -56,7 +57,8 @@ public class SparkCatalogWithRestTest {
                                 CatalogOptions.WAREHOUSE.key(),
                                 warehouse),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken, config);
+        restCatalogServer =
+                new RESTCatalogServer(warehouse, initToken, config, UUID.randomUUID().toString());
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
     }

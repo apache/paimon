@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -64,7 +65,8 @@ class RESTCatalogITCase extends CatalogITCaseBase {
                                 CatalogOptions.WAREHOUSE.key(),
                                 warehouse),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken, config);
+        restCatalogServer =
+                new RESTCatalogServer(warehouse, initToken, config, UUID.randomUUID().toString());
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
         super.before();

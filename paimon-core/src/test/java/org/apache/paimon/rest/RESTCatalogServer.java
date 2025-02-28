@@ -114,10 +114,12 @@ public class RESTCatalogServer {
     public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
     public final Map<String, View> viewStore = new HashMap<>();
     public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
-    public final Map<String, RESTToken> dataTokenStore = new HashMap<>();
     public final ConfigResponse configResponse;
+    public final String serverId;
 
-    public RESTCatalogServer(String warehouse, String initToken, ConfigResponse config) {
+    public RESTCatalogServer(
+            String warehouse, String initToken, ConfigResponse config, String serverId) {
+        this.serverId = serverId;
         this.configResponse = config;
         this.prefix =
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
@@ -158,7 +160,11 @@ public class RESTCatalogServer {
     }
 
     public void setDataToken(Identifier identifier, RESTToken token) {
-        dataTokenStore.put(identifier.getFullName(), token);
+        DataTokenStore.putDataToken(serverId, identifier.getFullName(), token);
+    }
+
+    public RESTToken getDataToken(Identifier identifier) {
+        return DataTokenStore.getDataToken(serverId, identifier.getFullName());
     }
 
     public Dispatcher initDispatcher(String authToken) {
@@ -418,10 +424,8 @@ public class RESTCatalogServer {
     }
 
     private MockResponse handleDataToken(Identifier tableIdentifier) throws Exception {
-        RESTToken dataToken;
-        if (dataTokenStore.containsKey(tableIdentifier.getFullName())) {
-            dataToken = dataTokenStore.get(tableIdentifier.getFullName());
-        } else {
+        RESTToken dataToken = DataTokenStore.getDataToken(serverId, tableIdentifier.getFullName());
+        if (dataToken == null) {
             long currentTimeMillis = System.currentTimeMillis();
             dataToken =
                     new RESTToken(
@@ -431,7 +435,7 @@ public class RESTCatalogServer {
                                     "akSecret",
                                     "akSecret" + currentTimeMillis),
                             currentTimeMillis);
-            dataTokenStore.put(tableIdentifier.getFullName(), dataToken);
+            DataTokenStore.putDataToken(serverId, tableIdentifier.getFullName(), dataToken);
         }
         GetTableTokenResponse getTableTokenResponse =
                 new GetTableTokenResponse(dataToken.token(), dataToken.expireAtMillis());
