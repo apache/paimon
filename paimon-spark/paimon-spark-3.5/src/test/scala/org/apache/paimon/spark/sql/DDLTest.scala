@@ -18,4 +18,16 @@
 
 package org.apache.paimon.spark.sql
 
-class DDLTest extends DDLTestBase {}
+class DDLTest extends DDLTestBase {
+
+  test("Paimon DDL: create append table with default value") {
+    withTable("T") {
+      sql("CREATE TABLE T (id INT, t1 INT DEFAULT 5, t2 INT DEFAULT 2)")
+      sql(
+        """INSERT INTO T VALUES (1, 2, 3), (2, DEFAULT, 3), (3, 2, DEFAULT), (4, DEFAULT, DEFAULT)"""
+      )
+      val res = sql("SELECT * FROM T").rdd.take(3).seq
+      assert(res != null)
+    }
+  }
+}
