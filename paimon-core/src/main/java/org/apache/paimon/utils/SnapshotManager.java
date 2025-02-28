@@ -215,6 +215,10 @@ public class SnapshotManager implements Serializable {
         } while (true);
     }
 
+    public boolean earliestFileNotExists() {
+        return HintFileUtils.readHint(fileIO, HintFileUtils.EARLIEST, snapshotDirectory()) == null;
+    }
+
     public @Nullable Long earliestSnapshotId() {
         try {
             return findEarliest(snapshotDirectory(), SNAPSHOT_PREFIX, this::snapshotPath);
