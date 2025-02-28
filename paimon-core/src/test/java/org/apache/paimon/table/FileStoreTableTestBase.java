@@ -1477,6 +1477,7 @@ public abstract class FileStoreTableTestBase {
                 TestFileStore.getFilesInUse(
                         latestSnapshotId,
                         snapshotManager,
+                        table.changelogManager(),
                         table.fileIO(),
                         store.pathFactory(),
                         store.manifestListFactory().create(),
