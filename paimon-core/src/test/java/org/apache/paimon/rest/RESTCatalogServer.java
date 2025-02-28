@@ -27,6 +27,8 @@ import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.SupportsBranches;
+import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -66,7 +68,9 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
@@ -114,6 +118,7 @@ public class RESTCatalogServer {
     public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
     public final Map<String, View> viewStore = new HashMap<>();
     public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
+    public final Map<String, FileIO> tableFileIOStore = new HashMap<>();
     public final ConfigResponse configResponse;
     public final String serverId;
 
@@ -424,9 +429,9 @@ public class RESTCatalogServer {
     }
 
     private MockResponse handleDataToken(Identifier tableIdentifier) throws Exception {
-        RESTToken dataToken = DataTokenStore.getDataToken(serverId, tableIdentifier.getFullName());
+        RESTToken dataToken = getDataToken(tableIdentifier);
         if (dataToken == null) {
-            long currentTimeMillis = System.currentTimeMillis();
+            long currentTimeMillis = System.currentTimeMillis() + 60_000;
             dataToken =
                     new RESTToken(
                             ImmutableMap.of(
@@ -483,7 +488,8 @@ public class RESTCatalogServer {
     private MockResponse commitTableApiHandler(RecordedRequest request) throws Exception {
         CommitTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(requestBody.getIdentifier());
+        Identifier identifier = requestBody.getIdentifier();
+        FileStoreTable table = getFileTable(identifier);
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
         String branchName = requestBody.getIdentifier().getBranchName();
@@ -495,6 +501,24 @@ public class RESTCatalogServer {
         commitSnapshot(requestBody.getIdentifier(), requestBody.getSnapshot(), null);
         CommitTableResponse response = new CommitTableResponse(success);
         return mockResponse(response, 200);
+    }
+
+    private FileStoreTable getFileTable(Identifier identifier) {
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        TableSchema schema = tableMetadata.schema();
+        CatalogEnvironment catalogEnv =
+                new CatalogEnvironment(
+                        identifier,
+                        tableMetadata.uuid(),
+                        catalog.catalogLoader(),
+                        catalog.lockFactory().orElse(null),
+                        catalog.lockContext().orElse(null),
+                        catalog instanceof SupportsSnapshots,
+                        catalog instanceof SupportsBranches);
+        Path path = new Path(schema.options().get(PATH.key()));
+        FileIO dataFileIO = tableFileIOStore.get(identifier.getFullName());
+        FileStoreTable table = FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
+        return table;
     }
 
     private MockResponse databasesApiHandler(RecordedRequest request) throws Exception {
@@ -830,7 +854,7 @@ public class RESTCatalogServer {
     private boolean commitSnapshot(
             Identifier identifier, Snapshot snapshot, List<Partition> statistics)
             throws Catalog.TableNotExistException {
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        FileStoreTable table = getFileTable(identifier);
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
         String branchName = identifier.getBranchName();

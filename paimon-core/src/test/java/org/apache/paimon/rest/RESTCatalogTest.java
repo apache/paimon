@@ -229,7 +229,8 @@ class RESTCatalogTest extends CatalogTestBase {
         Identifier tableIdentifier = Identifier.create("my_db", "my_table");
         createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(tableIdentifier);
-
+        restCatalogServer.tableFileIOStore.put(
+                tableIdentifier.getFullName(), tableTestWrite.fileIO());
         // write
         BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();

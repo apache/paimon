@@ -50,7 +50,10 @@ public class RESTTestFileIO extends LocalFileIO {
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
-        getToken(path);
+        RESTToken token = getToken(path);
+        if (token.expireAtMillis() < System.currentTimeMillis()) {
+            throw new RuntimeException("token expired");
+        }
         return super.newInputStream(path);
     }
 
