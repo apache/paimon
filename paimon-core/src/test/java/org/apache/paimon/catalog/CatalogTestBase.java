@@ -72,6 +72,7 @@ public abstract class CatalogTestBase {
     protected String warehouse;
     protected FileIO fileIO;
     protected Catalog catalog;
+    protected  String tmpFilePath;
 
     protected static final Schema DEFAULT_TABLE_SCHEMA =
             new Schema(
@@ -86,6 +87,7 @@ public abstract class CatalogTestBase {
 
     @BeforeEach
     public void setUp() throws Exception {
+        tmpFilePath = tempFile.toString();
         warehouse = tempFile.toUri().toString();
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);

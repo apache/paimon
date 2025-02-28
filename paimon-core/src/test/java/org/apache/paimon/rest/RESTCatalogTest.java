@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.iceberg.migrate.IcebergMigrateHadoopMetadataTest;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -61,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
@@ -81,6 +83,7 @@ class RESTCatalogTest extends CatalogTestBase {
     @Override
     public void setUp() throws Exception {
         super.setUp();
+        warehouse =  RESTFileIOTestLoader.SCHEME + "://" + tmpFilePath;
         this.config =
                 new ConfigResponse(
                         ImmutableMap.of(
@@ -89,7 +92,9 @@ class RESTCatalogTest extends CatalogTestBase {
                                 CatalogOptions.WAREHOUSE.key(),
                                 warehouse,
                                 "header." + serverDefineHeaderName,
-                                serverDefineHeaderValue),
+                                serverDefineHeaderValue,
+                                RESTCatalogOptions.DATA_TOKEN_ENABLED.key(),
+                                "true"),
                         ImmutableMap.of());
         restCatalogServer = new RESTCatalogServer(warehouse, initToken, this.config);
         restCatalogServer.start();
