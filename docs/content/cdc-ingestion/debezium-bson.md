@@ -47,7 +47,7 @@ bson-*.jar
 {{< hint info >}}
 The debezium bson format requires insert/update/delete event messages include the full document, and include a field that represents the state of the document before the change.
 This requires setting debezium's capture.mode to change_streams_update_full_with_pre_image and [capture.mode.full.update.type](https://debezium.io/documentation/reference/stable/connectors/mongodb.html#mongodb-property-capture-mode-full-update-type) to post_image.
-The database must be running **MongoDB 6.0 or later** to use this option.
+Before version 6.0 of MongoDB, it was not possible to obtain 'Update Before' information. Therefore, using the id field in the Kafka Key as 'Update before' information
 {{< /hint >}}
 
 Here is a simple example for an update operation captured from a Mongodb customers collection in JSON format:
@@ -145,7 +145,7 @@ Below is a list of top-level field BsonValue conversion examples:
         <td>
             <ul>
                 <li>1735934393769</li>
-                <li>{"$numberLong": 1735934393769}</li>
+                <li>{"$numberLong": "1735934393769"}</li>
             </ul>
         </td>
         <td>"1735934393769"</td>
@@ -186,7 +186,7 @@ Below is a list of top-level field BsonValue conversion examples:
     </tr>
     <tr>
         <td><h5>BsonArray</h5></td>
-        <td>[1,2,{"$numberLong": 1735934393769}]</td>
+        <td>[1,2,{"$numberLong": "1735934393769"}]</td>
         <td>"[1,2,1735934393769]"</td>
     </tr>
     <tr>

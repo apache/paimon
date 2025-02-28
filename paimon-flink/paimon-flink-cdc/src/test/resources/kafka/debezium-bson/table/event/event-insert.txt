@@ -15,4 +15,5 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+{"id": "{\"$oid\": \"67ab25755c0d5ac87eb8c632\"}"}
 {"before": null,"after": "{\"_id\": {\"$oid\": \"67ab25755c0d5ac87eb8c632\"},\"created_at\": {\"$numberLong\": \"1736207571013\"},\"created_by\": \"peter\",\"tags\": [\"pending\"],\"updated_at\": {\"$date\": 1739455297970}}","updateDescription": null,"source": {"version": "2.7.0.Final","connector": "mongodb","name": "mongodb_bigdata_test","ts_ms": 1739321992000,"snapshot": "false","db": "bigdata_test","sequence": null,"ts_us": 1739321992000000,"ts_ns": 1739321992000000000,"collection": "sync_test_table","ord": 28,"lsid": null,"txnNumber": null,"wallTime": null},"op": "c","ts_ms": 1739321992890,"transaction": null}
