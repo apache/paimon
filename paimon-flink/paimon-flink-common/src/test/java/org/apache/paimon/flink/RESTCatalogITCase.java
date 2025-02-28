@@ -105,6 +105,16 @@ class RESTCatalogITCase extends CatalogITCaseBase {
         return options;
     }
 
+    @Test
+    public void testWriteAndRead() {
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES ('1', 11), ('2', 22)",
+                        DATABASE_NAME, TABLE_NAME));
+        assertThat(batchSql(String.format("SELECT * FROM %s.%s", DATABASE_NAME, TABLE_NAME)))
+                .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
+    }
+
     @Override
     protected String getTempDirPath() {
         return this.warehouse;
