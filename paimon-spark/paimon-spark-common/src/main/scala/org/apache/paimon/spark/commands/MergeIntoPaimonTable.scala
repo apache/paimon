@@ -152,13 +152,16 @@ case class MergeIntoPaimonTable(
       }
       if (hasUpdate(matchedActions)) {
         touchedFilePathsSet ++= findTouchedFiles(
-          targetDS.join(sourceDS, toColumn(mergeCondition), "inner"),
-          sparkSession)
+          targetDS.alias("_left").join(sourceDS, toColumn(mergeCondition), "inner"),
+          sparkSession,
+          "_left." + FILE_PATH_COLUMN
+        )
       }
       if (hasUpdate(notMatchedBySourceActions)) {
         touchedFilePathsSet ++= findTouchedFiles(
-          targetDS.join(sourceDS, toColumn(mergeCondition), "left_anti"),
-          sparkSession)
+          targetDS.alias("_left").join(sourceDS, toColumn(mergeCondition), "left_anti"),
+          sparkSession,
+          "_left." + FILE_PATH_COLUMN)
       }
 
       val targetFilePaths: Array[String] = findTouchedFiles(targetDS, sparkSession)
