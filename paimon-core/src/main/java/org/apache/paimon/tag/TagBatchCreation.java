@@ -25,6 +25,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -33,6 +36,8 @@ import java.util.List;
 
 /** Tag creation for batch mode. */
 public class TagBatchCreation {
+
+    private static final Logger LOG = LoggerFactory.getLogger(TagBatchCreation.class);
 
     private static final String BATCH_WRITE_TAG_PREFIX = "batch-write-";
     private final FileStoreTable table;
@@ -72,14 +77,15 @@ public class TagBatchCreation {
                     table.coreOptions().tagDefaultTimeRetained(),
                     table.store().createTagCallbacks(),
                     false);
-            // Expire the tag
-            expireTag();
         } catch (Exception e) {
+            LOG.warn("Failed to create tag", e);
             if (tagManager.tagExists(tagName)) {
                 tagManager.deleteTag(
                         tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
             }
         }
+        // Expire the tag
+        expireTag();
     }
 
     private void expireTag() {
