@@ -597,7 +597,9 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
         StoreCommitter committer =
                 new StoreCommitter(
-                        table, commit, Committer.createContext("", metricGroup, true, false, null));
+                        table,
+                        commit,
+                        Committer.createContext("", metricGroup, true, false, null, 1, 1));
         committer.commit(Collections.singletonList(manifestCommittable));
         CommitterMetrics metrics = committer.getCommitterMetrics();
         assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(533);

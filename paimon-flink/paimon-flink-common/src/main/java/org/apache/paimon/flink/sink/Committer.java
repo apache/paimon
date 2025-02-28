@@ -81,6 +81,10 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
         boolean isRestored();
 
         OperatorStateStore stateStore();
+
+        int getParallelism();
+
+        int getSubtaskIndex();
     }
 
     static Context createContext(
@@ -88,7 +92,9 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             @Nullable OperatorMetricGroup metricGroup,
             boolean streamingCheckpointEnabled,
             boolean isRestored,
-            OperatorStateStore stateStore) {
+            OperatorStateStore stateStore,
+            int parallelism,
+            int subtaskIndex) {
         return new Committer.Context() {
             @Override
             public String commitUser() {
@@ -113,6 +119,16 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             @Override
             public OperatorStateStore stateStore() {
                 return stateStore;
+            }
+
+            @Override
+            public int getParallelism() {
+                return parallelism;
+            }
+
+            @Override
+            public int getSubtaskIndex() {
+                return subtaskIndex;
             }
         };
     }
