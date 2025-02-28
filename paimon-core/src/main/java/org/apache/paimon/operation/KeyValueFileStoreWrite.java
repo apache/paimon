@@ -62,6 +62,7 @@ import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -79,9 +80,11 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -107,6 +110,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     private final RowType partitionType;
+    private final PartitionTimeExtractor partitionTimeExtractor;
     private final String commitUser;
     @Nullable private final RecordLevelExpire recordLevelExpire;
     @Nullable private Cache<String, LookupFile> lookupFileCache;
@@ -142,6 +146,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 tableName);
         this.fileIO = fileIO;
         this.partitionType = partitionType;
+        this.partitionTimeExtractor = new PartitionTimeExtractor(options);
         this.keyType = keyType;
         this.valueType = valueType;
         this.commitUser = commitUser;
@@ -196,16 +201,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 writerFactoryBuilder.build(partition, bucket, options);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
-        UniversalCompaction universalCompaction =
-                new UniversalCompaction(
-                        options.maxSizeAmplificationPercent(),
-                        options.sortedRunSizeRatio(),
-                        options.numSortedRunCompactionTrigger(),
-                        options.optimizedCompactionInterval());
-        CompactStrategy compactStrategy =
-                options.needLookup()
-                        ? new ForceUpLevel0Compaction(universalCompaction)
-                        : universalCompaction;
+        CompactStrategy compactStrategy = createCompactStrategy(options, partition);
         CompactManager compactManager =
                 createCompactManager(
                         partition, bucket, compactStrategy, compactExecutor, levels, dvMaintainer);
@@ -225,6 +221,29 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.changelogProducer(),
                 restoreIncrement,
                 UserDefinedSeqComparator.create(valueType, options));
+    }
+
+    @VisibleForTesting
+    public CompactStrategy createCompactStrategy(CoreOptions options, BinaryRow partition) {
+        UniversalCompaction universalCompaction =
+                new UniversalCompaction(
+                        options.maxSizeAmplificationPercent(),
+                        options.sortedRunSizeRatio(),
+                        options.numSortedRunCompactionTrigger(),
+                        options.optimizedCompactionInterval());
+        if (options.needLookup()) {
+            Optional<Duration> lateArrivedThreshold = options.lateArrivalThreshold();
+            if (partition.getFieldCount() > 0 && lateArrivedThreshold.isPresent()) {
+                return new ForceUpLevel0Compaction(
+                        universalCompaction,
+                        lateArrivedThreshold.get(),
+                        partitionTimeExtractor.extract(partition, partitionType));
+            } else {
+                return new ForceUpLevel0Compaction(universalCompaction);
+            }
+        } else {
+            return universalCompaction;
+        }
     }
 
     @VisibleForTesting
