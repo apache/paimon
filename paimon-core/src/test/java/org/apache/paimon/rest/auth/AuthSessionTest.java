@@ -43,6 +43,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_ID;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_SECRET;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_REGION;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_SECURITY_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
@@ -171,6 +172,7 @@ public class AuthSessionTest {
         options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
         options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
         options.set(DLF_SECURITY_TOKEN.key(), token.getSecurityToken());
+        options.set(DLF_REGION.key(), "cn-hangzhou");
         AuthProvider authProvider =
                 AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
@@ -187,6 +189,7 @@ public class AuthSessionTest {
         DLFToken token = new DLFToken(akId, akSecret, null, null);
         options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
         options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
+        options.set(DLF_REGION.key(), "cn-hangzhou");
         AuthProvider authProvider =
                 AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
         AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
@@ -224,7 +227,7 @@ public class AuthSessionTest {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String tokenStr = tokenFile2Token.getRight();
-        String serverUrl = "https://dlf.cn-hangzhou.aliyuncs.com";
+        String serverUrl = "https://dlf-cn-hangzhou.aliyuncs.com";
         AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName, serverUrl);
         DLFToken token = OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DLFToken.class);
         Map<String, String> parameters = new HashMap<>();
@@ -280,6 +283,7 @@ public class AuthSessionTest {
         Options options = new Options();
         options.set(DLF_TOKEN_PATH.key(), folder.getRoot().getPath() + "/" + fileName);
         options.set(RESTCatalogOptions.URI.key(), serverUrl);
+        options.set(DLF_REGION.key(), "cn-hangzhou");
         tokenRefreshInMillsOpt.ifPresent(
                 tokenRefreshInMills ->
                         options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms"));
