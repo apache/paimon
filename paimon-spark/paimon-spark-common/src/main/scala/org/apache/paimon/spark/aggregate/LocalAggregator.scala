@@ -23,7 +23,8 @@ import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.table.{DataTable, Table}
 import org.apache.paimon.table.source.DataSplit
-import org.apache.paimon.utils.{InternalRowUtils, ProjectedRow}
+import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.ProjectedRow
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.JoinedRow
@@ -37,7 +38,8 @@ class LocalAggregator(table: Table) {
   private val partitionType = SparkTypeUtils.toPartitionType(table)
   private val groupByEvaluatorMap = new mutable.HashMap[InternalRow, Seq[AggFuncEvaluator[_]]]()
   private var requiredGroupByType: Seq[DataType] = _
-  private var requiredGroupByIndexMapping: Seq[Int] = _
+  private var requiredGroupByIndexMapping: Array[Int] = _
+  private var requiredGroupByPaimonType: RowType = _
   private var aggFuncEvaluatorGetter: () => Seq[AggFuncEvaluator[_]] = _
   private var isInitialized = false
 
@@ -57,6 +59,8 @@ class LocalAggregator(table: Table) {
       case r: NamedReference =>
         partitionType.getFieldIndex(r.fieldNames().head)
     }
+
+    requiredGroupByPaimonType = partitionType.project(requiredGroupByIndexMapping)
 
     isInitialized = true
   }
@@ -95,11 +99,8 @@ class LocalAggregator(table: Table) {
   }
 
   private def requiredGroupByRow(partitionRow: BinaryRow): InternalRow = {
-    val projectedRow =
-      ProjectedRow.from(requiredGroupByIndexMapping.toArray).replaceRow(partitionRow)
-    // `ProjectedRow` does not support `hashCode`, so do a deep copy
-    val genericRow = InternalRowUtils.copyInternalRow(projectedRow, partitionType)
-    SparkInternalRow.create(partitionType).replace(genericRow)
+    val projectedRow = ProjectedRow.from(requiredGroupByIndexMapping).replaceRow(partitionRow)
+    SparkInternalRow.create(requiredGroupByPaimonType).replace(projectedRow)
   }
 
   def update(dataSplit: DataSplit): Unit = {
