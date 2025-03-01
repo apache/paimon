@@ -436,6 +436,18 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>The maximal fan-in for external merge sort. It limits the number of file handles. If it is too small, may cause intermediate merging. But if it is too large, it will cause too many files opened at the same time, consume memory and lead to random reading.</td>
         </tr>
         <tr>
+            <td><h5>lookup-compact</h5></td>
+            <td style="word-wrap: break-word;">RADICAL</td>
+            <td><p>Enum</p></td>
+            <td>Lookup compact mode used for lookup compaction.<br /><br />Possible values:<ul><li>"RADICAL"</li><li>"GENTLE"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>lookup-compact.max-interval</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The max interval for a gentle mode lookup compaction to be triggered. For every interval, a forced lookup compaction will be performed to flush L0 files to higher level. This option is only valid when lookup-compact mode is gentle.</td>
+        </tr>
+        <tr>
             <td><h5>lookup-wait</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
