@@ -95,11 +95,6 @@ public class PartitionExpire {
                 maxExpireNum);
     }
 
-    public PartitionExpire withMaxExpireNum(int maxExpireNum) {
-        this.maxExpireNum = maxExpireNum;
-        return this;
-    }
-
     public List<Map<String, String>> expire(long commitIdentifier) {
         return expire(LocalDateTime.now(), commitIdentifier);
     }
