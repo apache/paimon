@@ -18,8 +18,13 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
+import org.apache.paimon.rest.responses.ConfigResponse;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterEach;
@@ -28,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,7 +49,16 @@ public class SparkCatalogWithRestTest {
     @BeforeEach
     public void before() throws IOException {
         warehouse = tempFile.toUri().toString();
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken);
+        ConfigResponse config =
+                new ConfigResponse(
+                        ImmutableMap.of(
+                                RESTCatalogInternalOptions.PREFIX.key(),
+                                "paimon",
+                                CatalogOptions.WAREHOUSE.key(),
+                                warehouse),
+                        ImmutableMap.of());
+        restCatalogServer =
+                new RESTCatalogServer(warehouse, initToken, config, UUID.randomUUID().toString());
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
     }
