@@ -109,11 +109,11 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
         return records;
     }
 
-    private JsonNode getData() {
+    protected JsonNode getData() {
         return getAndCheck(dataField());
     }
 
-    private JsonNode getBefore(String op) {
+    protected JsonNode getBefore(String op) {
         return getAndCheck(FIELD_BEFORE, FIELD_TYPE, op);
     }
 
