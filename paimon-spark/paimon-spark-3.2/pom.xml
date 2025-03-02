@@ -76,6 +76,13 @@ under the License.
         </dependency>
 
         <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-format</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
@@ -105,6 +112,7 @@ under the License.
             <version>${spark.version}</version>
             <scope>test</scope>
         </dependency>
+
     </dependencies>
 
     <build>
