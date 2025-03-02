@@ -102,7 +102,6 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     @Override
     protected RecordWriter<InternalRow> createWriter(
-            @Nullable Long snapshotId,
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoredFiles,

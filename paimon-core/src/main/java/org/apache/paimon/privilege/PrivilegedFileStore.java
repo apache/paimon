@@ -43,6 +43,7 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -77,6 +78,12 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     public SnapshotManager snapshotManager() {
         privilegeChecker.assertCanSelectOrInsert(identifier);
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public ChangelogManager changelogManager() {
+        privilegeChecker.assertCanSelectOrInsert(identifier);
+        return wrapped.changelogManager();
     }
 
     @Override

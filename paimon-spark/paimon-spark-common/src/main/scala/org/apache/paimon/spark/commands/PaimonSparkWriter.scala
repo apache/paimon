@@ -248,7 +248,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVectors]): Seq[CommitMessage] = {
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
-    val snapshotId = table.snapshotManager().latestSnapshotId();
+    val snapshot = table.snapshotManager().latestSnapshot()
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {
@@ -260,11 +260,11 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             if (dvIndexFileMaintainer == null) {
               val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
               dvIndexFileMaintainer = if (bucketMode == BUCKET_UNAWARE) {
-                AppendDeletionFileMaintainer.forUnawareAppend(indexHandler, snapshotId, partition)
+                AppendDeletionFileMaintainer.forUnawareAppend(indexHandler, snapshot, partition)
               } else {
                 AppendDeletionFileMaintainer.forBucketedAppend(
                   indexHandler,
-                  snapshotId,
+                  snapshot,
                   partition,
                   sdv.bucket)
               }

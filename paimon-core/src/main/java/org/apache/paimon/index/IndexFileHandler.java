@@ -75,8 +75,9 @@ public class IndexFileHandler {
         return this.deletionVectorsIndex;
     }
 
-    public Optional<IndexFileMeta> scanHashIndex(long snapshotId, BinaryRow partition, int bucket) {
-        List<IndexFileMeta> result = scan(snapshotId, HASH_INDEX, partition, bucket);
+    public Optional<IndexFileMeta> scanHashIndex(
+            Snapshot snapshot, BinaryRow partition, int bucket) {
+        List<IndexFileMeta> result = scan(snapshot, HASH_INDEX, partition, bucket);
         if (result.size() > 1) {
             throw new IllegalArgumentException(
                     "Find multiple hash index files for one bucket: " + result);
@@ -85,11 +86,10 @@ public class IndexFileHandler {
     }
 
     public Map<String, DeletionFile> scanDVIndex(
-            @Nullable Long snapshotId, BinaryRow partition, int bucket) {
-        if (snapshotId == null) {
+            @Nullable Snapshot snapshot, BinaryRow partition, int bucket) {
+        if (snapshot == null) {
             return Collections.emptyMap();
         }
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
         String indexManifest = snapshot.indexManifest();
         if (indexManifest == null) {
             return Collections.emptyMap();
@@ -136,9 +136,9 @@ public class IndexFileHandler {
     }
 
     public List<IndexFileMeta> scan(
-            long snapshotId, String indexType, BinaryRow partition, int bucket) {
+            Snapshot snapshot, String indexType, BinaryRow partition, int bucket) {
         List<IndexFileMeta> result = new ArrayList<>();
-        for (IndexManifestEntry file : scanEntries(snapshotId, indexType, partition)) {
+        for (IndexManifestEntry file : scanEntries(snapshot, indexType, partition)) {
             if (file.bucket() == bucket) {
                 result.add(file.indexFile());
             }
@@ -171,7 +171,7 @@ public class IndexFileHandler {
     }
 
     public List<IndexManifestEntry> scanEntries(String indexType, BinaryRow partition) {
-        Long snapshot = snapshotManager.latestSnapshotId();
+        Snapshot snapshot = snapshotManager.latestSnapshot();
         if (snapshot == null) {
             return Collections.emptyList();
         }
@@ -180,13 +180,8 @@ public class IndexFileHandler {
     }
 
     public List<IndexManifestEntry> scanEntries(
-            long snapshotId, String indexType, BinaryRow partition) {
-        return scanEntries(snapshotId, indexType, Collections.singleton(partition));
-    }
-
-    public List<IndexManifestEntry> scanEntries(
-            long snapshot, String indexType, Set<BinaryRow> partitions) {
-        return scanEntries(snapshotManager.snapshot(snapshot), indexType, partitions);
+            Snapshot snapshot, String indexType, BinaryRow partition) {
+        return scanEntries(snapshot, indexType, Collections.singleton(partition));
     }
 
     public List<IndexManifestEntry> scanEntries(

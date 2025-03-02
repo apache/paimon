@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 
 /**
@@ -28,10 +29,15 @@ import org.apache.paimon.utils.SnapshotManager;
 public class ContinuousFromSnapshotStartingScanner extends AbstractStartingScanner {
 
     private final boolean changelogDecoupled;
+    private final ChangelogManager changelogManager;
 
     public ContinuousFromSnapshotStartingScanner(
-            SnapshotManager snapshotManager, long snapshotId, boolean changelogDecoupled) {
+            SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
+            long snapshotId,
+            boolean changelogDecoupled) {
         super(snapshotManager);
+        this.changelogManager = changelogManager;
         this.startingSnapshotId = snapshotId;
         this.changelogDecoupled = changelogDecoupled;
     }
@@ -50,7 +56,7 @@ public class ContinuousFromSnapshotStartingScanner extends AbstractStartingScann
     private Long getEarliestId() {
         Long earliestId;
         if (changelogDecoupled) {
-            Long earliestChangelogId = snapshotManager.earliestLongLivedChangelogId();
+            Long earliestChangelogId = changelogManager.earliestLongLivedChangelogId();
             earliestId =
                     earliestChangelogId == null
                             ? snapshotManager.earliestSnapshotId()

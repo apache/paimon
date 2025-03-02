@@ -46,6 +46,7 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
@@ -79,6 +80,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final CoreOptions options;
     private final boolean deletionVectors;
     private final SnapshotManager snapshotManager;
+    private final ChangelogManager changelogManager;
     private final ConsumerManager consumerManager;
     private final SplitGenerator splitGenerator;
     private final BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer;
@@ -95,6 +97,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             TableSchema tableSchema,
             CoreOptions options,
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             SplitGenerator splitGenerator,
             BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer,
             DefaultValueAssigner defaultValueAssigner,
@@ -106,6 +109,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         this.options = options;
         this.deletionVectors = options.deletionVectorsEnabled();
         this.snapshotManager = snapshotManager;
+        this.changelogManager = changelogManager;
         this.consumerManager =
                 new ConsumerManager(
                         snapshotManager.fileIO(),
@@ -128,6 +132,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotManager snapshotManager() {
         return snapshotManager;
+    }
+
+    @Override
+    public ChangelogManager changelogManager() {
+        return changelogManager;
     }
 
     @Override

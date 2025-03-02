@@ -77,6 +77,7 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** migrate iceberg table to paimon table. */
 public class IcebergMigrator implements Migrator {
+
     private static final Logger LOG = LoggerFactory.getLogger(IcebergMigrator.class);
 
     private final ThreadPoolExecutor executor;

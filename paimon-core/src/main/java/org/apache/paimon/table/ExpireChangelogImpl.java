@@ -24,6 +24,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -45,6 +46,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
     public static final Logger LOG = LoggerFactory.getLogger(ExpireChangelogImpl.class);
 
     private final SnapshotManager snapshotManager;
+    private final ChangelogManager changelogManager;
     private final ConsumerManager consumerManager;
     private final ChangelogDeletion changelogDeletion;
     private final TagManager tagManager;
@@ -53,9 +55,11 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
     public ExpireChangelogImpl(
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             TagManager tagManager,
             ChangelogDeletion changelogDeletion) {
         this.snapshotManager = snapshotManager;
+        this.changelogManager = changelogManager;
         this.tagManager = tagManager;
         this.consumerManager =
                 new ConsumerManager(
@@ -90,11 +94,11 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             return 0;
         }
 
-        Long latestChangelogId = snapshotManager.latestLongLivedChangelogId();
+        Long latestChangelogId = changelogManager.latestLongLivedChangelogId();
         if (latestChangelogId == null) {
             return 0;
         }
-        Long earliestChangelogId = snapshotManager.earliestLongLivedChangelogId();
+        Long earliestChangelogId = changelogManager.earliestLongLivedChangelogId();
         if (earliestChangelogId == null) {
             return 0;
         }
@@ -123,8 +127,8 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         maxExclusive = Math.min(maxExclusive, latestChangelogId);
 
         for (long id = min; id <= maxExclusive; id++) {
-            if (snapshotManager.longLivedChangelogExists(id)
-                    && olderThanMills <= snapshotManager.longLivedChangelog(id).timeMillis()) {
+            if (changelogManager.longLivedChangelogExists(id)
+                    && olderThanMills <= changelogManager.longLivedChangelog(id).timeMillis()) {
                 return expireUntil(earliestChangelogId, id);
             }
         }
@@ -140,13 +144,13 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
         List<Snapshot> skippingSnapshots =
                 findSkippingTags(taggedSnapshots, earliestId, endExclusiveId);
-        skippingSnapshots.add(snapshotManager.changelog(endExclusiveId));
+        skippingSnapshots.add(changelogManager.changelog(endExclusiveId));
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete changelog files from changelog #" + id);
             }
-            Changelog changelog = snapshotManager.longLivedChangelog(id);
+            Changelog changelog = changelogManager.longLivedChangelog(id);
             Predicate<ExpireFileEntry> skipper;
             try {
                 skipper = changelogDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
@@ -161,7 +165,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
             changelogDeletion.cleanUnusedDataFiles(changelog, skipper);
             changelogDeletion.cleanUnusedManifests(changelog, manifestSkippSet);
-            snapshotManager.fileIO().deleteQuietly(snapshotManager.longLivedChangelogPath(id));
+            changelogManager.fileIO().deleteQuietly(changelogManager.longLivedChangelogPath(id));
         }
 
         changelogDeletion.cleanEmptyDirectories();
@@ -171,7 +175,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
     private void writeEarliestHintFile(long earliest) {
         try {
-            snapshotManager.commitLongLivedChangelogEarliestHint(earliest);
+            changelogManager.commitLongLivedChangelogEarliestHint(earliest);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

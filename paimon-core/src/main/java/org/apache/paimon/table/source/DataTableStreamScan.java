@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.NextSnapshotFetcher;
 import org.apache.paimon.utils.SnapshotManager;
@@ -74,6 +75,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             boolean supportStreamingReadOverwrite,
             DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
@@ -82,7 +84,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.defaultValueAssigner = defaultValueAssigner;
         this.nextSnapshotProvider =
-                new NextSnapshotFetcher(snapshotManager, options.changelogLifecycleDecoupled());
+                new NextSnapshotFetcher(
+                        snapshotManager, changelogManager, options.changelogLifecycleDecoupled());
     }
 
     @Override

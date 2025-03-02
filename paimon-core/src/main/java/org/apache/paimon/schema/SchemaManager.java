@@ -45,6 +45,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
@@ -272,7 +273,8 @@ public class SchemaManager implements Serializable {
                     Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager =
                 new SnapshotManager(fileIO, tableRoot, branch, null, null);
-        boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
+        LazyField<Boolean> hasSnapshots =
+                new LazyField<>(() -> snapshotManager.latestSnapshot() != null);
 
         while (true) {
             TableSchema oldTableSchema =
@@ -289,7 +291,7 @@ public class SchemaManager implements Serializable {
             for (SchemaChange change : changes) {
                 if (change instanceof SetOption) {
                     SetOption setOption = (SetOption) change;
-                    if (hasSnapshots) {
+                    if (hasSnapshots.get()) {
                         checkAlterTableOption(
                                 setOption.key(),
                                 oldOptions.get(setOption.key()),
@@ -299,7 +301,7 @@ public class SchemaManager implements Serializable {
                     newOptions.put(setOption.key(), setOption.value());
                 } else if (change instanceof RemoveOption) {
                     RemoveOption removeOption = (RemoveOption) change;
-                    if (hasSnapshots) {
+                    if (hasSnapshots.get()) {
                         checkResetTableOption(removeOption.key());
                     }
                     newOptions.remove(removeOption.key());

@@ -78,6 +78,7 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.coreOptions(),
                 wrapped.newSnapshotReader(),
                 wrapped.snapshotManager(),
+                wrapped.changelogManager(),
                 wrapped.supportStreamingReadOverwrite(),
                 DefaultValueAssigner.create(wrapped.schema()),
                 lookupScanMode);

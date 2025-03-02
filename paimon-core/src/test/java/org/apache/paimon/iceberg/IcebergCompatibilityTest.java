@@ -19,6 +19,7 @@
 package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -213,7 +214,7 @@ public class IcebergCompatibilityTest {
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
         List<CommitMessage> commitMessages2 = write.prepareCommit(true, 2);
         commit.commit(2, commitMessages2);
-        assertThat(table.latestSnapshotId()).hasValue(3L);
+        assertThat(table.latestSnapshot()).isPresent().map(Snapshot::id).hasValue(3L);
 
         IcebergPathFactory pathFactory =
                 new IcebergPathFactory(new Path(table.location(), "metadata"));

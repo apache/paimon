@@ -18,6 +18,7 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
@@ -99,8 +100,8 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         BatchTableCommit commit = table.newBatchWriteBuilder().newCommit();
         commit.commit(Collections.singletonList(commitMessage));
 
-        Long lastSnapshotId = table.snapshotManager().latestSnapshotId();
-        dvMaintainer = factory.createOrRestore(lastSnapshotId, BinaryRow.EMPTY_ROW, 0);
+        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+        dvMaintainer = factory.createOrRestore(latestSnapshot, BinaryRow.EMPTY_ROW, 0);
         DeletionVector deletionVector2 = dvMaintainer.deletionVectorOf("f1").get();
         assertThat(deletionVector2.isDeleted(1)).isTrue();
         assertThat(deletionVector2.isDeleted(2)).isFalse();
@@ -120,8 +121,8 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         commit = table.newBatchWriteBuilder().newCommit();
         commit.commit(Collections.singletonList(commitMessage));
 
-        lastSnapshotId = table.snapshotManager().latestSnapshotId();
-        dvMaintainer = factory.createOrRestore(lastSnapshotId, BinaryRow.EMPTY_ROW, 0);
+        latestSnapshot = table.snapshotManager().latestSnapshot();
+        dvMaintainer = factory.createOrRestore(latestSnapshot, BinaryRow.EMPTY_ROW, 0);
         DeletionVector deletionVector3 = dvMaintainer.deletionVectorOf("f1").get();
         assertThat(deletionVector3.isDeleted(1)).isTrue();
         assertThat(deletionVector3.isDeleted(2)).isTrue();

@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -41,6 +42,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.SnapshotTest.newChangelogManager;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -127,7 +129,9 @@ public class SnapshotManagerTest {
                 // pick a random time equal to one of the snapshots
                 time = millis.get(random.nextInt(numSnapshots));
             }
-            Long actual = snapshotManager.earlierThanTimeMills(time, false);
+            Long actual =
+                    ContinuousFromTimestampStartingScanner.earlierThanTimeMills(
+                            snapshotManager, null, time, false);
 
             if (millis.get(numSnapshots - 1) < time) {
                 if (isRaceCondition && millis.size() == 1) {
@@ -452,11 +456,13 @@ public class SnapshotManagerTest {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        ChangelogManager changelogManager =
+                newChangelogManager(localFileIO, new Path(tempDir.toString()));
         long millis = 1L;
         for (long i = 1; i <= 5; i++) {
             Changelog changelog = createChangelogWithMillis(i, millis + i * 1000);
             localFileIO.tryToWriteAtomic(
-                    snapshotManager.longLivedChangelogPath(i), changelog.toJson());
+                    changelogManager.longLivedChangelogPath(i), changelog.toJson());
         }
 
         for (long i = 6; i <= 10; i++) {
@@ -464,19 +470,18 @@ public class SnapshotManagerTest {
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
 
-        Assertions.assertThat(snapshotManager.earliestLongLivedChangelogId()).isEqualTo(1);
-        Assertions.assertThat(snapshotManager.latestChangelogId()).isEqualTo(10);
-        Assertions.assertThat(snapshotManager.latestLongLivedChangelogId()).isEqualTo(5);
+        Assertions.assertThat(changelogManager.earliestLongLivedChangelogId()).isEqualTo(1);
+        Assertions.assertThat(changelogManager.latestLongLivedChangelogId()).isEqualTo(5);
         Assertions.assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
         Assertions.assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
-        Assertions.assertThat(snapshotManager.changelog(1)).isNotNull();
+        Assertions.assertThat(changelogManager.changelog(1)).isNotNull();
     }
 
     @Test
     public void testCommitChangelogWhenSameChangelogCommitTwice() throws IOException {
         FileIO localFileIO = LocalFileIO.create();
-        SnapshotManager snapshotManager =
-                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        ChangelogManager snapshotManager =
+                newChangelogManager(localFileIO, new Path(tempDir.toString()));
         long id = 1L;
         Changelog changelog = createChangelogWithMillis(id, 1L);
         snapshotManager.commitChangelog(changelog, id);
