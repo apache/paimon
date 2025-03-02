@@ -62,7 +62,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalLong;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
@@ -113,8 +113,8 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public OptionalLong latestSnapshotId() {
-        return wrapped.latestSnapshotId();
+    public Optional<Snapshot> latestSnapshot() {
+        return wrapped.latestSnapshot();
     }
 
     @Override

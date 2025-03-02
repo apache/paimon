@@ -97,7 +97,6 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
 
     @Override
     protected PostponeBucketWriter createWriter(
-            @Nullable Long snapshotId,
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,

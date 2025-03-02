@@ -45,7 +45,6 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /** {@link FileStoreTable} with privilege checks. */
 public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
@@ -73,9 +72,9 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
-    public OptionalLong latestSnapshotId() {
+    public Optional<Snapshot> latestSnapshot() {
         privilegeChecker.assertCanSelectOrInsert(identifier);
-        return wrapped.latestSnapshotId();
+        return wrapped.latestSnapshot();
     }
 
     @Override

@@ -1545,7 +1545,7 @@ public class FlinkCatalog extends AbstractCatalog {
             Table table = catalog.getTable(toIdentifier(tablePath));
             checkArgument(
                     table instanceof FileStoreTable, "Now only support analyze FileStoreTable.");
-            if (!table.latestSnapshotId().isPresent()) {
+            if (!table.latestSnapshot().isPresent()) {
                 LOG.info("Skipping analyze table because the snapshot is null.");
                 return;
             }

@@ -51,7 +51,6 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /** Delegated {@link FileStoreTable}. */
 public abstract class DelegatedFileStoreTable implements FileStoreTable {
@@ -162,8 +161,8 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public OptionalLong latestSnapshotId() {
-        return wrapped.latestSnapshotId();
+    public Optional<Snapshot> latestSnapshot() {
+        return wrapped.latestSnapshot();
     }
 
     @Override
