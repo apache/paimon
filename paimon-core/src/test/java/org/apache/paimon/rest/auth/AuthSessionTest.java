@@ -104,6 +104,8 @@ public class AuthSessionTest {
         Thread.sleep(tokenRefreshInMills * 2);
         String theSecondFetchToken =
                 OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        // if the second fetch token is not equal to the first fetch token, it means refresh success
+        // as refresh maybe fail in test environment, so we need to check whether refresh success
         if (!theSecondFetchToken.equals(theFirstFetchToken)) {
             assertEquals(theSecondGenerateToken, theSecondFetchToken);
         }
