@@ -21,7 +21,6 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 
-import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,7 +39,8 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
     @Override
     public AuthProvider create(Options options) {
         String region =
-                getRegion(options.getOptional(RESTCatalogOptions.DLF_REGION), options.get(URI));
+                options.getOptional(RESTCatalogOptions.DLF_REGION)
+                        .orElseGet(() -> parseRegionFromUri(options.get(URI)));
         if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
             String tokenFilePath = options.get(DLF_TOKEN_PATH);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
@@ -56,10 +56,7 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
         throw new IllegalArgumentException("DLF token path or AK must be set for DLF Auth.");
     }
 
-    protected static String getRegion(Optional<String> region, String uri) {
-        if (region.isPresent()) {
-            return region.get();
-        }
+    protected static String parseRegionFromUri(String uri) {
         try {
             String regex = "dlf-(?:pre-)?([a-z]+-[a-z]+(?:-\\d+)?)(?:-internal)?";
 
