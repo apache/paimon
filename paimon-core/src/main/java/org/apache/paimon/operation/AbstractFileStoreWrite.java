@@ -369,7 +369,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         for (State<T> state : states) {
             RecordWriter<T> writer =
                     createWriter(
-                            state.baseSnapshotId,
                             state.partition,
                             state.bucket,
                             state.dataFiles,
@@ -428,24 +427,23 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        if (!ignorePreviousFiles && latestSnapshotId != null) {
-            restoreFiles = scanExistingFileMetas(latestSnapshotId, partition, bucket);
+        if (!ignorePreviousFiles && latestSnapshot != null) {
+            restoreFiles = scanExistingFileMetas(latestSnapshot, partition, bucket);
         }
         IndexMaintainer<T> indexMaintainer =
                 indexFactory == null
                         ? null
                         : indexFactory.createOrRestore(
-                                ignorePreviousFiles ? null : latestSnapshotId, partition, bucket);
+                                ignorePreviousFiles ? null : latestSnapshot, partition, bucket);
         DeletionVectorsMaintainer deletionVectorsMaintainer =
                 dvMaintainerFactory == null
                         ? null
                         : dvMaintainerFactory.createOrRestore(
-                                ignorePreviousFiles ? null : latestSnapshotId, partition, bucket);
+                                ignorePreviousFiles ? null : latestSnapshot, partition, bucket);
         RecordWriter<T> writer =
                 createWriter(
-                        latestSnapshotId,
                         partition.copy(),
                         bucket,
                         restoreFiles,
@@ -456,7 +454,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         writer.withInsertOnly(isInsertOnly);
         notifyNewWriter(writer);
         return new WriterContainer<>(
-                writer, indexMaintainer, deletionVectorsMaintainer, latestSnapshotId);
+                writer,
+                indexMaintainer,
+                deletionVectorsMaintainer,
+                latestSnapshot == null ? null : latestSnapshot.id());
     }
 
     @Override
@@ -471,10 +472,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private List<DataFileMeta> scanExistingFileMetas(
-            long snapshotId, BinaryRow partition, int bucket) {
+            Snapshot snapshot, BinaryRow partition, int bucket) {
         List<DataFileMeta> existingFileMetas = new ArrayList<>();
         List<ManifestEntry> files =
-                scan.withSnapshot(snapshotId).withPartitionBucket(partition, bucket).plan().files();
+                scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
         for (ManifestEntry entry : files) {
             if (entry.totalBuckets() != totalBuckets) {
                 String partInfo =
@@ -515,7 +516,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     protected void notifyNewWriter(RecordWriter<T> writer) {}
 
     protected abstract RecordWriter<T> createWriter(
-            @Nullable Long snapshotId,
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,

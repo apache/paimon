@@ -54,11 +54,11 @@ public class StatsFileHandler {
      * @return stats
      */
     public Optional<Statistics> readStats() {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        if (latestSnapshotId == null) {
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        if (latestSnapshot == null) {
             throw new IllegalStateException("Unable to obtain the latest snapshot");
         }
-        return readStats(latestSnapshotId);
+        return readStats(latestSnapshot);
     }
 
     /**
@@ -66,10 +66,6 @@ public class StatsFileHandler {
      *
      * @return stats
      */
-    public Optional<Statistics> readStats(long snapshotId) {
-        return readStats(snapshotManager.snapshot(snapshotId));
-    }
-
     public Optional<Statistics> readStats(Snapshot snapshot) {
         String file = snapshot.statistics();
         return file == null ? Optional.empty() : Optional.of(readStats(file));

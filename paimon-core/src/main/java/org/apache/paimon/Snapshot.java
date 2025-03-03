@@ -33,6 +33,7 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 
@@ -61,7 +62,9 @@ import java.util.Objects;
  */
 @Public
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class Snapshot {
+public class Snapshot implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     public static final long FIRST_SNAPSHOT_ID = 1;
 

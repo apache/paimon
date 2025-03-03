@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,10 @@ public class SnapshotTest {
 
     public static SnapshotManager newSnapshotManager(FileIO fileIO, Path tablePath) {
         return newSnapshotManager(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
+    }
+
+    public static ChangelogManager newChangelogManager(FileIO fileIO, Path tablePath) {
+        return new ChangelogManager(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
     }
 
     public static SnapshotManager newSnapshotManager(FileIO fileIO, Path tablePath, String branch) {

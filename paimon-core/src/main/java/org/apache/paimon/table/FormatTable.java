@@ -41,7 +41,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /**
  * A file format table refers to a directory that contains multiple files of the same format, where
@@ -253,7 +252,7 @@ public interface FormatTable extends Table {
     }
 
     @Override
-    default OptionalLong latestSnapshotId() {
+    default Optional<Snapshot> latestSnapshot() {
         throw new UnsupportedOperationException();
     }
 

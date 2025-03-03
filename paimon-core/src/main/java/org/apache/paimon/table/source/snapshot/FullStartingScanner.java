@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -30,9 +31,14 @@ public class FullStartingScanner extends ReadPlanStartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(FullStartingScanner.class);
 
+    private Snapshot startingSnapshot;
+
     public FullStartingScanner(SnapshotManager snapshotManager) {
         super(snapshotManager);
-        this.startingSnapshotId = snapshotManager.latestSnapshotId();
+        this.startingSnapshot = snapshotManager.latestSnapshot();
+        if (this.startingSnapshot != null) {
+            this.startingSnapshotId = startingSnapshot.id();
+        }
     }
 
     @Override
@@ -42,14 +48,14 @@ public class FullStartingScanner extends ReadPlanStartingScanner {
 
     @Override
     public SnapshotReader configure(SnapshotReader snapshotReader) {
-        if (startingSnapshotId == null) {
+        if (startingSnapshot == null) {
             // try to get first snapshot again
-            startingSnapshotId = snapshotManager.latestSnapshotId();
+            startingSnapshot = snapshotManager.latestSnapshot();
         }
-        if (startingSnapshotId == null) {
+        if (startingSnapshot == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
             return null;
         }
-        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshot);
     }
 }

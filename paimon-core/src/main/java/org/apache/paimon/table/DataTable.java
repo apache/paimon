@@ -24,6 +24,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -38,6 +39,8 @@ public interface DataTable extends InnerTable {
     CoreOptions coreOptions();
 
     SnapshotManager snapshotManager();
+
+    ChangelogManager changelogManager();
 
     SchemaManager schemaManager();
 
