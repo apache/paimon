@@ -42,13 +42,15 @@ public class SparkCatalogWithRestTest {
 
     private RESTCatalogServer restCatalogServer;
     private String serverUrl;
+    private String dataPath;
     private String warehouse;
-    private String initToken = "init_token";
     @TempDir java.nio.file.Path tempFile;
+    private String initToken = "init_token";
 
     @BeforeEach
     public void before() throws IOException {
-        warehouse = tempFile.toUri().toString();
+        dataPath = tempFile.toUri().toString();
+        warehouse = UUID.randomUUID().toString();
         ConfigResponse config =
                 new ConfigResponse(
                         ImmutableMap.of(
@@ -57,8 +59,7 @@ public class SparkCatalogWithRestTest {
                                 CatalogOptions.WAREHOUSE.key(),
                                 warehouse),
                         ImmutableMap.of());
-        restCatalogServer =
-                new RESTCatalogServer(warehouse, initToken, config, UUID.randomUUID().toString());
+        restCatalogServer = new RESTCatalogServer(dataPath, initToken, config, warehouse);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
     }
