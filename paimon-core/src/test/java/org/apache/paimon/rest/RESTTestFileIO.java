@@ -54,6 +54,53 @@ public class RESTTestFileIO extends LocalFileIO {
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
+        checkDataToken(path);
+        return super.newInputStream(path);
+    }
+
+    @Override
+    public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
+        checkDataToken(path);
+        return super.newOutputStream(path, overwrite);
+    }
+
+    @Override
+    public FileStatus getFileStatus(Path path) throws IOException {
+        checkDataToken(path);
+        return super.getFileStatus(path);
+    }
+
+    @Override
+    public FileStatus[] listStatus(Path path) throws IOException {
+        checkDataToken(path);
+        return super.listStatus(path);
+    }
+
+    @Override
+    public boolean exists(Path path) throws IOException {
+        checkDataToken(path);
+        return super.exists(path);
+    }
+
+    @Override
+    public boolean delete(Path path, boolean recursive) throws IOException {
+        checkDataToken(path);
+        return super.delete(path, recursive);
+    }
+
+    @Override
+    public boolean mkdirs(Path path) throws IOException {
+        checkDataToken(path);
+        return super.mkdirs(path);
+    }
+
+    @Override
+    public boolean rename(Path src, Path dst) throws IOException {
+        checkDataToken(src);
+        return super.rename(src, dst);
+    }
+
+    private void checkDataToken(Path path) throws IOException {
         boolean isDataTokenEnabled = options.getOptional(DATA_TOKEN_ENABLED).orElse(false);
         if (isDataTokenEnabled) {
             RESTToken token = getToken(path);
@@ -63,7 +110,6 @@ public class RESTTestFileIO extends LocalFileIO {
                 throw new IOException(TOKEN_EXPIRED_MSG);
             }
         }
-        return super.newInputStream(path);
     }
 
     private RESTToken getToken(Path path) {
@@ -74,40 +120,5 @@ public class RESTTestFileIO extends LocalFileIO {
         String table = paths[2];
         return DataTokenStore.getDataToken(
                 options.get("catalog-server-id"), Identifier.create(database, table).getFullName());
-    }
-
-    @Override
-    public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
-        return super.newOutputStream(path, overwrite);
-    }
-
-    @Override
-    public FileStatus getFileStatus(Path path) throws IOException {
-        return super.getFileStatus(path);
-    }
-
-    @Override
-    public FileStatus[] listStatus(Path path) throws IOException {
-        return super.listStatus(path);
-    }
-
-    @Override
-    public boolean exists(Path path) throws IOException {
-        return super.exists(path);
-    }
-
-    @Override
-    public boolean delete(Path path, boolean recursive) throws IOException {
-        return super.delete(path, recursive);
-    }
-
-    @Override
-    public boolean mkdirs(Path path) throws IOException {
-        return super.mkdirs(path);
-    }
-
-    @Override
-    public boolean rename(Path src, Path dst) throws IOException {
-        return super.rename(src, dst);
     }
 }

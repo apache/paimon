@@ -55,6 +55,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -238,7 +239,9 @@ class RESTCatalogTest extends CatalogTestBase {
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
         restCatalogServer.setFileIO(identifier, tableTestWrite.fileIO());
         List<Integer> data = Lists.newArrayList(12);
-        assertThrows(IOException.class, () -> batchWrite(tableTestWrite, data));
+        Exception exception =
+                assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
+        assertEquals(RESTTestFileIO.TOKEN_EXPIRED_MSG, exception.getCause().getMessage());
         RESTToken dataToken =
                 new RESTToken(
                         ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
@@ -262,21 +265,18 @@ class RESTCatalogTest extends CatalogTestBase {
         restTokenFileIO.isObjectStore();
         restCatalogServer.removeDataToken(identifier);
         restCatalogServer.setFileIO(identifier, tableTestWrite.fileIO());
-        assertThrows(IOException.class, () -> batchWrite(tableTestWrite, data));
+        Exception exception =
+                assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
+        assertEquals(RESTTestFileIO.TOKEN_UN_EXIST_MSG, exception.getCause().getMessage());
     }
 
     private void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
         BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
-        data.forEach(
-                i -> {
-                    GenericRow record1 = GenericRow.of(i);
-                    try {
-                        write.write(record1);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+        for (Integer i : data) {
+            GenericRow record = GenericRow.of(i);
+            write.write(record);
+        }
         List<CommitMessage> messages = write.prepareCommit();
         BatchTableCommit commit = writeBuilder.newCommit();
         commit.commit(messages);
