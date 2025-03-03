@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
+import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.responses.ConfigResponse;
 
@@ -40,6 +42,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** ITCase for REST catalog. */
 class RESTCatalogITCase extends CatalogITCaseBase {
@@ -57,16 +60,20 @@ class RESTCatalogITCase extends CatalogITCaseBase {
     public void before() throws IOException {
         String initToken = "init_token";
         warehouse = tempFile.toUri().toString();
+        String serverId = UUID.randomUUID().toString();
         ConfigResponse config =
                 new ConfigResponse(
                         ImmutableMap.of(
                                 RESTCatalogInternalOptions.PREFIX.key(),
                                 "paimon",
                                 CatalogOptions.WAREHOUSE.key(),
-                                warehouse),
+                                warehouse,
+                                RESTCatalogOptions.DATA_TOKEN_ENABLED.key(),
+                                "true",
+                                "catalog-server-id",
+                                serverId),
                         ImmutableMap.of());
-        restCatalogServer =
-                new RESTCatalogServer(warehouse, initToken, config, UUID.randomUUID().toString());
+        restCatalogServer = new RESTCatalogServer(warehouse, initToken, config, serverId);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
         super.before();
@@ -109,17 +116,6 @@ class RESTCatalogITCase extends CatalogITCaseBase {
                                 DATABASE_NAME, TABLE_NAME));
     }
 
-    @Override
-    protected Map<String, String> catalogOptions() {
-        String initToken = "init_token";
-        Map<String, String> options = new HashMap<>();
-        options.put("metastore", "rest");
-        options.put(RESTCatalogOptions.URI.key(), serverUrl);
-        options.put(RESTCatalogOptions.TOKEN.key(), initToken);
-        options.put(RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.BEAR.identifier());
-        return options;
-    }
-
     @Test
     public void testWriteAndRead() {
         batchSql(
@@ -128,6 +124,48 @@ class RESTCatalogITCase extends CatalogITCaseBase {
                         DATABASE_NAME, TABLE_NAME));
         assertThat(batchSql(String.format("SELECT * FROM %s.%s", DATABASE_NAME, TABLE_NAME)))
                 .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
+    }
+
+    @Test
+    public void testExpiredDataToken() {
+        Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of(
+                                "akId", "akId-expire", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() - 100_000);
+        restCatalogServer.setDataToken(identifier, expiredDataToken);
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        batchSql(
+                                String.format(
+                                        "INSERT INTO %s.%s VALUES ('1', 11), ('2', 22)",
+                                        DATABASE_NAME, TABLE_NAME)));
+        // update token and retry
+        RESTToken dataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 100_000);
+        restCatalogServer.setDataToken(identifier, dataToken);
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES ('1', 11), ('2', 22)",
+                        DATABASE_NAME, TABLE_NAME));
+        assertThat(batchSql(String.format("SELECT * FROM %s.%s", DATABASE_NAME, TABLE_NAME)))
+                .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
+    }
+
+    @Override
+    protected Map<String, String> catalogOptions() {
+        String initToken = "init_token";
+        Map<String, String> options = new HashMap<>();
+        options.put("metastore", "rest");
+        options.put(RESTCatalogOptions.URI.key(), serverUrl);
+        options.put(RESTCatalogOptions.TOKEN.key(), initToken);
+        options.put(RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.BEAR.identifier());
+        options.put(RESTCatalogOptions.DATA_TOKEN_ENABLED.key(), "true");
+        return options;
     }
 
     @Override

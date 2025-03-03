@@ -25,6 +25,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.fs.local.LocalFileIOLoader;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import java.io.IOException;
@@ -113,11 +115,17 @@ public class RESTTestFileIO extends LocalFileIO {
     }
 
     private RESTToken getToken(Path path) {
-        String basePath = options.get("warehouse").replaceAll("rest-test-file-io://", "");
+        String dataPath = options.get(CatalogOptions.WAREHOUSE.key());
+        String basePath = "";
+        if (dataPath.startsWith(RESTFileIOTestLoader.SCHEME)) {
+            basePath = dataPath.replaceAll(RESTFileIOTestLoader.SCHEME + "://", "");
+        } else if (dataPath.startsWith(LocalFileIOLoader.SCHEME)) {
+            basePath = dataPath.replaceAll(LocalFileIOLoader.SCHEME + "://", "");
+        }
         String filePath = path.toString().split(":")[1].replaceAll(basePath, "");
         String[] paths = filePath.split("/");
-        String database = paths[1].replaceAll("\\.db", "");
-        String table = paths[2];
+        String database = paths[0].replaceAll("\\.db", "");
+        String table = paths[1];
         return DataTokenStore.getDataToken(
                 options.get("catalog-server-id"), Identifier.create(database, table).getFullName());
     }

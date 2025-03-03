@@ -32,7 +32,10 @@ import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.fs.local.LocalFileIOLoader;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -118,12 +121,11 @@ public class RESTCatalogServer {
     public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
     public final Map<String, View> viewStore = new HashMap<>();
     public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
-    public final Map<String, FileIO> tableFileIOStore = new HashMap<>();
     public final ConfigResponse configResponse;
     public final String serverId;
 
     public RESTCatalogServer(
-            String warehouse, String initToken, ConfigResponse config, String serverId) {
+            String dataPath, String initToken, ConfigResponse config, String serverId) {
         this.serverId = serverId;
         this.configResponse = config;
         this.prefix =
@@ -132,12 +134,12 @@ public class RESTCatalogServer {
         authToken = initToken;
         Options conf = new Options();
         this.configResponse.getDefaults().forEach((k, v) -> conf.setString(k, v));
-        conf.setString("warehouse", warehouse);
+        conf.setString(CatalogOptions.WAREHOUSE.key(), dataPath);
         CatalogContext context = CatalogContext.create(conf);
-        Path warehousePath = new Path(warehouse);
+        Path warehousePath = new Path(dataPath);
         FileIO fileIO;
         try {
-            fileIO = FileIO.get(warehousePath, context);
+            fileIO = new LocalFileIO();
             fileIO.checkOrMkdirs(warehousePath);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -167,10 +169,6 @@ public class RESTCatalogServer {
 
     public void setDataToken(Identifier identifier, RESTToken token) {
         DataTokenStore.putDataToken(serverId, identifier.getFullName(), token);
-    }
-
-    public void setFileIO(Identifier identifier, FileIO fileIO) {
-        tableFileIOStore.put(identifier.getFullName(), fileIO);
     }
 
     public void removeDataToken(Identifier identifier) {
@@ -525,7 +523,7 @@ public class RESTCatalogServer {
                         catalog instanceof SupportsSnapshots,
                         catalog instanceof SupportsBranches);
         Path path = new Path(schema.options().get(PATH.key()));
-        FileIO dataFileIO = tableFileIOStore.get(identifier.getFullName());
+        FileIO dataFileIO = catalog.fileIO();
         FileStoreTable table = FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
         return table;
     }
@@ -956,7 +954,9 @@ public class RESTCatalogServer {
             Identifier identifier, long schemaId, Schema schema, String uuid, boolean isExternal) {
         Map<String, String> options = new HashMap<>(schema.options());
         Path path = catalog.getTableLocation(identifier);
-        options.put(PATH.key(), path.toString());
+        String restPath =
+                path.toString().replaceFirst(LocalFileIOLoader.SCHEME, RESTFileIOTestLoader.SCHEME);
+        options.put(PATH.key(), restPath);
         TableSchema tableSchema =
                 new TableSchema(
                         schemaId,

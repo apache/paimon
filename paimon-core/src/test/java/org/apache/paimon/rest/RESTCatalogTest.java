@@ -84,7 +84,6 @@ class RESTCatalogTest extends CatalogTestBase {
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        warehouse = RESTFileIOTestLoader.SCHEME + "://" + tmpFilePath;
         String serverId = UUID.randomUUID().toString();
         this.config =
                 new ConfigResponse(
@@ -237,7 +236,6 @@ class RESTCatalogTest extends CatalogTestBase {
                         System.currentTimeMillis() - 100_000);
         restCatalogServer.setDataToken(identifier, expiredDataToken);
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
-        restCatalogServer.setFileIO(identifier, tableTestWrite.fileIO());
         List<Integer> data = Lists.newArrayList(12);
         Exception exception =
                 assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
@@ -264,7 +262,6 @@ class RESTCatalogTest extends CatalogTestBase {
         // as RESTTokenFileIO is lazy so we need to call isObjectStore() to init fileIO
         restTokenFileIO.isObjectStore();
         restCatalogServer.removeDataToken(identifier);
-        restCatalogServer.setFileIO(identifier, tableTestWrite.fileIO());
         Exception exception =
                 assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
         assertEquals(RESTTestFileIO.TOKEN_UN_EXIST_MSG, exception.getCause().getMessage());
@@ -304,7 +301,6 @@ class RESTCatalogTest extends CatalogTestBase {
         Identifier tableIdentifier = Identifier.create("my_db", "my_table");
         createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(tableIdentifier);
-        restCatalogServer.setFileIO(tableIdentifier, tableTestWrite.fileIO());
         // write
         BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
