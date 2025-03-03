@@ -206,8 +206,7 @@ public class RESTCatalogServer {
                         if (!databaseStore.containsKey(databaseName)) {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
-                        boolean isViews =
-                                resources.length == 2 && resourcePaths.equals(resources[1]);
+                        boolean isViews = resources.length == 2 && "views".equals(resources[1]);
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
                         boolean isTableRename =
                                 resources.length == 3

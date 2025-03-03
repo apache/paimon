@@ -264,69 +264,17 @@ class RESTCatalogTest extends CatalogTestBase {
         assertEquals(RESTTestFileIO.TOKEN_UN_EXIST_MSG, exception.getCause().getMessage());
     }
 
-    private void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
-        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
-        BatchTableWrite write = writeBuilder.newWrite();
-        for (Integer i : data) {
-            GenericRow record = GenericRow.of(i);
-            write.write(record);
-        }
-        List<CommitMessage> messages = write.prepareCommit();
-        BatchTableCommit commit = writeBuilder.newCommit();
-        commit.commit(messages);
-        write.close();
-        commit.close();
-    }
-
-    private List<String> batchRead(FileStoreTable tableTestWrite) throws IOException {
-        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
-        List<Split> splits = readBuilder.newScan().plan().splits();
-        TableRead read = readBuilder.newRead();
-        RecordReader<InternalRow> reader = read.createReader(splits);
-        List<String> result = new ArrayList<>();
-        reader.forEachRemaining(
-                row -> {
-                    String rowStr =
-                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
-                    result.add(rowStr);
-                });
-        return result;
-    }
-
     @Test
     public void testBatchRecordsWrite() throws Exception {
         Identifier tableIdentifier = Identifier.create("my_db", "my_table");
         createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(tableIdentifier);
         // write
-        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
-        BatchTableWrite write = writeBuilder.newWrite();
-        GenericRow record1 = GenericRow.of(12);
-        GenericRow record2 = GenericRow.of(5);
-        GenericRow record3 = GenericRow.of(18);
-        write.write(record1);
-        write.write(record2);
-        write.write(record3);
-        List<CommitMessage> messages = write.prepareCommit();
-        BatchTableCommit commit = writeBuilder.newCommit();
-        commit.commit(messages);
-        write.close();
-        commit.close();
+        batchWrite(tableTestWrite, Lists.newArrayList(12, 5, 18));
 
         // read
-        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
-        List<Split> splits = readBuilder.newScan().plan().splits();
-        TableRead read = readBuilder.newRead();
-        RecordReader<InternalRow> reader = read.createReader(splits);
-        List<String> actual = new ArrayList<>();
-        reader.forEachRemaining(
-                row -> {
-                    String rowStr =
-                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
-                    actual.add(rowStr);
-                });
-
-        assertThat(actual).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
+        List<String> result = batchRead(tableTestWrite);
+        assertThat(result).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
     }
 
     @Test
@@ -389,5 +337,34 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
         options.set(RESTTestFileIO.DATA_PATH_CONF_KEY, dataPath);
         return new RESTCatalog(CatalogContext.create(options));
+    }
+
+    private void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
+        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        for (Integer i : data) {
+            GenericRow record = GenericRow.of(i);
+            write.write(record);
+        }
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+    }
+
+    private List<String> batchRead(FileStoreTable tableTestWrite) throws IOException {
+        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<String> result = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    String rowStr =
+                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
+                    result.add(rowStr);
+                });
+        return result;
     }
 }
