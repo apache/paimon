@@ -173,7 +173,7 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
 
             while (sourceReader.getNumberOfCurrentlyAssignedSplits() > 0
                     || inputProcessor.isAvailable()) {
-                testHarness.processSingleStep();
+                testHarness.processAll();
             }
 
             if (!rpcFirst) {
