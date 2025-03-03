@@ -38,13 +38,26 @@ public class RescaleProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "bucket_num", type = @DataTypeHint("INT"), isOptional = true),
-                @ArgumentHint(name = "partition", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(
+                        name = "partition",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "source_parallelism",
+                        type = @DataTypeHint("INT"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "sink_parallelism",
+                        type = @DataTypeHint("INT"),
+                        isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             @Nullable Integer bucketNum,
-            @Nullable String partition)
+            @Nullable String partition,
+            @Nullable Integer sourceParallelism,
+            @Nullable Integer sinkParallelism)
             throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
@@ -56,6 +69,12 @@ public class RescaleProcedure extends ProcedureBase {
         }
         if (partition != null) {
             action.withPartition(ParameterUtils.getPartitions(partition).get(0));
+        }
+        if (sourceParallelism != null) {
+            action.withSourceParallelism(sourceParallelism);
+        }
+        if (sinkParallelism != null) {
+            action.withSinkParallelism(sinkParallelism);
         }
 
         return execute(
