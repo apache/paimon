@@ -352,6 +352,57 @@ For streaming queries, `aggregation` merge engine must be used together with `lo
 [changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
 {{< /hint >}}
 
+## Custom FieldAggregator
+We also support custom FieldAggregator.
+
+```java
+package org.apache.paimon.custom.agg;
+/** Custom FieldAggregatorFactory. */
+public class TestCustomAggFactory implements FieldAggregatorFactory {
+
+    public static final String NAME = "custom";
+
+    @Override
+    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+        return new TestCustomAgg(identifier(), fieldType);
+    }
+
+    @Override
+    public String identifier() {
+        return NAME;
+    }
+}
+```
+```java
+/** Custom FieldAggregator. */
+public class TestCustomAgg extends FieldAggregator {
+
+    public TestCustomAgg(String name, DataType dataType) {
+        super(name, dataType);
+    }
+
+    @Override
+    public Object agg(Object accumulator, Object inputField) {
+        return inputField;
+    }
+}
+```
+```sql
+CREATE TABLE my_table (
+    product_id BIGINT,
+    price DOUBLE,
+    sales BIGINT,
+    PRIMARY KEY (product_id) NOT ENFORCED
+) WITH (
+    'merge-engine' = 'aggregation',
+    'fields.price.aggregate-function' = 'custom'
+    );
+```
+
+Add `org.apache.paimon.custom.agg.TestCustomAggFactory` to file `src/main/resources/META-INF/services/org.apache.paimon.factories.Factory`.
+Package the class and place it in the engine environment.
+
+
 ## Retraction
 
 Only `sum`, `product`, `collect`, `merge_map`, `nested_update`, `last_value` and `last_non_null_value` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
