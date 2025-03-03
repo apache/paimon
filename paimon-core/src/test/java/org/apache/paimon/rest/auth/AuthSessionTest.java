@@ -86,7 +86,7 @@ public class AuthSessionTest {
     public void testRefreshDLFAuthTokenFileAuthProvider() throws IOException, InterruptedException {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
-        String token = tokenFile2Token.getRight();
+        String theFirstGenerateToken = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
         long tokenRefreshInMills = 1000;
         AuthProvider authProvider =
@@ -95,15 +95,17 @@ public class AuthSessionTest {
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
         DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
-        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
-        assertEquals(authToken, token);
+        String theFirstFetchToken =
+                OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        assertEquals(theFirstFetchToken, theFirstGenerateToken);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
-        token = tokenFile2Token.getRight();
+        String theSecondGenerateToken = tokenFile2Token.getRight();
         Thread.sleep(tokenRefreshInMills * 2);
-        if (dlfAuthProvider.refreshSuccess) {
-            authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
-            assertEquals(authToken, token);
+        String theSecondFetchToken =
+                OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        if (!theSecondFetchToken.equals(theFirstFetchToken)) {
+            assertEquals(theSecondGenerateToken, theSecondFetchToken);
         }
     }
 
