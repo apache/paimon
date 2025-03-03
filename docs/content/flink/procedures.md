@@ -579,6 +579,25 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>migrate_iceberg_table</td>
+      <td>
+         -- Use named argument<br/>
+        CALL sys.migrate_iceberg_table(source_table => 'database_name.table_name', iceberg_options => 'iceberg_options', options => 'paimon_options', parallelism => parallelism);<br/><br/>
+        -- Use indexed argument<br/>
+        CALL sys.migrate_iceberg_table('source_table','iceberg_options', 'options', 'parallelism');
+      </td>
+      <td>
+         To migrate iceberg table to paimon. Arguments:
+            <li>source_table: string type, is used to specify the source iceberg table to migrate, it's required.</li>
+            <li>iceberg_options: string type, is used to specify the configuration of migration, multiple configuration items are separated by commas. it's required.</li>
+            <li>options: string type, is used to specify the additional options for the target paimon table, it's optional.</li>
+            <li>parallelism: integer type, is used to specify the parallelism of the migration job, it's optional.</li>
+      </td>
+      <td>
+         CALL sys.migrate_iceberg_table(source_table => 'iceberg_db.iceberg_tbl',iceberg_options => 'metadata.iceberg.storage=hadoop-catalog,iceberg_warehouse=/path/to/iceberg/warehouse');
+      </td>
+   </tr>
+   <tr>
       <td>expire_snapshots</td>
       <td>
          -- Use named argument<br/>
