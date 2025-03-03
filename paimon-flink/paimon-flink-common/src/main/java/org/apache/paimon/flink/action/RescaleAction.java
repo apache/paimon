@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
@@ -38,6 +39,7 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 
 /** Action to rescale one partition of a table. */
@@ -45,6 +47,8 @@ public class RescaleAction extends TableActionBase {
 
     private @Nullable Integer bucketNum;
     private Map<String, String> partition = new HashMap<>();
+    private @Nullable Integer sourceParallelism;
+    private @Nullable Integer sinkParallelism;
 
     public RescaleAction(String databaseName, String tableName, Map<String, String> catalogConfig) {
         super(databaseName, tableName, catalogConfig);
@@ -57,6 +61,16 @@ public class RescaleAction extends TableActionBase {
 
     public RescaleAction withPartition(Map<String, String> partition) {
         this.partition = partition;
+        return this;
+    }
+
+    public RescaleAction withSourceParallelism(int sourceParallelism) {
+        this.sourceParallelism = sourceParallelism;
+        return this;
+    }
+
+    public RescaleAction withSinkParallelism(int sinkParallelism) {
+        this.sinkParallelism = sinkParallelism;
         return this;
     }
 
@@ -79,6 +93,8 @@ public class RescaleAction extends TableActionBase {
                 new FlinkSourceBuilder(fileStoreTable)
                         .env(env)
                         .sourceBounded(true)
+                        .sourceParallelism(
+                                sourceParallelism == null ? currentBucketNum() : sourceParallelism)
                         .predicate(partitionPredicate)
                         .build();
 
@@ -92,12 +108,29 @@ public class RescaleAction extends TableActionBase {
         }
         FileStoreTable rescaledTable =
                 fileStoreTable.copy(fileStoreTable.schema().copy(bucketOptions));
-        new FlinkSinkBuilder(rescaledTable).overwrite(partition).forRowData(source).build();
+        new FlinkSinkBuilder(rescaledTable)
+                .overwrite(partition)
+                .parallelism(sinkParallelism == null ? bucketNum : sinkParallelism)
+                .forRowData(source)
+                .build();
     }
 
     @Override
     public void run() throws Exception {
         build();
         env.execute("Rescale Postpone Bucket : " + table.fullName());
+    }
+
+    private int currentBucketNum() {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        Iterator<ManifestEntry> it =
+                fileStoreTable
+                        .newSnapshotReader()
+                        .withPartitionFilter(partition)
+                        .readFileIterator();
+        Preconditions.checkArgument(
+                it.hasNext(),
+                "The specified partition does not have any data files. No need to rescale.");
+        return it.next().totalBuckets();
     }
 }
