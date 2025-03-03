@@ -223,8 +223,8 @@ public class MergeTreeCompactManagerTest {
                         false,
                         false);
 
-        assertThat(lookupManager.isCompacting()).isTrue();
-        assertThat(defaultManager.isCompacting()).isFalse();
+        assertThat(lookupManager.compactNotCompleted()).isTrue();
+        assertThat(defaultManager.compactNotCompleted()).isFalse();
     }
 
     private void innerTest(List<LevelMinMax> inputs, List<LevelMinMax> expected)

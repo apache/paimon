@@ -244,8 +244,11 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public boolean isCompacting() {
-        return super.isCompacting() || (needLookup && !levels().level0().isEmpty());
+    public boolean compactNotCompleted() {
+        // If it is a lookup compaction, we should ensure that all level 0 files are consumed, so
+        // here we need to make the outside think that we still need to do unfinished compact
+        // working
+        return super.compactNotCompleted() || (needLookup && !levels().level0().isEmpty());
     }
 
     private void reportMetrics() {

@@ -2539,7 +2539,7 @@ public class CoreOptions implements Serializable {
         return options.get(LOOKUP_WAIT);
     }
 
-    public boolean statefulLookup() {
+    public boolean laziedLookup() {
         return needLookup()
                 && (!options.get(LOOKUP_WAIT) || LookupCompactMode.GENTLE.equals(lookupCompact()));
     }

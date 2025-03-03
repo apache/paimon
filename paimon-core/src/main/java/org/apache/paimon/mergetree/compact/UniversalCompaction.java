@@ -78,7 +78,8 @@ public class UniversalCompaction implements CompactStrategy {
         this.opCompactionInterval =
                 opCompactionInterval == null ? null : opCompactionInterval.toMillis();
         this.maxLookupCompactInterval = maxLookupCompactInterval;
-        this.lookupCompactTriggerCount = new AtomicInteger(0);
+        this.lookupCompactTriggerCount =
+                maxLookupCompactInterval == null ? null : new AtomicInteger(0);
     }
 
     @Override

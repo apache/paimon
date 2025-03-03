@@ -294,7 +294,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         // Condition 3: The writer has no postponed compaction like gentle lookup compaction.
         return writerContainer ->
                 writerContainer.lastModifiedCommitIdentifier < latestCommittedIdentifier
-                        && !writerContainer.writer.isCompacting();
+                        && !writerContainer.writer.compactNotCompleted();
     }
 
     protected static <T>

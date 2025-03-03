@@ -84,7 +84,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue> {
     }
 
     @Override
-    public boolean isCompacting() {
+    public boolean compactNotCompleted() {
         return false;
     }
 
