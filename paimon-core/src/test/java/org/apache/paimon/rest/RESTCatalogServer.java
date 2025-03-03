@@ -289,7 +289,7 @@ public class RESTCatalogServer {
                                     identifier, markDonePartitionsRequest.getPartitionSpecs());
                             return new MockResponse().setResponseCode(200);
                         } else if (isPartitions) {
-                            return partitionsApiHandler(request, identifier);
+                            return partitionsApiHandle(request, identifier);
                         } else if (isBranches) {
                             FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
                             BranchManager branchManager = table.branchManager();
@@ -326,25 +326,25 @@ public class RESTCatalogServer {
                                     return new MockResponse().setResponseCode(404);
                             }
                         } else if (isTableToken) {
-                            return handleDataToken(identifier);
+                            return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
-                            return handleSnapshot(identifier);
+                            return snapshotHandle(identifier);
                         } else if (isTableRename) {
-                            return renameTableApiHandler(request);
+                            return renameTableHandle(request);
                         } else if (isTableCommit) {
-                            return commitTableApiHandler(request);
+                            return commitTableHandle(request);
                         } else if (isTable) {
-                            return tableApiHandler(request, identifier);
+                            return tableHandle(request, identifier);
                         } else if (isTables) {
-                            return tablesApiHandler(request, databaseName);
+                            return tablesHandle(request, databaseName);
                         } else if (isViews) {
-                            return viewsApiHandler(request, databaseName);
+                            return viewsHandle(request, databaseName);
                         } else if (isViewRename) {
-                            return renameViewApiHandler(request);
+                            return renameViewHandle(request);
                         } else if (isView) {
-                            return viewApiHandler(request, identifier);
+                            return viewHandle(request, identifier);
                         } else {
-                            return databaseApiHandler(request, databaseName);
+                            return databaseHandle(request, databaseName);
                         }
                     }
                     return new MockResponse().setResponseCode(404);
@@ -435,7 +435,7 @@ public class RESTCatalogServer {
         };
     }
 
-    private MockResponse handleDataToken(Identifier tableIdentifier) throws Exception {
+    private MockResponse getDataTokenHandle(Identifier tableIdentifier) throws Exception {
         RESTToken dataToken = getDataToken(tableIdentifier);
         if (dataToken == null) {
             long currentTimeMillis = System.currentTimeMillis() + 60_000;
@@ -456,7 +456,7 @@ public class RESTCatalogServer {
                 .setBody(OBJECT_MAPPER.writeValueAsString(getTableTokenResponse));
     }
 
-    private MockResponse handleSnapshot(Identifier identifier) throws Exception {
+    private MockResponse snapshotHandle(Identifier identifier) throws Exception {
         RESTResponse response;
         Optional<Snapshot> snapshotOptional =
                 Optional.ofNullable(tableSnapshotStore.get(identifier.getFullName()));
@@ -492,7 +492,7 @@ public class RESTCatalogServer {
                         new ErrorResponse(ErrorResponseResourceType.TABLE, null, "", 404), 404));
     }
 
-    private MockResponse commitTableApiHandler(RecordedRequest request) throws Exception {
+    private MockResponse commitTableHandle(RecordedRequest request) throws Exception {
         CommitTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
         Identifier identifier = requestBody.getIdentifier();
@@ -508,24 +508,6 @@ public class RESTCatalogServer {
         commitSnapshot(requestBody.getIdentifier(), requestBody.getSnapshot(), null);
         CommitTableResponse response = new CommitTableResponse(success);
         return mockResponse(response, 200);
-    }
-
-    private FileStoreTable getFileTable(Identifier identifier) {
-        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-        TableSchema schema = tableMetadata.schema();
-        CatalogEnvironment catalogEnv =
-                new CatalogEnvironment(
-                        identifier,
-                        tableMetadata.uuid(),
-                        catalog.catalogLoader(),
-                        catalog.lockFactory().orElse(null),
-                        catalog.lockContext().orElse(null),
-                        catalog instanceof SupportsSnapshots,
-                        catalog instanceof SupportsBranches);
-        Path path = new Path(schema.options().get(PATH.key()));
-        FileIO dataFileIO = catalog.fileIO();
-        FileStoreTable table = FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
-        return table;
     }
 
     private MockResponse databasesApiHandler(RecordedRequest request) throws Exception {
@@ -550,7 +532,7 @@ public class RESTCatalogServer {
         }
     }
 
-    private MockResponse databaseApiHandler(RecordedRequest request, String databaseName)
+    private MockResponse databaseHandle(RecordedRequest request, String databaseName)
             throws Exception {
         RESTResponse response;
         Database database;
@@ -611,7 +593,7 @@ public class RESTCatalogServer {
         return new MockResponse().setResponseCode(404);
     }
 
-    private MockResponse tablesApiHandler(RecordedRequest request, String databaseName)
+    private MockResponse tablesHandle(RecordedRequest request, String databaseName)
             throws Exception {
         RESTResponse response;
         if (databaseStore.containsKey(databaseName)) {
@@ -660,7 +642,7 @@ public class RESTCatalogServer {
         return Options.fromMap(schema.options()).get(TYPE) == FORMAT_TABLE;
     }
 
-    private MockResponse tableApiHandler(RecordedRequest request, Identifier identifier)
+    private MockResponse tableHandle(RecordedRequest request, Identifier identifier)
             throws Exception {
         RESTResponse response;
         if (tableMetadataStore.containsKey(identifier.getFullName())) {
@@ -697,7 +679,7 @@ public class RESTCatalogServer {
         }
     }
 
-    private MockResponse renameTableApiHandler(RecordedRequest request) throws Exception {
+    private MockResponse renameTableHandle(RecordedRequest request) throws Exception {
         RenameTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
         Identifier fromTable = requestBody.getSource();
@@ -715,7 +697,7 @@ public class RESTCatalogServer {
         return new MockResponse().setResponseCode(200);
     }
 
-    private MockResponse partitionsApiHandler(RecordedRequest request, Identifier tableIdentifier)
+    private MockResponse partitionsApiHandle(RecordedRequest request, Identifier tableIdentifier)
             throws Exception {
         RESTResponse response;
         switch (request.getMethod()) {
@@ -739,7 +721,7 @@ public class RESTCatalogServer {
         }
     }
 
-    private MockResponse viewsApiHandler(RecordedRequest request, String databaseName)
+    private MockResponse viewsHandle(RecordedRequest request, String databaseName)
             throws Exception {
         RESTResponse response;
         switch (request.getMethod()) {
@@ -778,7 +760,7 @@ public class RESTCatalogServer {
         }
     }
 
-    private MockResponse viewApiHandler(RecordedRequest request, Identifier identifier)
+    private MockResponse viewHandle(RecordedRequest request, Identifier identifier)
             throws Exception {
         RESTResponse response;
         if (viewStore.containsKey(identifier.getFullName())) {
@@ -807,7 +789,7 @@ public class RESTCatalogServer {
         throw new Catalog.ViewNotExistException(identifier);
     }
 
-    private MockResponse renameViewApiHandler(RecordedRequest request) throws Exception {
+    private MockResponse renameViewHandle(RecordedRequest request) throws Exception {
         RenameTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
         Identifier fromView = requestBody.getSource();
@@ -977,5 +959,23 @@ public class RESTCatalogServer {
     private Partition spec2Partition(Map<String, String> spec) {
         // todo: need update
         return new Partition(spec, 123, 456, 789, 123);
+    }
+
+    private FileStoreTable getFileTable(Identifier identifier) {
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        TableSchema schema = tableMetadata.schema();
+        CatalogEnvironment catalogEnv =
+                new CatalogEnvironment(
+                        identifier,
+                        tableMetadata.uuid(),
+                        catalog.catalogLoader(),
+                        catalog.lockFactory().orElse(null),
+                        catalog.lockContext().orElse(null),
+                        catalog instanceof SupportsSnapshots,
+                        catalog instanceof SupportsBranches);
+        Path path = new Path(schema.options().get(PATH.key()));
+        FileIO dataFileIO = catalog.fileIO();
+        FileStoreTable table = FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
+        return table;
     }
 }
