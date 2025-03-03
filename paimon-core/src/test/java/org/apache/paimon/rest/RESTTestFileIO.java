@@ -29,12 +29,16 @@ import org.apache.paimon.options.Options;
 
 import java.io.IOException;
 
+import static org.apache.paimon.rest.RESTCatalogOptions.DATA_TOKEN_ENABLED;
+
 /**
  * A {@link org.apache.paimon.fs.FileIO} implementation for testing.
  *
  * <p>It is used to test the RESTFileIO.
  */
 public class RESTTestFileIO extends LocalFileIO {
+    public static final String TOKEN_UN_EXIST_MSG = "token is null";
+    public static final String TOKEN_EXPIRED_MSG = "token is expired";
     private Options options;
 
     @Override
@@ -50,9 +54,14 @@ public class RESTTestFileIO extends LocalFileIO {
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
-        RESTToken token = getToken(path);
-        if (token.expireAtMillis() < System.currentTimeMillis()) {
-            throw new RuntimeException("token expired");
+        boolean isDataTokenEnabled = options.getOptional(DATA_TOKEN_ENABLED).orElse(false);
+        if (isDataTokenEnabled) {
+            RESTToken token = getToken(path);
+            if (token == null) {
+                throw new IOException(TOKEN_UN_EXIST_MSG);
+            } else if (token.expireAtMillis() < System.currentTimeMillis()) {
+                throw new IOException(TOKEN_EXPIRED_MSG);
+            }
         }
         return super.newInputStream(path);
     }

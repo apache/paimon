@@ -54,6 +54,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -67,6 +68,7 @@ import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMill
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for REST Catalog. */
 class RESTCatalogTest extends CatalogTestBase {
@@ -92,8 +94,6 @@ class RESTCatalogTest extends CatalogTestBase {
                                 warehouse,
                                 "header." + serverDefineHeaderName,
                                 serverDefineHeaderValue,
-                                RESTCatalogOptions.DATA_TOKEN_ENABLED.key(),
-                                "true",
                                 "catalog-server-id",
                                 serverId),
                         ImmutableMap.of());
@@ -224,13 +224,87 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testBatchRecordsWrite() throws Exception {
+    public void testDataTokenExpired() throws Exception {
+        this.catalog = initDataTokenCatalog();
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_expired_date_token");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of(
+                                "akId", "akId-expire", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() - 100_000);
+        restCatalogServer.setDataToken(identifier, expiredDataToken);
+        FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
+        restCatalogServer.setFileIO(identifier, tableTestWrite.fileIO());
+        List<Integer> data = Lists.newArrayList(12);
+        assertThrows(IOException.class, () -> batchWrite(tableTestWrite, data));
+        RESTToken dataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 100_000);
+        restCatalogServer.setDataToken(identifier, dataToken);
+        batchWrite(tableTestWrite, data);
+        List<String> actual = batchRead(tableTestWrite);
+        assertThat(actual).containsExactlyInAnyOrder("+I[12]");
+    }
 
+    @Test
+    public void testDataTokenUnExistInServer() throws Exception {
+        this.catalog = initDataTokenCatalog();
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_un_exist_date_token");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) tableTestWrite.fileIO();
+        List<Integer> data = Lists.newArrayList(12);
+        // as RESTTokenFileIO is lazy so we need to call isObjectStore() to init fileIO
+        restTokenFileIO.isObjectStore();
+        restCatalogServer.removeDataToken(identifier);
+        restCatalogServer.setFileIO(identifier, tableTestWrite.fileIO());
+        assertThrows(IOException.class, () -> batchWrite(tableTestWrite, data));
+    }
+
+    private void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
+        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        data.forEach(
+                i -> {
+                    GenericRow record1 = GenericRow.of(i);
+                    try {
+                        write.write(record1);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+    }
+
+    private List<String> batchRead(FileStoreTable tableTestWrite) throws IOException {
+        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<String> result = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    String rowStr =
+                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
+                    result.add(rowStr);
+                });
+        return result;
+    }
+
+    @Test
+    public void testBatchRecordsWrite() throws Exception {
         Identifier tableIdentifier = Identifier.create("my_db", "my_table");
         createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(tableIdentifier);
-        restCatalogServer.tableFileIOStore.put(
-                tableIdentifier.getFullName(), tableTestWrite.fileIO());
+        restCatalogServer.setFileIO(tableIdentifier, tableTestWrite.fileIO());
         // write
         BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();

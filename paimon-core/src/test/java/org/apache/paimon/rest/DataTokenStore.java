@@ -42,4 +42,12 @@ public class DataTokenStore {
         }
         return dataTokenData.get(tableFullName);
     }
+
+    public static void removeDataToken(String serverId, String tableFullName) {
+        Map<String, RESTToken> dataTokenData = serverName2DataTokenData.get(serverId);
+        if (dataTokenData != null && dataTokenData.containsKey(tableFullName)) {
+            dataTokenData.remove(tableFullName);
+            serverName2DataTokenData.put(serverId, dataTokenData);
+        }
+    }
 }

@@ -131,6 +131,7 @@ public class RESTCatalogServer {
         this.databaseUri = String.format("/v1/%s/databases", prefix);
         authToken = initToken;
         Options conf = new Options();
+        this.configResponse.getDefaults().forEach((k, v) -> conf.setString(k, v));
         conf.setString("warehouse", warehouse);
         CatalogContext context = CatalogContext.create(conf);
         Path warehousePath = new Path(warehouse);
@@ -166,6 +167,14 @@ public class RESTCatalogServer {
 
     public void setDataToken(Identifier identifier, RESTToken token) {
         DataTokenStore.putDataToken(serverId, identifier.getFullName(), token);
+    }
+
+    public void setFileIO(Identifier identifier, FileIO fileIO) {
+        tableFileIOStore.put(identifier.getFullName(), fileIO);
+    }
+
+    public void removeDataToken(Identifier identifier) {
+        DataTokenStore.removeDataToken(serverId, identifier.getFullName());
     }
 
     public RESTToken getDataToken(Identifier identifier) {
