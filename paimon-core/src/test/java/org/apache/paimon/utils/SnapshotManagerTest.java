@@ -23,7 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -129,9 +129,7 @@ public class SnapshotManagerTest {
                 // pick a random time equal to one of the snapshots
                 time = millis.get(random.nextInt(numSnapshots));
             }
-            Long actual =
-                    ContinuousFromTimestampStartingScanner.earlierThanTimeMills(
-                            snapshotManager, null, time, false);
+            Long actual = TimeTravelUtil.earlierThanTimeMills(snapshotManager, null, time, false);
 
             if (millis.get(numSnapshots - 1) < time) {
                 if (isRaceCondition && millis.size() == 1) {
