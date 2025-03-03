@@ -23,31 +23,31 @@ import java.util.Map;
 
 /** DataTokenStore is used to store data token. */
 public class DataTokenStore {
-    private static final Map<String, Map<String, RESTToken>> serverName2DataTokenData =
+    private static final Map<String, Map<String, RESTToken>> serverName2ServerDataTokenStore =
             new HashMap<>();
 
     public static void putDataToken(String serverId, String tableFullName, RESTToken dataToken) {
-        Map<String, RESTToken> dataTokenData = serverName2DataTokenData.get(serverId);
-        if (dataTokenData == null) {
-            dataTokenData = new HashMap<>();
-            serverName2DataTokenData.put(serverId, dataTokenData);
+        Map<String, RESTToken> serverDataTokenStore = serverName2ServerDataTokenStore.get(serverId);
+        if (serverDataTokenStore == null) {
+            serverDataTokenStore = new HashMap<>();
+            serverName2ServerDataTokenStore.put(serverId, serverDataTokenStore);
         }
-        dataTokenData.put(tableFullName, dataToken);
+        serverDataTokenStore.put(tableFullName, dataToken);
     }
 
     public static RESTToken getDataToken(String serverId, String tableFullName) {
-        Map<String, RESTToken> dataTokenData = serverName2DataTokenData.get(serverId);
-        if (dataTokenData == null) {
+        Map<String, RESTToken> serverDataTokenStore = serverName2ServerDataTokenStore.get(serverId);
+        if (serverDataTokenStore == null) {
             return null;
         }
-        return dataTokenData.get(tableFullName);
+        return serverDataTokenStore.get(tableFullName);
     }
 
     public static void removeDataToken(String serverId, String tableFullName) {
-        Map<String, RESTToken> dataTokenData = serverName2DataTokenData.get(serverId);
-        if (dataTokenData != null && dataTokenData.containsKey(tableFullName)) {
-            dataTokenData.remove(tableFullName);
-            serverName2DataTokenData.put(serverId, dataTokenData);
+        Map<String, RESTToken> serverDataTokenStore = serverName2ServerDataTokenStore.get(serverId);
+        if (serverDataTokenStore != null && serverDataTokenStore.containsKey(tableFullName)) {
+            serverDataTokenStore.remove(tableFullName);
+            serverName2ServerDataTokenStore.put(serverId, serverDataTokenStore);
         }
     }
 }

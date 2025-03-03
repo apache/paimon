@@ -122,15 +122,18 @@ public class RESTCatalogServer {
     public final Map<String, View> viewStore = new HashMap<>();
     public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
     public final ConfigResponse configResponse;
-    public final String serverId;
+    public final String warehouse;
+
+    private ResourcePaths resourcePaths;
 
     public RESTCatalogServer(
-            String dataPath, String initToken, ConfigResponse config, String serverId) {
-        this.serverId = serverId;
+            String dataPath, String initToken, ConfigResponse config, String warehouse) {
+        this.warehouse = warehouse;
         this.configResponse = config;
         this.prefix =
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
-        this.databaseUri = String.format("/v1/%s/databases", prefix);
+        ResourcePaths resourcePaths = new ResourcePaths(prefix);
+        this.databaseUri = resourcePaths.databases();
         authToken = initToken;
         Options conf = new Options();
         this.configResponse.getDefaults().forEach((k, v) -> conf.setString(k, v));
@@ -168,15 +171,15 @@ public class RESTCatalogServer {
     }
 
     public void setDataToken(Identifier identifier, RESTToken token) {
-        DataTokenStore.putDataToken(serverId, identifier.getFullName(), token);
+        DataTokenStore.putDataToken(warehouse, identifier.getFullName(), token);
     }
 
     public void removeDataToken(Identifier identifier) {
-        DataTokenStore.removeDataToken(serverId, identifier.getFullName());
+        DataTokenStore.removeDataToken(warehouse, identifier.getFullName());
     }
 
     public RESTToken getDataToken(Identifier identifier) {
-        return DataTokenStore.getDataToken(serverId, identifier.getFullName());
+        return DataTokenStore.getDataToken(warehouse, identifier.getFullName());
     }
 
     public Dispatcher initDispatcher(String authToken) {
@@ -190,7 +193,7 @@ public class RESTCatalogServer {
                     if (!("Bearer " + authToken).equals(token)) {
                         return new MockResponse().setResponseCode(401);
                     }
-                    if (request.getPath().startsWith("/v1/config")) {
+                    if (request.getPath().equals(resourcePaths.config(warehouse))) {
                         return mockResponse(configResponse, 200);
                     } else if (databaseUri.equals(request.getPath())) {
                         return databasesApiHandler(request);
@@ -203,7 +206,8 @@ public class RESTCatalogServer {
                         if (!databaseStore.containsKey(databaseName)) {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
-                        boolean isViews = resources.length == 2 && "views".equals(resources[1]);
+                        boolean isViews =
+                                resources.length == 2 && resourcePaths.equals(resources[1]);
                         boolean isTables = resources.length == 2 && "tables".equals(resources[1]);
                         boolean isTableRename =
                                 resources.length == 3
@@ -447,7 +451,7 @@ public class RESTCatalogServer {
                                     "akSecret",
                                     "akSecret" + currentTimeMillis),
                             currentTimeMillis);
-            DataTokenStore.putDataToken(serverId, tableIdentifier.getFullName(), dataToken);
+            DataTokenStore.putDataToken(warehouse, tableIdentifier.getFullName(), dataToken);
         }
         GetTableTokenResponse getTableTokenResponse =
                 new GetTableTokenResponse(dataToken.token(), dataToken.expireAtMillis());
@@ -961,21 +965,26 @@ public class RESTCatalogServer {
         return new Partition(spec, 123, 456, 789, 123);
     }
 
-    private FileStoreTable getFileTable(Identifier identifier) {
-        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-        TableSchema schema = tableMetadata.schema();
-        CatalogEnvironment catalogEnv =
-                new CatalogEnvironment(
-                        identifier,
-                        tableMetadata.uuid(),
-                        catalog.catalogLoader(),
-                        catalog.lockFactory().orElse(null),
-                        catalog.lockContext().orElse(null),
-                        catalog instanceof SupportsSnapshots,
-                        catalog instanceof SupportsBranches);
-        Path path = new Path(schema.options().get(PATH.key()));
-        FileIO dataFileIO = catalog.fileIO();
-        FileStoreTable table = FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
-        return table;
+    private FileStoreTable getFileTable(Identifier identifier)
+            throws Catalog.TableNotExistException {
+        if (tableMetadataStore.containsKey(identifier.getFullName())) {
+            TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+            TableSchema schema = tableMetadata.schema();
+            CatalogEnvironment catalogEnv =
+                    new CatalogEnvironment(
+                            identifier,
+                            tableMetadata.uuid(),
+                            catalog.catalogLoader(),
+                            catalog.lockFactory().orElse(null),
+                            catalog.lockContext().orElse(null),
+                            catalog instanceof SupportsSnapshots,
+                            catalog instanceof SupportsBranches);
+            Path path = new Path(schema.options().get(PATH.key()));
+            FileIO dataFileIO = catalog.fileIO();
+            FileStoreTable table =
+                    FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
+            return table;
+        }
+        throw new Catalog.TableNotExistException(identifier);
     }
 }

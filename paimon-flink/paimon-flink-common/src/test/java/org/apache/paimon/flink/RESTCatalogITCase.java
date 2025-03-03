@@ -23,6 +23,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
+import org.apache.paimon.rest.RESTTestFileIO;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -52,6 +53,7 @@ class RESTCatalogITCase extends CatalogITCaseBase {
 
     private RESTCatalogServer restCatalogServer;
     private String serverUrl;
+    private String dataPath;
     private String warehouse;
     @TempDir java.nio.file.Path tempFile;
 
@@ -59,21 +61,19 @@ class RESTCatalogITCase extends CatalogITCaseBase {
     @Override
     public void before() throws IOException {
         String initToken = "init_token";
-        warehouse = tempFile.toUri().toString();
-        String serverId = UUID.randomUUID().toString();
+        dataPath = tempFile.toUri().toString();
+        warehouse = UUID.randomUUID().toString();
         ConfigResponse config =
                 new ConfigResponse(
                         ImmutableMap.of(
                                 RESTCatalogInternalOptions.PREFIX.key(),
                                 "paimon",
-                                CatalogOptions.WAREHOUSE.key(),
-                                warehouse,
                                 RESTCatalogOptions.DATA_TOKEN_ENABLED.key(),
                                 "true",
-                                "catalog-server-id",
-                                serverId),
+                                CatalogOptions.WAREHOUSE.key(),
+                                warehouse),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken, config, serverId);
+        restCatalogServer = new RESTCatalogServer(dataPath, initToken, config, warehouse);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
         super.before();
@@ -161,16 +161,18 @@ class RESTCatalogITCase extends CatalogITCaseBase {
         String initToken = "init_token";
         Map<String, String> options = new HashMap<>();
         options.put("metastore", "rest");
+        options.put(CatalogOptions.WAREHOUSE.key(), warehouse);
         options.put(RESTCatalogOptions.URI.key(), serverUrl);
         options.put(RESTCatalogOptions.TOKEN.key(), initToken);
         options.put(RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.BEAR.identifier());
         options.put(RESTCatalogOptions.DATA_TOKEN_ENABLED.key(), "true");
+        options.put(RESTTestFileIO.DATA_PATH_CONF_KEY, dataPath);
         return options;
     }
 
     @Override
     protected String getTempDirPath() {
-        return this.warehouse;
+        return this.dataPath;
     }
 
     @Override

@@ -79,27 +79,28 @@ class RESTCatalogTest extends CatalogTestBase {
     private String serverDefineHeaderName = "test-header";
     private String serverDefineHeaderValue = "test-value";
     private ConfigResponse config;
+    private Options options = new Options();
+    private String dataPath;
 
     @BeforeEach
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        String serverId = UUID.randomUUID().toString();
+        dataPath = warehouse;
+        String restWarehouse = UUID.randomUUID().toString();
         this.config =
                 new ConfigResponse(
                         ImmutableMap.of(
                                 RESTCatalogInternalOptions.PREFIX.key(),
                                 "paimon",
-                                CatalogOptions.WAREHOUSE.key(),
-                                warehouse,
                                 "header." + serverDefineHeaderName,
                                 serverDefineHeaderValue,
-                                "catalog-server-id",
-                                serverId),
+                                CatalogOptions.WAREHOUSE.key(),
+                                restWarehouse),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken, this.config, serverId);
+        restCatalogServer = new RESTCatalogServer(dataPath, initToken, this.config, restWarehouse);
         restCatalogServer.start();
-        Options options = new Options();
+        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
@@ -202,11 +203,7 @@ class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testSnapshotFromREST() throws Exception {
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options));
+        RESTCatalog catalog = (RESTCatalog) this.catalog;
         Identifier hasSnapshotTableIdentifier = Identifier.create("test_db_a", "my_snapshot_table");
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
@@ -389,11 +386,8 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     private Catalog initDataTokenCatalog() {
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
+        options.set(RESTTestFileIO.DATA_PATH_CONF_KEY, dataPath);
         return new RESTCatalog(CatalogContext.create(options));
     }
 }
