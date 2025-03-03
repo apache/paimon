@@ -66,7 +66,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
-public abstract class AbstractDataTableScan implements DataTableScan {
+abstract class AbstractDataTableScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
 
