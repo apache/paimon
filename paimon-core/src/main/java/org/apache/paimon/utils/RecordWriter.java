@@ -64,7 +64,10 @@ public interface RecordWriter<T> {
      */
     CommitIncrement prepareCommit(boolean waitCompaction) throws Exception;
 
-    /** Check if a compaction is in progress, or if a compaction result remains to be fetched. */
+    /**
+     * Check if a compaction is in progress, or if a compaction result remains to be fetched, or if
+     * a compaction should be triggered later.
+     */
     boolean isCompacting();
 
     /**

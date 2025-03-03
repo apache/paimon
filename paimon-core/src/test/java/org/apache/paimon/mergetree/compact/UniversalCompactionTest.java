@@ -292,6 +292,68 @@ public class UniversalCompactionTest {
         assertThat(pick.get().outputLevel()).isEqualTo(1);
     }
 
+    @Test
+    public void testForcePickL0() {
+        int maxInterval = 5;
+        UniversalCompaction compaction = new UniversalCompaction(25, 1, 5, null, maxInterval);
+
+        // level 0 to max level
+        List<LevelSortedRun> level0ToMax = level0(1, 2, 2, 2);
+        Optional<CompactUnit> pick;
+        long[] results;
+
+        for (int i = 1; i <= maxInterval; i++) {
+            if (i == maxInterval) {
+                // level 0 to max level triggered
+                pick = compaction.pick(3, level0ToMax);
+                assertThat(pick.isPresent()).isTrue();
+                results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+                assertThat(results).isEqualTo(new long[] {1, 2, 2, 2});
+                assertThat(pick.get().outputLevel()).isEqualTo(2);
+            } else {
+                // compact skipped
+                pick = compaction.pick(3, level0ToMax);
+                assertThat(pick.isPresent()).isFalse();
+            }
+        }
+
+        // level 0 force pick
+        List<LevelSortedRun> level0ForcePick = Arrays.asList(level(0, 2), level(1, 2), level(2, 2));
+
+        for (int i = 1; i <= maxInterval; i++) {
+            if (i == maxInterval) {
+                // level 0 force pick triggered
+                pick = compaction.pick(3, level0ForcePick);
+                assertThat(pick.isPresent()).isTrue();
+                results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+                assertThat(results).isEqualTo(new long[] {2, 2, 2});
+                assertThat(pick.get().outputLevel()).isEqualTo(2);
+            } else {
+                // compact skipped
+                pick = compaction.pick(3, level0ForcePick);
+                assertThat(pick.isPresent()).isFalse();
+            }
+        }
+
+        // level 0 to empty level
+        List<LevelSortedRun> level0ToEmpty = Arrays.asList(level(0, 1), level(2, 2));
+
+        for (int i = 1; i <= maxInterval; i++) {
+            if (i == maxInterval) {
+                // level 0 to empty level triggered
+                pick = compaction.pick(3, level0ToEmpty);
+                assertThat(pick.isPresent()).isTrue();
+                results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+                assertThat(results).isEqualTo(new long[] {1});
+                assertThat(pick.get().outputLevel()).isEqualTo(1);
+            } else {
+                // compact skipped
+                pick = compaction.pick(3, level0ToEmpty);
+                assertThat(pick.isPresent()).isFalse();
+            }
+        }
+    }
+
     private List<LevelSortedRun> createLevels(int... levels) {
         List<LevelSortedRun> runs = new ArrayList<>();
         for (int size : levels) {
