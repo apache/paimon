@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 
 /**
  * Wrapper for {@link MergeFunction}s which works like a reducer.
@@ -51,14 +52,23 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     /** Adds the given {@link KeyValue} to the {@link MergeFunction} helper. */
     @Override
     public void add(KeyValue kv) {
-        if (initialKv == null) {
-            initialKv = kv;
+        if (isInitialized) {
+            merge(kv);
+            return;
+        }
+        // AggregateMergeFunction should do merge even if there are only one element
+        if (mergeFunction instanceof AggregateMergeFunction) {
+            merge(kv);
+            isInitialized = true;
         } else {
-            if (!isInitialized) {
+            if (initialKv == null) {
+                initialKv = kv;
+            } else {
+                // isInitialized must be false
                 merge(initialKv);
                 isInitialized = true;
+                merge(kv);
             }
-            merge(kv);
         }
     }
 
