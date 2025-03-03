@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-name: End to End Tests Flink 1.17
+name: End to End Tests Flink
 
 on:
   push:
@@ -33,25 +33,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build_test:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        # Last element should be the current default flink version
+        flink_version: [ '1.15', '1.16', '1.17', '1.18', '1.19', '1.20' ]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+
       - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JDK_VERSION }}
-          distribution: 'adopt'
-      - name: Build Flink 1.17
-        run: mvn -T 1C -B clean install -DskipTests -Pflink-1.17
-      - name: Test Flink 1.17
-        timeout-minutes: 60
+          distribution: 'temurin'
+
+      - name: Build Flink
+        run:  mvn -T 2C -B clean install -DskipTests -pl paimon-e2e-tests -am
+
+      - name: Test Flink
         run: |
           # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          mvn -T 1C -B test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pflink-1.17
+          profile="flink-${{ matrix.flink_version }}"
+          if [ "${{ matrix.flink_version }}" = "${{ matrix.flink_version[-1] }}" ]; then
+            mvn -T 1C -B test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
+          else
+            mvn -T 1C -B test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile}
+          fi
         env:
           MAVEN_OPTS: -Xmx4096m
