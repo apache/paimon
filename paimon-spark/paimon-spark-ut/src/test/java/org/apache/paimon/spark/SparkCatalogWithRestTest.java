@@ -77,6 +77,7 @@ public class SparkCatalogWithRestTest {
                         .config("spark.sql.catalog.paimon.metastore", "rest")
                         .config("spark.sql.catalog.paimon.uri", serverUrl)
                         .config("spark.sql.catalog.paimon.token", initToken)
+                        .config("spark.sql.catalog.paimon.warehouse", warehouse)
                         .config(
                                 "spark.sql.catalog.paimon.token.provider",
                                 AuthProviderEnum.BEAR.identifier())
