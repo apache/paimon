@@ -150,6 +150,15 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Create reader of the parquet file {}, the fileSchema is {}, the requestedSchema is {}.",
+                    context.filePath(),
+                    fileSchema,
+                    requestedSchema);
+        }
+
         reader.setRequestedSchema(requestedSchema);
         WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
 
