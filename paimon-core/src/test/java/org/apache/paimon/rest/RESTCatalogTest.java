@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.CatalogOptions;
@@ -34,6 +35,7 @@ import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -62,10 +64,12 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for REST Catalog. */
 class RESTCatalogTest extends CatalogTestBase {
@@ -114,6 +118,108 @@ class RESTCatalogTest extends CatalogTestBase {
         assertEquals(
                 headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
         assertEquals(headers.get("test-header"), "test-value");
+    }
+
+    @Test
+    void testDatabaseApiWhenNoPermission() {
+        String database = "test_no_permission_db";
+        restCatalogServer.addNoPermissionDatabase(database);
+        assertThrows(
+                Catalog.DatabaseNoPermissionException.class,
+                () -> catalog.createDatabase(database, false, Maps.newHashMap()));
+        assertThrows(
+                Catalog.DatabaseNoPermissionException.class, () -> catalog.getDatabase(database));
+        assertThrows(
+                Catalog.DatabaseNoPermissionException.class,
+                () -> catalog.dropDatabase(database, false, false));
+        assertThrows(
+                Catalog.DatabaseNoPermissionException.class,
+                () ->
+                        catalog.alterDatabase(
+                                database,
+                                Lists.newArrayList(PropertyChange.setProperty("key1", "value1")),
+                                false));
+    }
+
+    @Test
+    void testDatabaseApiWhenNoExistAndNotIgnore() {
+        String database = "test_no_exist_db";
+        assertThrows(
+                Catalog.DatabaseNotExistException.class,
+                () -> catalog.dropDatabase(database, false, false));
+        assertThrows(
+                Catalog.DatabaseNotExistException.class,
+                () ->
+                        catalog.alterDatabase(
+                                database,
+                                Lists.newArrayList(PropertyChange.setProperty("key1", "value1")),
+                                false));
+    }
+
+    @Test
+    void testGetSystemDatabase() throws Catalog.DatabaseNotExistException {
+        assertThat(catalog.getDatabase(SYSTEM_DATABASE_NAME).name())
+                .isEqualTo(SYSTEM_DATABASE_NAME);
+    }
+
+    @Test
+    void testTableApiWhenTableNoPermission() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "no_permission_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        restCatalogServer.addNoPermissionTable(identifier);
+        assertThrows(Catalog.TableNoPermissionException.class, () -> catalog.getTable(identifier));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        catalog.alterTable(
+                                identifier,
+                                Lists.newArrayList(
+                                        SchemaChange.addColumn("col2", DataTypes.DATE())),
+                                false));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> catalog.dropTable(identifier, false));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        catalog.renameTable(
+                                identifier,
+                                Identifier.create("test_table_db", "no_permission_table2"),
+                                false));
+    }
+
+    @Test
+    void testSnapshotApiWhenTableNoExist() throws Exception {
+        RESTCatalog restCatalog = (RESTCatalog) catalog;
+        Identifier identifier = Identifier.create("test_snapshot_db", "no_exit_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        assertThrows(
+                Catalog.TableNotExistException.class, () -> restCatalog.loadSnapshot(identifier));
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () ->
+                        restCatalog.commitSnapshot(
+                                identifier,
+                                createSnapshotWithMillis(1L, System.currentTimeMillis()),
+                                new ArrayList<Partition>()));
+    }
+
+    @Test
+    void testSnapshotApiWhenTableNoPermission() throws Exception {
+        RESTCatalog restCatalog = (RESTCatalog) catalog;
+        Identifier identifier = Identifier.create("test_snapshot_db", "no_permission_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        restCatalogServer.addNoPermissionTable(identifier);
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> restCatalog.loadSnapshot(identifier));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        restCatalog.commitSnapshot(
+                                identifier,
+                                createSnapshotWithMillis(1L, System.currentTimeMillis()),
+                                new ArrayList<Partition>()));
     }
 
     @Test
