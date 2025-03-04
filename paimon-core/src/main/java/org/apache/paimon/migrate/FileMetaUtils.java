@@ -175,9 +175,9 @@ public class FileMetaUtils {
     private static Path renameFile(
             FileIO fileIO, Path originPath, Path newDir, String format, Map<Path, Path> rollback)
             throws IOException {
-        String subfix = "." + format;
+        String suffix = "." + format;
         String fileName = originPath.getName();
-        String newFileName = fileName.endsWith(subfix) ? fileName : fileName + "." + format;
+        String newFileName = fileName.endsWith(suffix) ? fileName : fileName + "." + format;
         Path newPath = new Path(newDir, newFileName);
         rollback.put(newPath, originPath);
         LOG.info("Migration: rename file from " + originPath + " to " + newPath);
