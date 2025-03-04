@@ -61,31 +61,31 @@ import java.util.function.Function;
  * <pre>
  * Bitmap file index format (V1)
  * +-------------------------------------------------+-----------------
- * ｜ version (1 byte)                               ｜
+ * | version (1 byte)                                |
  * +-------------------------------------------------+
- * ｜ row count (4 bytes int)                        ｜
+ * | row count (4 bytes int)                         |
  * +-------------------------------------------------+
- * ｜ non-null value bitmap number (4 bytes int)     ｜
+ * | non-null value bitmap number (4 bytes int)      |
  * +-------------------------------------------------+
- * ｜ has null value (1 byte)                        ｜
+ * | has null value (1 byte)                         |
  * +-------------------------------------------------+
- * ｜ null value offset (4 bytes if has null value)  ｜       HEAD
+ * | null value offset (4 bytes if has null value)   |       HEAD
  * +-------------------------------------------------+
- * ｜ value 1 | offset 1                             ｜
+ * | value 1 | offset 1                              |
  * +-------------------------------------------------+
- * ｜ value 2 | offset 2                             ｜
+ * | value 2 | offset 2                              |
  * +-------------------------------------------------+
- * ｜ value 3 | offset 3                             ｜
+ * | value 3 | offset 3                              |
  * +-------------------------------------------------+
- * ｜ ...                                            ｜
+ * | ...                                             |
  * +-------------------------------------------------+-----------------
- * ｜ serialized bitmap 1                            ｜
+ * | serialized bitmap 1                             |
  * +-------------------------------------------------+
- * ｜ serialized bitmap 2                            ｜
+ * | serialized bitmap 2                             |
  * +-------------------------------------------------+       BODY
- * ｜ serialized bitmap 3                            ｜
+ * | serialized bitmap 3                             |
  * +-------------------------------------------------+
- * ｜ ...                                            ｜
+ * | ...                                             |
  * +-------------------------------------------------+-----------------
  *
  * value x:                       var bytes for any data type (as bitmap identifier)
