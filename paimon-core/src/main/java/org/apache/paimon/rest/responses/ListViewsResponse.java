@@ -27,22 +27,39 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.List;
 
-/** Response for listing tables. */
+/** Response for listing views. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ListViewsResponse implements RESTResponse {
 
     private static final String FIELD_VIEWS = "views";
 
+    private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
+
     @JsonProperty(FIELD_VIEWS)
     private final List<String> views;
 
-    @JsonCreator
+    @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
+    private final String nextPageToken;
+
     public ListViewsResponse(@JsonProperty(FIELD_VIEWS) List<String> views) {
+        this(views, null);
+    }
+
+    @JsonCreator
+    public ListViewsResponse(
+            @JsonProperty(FIELD_VIEWS) List<String> views,
+            @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
         this.views = views;
+        this.nextPageToken = nextPageToken;
     }
 
     @JsonGetter(FIELD_VIEWS)
     public List<String> getViews() {
         return this.views;
+    }
+
+    @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
+    public String getNextPageToken() {
+        return this.nextPageToken;
     }
 }

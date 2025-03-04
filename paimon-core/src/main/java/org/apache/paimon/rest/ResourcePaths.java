@@ -32,6 +32,8 @@ public class ResourcePaths {
     private static final String PARTITIONS = "partitions";
     private static final String BRANCHES = "branches";
     private static final String VIEWS = "views";
+    private static final String TABLE_DETAILS = "table-details";
+    private static final String VIEW_DETAILS = "view-details";
     public static final String QUERY_PARAMETER_WAREHOUSE_KEY = "warehouse";
 
     public static String config(String warehouse) {
@@ -62,6 +64,10 @@ public class ResourcePaths {
 
     public String tables(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES);
+    }
+
+    public String tableDetails(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLE_DETAILS);
     }
 
     public String table(String databaseName, String tableName) {
@@ -119,6 +125,10 @@ public class ResourcePaths {
 
     public String views(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, databaseName, VIEWS);
+    }
+
+    public String viewDetails(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, VIEW_DETAILS);
     }
 
     public String view(String databaseName, String viewName) {

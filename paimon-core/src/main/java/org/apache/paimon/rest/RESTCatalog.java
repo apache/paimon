@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -68,7 +69,9 @@ import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -82,6 +85,11 @@ import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -91,9 +99,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -111,7 +121,11 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches {
 
+    private static final Logger LOG = LoggerFactory.getLogger(RESTCatalog.class);
+
     public static final String HEADER_PREFIX = "header.";
+    public static final String MAX_RESULTS = "maxResults";
+    public static final String PAGE_TOKEN = "pageToken";
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
@@ -258,15 +272,104 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
+            String pageToken = null;
+            Map<String, String> queryParams = Maps.newHashMap();
+            Integer maxResults = context.options().get(RESTCatalogOptions.REST_PAGE_MAX_RESULTS);
+            if (Objects.nonNull(maxResults) && maxResults > 0) {
+                queryParams.put(MAX_RESULTS, String.valueOf(maxResults));
+            }
+            List<String> tables = new ArrayList<>();
+            do {
+                queryParams.put(PAGE_TOKEN, pageToken);
+                ListTablesResponse response =
+                        client.get(
+                                resourcePaths.tables(databaseName),
+                                queryParams,
+                                ListTablesResponse.class,
+                                restAuthFunction);
+                if (Objects.nonNull(response)) {
+                    pageToken = response.getNextPageToken();
+                    tables.addAll(response.getTables());
+                } else {
+                    LOG.warn(
+                            "response of listTables for {} is null with params {}",
+                            databaseName,
+                            queryParams);
+                }
+            } while (StringUtils.isNotEmpty(pageToken));
+            return tables;
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
+    public PagedList<String> listTablesPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        Map<String, String> queryParams = buildPagedQueryParams(maxResults, pageToken);
+        try {
             ListTablesResponse response =
                     client.get(
                             resourcePaths.tables(databaseName),
+                            queryParams,
                             ListTablesResponse.class,
                             restAuthFunction);
-            if (response.getTables() != null) {
-                return response.getTables();
+            if (Objects.nonNull(response) && Objects.nonNull(response.getTables())) {
+                return new PagedList<>(response.getTables(), response.getNextPageToken());
+            } else {
+                LOG.warn(
+                        "response of listTablesPaged for {} is null with maxResults {} and pageToken {}",
+                        databaseName,
+                        maxResults,
+                        pageToken);
+                return new PagedList<>(Collections.emptyList(), null);
             }
-            return ImmutableList.of();
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
+    public PagedList<Table> listTableDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        Map<String, String> queryParams = buildPagedQueryParams(maxResults, pageToken);
+        try {
+            ListTableDetailsResponse response =
+                    client.get(
+                            resourcePaths.tableDetails(databaseName),
+                            queryParams,
+                            ListTableDetailsResponse.class,
+                            restAuthFunction);
+            if (Objects.nonNull(response) && Objects.nonNull(response.getTableDetails())) {
+                return new PagedList<>(
+                        response.getTableDetails().stream()
+                                .map(
+                                        getTableResponse -> {
+                                            try {
+                                                return loadTableByResponse(
+                                                        getTableResponse, databaseName);
+                                            } catch (TableNotExistException e) {
+                                                LOG.error(
+                                                        "load table {}.{} by response {} failed",
+                                                        databaseName,
+                                                        getTableResponse.getName(),
+                                                        getTableResponse,
+                                                        e);
+                                                throw new RuntimeException(e);
+                                            }
+                                        })
+                                .collect(Collectors.toList()),
+                        response.getNextPageToken());
+            } else {
+                LOG.warn(
+                        "response of listTableDetailsPaged for {} is null with maxResults {} and pageToken {}",
+                        databaseName,
+                        maxResults,
+                        pageToken);
+                return new PagedList<>(Collections.emptyList(), null);
+            }
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
@@ -560,16 +663,34 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         try {
-            ListPartitionsResponse response =
-                    client.get(
-                            resourcePaths.partitions(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
-                            ListPartitionsResponse.class,
-                            restAuthFunction);
-            if (response == null || response.getPartitions() == null) {
-                return Collections.emptyList();
+            String pageToken = null;
+            Map<String, String> queryParams = Maps.newHashMap();
+            Integer maxResults = context.options().get(RESTCatalogOptions.REST_PAGE_MAX_RESULTS);
+            if (Objects.nonNull(maxResults) && maxResults > 0) {
+                queryParams.put(MAX_RESULTS, String.valueOf(maxResults));
             }
-            return response.getPartitions();
+            List<Partition> partitions = new ArrayList<>();
+            do {
+                queryParams.put(PAGE_TOKEN, pageToken);
+                ListPartitionsResponse response =
+                        client.get(
+                                resourcePaths.partitions(
+                                        identifier.getDatabaseName(), identifier.getTableName()),
+                                queryParams,
+                                ListPartitionsResponse.class,
+                                restAuthFunction);
+                if (Objects.nonNull(response)) {
+                    pageToken = response.getNextPageToken();
+                    partitions.addAll(response.getPartitions());
+                } else {
+                    LOG.warn(
+                            "response of listPartitions for {}.{} is null with params {}",
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            queryParams);
+                }
+            } while (StringUtils.isNotEmpty(pageToken));
+            return partitions;
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -655,6 +776,35 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     }
 
     @Override
+    public PagedList<Partition> listPartitionsPaged(
+            Identifier identifier, Integer maxResults, String pageToken)
+            throws TableNotExistException {
+        Map<String, String> queryParams = buildPagedQueryParams(maxResults, pageToken);
+        try {
+            ListPartitionsResponse response =
+                    client.get(
+                            resourcePaths.partitions(
+                                    identifier.getDatabaseName(), identifier.getTableName()),
+                            queryParams,
+                            ListPartitionsResponse.class,
+                            restAuthFunction);
+            if (Objects.nonNull(response)) {
+                return new PagedList<>(response.getPartitions(), response.getNextPageToken());
+            } else {
+                return new PagedList<>(Collections.emptyList(), null);
+            }
+
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            // not a metastore partitioned table
+            return new PagedList<>(listPartitionsFromFileSystem(getTable(identifier)), null);
+        }
+    }
+
+    @Override
     public View getView(Identifier identifier) throws ViewNotExistException {
         try {
             GetViewResponse response =
@@ -717,12 +867,101 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     @Override
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
         try {
+            String pageToken = null;
+            Map<String, String> queryParams = Maps.newHashMap();
+            Integer maxResults = context.options().get(RESTCatalogOptions.REST_PAGE_MAX_RESULTS);
+            if (Objects.nonNull(maxResults) && maxResults > 0) {
+                queryParams.put(MAX_RESULTS, String.valueOf(maxResults));
+            }
+            List<String> views = new ArrayList<>();
+            do {
+                queryParams.put(PAGE_TOKEN, pageToken);
+                ListViewsResponse response =
+                        client.get(
+                                resourcePaths.views(databaseName),
+                                queryParams,
+                                ListViewsResponse.class,
+                                restAuthFunction);
+                if (Objects.nonNull(response)) {
+                    pageToken = response.getNextPageToken();
+                    views.addAll(response.getViews());
+                } else {
+                    LOG.warn(
+                            "response of listViews for {} is null with params {}",
+                            databaseName,
+                            queryParams);
+                }
+            } while (StringUtils.isNotEmpty(pageToken));
+            return views;
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
+    public PagedList<String> listViewsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        Map<String, String> queryParams = buildPagedQueryParams(maxResults, pageToken);
+        try {
             ListViewsResponse response =
                     client.get(
                             resourcePaths.views(databaseName),
+                            queryParams,
                             ListViewsResponse.class,
                             restAuthFunction);
-            return response.getViews();
+            if (Objects.nonNull(response) && Objects.nonNull(response.getViews())) {
+                return new PagedList<>(response.getViews(), response.getNextPageToken());
+            } else {
+                LOG.warn(
+                        "response of listViewsPaged for {} is null with maxResults {} and pageToken {}",
+                        databaseName,
+                        maxResults,
+                        pageToken);
+                return new PagedList<>(Collections.emptyList(), null);
+            }
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
+    public PagedList<View> listViewDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        Map<String, String> queryParams = buildPagedQueryParams(maxResults, pageToken);
+        try {
+            ListViewDetailsResponse response =
+                    client.get(
+                            resourcePaths.viewDetails(databaseName),
+                            queryParams,
+                            ListViewDetailsResponse.class,
+                            restAuthFunction);
+            if (Objects.nonNull(response) && Objects.nonNull(response.getViewDetails())) {
+                return new PagedList<>(
+                        response.getViewDetails().stream()
+                                .map(
+                                        viewResponse -> {
+                                            ViewSchema schema = viewResponse.getSchema();
+                                            return new ViewImpl(
+                                                    Identifier.create(
+                                                            databaseName, viewResponse.getName()),
+                                                    schema.fields(),
+                                                    schema.query(),
+                                                    schema.dialects(),
+                                                    schema.comment(),
+                                                    schema.options());
+                                        })
+                                .collect(Collectors.toList()),
+                        response.getNextPageToken());
+            } else {
+                LOG.warn(
+                        "response of listViewDetailsPaged for {} is null with maxResults {} and pageToken {}",
+                        databaseName,
+                        maxResults,
+                        pageToken);
+                return new PagedList<>(Collections.emptyList(), null);
+            }
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
@@ -776,5 +1015,37 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         }
 
         return refreshExecutor;
+    }
+
+    private Table loadTableByResponse(GetTableResponse getTableResponse, String databaseName)
+            throws TableNotExistException {
+        Identifier identifier = Identifier.create(databaseName, getTableResponse.getName());
+        TableMetadata.Loader tableMetaDataLoader =
+                tableIdentifier -> {
+                    TableSchema schema =
+                            TableSchema.create(
+                                    getTableResponse.getSchemaId(), getTableResponse.getSchema());
+                    return new TableMetadata(
+                            schema, getTableResponse.isExternal(), getTableResponse.getId());
+                };
+        return CatalogUtils.loadTable(
+                this,
+                identifier,
+                path -> fileIOForData(path, identifier),
+                this::fileIOFromOptions,
+                tableMetaDataLoader,
+                null,
+                null);
+    }
+
+    private Map<String, String> buildPagedQueryParams(Integer maxResults, String pageToken) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        if (Objects.nonNull(maxResults) && maxResults > 0) {
+            queryParams.put(MAX_RESULTS, maxResults.toString());
+        }
+        if (Objects.nonNull(pageToken)) {
+            queryParams.put(PAGE_TOKEN, pageToken);
+        }
+        return queryParams;
     }
 }

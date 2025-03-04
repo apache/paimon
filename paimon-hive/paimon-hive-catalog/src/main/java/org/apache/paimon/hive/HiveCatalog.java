@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
@@ -90,6 +91,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -849,6 +851,35 @@ public class HiveCatalog extends AbstractCatalog {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in call to getTables " + databaseName, e);
         }
+    }
+
+    @Override
+    public PagedList<View> listViewDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            return new PagedList<>(Collections.emptyList(), null);
+        }
+        getDatabase(databaseName);
+
+        PagedList<String> pagedViewNames = listViewsPaged(databaseName, maxResults, pageToken);
+        return new PagedList<>(
+                pagedViewNames.getPagedList().stream()
+                        .map(
+                                viewName -> {
+                                    try {
+                                        return getView(Identifier.create(databaseName, viewName));
+                                    } catch (ViewNotExistException ignored) {
+                                        LOG.warn(
+                                                "view {}.{} does not exist",
+                                                databaseName,
+                                                viewName);
+                                        return null;
+                                    }
+                                })
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()),
+                pagedViewNames.getNextPageToken());
     }
 
     @Override
