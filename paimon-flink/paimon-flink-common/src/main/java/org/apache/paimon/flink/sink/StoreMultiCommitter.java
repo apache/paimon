@@ -85,9 +85,21 @@ public class StoreMultiCommitter
         this.tableCommitters = new HashMap<>();
 
         this.tableFilter = tableFilter;
+        int parallelism = context.getParallelism();
+        int index = context.getSubtaskIndex();
 
         if (eagerInit) {
-            List<Identifier> tableIds = filterTables();
+            List<Identifier> tableIds =
+                    filterTables().stream()
+                            .filter(
+                                    identifier ->
+                                            MultiTableCommittableChannelComputer.computeChannel(
+                                                            identifier.getDatabaseName(),
+                                                            identifier.getTableName(),
+                                                            parallelism)
+                                                    == index)
+                            .collect(Collectors.toList());
+
             tableIds.stream().forEach(this::getStoreCommitter);
         }
     }

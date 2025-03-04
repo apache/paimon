@@ -1523,6 +1523,21 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "When need to lookup, commit will wait for compaction by lookup.");
 
+    public static final ConfigOption<LookupCompactMode> LOOKUP_COMPACT =
+            key("lookup-compact")
+                    .enumType(LookupCompactMode.class)
+                    .defaultValue(LookupCompactMode.RADICAL)
+                    .withDescription("Lookup compact mode used for lookup compaction.");
+
+    public static final ConfigOption<Integer> LOOKUP_COMPACT_MAX_INTERVAL =
+            key("lookup-compact.max-interval")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The max interval for a gentle mode lookup compaction to be triggered. For every interval, "
+                                    + "a forced lookup compaction will be performed to flush L0 files to higher level. "
+                                    + "This option is only valid when lookup-compact mode is gentle.");
+
     public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
             key("delete-file.thread-num")
                     .intType()
@@ -2524,6 +2539,23 @@ public class CoreOptions implements Serializable {
         return options.get(LOOKUP_WAIT);
     }
 
+    public boolean laziedLookup() {
+        return needLookup()
+                && (!options.get(LOOKUP_WAIT) || LookupCompactMode.GENTLE.equals(lookupCompact()));
+    }
+
+    public LookupCompactMode lookupCompact() {
+        return options.get(LOOKUP_COMPACT);
+    }
+
+    public int lookupCompactMaxInterval() {
+        Integer maxInterval = options.get(LOOKUP_COMPACT_MAX_INTERVAL);
+        if (maxInterval == null) {
+            maxInterval = MathUtils.multiplySafely(numSortedRunCompactionTrigger(), 2);
+        }
+        return Math.max(numSortedRunCompactionTrigger(), maxInterval);
+    }
+
     public boolean asyncFileWrite() {
         return options.get(ASYNC_FILE_WRITE);
     }
@@ -3004,7 +3036,10 @@ public class CoreOptions implements Serializable {
     /** The period format options for tag creation. */
     public enum TagPeriodFormatter implements DescribedEnum {
         WITH_DASHES("with_dashes", "Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'"),
-        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'");
+        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'"),
+        WITHOUT_DASHES_AND_SPACES(
+                "without_dashes_and_spaces",
+                "Dates and hours without dashes and spaces, e.g., 'yyyyMMddHH'");
 
         private final String value;
         private final String description;
@@ -3284,5 +3319,17 @@ public class CoreOptions implements Serializable {
 
             throw new IllegalArgumentException("cannot match type: " + orderType + " for ordering");
         }
+    }
+
+    /** The compact mode for lookup compaction. */
+    public enum LookupCompactMode {
+        /**
+         * Lookup compaction will use ForceUpLevel0Compaction strategy to radically compact new
+         * files.
+         */
+        RADICAL,
+
+        /** Lookup compaction will use UniversalCompaction strategy to gently compact new files. */
+        GENTLE
     }
 }

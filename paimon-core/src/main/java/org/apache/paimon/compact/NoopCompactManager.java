@@ -71,7 +71,7 @@ public class NoopCompactManager implements CompactManager {
     public void cancelCompaction() {}
 
     @Override
-    public boolean isCompacting() {
+    public boolean compactNotCompleted() {
         return false;
     }
 

@@ -30,13 +30,13 @@ jobs:
       MVN_VALIDATION_DIR: "/tmp/paimon-validation-deployment"
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Set JDK
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v4
         with:
           java-version: 8
-          distribution: 'adopt'
+          distribution: 'temurin'
       - name: Build
         run: |
           set -o pipefail

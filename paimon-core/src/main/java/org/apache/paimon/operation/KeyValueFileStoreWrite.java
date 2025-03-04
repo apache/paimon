@@ -176,7 +176,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     @Override
     protected MergeTreeWriter createWriter(
-            @Nullable Long snapshotId,
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
@@ -196,16 +195,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 writerFactoryBuilder.build(partition, bucket, options);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
-        UniversalCompaction universalCompaction =
-                new UniversalCompaction(
-                        options.maxSizeAmplificationPercent(),
-                        options.sortedRunSizeRatio(),
-                        options.numSortedRunCompactionTrigger(),
-                        options.optimizedCompactionInterval());
-        CompactStrategy compactStrategy =
-                options.needLookup()
-                        ? new ForceUpLevel0Compaction(universalCompaction)
-                        : universalCompaction;
+        CompactStrategy compactStrategy = createCompactStrategy(options);
         CompactManager compactManager =
                 createCompactManager(
                         partition, bucket, compactStrategy, compactExecutor, levels, dvMaintainer);
@@ -230,6 +220,32 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     @VisibleForTesting
     public boolean bufferSpillable() {
         return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode, true);
+    }
+
+    private CompactStrategy createCompactStrategy(CoreOptions options) {
+        if (options.needLookup()) {
+            if (CoreOptions.LookupCompactMode.RADICAL.equals(options.lookupCompact())) {
+                return new ForceUpLevel0Compaction(
+                        new UniversalCompaction(
+                                options.maxSizeAmplificationPercent(),
+                                options.sortedRunSizeRatio(),
+                                options.numSortedRunCompactionTrigger(),
+                                options.optimizedCompactionInterval()));
+            } else if (CoreOptions.LookupCompactMode.GENTLE.equals(options.lookupCompact())) {
+                return new UniversalCompaction(
+                        options.maxSizeAmplificationPercent(),
+                        options.sortedRunSizeRatio(),
+                        options.numSortedRunCompactionTrigger(),
+                        options.optimizedCompactionInterval(),
+                        options.lookupCompactMaxInterval());
+            }
+        }
+
+        return new UniversalCompaction(
+                options.maxSizeAmplificationPercent(),
+                options.sortedRunSizeRatio(),
+                options.numSortedRunCompactionTrigger(),
+                options.optimizedCompactionInterval());
     }
 
     private CompactManager createCompactManager(
@@ -264,7 +280,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             ? null
                             : compactionMetrics.createReporter(partition, bucket),
                     dvMaintainer,
-                    options.prepareCommitWaitCompaction());
+                    options.prepareCommitWaitCompaction(),
+                    options.needLookup());
         }
     }
 

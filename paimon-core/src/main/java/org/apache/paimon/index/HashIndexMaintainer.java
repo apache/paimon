@@ -19,6 +19,7 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -44,14 +45,14 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
 
     private HashIndexMaintainer(
             IndexFileHandler fileHandler,
-            @Nullable Long snapshotId,
+            @Nullable Snapshot snapshot,
             BinaryRow partition,
             int bucket) {
         this.fileHandler = fileHandler;
         IntHashSet hashcode = new IntHashSet();
-        if (snapshotId != null) {
+        if (snapshot != null) {
             Optional<IndexFileMeta> indexFile =
-                    fileHandler.scanHashIndex(snapshotId, partition, bucket);
+                    fileHandler.scanHashIndex(snapshot, partition, bucket);
             if (indexFile.isPresent()) {
                 IndexFileMeta file = indexFile.get();
                 hashcode = new IntHashSet((int) file.rowCount());
@@ -115,8 +116,8 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
 
         @Override
         public IndexMaintainer<KeyValue> createOrRestore(
-                @Nullable Long snapshotId, BinaryRow partition, int bucket) {
-            return new HashIndexMaintainer(handler, snapshotId, partition, bucket);
+                @Nullable Snapshot snapshot, BinaryRow partition, int bucket) {
+            return new HashIndexMaintainer(handler, snapshot, partition, bucket);
         }
     }
 }

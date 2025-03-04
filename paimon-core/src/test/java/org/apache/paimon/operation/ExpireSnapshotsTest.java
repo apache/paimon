@@ -41,6 +41,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -68,6 +69,7 @@ import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link ExpireSnapshotsImpl}. */
@@ -79,12 +81,14 @@ public class ExpireSnapshotsTest {
     @TempDir java.nio.file.Path tempExternalPath;
     protected TestFileStore store;
     protected SnapshotManager snapshotManager;
+    protected ChangelogManager changelogManager;
 
     @BeforeEach
     public void beforeEach() throws Exception {
         gen = new TestKeyValueGenerator();
         store = createStore();
         snapshotManager = store.snapshotManager();
+        changelogManager = store.changelogManager();
         SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
@@ -494,7 +498,7 @@ public class ExpireSnapshotsTest {
         // validate earliest hint file
 
         Path snapshotDir = snapshotManager.snapshotDirectory();
-        Path earliest = new Path(snapshotDir, SnapshotManager.EARLIEST);
+        Path earliest = new Path(snapshotDir, EARLIEST);
 
         assertThat(fileIO.exists(earliest)).isTrue();
 
@@ -603,9 +607,9 @@ public class ExpireSnapshotsTest {
 
         int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         int earliestSnapshotId = snapshotManager.earliestSnapshotId().intValue();
-        int latestLongLivedChangelogId = snapshotManager.latestLongLivedChangelogId().intValue();
+        int latestLongLivedChangelogId = changelogManager.latestLongLivedChangelogId().intValue();
         int earliestLongLivedChangelogId =
-                snapshotManager.earliestLongLivedChangelogId().intValue();
+                changelogManager.earliestLongLivedChangelogId().intValue();
 
         // 2 snapshot in /snapshot
         assertThat(latestSnapshotId - earliestSnapshotId).isEqualTo(1);
@@ -618,9 +622,9 @@ public class ExpireSnapshotsTest {
 
         assertThat(snapshotManager.latestSnapshotId().intValue()).isEqualTo(latestSnapshotId);
         assertThat(snapshotManager.earliestSnapshotId().intValue()).isEqualTo(earliestSnapshotId);
-        assertThat(snapshotManager.latestLongLivedChangelogId())
+        assertThat(changelogManager.latestLongLivedChangelogId())
                 .isEqualTo(snapshotManager.earliestSnapshotId() - 1);
-        assertThat(snapshotManager.earliestLongLivedChangelogId())
+        assertThat(changelogManager.earliestLongLivedChangelogId())
                 .isEqualTo(snapshotManager.earliestSnapshotId() - 1);
         store.assertCleaned();
     }

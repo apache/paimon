@@ -25,6 +25,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -50,6 +51,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private static final Logger LOG = LoggerFactory.getLogger(ExpireSnapshotsImpl.class);
 
     private final SnapshotManager snapshotManager;
+    private final ChangelogManager changelogManager;
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
     private final TagManager tagManager;
@@ -58,9 +60,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager) {
         this.snapshotManager = snapshotManager;
+        this.changelogManager = changelogManager;
         this.consumerManager =
                 new ConsumerManager(
                         snapshotManager.fileIO(),
@@ -135,7 +139,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             // No expire happens:
             // write the hint file in order to see the earliest snapshot directly next time
             // should avoid duplicate writes when the file exists
-            if (snapshotManager.readHint(SnapshotManager.EARLIEST) == null) {
+            if (snapshotManager.earliestFileNotExists()) {
                 writeEarliestHint(earliestId);
             }
 
@@ -261,8 +265,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     private void commitChangelog(Changelog changelog) {
         try {
-            snapshotManager.commitChangelog(changelog, changelog.id());
-            snapshotManager.commitLongLivedChangelogLatestHint(changelog.id());
+            changelogManager.commitChangelog(changelog, changelog.id());
+            changelogManager.commitLongLivedChangelogLatestHint(changelog.id());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

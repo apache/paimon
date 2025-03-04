@@ -27,7 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
-import java.util.OptionalLong;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link PrivilegedCatalog}. */
 public class PrivilegedCatalogTest extends FileSystemCatalogTest {
+
     private static final String PASSWORD_ROOT = "123456";
     private static final String USERNAME_TEST_USER = "test_user";
     private static final String PASSWORD_TEST_USER = "test_password";
@@ -61,7 +62,7 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
         FileStoreTable dataTable = (FileStoreTable) userCatalog.getTable(identifier);
 
         assertNoPrivilege(dataTable::snapshotManager);
-        assertNoPrivilege(dataTable::latestSnapshotId);
+        assertNoPrivilege(dataTable::latestSnapshot);
         assertNoPrivilege(() -> dataTable.snapshot(0));
 
         rootCatalog.grantPrivilegeOnTable(USERNAME_TEST_USER, identifier, PrivilegeType.SELECT);
@@ -69,7 +70,7 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
         FileStoreTable dataTable2 = (FileStoreTable) userCatalog.getTable(identifier);
 
         assertThat(dataTable2.snapshotManager().latestSnapshotId()).isNull();
-        assertThat(dataTable2.latestSnapshotId()).isEqualTo(OptionalLong.empty());
+        assertThat(dataTable2.latestSnapshot()).isEqualTo(Optional.empty());
         assertThatThrownBy(() -> dataTable2.snapshot(0)).isNotNull();
     }
 

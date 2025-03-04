@@ -63,6 +63,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
+    private final boolean needLookup;
 
     public MergeTreeCompactManager(
             ExecutorService executor,
@@ -74,7 +75,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter,
             @Nullable DeletionVectorsMaintainer dvMaintainer,
-            boolean lazyGenDeletionFile) {
+            boolean lazyGenDeletionFile,
+            boolean needLookup) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -85,6 +87,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.metricsReporter = metricsReporter;
         this.dvMaintainer = dvMaintainer;
         this.lazyGenDeletionFile = lazyGenDeletionFile;
+        this.needLookup = needLookup;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
@@ -240,6 +243,14 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         return result;
     }
 
+    @Override
+    public boolean compactNotCompleted() {
+        // If it is a lookup compaction, we should ensure that all level 0 files are consumed, so
+        // here we need to make the outside think that we still need to do unfinished compact
+        // working
+        return super.compactNotCompleted() || (needLookup && !levels().level0().isEmpty());
+    }
+
     private void reportMetrics() {
         if (metricsReporter != null) {
             metricsReporter.reportLevel0FileCount(levels.level0().size());
@@ -253,5 +264,10 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         if (metricsReporter != null) {
             MetricUtils.safeCall(metricsReporter::unregister, LOG);
         }
+    }
+
+    @VisibleForTesting
+    public CompactStrategy getStrategy() {
+        return strategy;
     }
 }

@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
@@ -50,7 +51,6 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /** Delegated {@link FileStoreTable}. */
 public abstract class DelegatedFileStoreTable implements FileStoreTable {
@@ -93,6 +93,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public ChangelogManager changelogManager() {
+        return wrapped.changelogManager();
     }
 
     @Override
@@ -156,8 +161,8 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public OptionalLong latestSnapshotId() {
-        return wrapped.latestSnapshotId();
+    public Optional<Snapshot> latestSnapshot() {
+        return wrapped.latestSnapshot();
     }
 
     @Override
