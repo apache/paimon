@@ -34,6 +34,7 @@ import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
@@ -55,6 +56,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -76,14 +79,31 @@ class RESTCatalogTest extends CatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
     private String initToken = "init_token";
+    private String serverDefineHeaderName = "test-header";
+    private String serverDefineHeaderValue = "test-value";
+    private ConfigResponse config;
+    private Options options = new Options();
+    private String dataPath;
 
     @BeforeEach
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken);
+        dataPath = warehouse;
+        String restWarehouse = UUID.randomUUID().toString();
+        this.config =
+                new ConfigResponse(
+                        ImmutableMap.of(
+                                RESTCatalogInternalOptions.PREFIX.key(),
+                                "paimon",
+                                "header." + serverDefineHeaderName,
+                                serverDefineHeaderValue,
+                                CatalogOptions.WAREHOUSE.key(),
+                                restWarehouse),
+                        ImmutableMap.of());
+        restCatalogServer = new RESTCatalogServer(dataPath, initToken, this.config, restWarehouse);
         restCatalogServer.start();
-        Options options = new Options();
+        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
@@ -117,7 +137,7 @@ class RESTCatalogTest extends CatalogTestBase {
         Map<String, String> headers = restCatalog.headers(restAuthParameter);
         assertEquals(
                 headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
-        assertEquals(headers.get("test-header"), "test-value");
+        assertEquals(headers.get(serverDefineHeaderName), serverDefineHeaderValue);
     }
 
     @Test
@@ -256,8 +276,7 @@ class RESTCatalogTest extends CatalogTestBase {
 
             RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
             RESTToken fileDataToken = fileIO.validToken();
-            RESTToken serverDataToken =
-                    restCatalogServer.dataTokenStore.get(identifier.getFullName());
+            RESTToken serverDataToken = restCatalogServer.getDataToken(identifier);
             assertEquals(serverDataToken, fileDataToken);
         }
     }
@@ -289,11 +308,7 @@ class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testSnapshotFromREST() throws Exception {
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        RESTCatalog catalog = new RESTCatalog(CatalogContext.create(options));
+        RESTCatalog catalog = (RESTCatalog) this.catalog;
         Identifier hasSnapshotTableIdentifier = Identifier.create("test_db_a", "my_snapshot_table");
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
@@ -311,41 +326,60 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testBatchRecordsWrite() throws Exception {
+    public void testDataTokenExpired() throws Exception {
+        this.catalog = initDataTokenCatalog();
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_expired_date_token");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of(
+                                "akId", "akId-expire", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() - 100_000);
+        restCatalogServer.setDataToken(identifier, expiredDataToken);
+        FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
+        List<Integer> data = Lists.newArrayList(12);
+        Exception exception =
+                assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
+        assertEquals(RESTTestFileIO.TOKEN_EXPIRED_MSG, exception.getCause().getMessage());
+        RESTToken dataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 100_000);
+        restCatalogServer.setDataToken(identifier, dataToken);
+        batchWrite(tableTestWrite, data);
+        List<String> actual = batchRead(tableTestWrite);
+        assertThat(actual).containsExactlyInAnyOrder("+I[12]");
+    }
 
+    @Test
+    public void testDataTokenUnExistInServer() throws Exception {
+        this.catalog = initDataTokenCatalog();
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_un_exist_date_token");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) tableTestWrite.fileIO();
+        List<Integer> data = Lists.newArrayList(12);
+        // as RESTTokenFileIO is lazy so we need to call isObjectStore() to init fileIO
+        restTokenFileIO.isObjectStore();
+        restCatalogServer.removeDataToken(identifier);
+        Exception exception =
+                assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
+        assertEquals(RESTTestFileIO.TOKEN_UN_EXIST_MSG, exception.getCause().getMessage());
+    }
+
+    @Test
+    public void testBatchRecordsWrite() throws Exception {
         Identifier tableIdentifier = Identifier.create("my_db", "my_table");
         createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(tableIdentifier);
-
         // write
-        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
-        BatchTableWrite write = writeBuilder.newWrite();
-        GenericRow record1 = GenericRow.of(12);
-        GenericRow record2 = GenericRow.of(5);
-        GenericRow record3 = GenericRow.of(18);
-        write.write(record1);
-        write.write(record2);
-        write.write(record3);
-        List<CommitMessage> messages = write.prepareCommit();
-        BatchTableCommit commit = writeBuilder.newCommit();
-        commit.commit(messages);
-        write.close();
-        commit.close();
+        batchWrite(tableTestWrite, Lists.newArrayList(12, 5, 18));
 
         // read
-        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
-        List<Split> splits = readBuilder.newScan().plan().splits();
-        TableRead read = readBuilder.newRead();
-        RecordReader<InternalRow> reader = read.createReader(splits);
-        List<String> actual = new ArrayList<>();
-        reader.forEachRemaining(
-                row -> {
-                    String rowStr =
-                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
-                    actual.add(rowStr);
-                });
-
-        assertThat(actual).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
+        List<String> result = batchRead(tableTestWrite);
+        assertThat(result).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
     }
 
     @Test
@@ -405,11 +439,39 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     private Catalog initDataTokenCatalog() {
-        Options options = new Options();
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
+        options.set(
+                RESTTestFileIO.DATA_PATH_CONF_KEY,
+                dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
         return new RESTCatalog(CatalogContext.create(options));
+    }
+
+    private void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
+        BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        for (Integer i : data) {
+            GenericRow record = GenericRow.of(i);
+            write.write(record);
+        }
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+    }
+
+    private List<String> batchRead(FileStoreTable tableTestWrite) throws IOException {
+        ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<String> result = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    String rowStr =
+                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
+                    result.add(rowStr);
+                });
+        return result;
     }
 }

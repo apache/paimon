@@ -18,8 +18,13 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
+import org.apache.paimon.rest.responses.ConfigResponse;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterEach;
@@ -28,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,14 +42,24 @@ public class SparkCatalogWithRestTest {
 
     private RESTCatalogServer restCatalogServer;
     private String serverUrl;
+    private String dataPath;
     private String warehouse;
-    private String initToken = "init_token";
     @TempDir java.nio.file.Path tempFile;
+    private String initToken = "init_token";
 
     @BeforeEach
     public void before() throws IOException {
-        warehouse = tempFile.toUri().toString();
-        restCatalogServer = new RESTCatalogServer(warehouse, initToken);
+        dataPath = tempFile.toUri().toString();
+        warehouse = UUID.randomUUID().toString();
+        ConfigResponse config =
+                new ConfigResponse(
+                        ImmutableMap.of(
+                                RESTCatalogInternalOptions.PREFIX.key(),
+                                "paimon",
+                                CatalogOptions.WAREHOUSE.key(),
+                                warehouse),
+                        ImmutableMap.of());
+        restCatalogServer = new RESTCatalogServer(dataPath, initToken, config, warehouse);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
     }
@@ -61,6 +77,7 @@ public class SparkCatalogWithRestTest {
                         .config("spark.sql.catalog.paimon.metastore", "rest")
                         .config("spark.sql.catalog.paimon.uri", serverUrl)
                         .config("spark.sql.catalog.paimon.token", initToken)
+                        .config("spark.sql.catalog.paimon.warehouse", warehouse)
                         .config(
                                 "spark.sql.catalog.paimon.token.provider",
                                 AuthProviderEnum.BEAR.identifier())
