@@ -326,8 +326,8 @@ public interface Catalog extends AutoCloseable {
     /**
      * Get paged partitioned list of the table.
      *
-     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog which supports
-     * view will return all partitions.
+     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog will return all
+     * partitions.
      *
      * @param identifier path of the table to list partitions
      * @param maxResults Optional parameter indicating the maximum number of results to include in
