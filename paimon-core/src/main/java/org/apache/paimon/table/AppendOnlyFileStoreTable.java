@@ -51,7 +51,7 @@ import java.util.List;
 import java.util.function.BiConsumer;
 
 /** {@link FileStoreTable} for append table. */
-class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
+public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -61,7 +61,7 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         this(fileIO, path, tableSchema, CatalogEnvironment.empty());
     }
 
-    AppendOnlyFileStoreTable(
+    public AppendOnlyFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,

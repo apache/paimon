@@ -86,7 +86,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final String tableName;
     protected final CoreOptions options;
     protected final RowType partitionType;
-    private final CatalogEnvironment catalogEnvironment;
+    protected final CatalogEnvironment catalogEnvironment;
 
     @Nullable private final SegmentsCache<Path> writeManifestCache;
     @Nullable private SegmentsCache<Path> readManifestCache;
@@ -279,7 +279,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
-        return newCommit(commitUser, Collections.emptyList());
+        return newCommit(commitUser, createCommitCallbacks(commitUser));
     }
 
     @Override
@@ -365,6 +365,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
+
+    protected abstract List<CommitCallback> createCommitCallbacks(String commitUser);
 
     @Override
     @Nullable

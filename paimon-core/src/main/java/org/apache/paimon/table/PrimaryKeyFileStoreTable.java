@@ -50,7 +50,7 @@ import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMap
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreTable} for primary key table. */
-class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
+public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -60,7 +60,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
         this(fileIO, path, tableSchema, CatalogEnvironment.empty());
     }
 
-    PrimaryKeyFileStoreTable(
+    public PrimaryKeyFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
