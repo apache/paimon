@@ -23,6 +23,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
+import org.apache.paimon.rest.RESTFileIOTestLoader;
 import org.apache.paimon.rest.RESTTestFileIO;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
@@ -166,7 +167,9 @@ class RESTCatalogITCase extends CatalogITCaseBase {
         options.put(RESTCatalogOptions.TOKEN.key(), initToken);
         options.put(RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.BEAR.identifier());
         options.put(RESTCatalogOptions.DATA_TOKEN_ENABLED.key(), "true");
-        options.put(RESTTestFileIO.DATA_PATH_CONF_KEY, dataPath);
+        options.put(
+                RESTTestFileIO.DATA_PATH_CONF_KEY,
+                dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
         return options;
     }
 

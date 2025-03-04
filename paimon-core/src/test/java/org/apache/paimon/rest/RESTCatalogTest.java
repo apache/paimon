@@ -335,7 +335,9 @@ class RESTCatalogTest extends CatalogTestBase {
 
     private Catalog initDataTokenCatalog() {
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
-        options.set(RESTTestFileIO.DATA_PATH_CONF_KEY, dataPath);
+        options.set(
+                RESTTestFileIO.DATA_PATH_CONF_KEY,
+                dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
         return new RESTCatalog(CatalogContext.create(options));
     }
 
