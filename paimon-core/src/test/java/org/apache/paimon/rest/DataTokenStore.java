@@ -23,31 +23,31 @@ import java.util.Map;
 
 /** DataTokenStore is used to store data token. */
 public class DataTokenStore {
-    private static final Map<String, Map<String, RESTToken>> serverName2ServerDataTokenStore =
+    private static final Map<String, Map<String, RESTToken>> warehouse2DataTokenStore =
             new HashMap<>();
 
-    public static void putDataToken(String serverId, String tableFullName, RESTToken dataToken) {
-        Map<String, RESTToken> serverDataTokenStore = serverName2ServerDataTokenStore.get(serverId);
-        if (serverDataTokenStore == null) {
-            serverDataTokenStore = new HashMap<>();
-            serverName2ServerDataTokenStore.put(serverId, serverDataTokenStore);
+    public static void putDataToken(String warehouse, String tableFullName, RESTToken dataToken) {
+        Map<String, RESTToken> dataTokenStore = warehouse2DataTokenStore.get(warehouse);
+        if (dataTokenStore == null) {
+            dataTokenStore = new HashMap<>();
+            warehouse2DataTokenStore.put(warehouse, dataTokenStore);
         }
-        serverDataTokenStore.put(tableFullName, dataToken);
+        dataTokenStore.put(tableFullName, dataToken);
     }
 
-    public static RESTToken getDataToken(String serverId, String tableFullName) {
-        Map<String, RESTToken> serverDataTokenStore = serverName2ServerDataTokenStore.get(serverId);
-        if (serverDataTokenStore == null) {
+    public static RESTToken getDataToken(String warehouse, String tableFullName) {
+        Map<String, RESTToken> dataTokenStore = warehouse2DataTokenStore.get(warehouse);
+        if (dataTokenStore == null) {
             return null;
         }
-        return serverDataTokenStore.get(tableFullName);
+        return dataTokenStore.get(tableFullName);
     }
 
-    public static void removeDataToken(String serverId, String tableFullName) {
-        Map<String, RESTToken> serverDataTokenStore = serverName2ServerDataTokenStore.get(serverId);
-        if (serverDataTokenStore != null && serverDataTokenStore.containsKey(tableFullName)) {
-            serverDataTokenStore.remove(tableFullName);
-            serverName2ServerDataTokenStore.put(serverId, serverDataTokenStore);
+    public static void removeDataToken(String warehouse, String tableFullName) {
+        Map<String, RESTToken> dataTokenStore = warehouse2DataTokenStore.get(warehouse);
+        if (dataTokenStore != null && dataTokenStore.containsKey(tableFullName)) {
+            dataTokenStore.remove(tableFullName);
+            warehouse2DataTokenStore.put(warehouse, dataTokenStore);
         }
     }
 }
