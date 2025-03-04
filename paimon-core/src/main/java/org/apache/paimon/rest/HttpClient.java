@@ -29,6 +29,7 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import okhttp3.Headers;
+import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -41,6 +42,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -88,6 +90,22 @@ public class HttpClient implements RESTClient {
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
+                        .get()
+                        .headers(Headers.of(authHeaders))
+                        .build();
+        return exec(request, responseType);
+    }
+
+    @Override
+    public <T extends RESTResponse> T get(
+            String path,
+            Map<String, String> queryParams,
+            Class<T> responseType,
+            RESTAuthFunction restAuthFunction) {
+        Map<String, String> authHeaders = getHeaders(path, "GET", "", restAuthFunction);
+        Request request =
+                new Request.Builder()
+                        .url(getRequestUrl(path, queryParams))
                         .get()
                         .headers(Headers.of(authHeaders))
                         .build();
@@ -191,7 +209,23 @@ public class HttpClient implements RESTClient {
     }
 
     private String getRequestUrl(String path) {
-        return StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
+        return getRequestUrl(path, null);
+    }
+
+    private String getRequestUrl(String path, Map<String, String> queryParams) {
+        String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
+        if (queryParams != null && !queryParams.isEmpty()) {
+            HttpUrl httpUrl = HttpUrl.parse(fullPath);
+            if (Objects.nonNull(httpUrl)) {
+                HttpUrl.Builder builder = httpUrl.newBuilder();
+                queryParams.forEach(builder::addQueryParameter);
+                return builder.build().toString();
+            } else {
+                return fullPath;
+            }
+        } else {
+            return fullPath;
+        }
     }
 
     private Map<String, String> getHeaders(

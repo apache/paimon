@@ -45,7 +45,9 @@ import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -226,8 +228,47 @@ public class RESTCatalogController {
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables")
     public ListTablesResponse listTables(
-            @PathVariable String prefix, @PathVariable String database) {
-        return new ListTablesResponse(ImmutableList.of("user"));
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // paged list tables in this database with provided maxResults and pageToken
+        return new ListTablesResponse(ImmutableList.of("user"), null);
+    }
+
+    @Operation(
+            summary = "List table details",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = ListTableDetailsResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/table-details")
+    public ListTableDetailsResponse listTableDetails(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // paged list table details in this database with provided maxResults and pageToken
+        GetTableResponse singleTable =
+                new GetTableResponse(
+                        UUID.randomUUID().toString(),
+                        "",
+                        false,
+                        1,
+                        new org.apache.paimon.schema.Schema(
+                                ImmutableList.of(),
+                                ImmutableList.of(),
+                                ImmutableList.of(),
+                                new HashMap<>(),
+                                "test-comment"));
+        return new ListTableDetailsResponse(ImmutableList.of(singleTable), null);
     }
 
     @Operation(
@@ -435,7 +476,10 @@ public class RESTCatalogController {
     public ListPartitionsResponse listPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable String table) {
+            @PathVariable String table,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // paged list partitions in this table with provided maxResults and pageToken
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
         Partition partition = new Partition(spec, 1, 2, 3, 4);
@@ -615,8 +659,50 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/views")
-    public ListViewsResponse listViews(@PathVariable String prefix, @PathVariable String database) {
-        return new ListViewsResponse(ImmutableList.of("view1"));
+    public ListViewsResponse listViews(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // support paged list views in this database with provided maxResults and pageToken
+        return new ListViewsResponse(ImmutableList.of("view1"), null);
+    }
+
+    @Operation(
+            summary = "List view details",
+            tags = {"view"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = ListViewsResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/views")
+    public ListViewDetailsResponse listViewDetails(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // paged list view details in this database with provided maxResults and pageToken
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", new IntType()),
+                        new DataField(1, "f1", new IntType()));
+        ViewSchema schema =
+                new ViewSchema(
+                        fields,
+                        "select * from t1",
+                        Collections.emptyMap(),
+                        "comment",
+                        Collections.singletonMap("pt", "1"));
+        GetViewResponse singleView = new GetViewResponse("id", "name", schema);
+        return new ListViewDetailsResponse(ImmutableList.of(singleView), null);
     }
 
     @Operation(
