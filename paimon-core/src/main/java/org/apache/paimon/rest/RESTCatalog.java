@@ -274,10 +274,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         try {
             String pageToken = null;
             Map<String, String> queryParams = Maps.newHashMap();
-            Integer maxResults = context.options().get(RESTCatalogOptions.REST_PAGE_MAX_RESULTS);
-            if (Objects.nonNull(maxResults) && maxResults > 0) {
-                queryParams.put(MAX_RESULTS, String.valueOf(maxResults));
-            }
             List<String> tables = new ArrayList<>();
             do {
                 queryParams.put(PAGE_TOKEN, pageToken);
@@ -665,10 +661,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         try {
             String pageToken = null;
             Map<String, String> queryParams = Maps.newHashMap();
-            Integer maxResults = context.options().get(RESTCatalogOptions.REST_PAGE_MAX_RESULTS);
-            if (Objects.nonNull(maxResults) && maxResults > 0) {
-                queryParams.put(MAX_RESULTS, String.valueOf(maxResults));
-            }
             List<Partition> partitions = new ArrayList<>();
             do {
                 queryParams.put(PAGE_TOKEN, pageToken);
@@ -869,10 +861,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         try {
             String pageToken = null;
             Map<String, String> queryParams = Maps.newHashMap();
-            Integer maxResults = context.options().get(RESTCatalogOptions.REST_PAGE_MAX_RESULTS);
-            if (Objects.nonNull(maxResults) && maxResults > 0) {
-                queryParams.put(MAX_RESULTS, String.valueOf(maxResults));
-            }
             List<String> views = new ArrayList<>();
             do {
                 queryParams.put(PAGE_TOKEN, pageToken);

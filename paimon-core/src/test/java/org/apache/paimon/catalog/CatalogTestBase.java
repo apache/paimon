@@ -268,7 +268,7 @@ public abstract class CatalogTestBase {
         String databaseName = "tables_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null);
-        assertThat(pagedTables.getPagedList()).isEmpty();
+        assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
         String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr"};
@@ -314,7 +314,7 @@ public abstract class CatalogTestBase {
         catalog.createDatabase(databaseName, false);
         PagedList<Table> pagedTableDetails =
                 catalog.listTableDetailsPaged(databaseName, null, null);
-        assertThat(pagedTableDetails.getPagedList()).isEmpty();
+        assertThat(pagedTableDetails.getElements()).isEmpty();
         assertNull(pagedTableDetails.getNextPageToken());
 
         // List table details paged returns a list with all table in the database in all catalogs
@@ -1093,7 +1093,7 @@ public abstract class CatalogTestBase {
         String databaseName = "views_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<String> pagedViews = catalog.listViewsPaged(databaseName, null, null);
-        assertThat(pagedViews.getPagedList()).isEmpty();
+        assertThat(pagedViews.getElements()).isEmpty();
         assertNull(pagedViews.getNextPageToken());
 
         // List views paged returns a list with the names of all views in the database in all
@@ -1143,7 +1143,7 @@ public abstract class CatalogTestBase {
         catalog.createDatabase(databaseName, false);
         PagedList<View> pagedViewDetailsPaged =
                 catalog.listViewDetailsPaged(databaseName, null, null);
-        assertThat(pagedViewDetailsPaged.getPagedList()).isEmpty();
+        assertThat(pagedViewDetailsPaged.getElements()).isEmpty();
         assertNull(pagedViewDetailsPaged.getNextPageToken());
 
         // List view details paged returns a list with all view in the database in all catalogs
@@ -1429,7 +1429,7 @@ public abstract class CatalogTestBase {
     }
 
     private void assertPagedTables(PagedList<String> tablePagedList, String... tableNames) {
-        List<String> tables = tablePagedList.getPagedList();
+        List<String> tables = tablePagedList.getElements();
         if (supportPagedList()) {
             assertThat(tables).containsExactly(tableNames);
         } else {
@@ -1440,7 +1440,7 @@ public abstract class CatalogTestBase {
 
     protected void assertPagedTableDetails(
             PagedList<Table> tableDetailsPagedList, int size, String... tableNames) {
-        List<Table> tableDetails = tableDetailsPagedList.getPagedList();
+        List<Table> tableDetails = tableDetailsPagedList.getElements();
         assertEquals(size, tableDetails.size());
         if (supportPagedList()) {
             assertThat(tableDetails.stream().map(Table::name).collect(Collectors.toList()))
@@ -1509,7 +1509,7 @@ public abstract class CatalogTestBase {
     }
 
     protected void assertPagedViews(PagedList<String> viewPagedList, String... viewNames) {
-        List<String> views = viewPagedList.getPagedList();
+        List<String> views = viewPagedList.getElements();
         if (supportPagedList()) {
             assertThat(views).containsExactly(viewNames);
         } else {
@@ -1519,7 +1519,7 @@ public abstract class CatalogTestBase {
 
     protected void assertPagedViewDetails(
             PagedList<View> viewDetailsPagedList, View view, int size, String... viewNames) {
-        List<View> viewDetails = viewDetailsPagedList.getPagedList();
+        List<View> viewDetails = viewDetailsPagedList.getElements();
         assertEquals(size, viewDetails.size());
         if (supportPagedList()) {
             assertThat(viewDetails.stream().map(View::name).collect(Collectors.toList()))
@@ -1560,7 +1560,7 @@ public abstract class CatalogTestBase {
             PagedList<Partition> partitionsPagedList,
             int size,
             Map<String, String>... partitionSpecs) {
-        List<Partition> partitions = partitionsPagedList.getPagedList();
+        List<Partition> partitions = partitionsPagedList.getElements();
         assertEquals(size, partitions.size());
         if (supportPagedList()) {
             assertThat(partitions.stream().map(Partition::spec)).containsExactly(partitionSpecs);

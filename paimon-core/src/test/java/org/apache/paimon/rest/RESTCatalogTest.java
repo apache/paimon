@@ -153,7 +153,6 @@ class RESTCatalogTest extends CatalogTestBase {
         String[] tableNames = {"table4", "table5", "table1", "table2", "table3"};
         String[] sortedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
         Options options = new Options(this.catalog.options());
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS, 2);
         try (RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options))) {
 
             restCatalog.createDatabase(databaseName, false);
@@ -173,18 +172,6 @@ class RESTCatalogTest extends CatalogTestBase {
             assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
                     .isThrownBy(() -> restCatalog.listTables("non_existing_db"));
         }
-
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS, 0);
-        try (RESTCatalog testCatalog = new RESTCatalog(CatalogContext.create(options))) {
-            List<String> restTables = testCatalog.listTables(databaseName);
-            assertThat(restTables).containsExactly(sortedTableNames);
-        }
-
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS.key(), "dummy");
-        try (RESTCatalog dummyCatalog = new RESTCatalog(CatalogContext.create(options))) {
-            assertThatExceptionOfType(IllegalArgumentException.class)
-                    .isThrownBy(() -> dummyCatalog.listTables(databaseName));
-        }
     }
 
     @Test
@@ -193,7 +180,7 @@ class RESTCatalogTest extends CatalogTestBase {
         String databaseName = "tables_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null);
-        assertThat(pagedTables.getPagedList()).isEmpty();
+        assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
         String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr"};
@@ -205,7 +192,7 @@ class RESTCatalogTest extends CatalogTestBase {
         // when maxResults is null or 0, the page length is set to a server configured value
         String[] sortedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
         pagedTables = catalog.listTablesPaged(databaseName, null, null);
-        List<String> tables = pagedTables.getPagedList();
+        List<String> tables = pagedTables.getElements();
         assertThat(tables).containsExactly(sortedTableNames);
         assertNull(pagedTables.getNextPageToken());
 
@@ -214,7 +201,7 @@ class RESTCatalogTest extends CatalogTestBase {
         // when pageToken is null, will list tables from the beginning
         int maxResults = 2;
         pagedTables = catalog.listTablesPaged(databaseName, maxResults, null);
-        tables = pagedTables.getPagedList();
+        tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("abd", "def");
         assertEquals("def", pagedTables.getNextPageToken());
@@ -222,33 +209,33 @@ class RESTCatalogTest extends CatalogTestBase {
         // when pageToken is not null, will list tables from the pageToken (exclusive)
         pagedTables =
                 catalog.listTablesPaged(databaseName, maxResults, pagedTables.getNextPageToken());
-        tables = pagedTables.getPagedList();
+        tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("opr", "table1");
         assertEquals("table1", pagedTables.getNextPageToken());
 
         pagedTables =
                 catalog.listTablesPaged(databaseName, maxResults, pagedTables.getNextPageToken());
-        tables = pagedTables.getPagedList();
+        tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("table2", "table3");
         assertEquals("table3", pagedTables.getNextPageToken());
 
         pagedTables =
                 catalog.listTablesPaged(databaseName, maxResults, pagedTables.getNextPageToken());
-        tables = pagedTables.getPagedList();
+        tables = pagedTables.getElements();
         assertEquals(0, tables.size());
         assertNull(pagedTables.getNextPageToken());
 
         maxResults = 8;
         pagedTables = catalog.listTablesPaged(databaseName, maxResults, null);
-        tables = pagedTables.getPagedList();
+        tables = pagedTables.getElements();
         String[] expectedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
         assertThat(tables).containsExactly(expectedTableNames);
         assertNull(pagedTables.getNextPageToken());
 
         pagedTables = catalog.listTablesPaged(databaseName, maxResults, "table1");
-        tables = pagedTables.getPagedList();
+        tables = pagedTables.getElements();
         assertEquals(2, tables.size());
         assertThat(tables).containsExactly("table2", "table3");
         assertNull(pagedTables.getNextPageToken());
@@ -265,7 +252,7 @@ class RESTCatalogTest extends CatalogTestBase {
         catalog.createDatabase(databaseName, false);
         PagedList<Table> pagedTableDetails =
                 catalog.listTableDetailsPaged(databaseName, null, null);
-        assertThat(pagedTableDetails.getPagedList()).isEmpty();
+        assertThat(pagedTableDetails.getElements()).isEmpty();
         assertNull(pagedTableDetails.getNextPageToken());
 
         String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr"};
@@ -299,7 +286,7 @@ class RESTCatalogTest extends CatalogTestBase {
         pagedTableDetails =
                 catalog.listTableDetailsPaged(
                         databaseName, maxResults, pagedTableDetails.getNextPageToken());
-        assertEquals(0, pagedTableDetails.getPagedList().size());
+        assertEquals(0, pagedTableDetails.getElements().size());
         assertNull(pagedTableDetails.getNextPageToken());
 
         maxResults = 8;
@@ -325,7 +312,6 @@ class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testListViews() throws Exception {
         Options options = new Options(this.catalog.options());
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS, 2);
         String databaseName;
         List<String> views;
         String[] viewNames = new String[] {"view1", "view2", "view3", "abd", "def", "opr", "xyz"};
@@ -349,18 +335,6 @@ class RESTCatalogTest extends CatalogTestBase {
             restViews = restCatalog.listViews(databaseName);
         }
         assertThat(restViews).containsExactly(sortedViewNames);
-
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS, -1);
-        try (RESTCatalog testCatalog = new RESTCatalog(CatalogContext.create(options))) {
-            List<String> restTables = testCatalog.listViews(databaseName);
-            assertThat(restTables).containsExactly(sortedViewNames);
-        }
-
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS.key(), "dummy");
-        try (RESTCatalog dummyCatalog = new RESTCatalog(CatalogContext.create(options))) {
-            assertThatExceptionOfType(IllegalArgumentException.class)
-                    .isThrownBy(() -> dummyCatalog.listTables(databaseName));
-        }
     }
 
     @Test
@@ -373,7 +347,7 @@ class RESTCatalogTest extends CatalogTestBase {
         String databaseName = "views_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<String> pagedViews = catalog.listViewsPaged(databaseName, null, null);
-        assertThat(pagedViews.getPagedList()).isEmpty();
+        assertThat(pagedViews.getElements()).isEmpty();
         assertNull(pagedViews.getNextPageToken());
 
         // List views paged returns a list with the names of all views in the database in all
@@ -387,7 +361,7 @@ class RESTCatalogTest extends CatalogTestBase {
         }
 
         pagedViews = catalog.listViewsPaged(databaseName, null, null);
-        assertThat(pagedViews.getPagedList()).containsExactly(sortedViewNames);
+        assertThat(pagedViews.getElements()).containsExactly(sortedViewNames);
         assertNull(pagedViews.getNextPageToken());
 
         int maxResults = 2;
@@ -431,7 +405,7 @@ class RESTCatalogTest extends CatalogTestBase {
         String databaseName = "view_details_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<View> pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null);
-        assertThat(pagedViewDetails.getPagedList()).isEmpty();
+        assertThat(pagedViewDetails.getElements()).isEmpty();
         assertNull(pagedViewDetails.getNextPageToken());
 
         String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr"};
@@ -464,7 +438,7 @@ class RESTCatalogTest extends CatalogTestBase {
         pagedViewDetails =
                 catalog.listViewDetailsPaged(
                         databaseName, maxResults, pagedViewDetails.getNextPageToken());
-        assertEquals(0, pagedViewDetails.getPagedList().size());
+        assertEquals(0, pagedViewDetails.getElements().size());
         assertNull(pagedViewDetails.getNextPageToken());
 
         maxResults = 8;
@@ -526,7 +500,6 @@ class RESTCatalogTest extends CatalogTestBase {
                         .toArray(Map[]::new);
 
         Options options = new Options(this.catalog.options());
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS, 2);
         Identifier identifier;
         try (RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options))) {
 
@@ -553,18 +526,6 @@ class RESTCatalogTest extends CatalogTestBase {
                             () ->
                                     restCatalog.listPartitions(
                                             Identifier.create(databaseName, "non_existing_table")));
-        }
-
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS, -1);
-        try (RESTCatalog testCatalog = new RESTCatalog(CatalogContext.create(options))) {
-            List<Partition> restPartitions = testCatalog.listPartitions(identifier);
-            assertThat(restPartitions.stream().map(Partition::spec)).containsExactly(sortedSpecs);
-        }
-
-        options.set(RESTCatalogOptions.REST_PAGE_MAX_RESULTS.key(), "dummy");
-        try (RESTCatalog dummyCatalog = new RESTCatalog(CatalogContext.create(options))) {
-            assertThatExceptionOfType(IllegalArgumentException.class)
-                    .isThrownBy(() -> dummyCatalog.listPartitions(identifier));
         }
     }
 
@@ -624,7 +585,7 @@ class RESTCatalogTest extends CatalogTestBase {
         pagedPartitions =
                 catalog.listPartitionsPaged(
                         identifier, maxResults, pagedPartitions.getNextPageToken());
-        assertThat(pagedPartitions.getPagedList()).isEmpty();
+        assertThat(pagedPartitions.getElements()).isEmpty();
         assertNull(pagedPartitions.getNextPageToken());
 
         maxResults = 8;

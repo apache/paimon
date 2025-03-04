@@ -18,23 +18,30 @@
 
 package org.apache.paimon;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
-/** Paged List which supports request data from page streaming. */
+/**
+ * Paged List which supports request data from page streaming.
+ *
+ * @since 1.1.0
+ */
 public class PagedList<T> {
-    private final List<T> pagedList;
+    private final List<T> elements;
 
-    private final String nextPageToken;
+    @Nullable private final String nextPageToken;
 
-    public PagedList(List<T> pagedList, String nextPageToken) {
-        this.pagedList = pagedList;
+    public PagedList(List<T> elements, @Nullable String nextPageToken) {
+        this.elements = elements;
         this.nextPageToken = nextPageToken;
     }
 
-    public List<T> getPagedList() {
-        return this.pagedList;
+    public List<T> getElements() {
+        return this.elements;
     }
 
+    @Nullable
     public String getNextPageToken() {
         return this.nextPageToken;
     }

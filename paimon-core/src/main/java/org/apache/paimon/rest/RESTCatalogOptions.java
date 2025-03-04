@@ -85,10 +85,4 @@ public class RESTCatalogOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
-
-    public static final ConfigOption<Integer> REST_PAGE_MAX_RESULTS =
-            ConfigOptions.key("rest.page.max.results")
-                    .intType()
-                    .defaultValue(100)
-                    .withDescription("the page size of each paged listing request in rest catalog");
 }

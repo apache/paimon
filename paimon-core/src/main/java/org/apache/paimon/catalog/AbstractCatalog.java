@@ -299,7 +299,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws DatabaseNotExistException {
         PagedList<String> pagedTableNames = listTablesPaged(databaseName, maxResults, pageToken);
         return new PagedList<>(
-                pagedTableNames.getPagedList().stream()
+                pagedTableNames.getElements().stream()
                         .map(
                                 tableName -> {
                                     try {

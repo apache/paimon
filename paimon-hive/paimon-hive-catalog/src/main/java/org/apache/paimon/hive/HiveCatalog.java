@@ -864,7 +864,7 @@ public class HiveCatalog extends AbstractCatalog {
 
         PagedList<String> pagedViewNames = listViewsPaged(databaseName, maxResults, pageToken);
         return new PagedList<>(
-                pagedViewNames.getPagedList().stream()
+                pagedViewNames.getElements().stream()
                         .map(
                                 viewName -> {
                                     try {
