@@ -276,7 +276,9 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             Map<String, String> queryParams = Maps.newHashMap();
             List<String> tables = new ArrayList<>();
             do {
-                queryParams.put(PAGE_TOKEN, pageToken);
+                if (pageToken != null) {
+                    queryParams.put(PAGE_TOKEN, pageToken);
+                }
                 ListTablesResponse response =
                         client.get(
                                 resourcePaths.tables(databaseName),
@@ -663,7 +665,9 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             Map<String, String> queryParams = Maps.newHashMap();
             List<Partition> partitions = new ArrayList<>();
             do {
-                queryParams.put(PAGE_TOKEN, pageToken);
+                if (pageToken != null) {
+                    queryParams.put(PAGE_TOKEN, pageToken);
+                }
                 ListPartitionsResponse response =
                         client.get(
                                 resourcePaths.partitions(
@@ -863,7 +867,9 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             Map<String, String> queryParams = Maps.newHashMap();
             List<String> views = new ArrayList<>();
             do {
-                queryParams.put(PAGE_TOKEN, pageToken);
+                if (pageToken != null) {
+                    queryParams.put(PAGE_TOKEN, pageToken);
+                }
                 ListViewsResponse response =
                         client.get(
                                 resourcePaths.views(databaseName),
