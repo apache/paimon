@@ -284,38 +284,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                 null);
     }
 
-    private FileIO fileIOForData(Path path, Identifier identifier) {
-        return dataTokenEnabled
-                ? new RESTTokenFileIO(catalogLoader(), this, identifier, path)
-                : fileIOFromOptions(path);
-    }
-
-    private FileIO fileIOFromOptions(Path path) {
-        try {
-            return FileIO.get(path, context);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    protected GetTableTokenResponse loadTableToken(Identifier identifier)
-            throws TableNotExistException {
-        GetTableTokenResponse response;
-        try {
-            response =
-                    client.get(
-                            resourcePaths.tableToken(
-                                    identifier.getDatabaseName(), identifier.getObjectName()),
-                            GetTableTokenResponse.class,
-                            restAuthFunction);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
-        return response;
-    }
-
     @Override
     public Optional<Snapshot> loadSnapshot(Identifier identifier) throws TableNotExistException {
         GetTableSnapshotResponse response;
@@ -766,6 +734,24 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         return restAuthFunction.apply(restAuthParameter);
     }
 
+    protected GetTableTokenResponse loadTableToken(Identifier identifier)
+            throws TableNotExistException {
+        GetTableTokenResponse response;
+        try {
+            response =
+                    client.get(
+                            resourcePaths.tableToken(
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
+                            GetTableTokenResponse.class,
+                            restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+        return response;
+    }
+
     private ScheduledExecutorService tokenRefreshExecutor() {
         if (refreshExecutor == null) {
             synchronized (this) {
@@ -776,5 +762,19 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         }
 
         return refreshExecutor;
+    }
+
+    private FileIO fileIOForData(Path path, Identifier identifier) {
+        return dataTokenEnabled
+                ? new RESTTokenFileIO(catalogLoader(), this, identifier, path)
+                : fileIOFromOptions(path);
+    }
+
+    private FileIO fileIOFromOptions(Path path) {
+        try {
+            return FileIO.get(path, context);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 }

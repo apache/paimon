@@ -1089,6 +1089,12 @@ public abstract class CatalogTestBase {
                                 catalog.markDonePartitions(
                                         Identifier.create(databaseName, "non_existing_table"),
                                         partitionSpecs));
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.dropPartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        partitionSpecs));
     }
 
     @Test

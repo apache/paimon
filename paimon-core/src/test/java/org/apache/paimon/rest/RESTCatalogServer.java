@@ -116,11 +116,13 @@ public class RESTCatalogServer {
     private final MockWebServer server;
     private final String authToken;
 
-    public final Map<String, Database> databaseStore = new HashMap<>();
-    public final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
-    public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
-    public final Map<String, View> viewStore = new HashMap<>();
-    public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
+    private final Map<String, Database> databaseStore = new HashMap<>();
+    private final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
+    private final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
+    private final Map<String, View> viewStore = new HashMap<>();
+    private final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
+    private final List<String> noPermissionDatabases = new ArrayList<>();
+    private final List<String> noPermissionTables = new ArrayList<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
 
@@ -178,6 +180,15 @@ public class RESTCatalogServer {
         DataTokenStore.removeDataToken(warehouse, identifier.getFullName());
     }
 
+
+    public void addNoPermissionDatabase(String database) {
+        noPermissionDatabases.add(database);
+    }
+
+    public void addNoPermissionTable(Identifier identifier) {
+        noPermissionTables.add(identifier.getFullName());
+    }
+  
     public RESTToken getDataToken(Identifier identifier) {
         return DataTokenStore.getDataToken(warehouse, identifier.getFullName());
     }
@@ -203,6 +214,9 @@ public class RESTCatalogServer {
                                         .substring((databaseUri + "/").length())
                                         .split("/");
                         String databaseName = resources[0];
+                        if (noPermissionDatabases.contains(databaseName)) {
+                            throw new Catalog.DatabaseNoPermissionException(databaseName);
+                        }
                         if (!databaseStore.containsKey(databaseName)) {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
@@ -264,8 +278,18 @@ public class RESTCatalogServer {
                                         && "branches".equals(resources[3]);
                         Identifier identifier =
                                 resources.length >= 3
+                                                && !"rename".equals(resources[2])
+                                                && !"commit".equals(resources[2])
                                         ? Identifier.create(databaseName, resources[2])
                                         : null;
+                        if (identifier != null && "tables".equals(resources[1])) {
+                            if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+                                throw new Catalog.TableNotExistException(identifier);
+                            }
+                            if (noPermissionTables.contains(identifier.getFullName())) {
+                                throw new Catalog.TableNoPermissionException(identifier);
+                            }
+                        }
                         // validate partition
                         if (isPartitions
                                 || isDropPartitions
@@ -375,6 +399,22 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     404);
                     return mockResponse(response, 404);
+                } catch (Catalog.DatabaseNoPermissionException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.DATABASE,
+                                    e.database(),
+                                    e.getMessage(),
+                                    403);
+                    return mockResponse(response, 403);
+                } catch (Catalog.TableNoPermissionException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.TABLE,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    403);
+                    return mockResponse(response, 403);
                 } catch (Catalog.DatabaseAlreadyExistException e) {
                     response =
                             new ErrorResponse(
@@ -498,7 +538,13 @@ public class RESTCatalogServer {
     private MockResponse commitTableHandle(RecordedRequest request) throws Exception {
         CommitTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
-        Identifier identifier = requestBody.getIdentifier();
+      Identifier identifier = requestBody.getIdentifier();
+        if (noPermissionTables.contains(requestBody.getIdentifier().getFullName())) {
+            throw new Catalog.TableNoPermissionException(requestBody.getIdentifier());
+        }
+        if (!tableMetadataStore.containsKey(requestBody.getIdentifier().getFullName())) {
+            throw new Catalog.TableNotExistException(requestBody.getIdentifier());
+        }
         FileStoreTable table = getFileTable(identifier);
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
@@ -525,6 +571,9 @@ public class RESTCatalogServer {
                         OBJECT_MAPPER.readValue(
                                 request.getBody().readUtf8(), CreateDatabaseRequest.class);
                 String databaseName = requestBody.getName();
+                if (noPermissionDatabases.contains(databaseName)) {
+                    throw new Catalog.DatabaseNoPermissionException(databaseName);
+                }
                 catalog.createDatabase(databaseName, false);
                 databaseStore.put(
                         databaseName, Database.of(databaseName, requestBody.getOptions(), null));
@@ -648,7 +697,9 @@ public class RESTCatalogServer {
     private MockResponse tableHandle(RecordedRequest request, Identifier identifier)
             throws Exception {
         RESTResponse response;
-        if (tableMetadataStore.containsKey(identifier.getFullName())) {
+        if (noPermissionTables.contains(identifier.getFullName())) {
+            throw new Catalog.TableNoPermissionException(identifier);
+        } else if (tableMetadataStore.containsKey(identifier.getFullName())) {
             switch (request.getMethod()) {
                 case "GET":
                     TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
@@ -687,7 +738,9 @@ public class RESTCatalogServer {
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
         Identifier fromTable = requestBody.getSource();
         Identifier toTable = requestBody.getDestination();
-        if (tableMetadataStore.containsKey(fromTable.getFullName())) {
+        if (noPermissionTables.contains(fromTable.getFullName())) {
+            throw new Catalog.TableNoPermissionException(fromTable);
+        } else if (tableMetadataStore.containsKey(fromTable.getFullName())) {
             TableMetadata tableMetadata = tableMetadataStore.get(fromTable.getFullName());
             if (!isFormatTable(tableMetadata.schema().toSchema())) {
                 catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
