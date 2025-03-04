@@ -191,6 +191,70 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
+    public void testDropPartition() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt1", "pt2", "k", "v"});
+
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Arrays.asList("pt1", "pt2"),
+                        Arrays.asList("pt1", "pt2", "k"),
+                        1,
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(BinaryString.fromString("20250304"), 15, 1, 1));
+        write.write(GenericRow.of(BinaryString.fromString("20250304"), 16, 1, 1));
+        write.write(GenericRow.of(BinaryString.fromString("20250305"), 15, 1, 1));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(20250304, 15, 1, 1)",
+                        "Record(20250304, 16, 1, 1)",
+                        "Record(20250305, 15, 1, 1)");
+
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path path = new Path(tempDir.toString());
+
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path)) {
+            Identifier paimonIdentifier = Identifier.create("mydb", "t");
+            if (ThreadLocalRandom.current().nextBoolean()) {
+                // delete the second-level partition
+                Map<String, String> partition = new HashMap<>();
+                partition.put("pt1", "20250304");
+                partition.put("pt2", "16");
+                paimonCatalog.dropPartitions(
+                        paimonIdentifier, Collections.singletonList(partition));
+
+                assertThat(getIcebergResult())
+                        .containsExactlyInAnyOrder(
+                                "Record(20250304, 15, 1, 1)", "Record(20250305, 15, 1, 1)");
+            } else {
+                // delete the first-level partition
+                Map<String, String> partition = new HashMap<>();
+                partition.put("pt1", "20250304");
+                paimonCatalog.dropPartitions(
+                        paimonIdentifier, Collections.singletonList(partition));
+
+                assertThat(getIcebergResult())
+                        .containsExactlyInAnyOrder("Record(20250305, 15, 1, 1)");
+            }
+        }
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testRetryCreateMetadata() throws Exception {
         RowType rowType =
                 RowType.of(
