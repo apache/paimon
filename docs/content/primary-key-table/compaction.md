@@ -92,6 +92,24 @@ Paimon also provides a configuration that allows for regular execution of Full C
 2. 'full-compaction.delta-commits': Full compaction will be constantly triggered after delta commits. Its disadvantage
     is that it can only perform compaction synchronously, which will affect writing efficiency.
 
+## Lookup Compaction
+
+When primary key table is configured with `lookup` [changelog producer]({{< ref "primary-key-table/changelog-producer" >}}) 
+or `first-row` [merge-engine]({{< ref "primary-key-table/merge-engine" >}})
+or has enabled `deletion vectors` for [MOW mode]({{< ref "primary-key-table/table-mode#merge-on-write" >}}), Paimon will
+use a radical compaction strategy to force compacting level 0 files to higher levels for every compaction trigger.
+
+Paimon also provides configurations to optimize the frequency of this compaction.
+
+1. 'lookup-compact': compact mode used for lookup compaction. Possible values: `radical`, will use
+   `ForceUpLevel0Compaction` strategy to radically compact new files; `gentle`, will use `UniversalCompaction` strategy
+   to gently compact new files;
+2. 'lookup-compact.max-interval': The max interval for a forced L0 lookup compaction to be triggered in `gentle` mode.
+   This option is only valid when `lookup-compact` mode is `gentle`.
+
+By configuring 'lookup-compact' as `gentle`, new files in L0 will not be compacted immediately, this may greatly
+reduce the overall resource usage at the expense of worse data freshness in certain cases.
+
 ## Compaction Options
 
 ### Number of Sorted Runs to Pause Writing
