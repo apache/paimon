@@ -38,6 +38,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.DATA_TOKEN_ENABLED;
  * <p>It is used to test the RESTFileIO.
  */
 public class RESTTestFileIO extends LocalFileIO {
+
     public static final String TOKEN_UN_EXIST_MSG = "token is null";
     public static final String TOKEN_EXPIRED_MSG = "token is expired";
     public static final String DATA_PATH_CONF_KEY = "rest.test.data-path";

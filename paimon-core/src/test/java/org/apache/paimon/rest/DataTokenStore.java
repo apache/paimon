@@ -23,6 +23,8 @@ import java.util.Map;
 
 /** DataTokenStore is used to store data token. */
 public class DataTokenStore {
+
+    // as warehouse means one catalog instance, so we use warehouse as key to store data token
     private static final Map<String, Map<String, RESTToken>> warehouse2DataTokenStore =
             new HashMap<>();
 
