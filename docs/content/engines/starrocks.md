@@ -38,12 +38,10 @@ Paimon catalogs are registered by executing a `CREATE EXTERNAL CATALOG` SQL in S
 For example, you can use the following SQL to create a Paimon catalog named paimon_catalog.
 
 ```sql
-CREATE EXTERNAL CATALOG paimon_catalog
-PROPERTIES
-(
-"type" = "paimon",
-"paimon.catalog.type" = "filesystem",
-"paimon.catalog.warehouse" = "oss://<your_bucket>/user/warehouse/"
+CREATE EXTERNAL CATALOG paimon_catalog PROPERTIES(
+    "type" = "paimon",
+    "paimon.catalog.type" = "filesystem",
+    "paimon.catalog.warehouse" = "oss://<your_bucket>/user/warehouse/"
 );
 ```
 
