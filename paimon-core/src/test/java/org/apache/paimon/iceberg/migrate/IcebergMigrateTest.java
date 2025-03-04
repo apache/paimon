@@ -716,6 +716,91 @@ public class IcebergMigrateTest {
         assertThat(paiResults.size()).isEqualTo(1);
     }
 
+    @Test
+    public void testNestedDataTypes() throws Exception {
+        // iceberg nested schema
+        // table {
+        //  1: c1: required list<string>
+        //  2: c2: required map<string, int>
+        //  3: c3: required struct<11: c31: required int, 12: c32: required string>
+        //  4: c4: required map<int, list<struct<13: c41: required int, 14: c42: required string>>>
+        // }
+        Schema innerType1 =
+                new Schema(
+                        Types.NestedField.required(11, "c31", Types.IntegerType.get()),
+                        Types.NestedField.required(12, "c32", Types.StringType.get()));
+        Schema innerType2 =
+                new Schema(
+                        Types.NestedField.required(13, "c41", Types.IntegerType.get()),
+                        Types.NestedField.required(14, "c42", Types.StringType.get()));
+        Schema iceNestedTypesSchema =
+                new Schema(
+                        Types.NestedField.required(
+                                1, "c1", Types.ListType.ofRequired(15, Types.StringType.get())),
+                        Types.NestedField.required(
+                                2,
+                                "c2",
+                                Types.MapType.ofRequired(
+                                        16, 17, Types.StringType.get(), Types.IntegerType.get())),
+                        Types.NestedField.required(3, "c3", innerType1.asStruct()),
+                        Types.NestedField.required(
+                                4,
+                                "c4",
+                                Types.MapType.ofRequired(
+                                        18,
+                                        19,
+                                        Types.IntegerType.get(),
+                                        Types.ListType.ofRequired(20, innerType2.asStruct()))));
+        Table icebergTable = createIcebergTable(false, iceNestedTypesSchema);
+        String format = "parquet";
+        GenericRecord record =
+                toIcebergRecord(
+                        iceNestedTypesSchema,
+                        Arrays.asList("hello", "hi"),
+                        new HashMap<String, Integer>() {
+                            {
+                                put("k1", 1);
+                                put("k2", 2);
+                            }
+                        },
+                        toIcebergRecord(innerType1, 1, "test"),
+                        new HashMap<Integer, List<GenericRecord>>() {
+                            {
+                                put(
+                                        1,
+                                        Collections.singletonList(
+                                                toIcebergRecord(innerType2, 11, "test-11")));
+                                put(
+                                        2,
+                                        Arrays.asList(
+                                                toIcebergRecord(innerType2, 12, "test-12"),
+                                                toIcebergRecord(innerType2, 13, "test-13")));
+                            }
+                        });
+
+        writeRecordsToIceberg(icebergTable, format, Collections.singletonList(record));
+
+        IcebergMigrator icebergMigrator =
+                new IcebergMigrator(
+                        paiCatalog,
+                        paiDatabase,
+                        paiTable,
+                        iceDatabase,
+                        iceTable,
+                        new Options(icebergProperties),
+                        1,
+                        Collections.emptyMap());
+        icebergMigrator.executeMigrate();
+
+        FileStoreTable paimonTable =
+                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
+        List<String> paiResults = getPaimonResult(paimonTable);
+        assertThat(paiResults.stream().map(row -> String.format("(%s)", row)))
+                .hasSameElementsAs(
+                        Collections.singletonList(
+                                record.toString().replaceAll("\\bRecord\\b", "")));
+    }
+
     private org.apache.iceberg.catalog.Catalog createIcebergCatalog() {
         Map<String, String> icebergCatalogOptions = new HashMap<>();
         icebergCatalogOptions.put("type", "hadoop");
@@ -899,7 +984,7 @@ public class IcebergMigrateTest {
             recordReader.forEachRemaining(
                     row ->
                             result.add(
-                                    DataFormatTestUtil.toStringNoRowKind(
+                                    DataFormatTestUtil.toStringWithRowKind(
                                             row, paimonTable.rowType())));
             return result;
         }
