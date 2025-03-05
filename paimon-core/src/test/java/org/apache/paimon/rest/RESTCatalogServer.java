@@ -191,7 +191,6 @@ public class RESTCatalogServer {
         DataTokenStore.removeDataToken(warehouse, identifier.getFullName());
     }
 
-
     public void addNoPermissionDatabase(String database) {
         noPermissionDatabases.add(database);
     }
@@ -199,7 +198,7 @@ public class RESTCatalogServer {
     public void addNoPermissionTable(Identifier identifier) {
         noPermissionTables.add(identifier.getFullName());
     }
-  
+
     public RESTToken getDataToken(Identifier identifier) {
         return DataTokenStore.getDataToken(warehouse, identifier.getFullName());
     }
@@ -558,7 +557,7 @@ public class RESTCatalogServer {
     private MockResponse commitTableHandle(RecordedRequest request) throws Exception {
         CommitTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
-      Identifier identifier = requestBody.getIdentifier();
+        Identifier identifier = requestBody.getIdentifier();
         if (noPermissionTables.contains(requestBody.getIdentifier().getFullName())) {
             throw new Catalog.TableNoPermissionException(requestBody.getIdentifier());
         }

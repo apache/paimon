@@ -285,15 +285,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                                 queryParams,
                                 ListTablesResponse.class,
                                 restAuthFunction);
-                if (Objects.nonNull(response)) {
-                    pageToken = response.getNextPageToken();
-                    tables.addAll(response.getTables());
-                } else {
-                    LOG.warn(
-                            "response of listTables for {} is null with params {}",
-                            databaseName,
-                            queryParams);
-                }
+                pageToken = response.getNextPageToken();
+                tables.addAll(response.getTables());
             } while (StringUtils.isNotEmpty(pageToken));
             return tables;
         } catch (NoSuchResourceException e) {
@@ -313,7 +306,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                             queryParams,
                             ListTablesResponse.class,
                             restAuthFunction);
-            if (Objects.nonNull(response) && Objects.nonNull(response.getTables())) {
+            if (Objects.nonNull(response.getTables())) {
                 return new PagedList<>(response.getTables(), response.getNextPageToken());
             } else {
                 LOG.warn(
@@ -340,7 +333,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                             queryParams,
                             ListTableDetailsResponse.class,
                             restAuthFunction);
-            if (Objects.nonNull(response) && Objects.nonNull(response.getTableDetails())) {
+            if (Objects.nonNull(response.getTableDetails())) {
                 return new PagedList<>(
                         response.getTableDetails().stream()
                                 .map(
@@ -643,16 +636,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                                 queryParams,
                                 ListPartitionsResponse.class,
                                 restAuthFunction);
-                if (Objects.nonNull(response)) {
-                    pageToken = response.getNextPageToken();
-                    partitions.addAll(response.getPartitions());
-                } else {
-                    LOG.warn(
-                            "response of listPartitions for {}.{} is null with params {}",
-                            identifier.getDatabaseName(),
-                            identifier.getTableName(),
-                            queryParams);
-                }
+                pageToken = response.getNextPageToken();
+                partitions.addAll(response.getPartitions());
             } while (StringUtils.isNotEmpty(pageToken));
             return partitions;
         } catch (NoSuchResourceException e) {
@@ -752,11 +737,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                             queryParams,
                             ListPartitionsResponse.class,
                             restAuthFunction);
-            if (Objects.nonNull(response)) {
-                return new PagedList<>(response.getPartitions(), response.getNextPageToken());
-            } else {
-                return new PagedList<>(Collections.emptyList(), null);
-            }
+            return new PagedList<>(response.getPartitions(), response.getNextPageToken());
 
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
@@ -844,15 +825,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                                 queryParams,
                                 ListViewsResponse.class,
                                 restAuthFunction);
-                if (Objects.nonNull(response)) {
-                    pageToken = response.getNextPageToken();
-                    views.addAll(response.getViews());
-                } else {
-                    LOG.warn(
-                            "response of listViews for {} is null with params {}",
-                            databaseName,
-                            queryParams);
-                }
+                pageToken = response.getNextPageToken();
+                views.addAll(response.getViews());
             } while (StringUtils.isNotEmpty(pageToken));
             return views;
         } catch (NoSuchResourceException e) {
@@ -872,7 +846,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                             queryParams,
                             ListViewsResponse.class,
                             restAuthFunction);
-            if (Objects.nonNull(response) && Objects.nonNull(response.getViews())) {
+            if (Objects.nonNull(response.getViews())) {
                 return new PagedList<>(response.getViews(), response.getNextPageToken());
             } else {
                 LOG.warn(
@@ -899,7 +873,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                             queryParams,
                             ListViewDetailsResponse.class,
                             restAuthFunction);
-            if (Objects.nonNull(response) && Objects.nonNull(response.getViewDetails())) {
+            if (Objects.nonNull(response.getViewDetails())) {
                 return new PagedList<>(
                         response.getViewDetails().stream()
                                 .map(
@@ -996,7 +970,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
 
         return refreshExecutor;
     }
-
 
     private FileIO fileIOForData(Path path, Identifier identifier) {
         return dataTokenEnabled
