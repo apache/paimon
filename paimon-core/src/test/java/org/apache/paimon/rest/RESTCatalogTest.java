@@ -894,19 +894,23 @@ class RESTCatalogTest extends CatalogTestBase {
                             fetchTimes.incrementAndGet();
                             if (nextToken == null) {
                                 return new TestPagedResponse(
-                                        (maxResults - 1) + "", testData.subList(0, maxResults));
+                                        maxResults + "", testData.subList(0, maxResults));
                             } else {
-                                Integer index = Integer.parseInt(nextToken) + 1;
-                                if (index >= testData.size() - 1) {
+                                Integer index = Integer.parseInt(nextToken);
+                                if (index >= testData.size()) {
                                     return new TestPagedResponse(null, null);
                                 } else {
+                                    String nextPageToken =
+                                            (index + maxResults) == (testData.size())
+                                                    ? null
+                                                    : (index + maxResults + 1) + "";
                                     return new TestPagedResponse(
-                                            (index + maxResults - 1) + "",
+                                            nextPageToken,
                                             testData.subList(index, index + maxResults));
                                 }
                             }
                         });
-        assertEquals(fetchTimes.get(), 3);
+        assertEquals(fetchTimes.get(), testData.size() / maxResults);
         assertThat(fetchData).containsSequence(testData);
     }
 
