@@ -103,6 +103,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
@@ -272,23 +273,17 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
-            String pageToken = null;
-            Map<String, String> queryParams = Maps.newHashMap();
-            List<String> tables = new ArrayList<>();
-            do {
-                if (pageToken != null) {
-                    queryParams.put(PAGE_TOKEN, pageToken);
-                }
-                ListTablesResponse response =
-                        client.get(
-                                resourcePaths.tables(databaseName),
-                                queryParams,
-                                ListTablesResponse.class,
-                                restAuthFunction);
-                pageToken = response.getNextPageToken();
-                tables.addAll(response.getTables());
-            } while (StringUtils.isNotEmpty(pageToken));
-            return tables;
+            return listDataFromPageApi(
+                    null,
+                    pageToken -> {
+                        ListTablesResponse response =
+                                client.get(
+                                        resourcePaths.tables(databaseName),
+                                        Maps.newHashMap(),
+                                        ListTablesResponse.class,
+                                        restAuthFunction);
+                        return Pair.of(response.getNextPageToken(), response.getTables());
+                    });
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
@@ -622,24 +617,19 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         try {
-            String pageToken = null;
-            Map<String, String> queryParams = Maps.newHashMap();
-            List<Partition> partitions = new ArrayList<>();
-            do {
-                if (pageToken != null) {
-                    queryParams.put(PAGE_TOKEN, pageToken);
-                }
-                ListPartitionsResponse response =
-                        client.get(
-                                resourcePaths.partitions(
-                                        identifier.getDatabaseName(), identifier.getTableName()),
-                                queryParams,
-                                ListPartitionsResponse.class,
-                                restAuthFunction);
-                pageToken = response.getNextPageToken();
-                partitions.addAll(response.getPartitions());
-            } while (StringUtils.isNotEmpty(pageToken));
-            return partitions;
+            return listDataFromPageApi(
+                    Maps.newHashMap(),
+                    queryParams -> {
+                        ListPartitionsResponse response =
+                                client.get(
+                                        resourcePaths.partitions(
+                                                identifier.getDatabaseName(),
+                                                identifier.getTableName()),
+                                        queryParams,
+                                        ListPartitionsResponse.class,
+                                        restAuthFunction);
+                        return Pair.of(response.getNextPageToken(), response.getPartitions());
+                    });
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -713,7 +703,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             ListBranchesResponse.class,
                             restAuthFunction);
-            if (response == null || response.branches() == null) {
+            response.branches();
+            if (response.branches() == null) {
                 return Collections.emptyList();
             }
             return response.branches();
@@ -812,23 +803,18 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     @Override
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
         try {
-            String pageToken = null;
-            Map<String, String> queryParams = Maps.newHashMap();
-            List<String> views = new ArrayList<>();
-            do {
-                if (pageToken != null) {
-                    queryParams.put(PAGE_TOKEN, pageToken);
-                }
-                ListViewsResponse response =
-                        client.get(
-                                resourcePaths.views(databaseName),
-                                queryParams,
-                                ListViewsResponse.class,
-                                restAuthFunction);
-                pageToken = response.getNextPageToken();
-                views.addAll(response.getViews());
-            } while (StringUtils.isNotEmpty(pageToken));
-            return views;
+            return listDataFromPageApi(
+                    Maps.newHashMap(),
+                    queryParams -> {
+                        ListViewsResponse response =
+                                client.get(
+                                        resourcePaths.views(databaseName),
+                                        queryParams,
+                                        ListViewsResponse.class,
+                                        restAuthFunction);
+                        ;
+                        return Pair.of(response.getNextPageToken(), response.getViews());
+                    });
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
@@ -957,6 +943,25 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             throw new TableNoPermissionException(identifier, e);
         }
         return response;
+    }
+
+    protected <T> List<T> listDataFromPageApi(
+            Map<String, String> queryParams,
+            Function<Map<String, String>, Pair<String, List<T>>> pageApi) {
+        List<T> results = new ArrayList<>();
+        String pageToken = null;
+        do {
+            if (pageToken != null) {
+                queryParams.put(PAGE_TOKEN, pageToken);
+            }
+            Pair<String, List<T>> nextPageToken2Result = pageApi.apply(queryParams);
+            pageToken = nextPageToken2Result.getKey();
+            if (nextPageToken2Result.getValue() != null
+                    && nextPageToken2Result.getValue().size() > 0) {
+                results.addAll(nextPageToken2Result.getValue());
+            }
+        } while (StringUtils.isNotEmpty(pageToken));
+        return results;
     }
 
     private ScheduledExecutorService tokenRefreshExecutor() {

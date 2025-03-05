@@ -333,40 +333,7 @@ public class RESTCatalogServer {
                         } else if (isPartitions) {
                             return partitionsApiHandle(request, identifier);
                         } else if (isBranches) {
-                            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-                            BranchManager branchManager = table.branchManager();
-                            switch (request.getMethod()) {
-                                case "DELETE":
-                                    String branch = resources[4];
-                                    table.deleteBranch(branch);
-                                    return new MockResponse().setResponseCode(200);
-                                case "GET":
-                                    List<String> branches = branchManager.branches();
-                                    response = new ListBranchesResponse(branches);
-                                    return mockResponse(response, 200);
-                                case "POST":
-                                    if (resources.length == 5) {
-                                        ForwardBranchRequest requestBody =
-                                                OBJECT_MAPPER.readValue(
-                                                        request.getBody().readUtf8(),
-                                                        ForwardBranchRequest.class);
-                                        branchManager.fastForward(requestBody.branch());
-                                    } else {
-                                        CreateBranchRequest requestBody =
-                                                OBJECT_MAPPER.readValue(
-                                                        request.getBody().readUtf8(),
-                                                        CreateBranchRequest.class);
-                                        if (requestBody.fromTag() == null) {
-                                            branchManager.createBranch(requestBody.branch());
-                                        } else {
-                                            branchManager.createBranch(
-                                                    requestBody.branch(), requestBody.fromTag());
-                                        }
-                                    }
-                                    return new MockResponse().setResponseCode(200);
-                                default:
-                                    return new MockResponse().setResponseCode(404);
-                            }
+                            return branchApiHandle(resources, request, identifier);
                         } else if (isTableToken) {
                             return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
@@ -921,6 +888,9 @@ public class RESTCatalogServer {
             if (!isFormatTable(tableMetadata.schema().toSchema())) {
                 catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
             }
+            if (tableMetadataStore.containsKey(toTable.getFullName())) {
+                throw new Catalog.TableAlreadyExistException(toTable);
+            }
             tableMetadataStore.remove(fromTable.getFullName());
             tableMetadataStore.put(toTable.getFullName(), tableMetadata);
         } else {
@@ -958,6 +928,71 @@ public class RESTCatalogServer {
                             ErrorResponseResourceType.TABLE, null, "invalid input " + request, 400),
                     400);
         }
+    }
+
+    private MockResponse branchApiHandle(
+            String[] resources, RecordedRequest request, Identifier identifier) throws Exception {
+        RESTResponse response;
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BranchManager branchManager = table.branchManager();
+        String fromTag = "";
+        String branch = "";
+        try {
+            switch (request.getMethod()) {
+                case "DELETE":
+                    branch = resources[4];
+                    table.deleteBranch(branch);
+                    return new MockResponse().setResponseCode(200);
+                case "GET":
+                    List<String> branches = branchManager.branches();
+                    response = new ListBranchesResponse(branches.isEmpty() ? null : branches);
+                    return mockResponse(response, 200);
+                case "POST":
+                    if (resources.length == 5) {
+                        ForwardBranchRequest requestBody =
+                                OBJECT_MAPPER.readValue(
+                                        request.getBody().readUtf8(), ForwardBranchRequest.class);
+                        branch = requestBody.branch();
+                        branchManager.fastForward(requestBody.branch());
+                    } else {
+                        CreateBranchRequest requestBody =
+                                OBJECT_MAPPER.readValue(
+                                        request.getBody().readUtf8(), CreateBranchRequest.class);
+                        branch = requestBody.branch();
+                        if (requestBody.fromTag() == null) {
+                            branchManager.createBranch(requestBody.branch());
+                        } else {
+                            fromTag = requestBody.fromTag();
+                            branchManager.createBranch(requestBody.branch(), requestBody.fromTag());
+                        }
+                    }
+                    return new MockResponse().setResponseCode(200);
+                default:
+                    return new MockResponse().setResponseCode(404);
+            }
+        } catch (Exception e) {
+            if (e.getMessage().contains("Tag")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponseResourceType.TAG, fromTag, e.getMessage(), 404);
+                return mockResponse(response, 404);
+            }
+            if (e.getMessage().contains("Branch name")
+                    && e.getMessage().contains("already exists")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponseResourceType.BRANCH, branch, e.getMessage(), 409);
+                return mockResponse(response, 409);
+            }
+            if (e.getMessage().contains("Branch name")
+                    && e.getMessage().contains("doesn't exist")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponseResourceType.BRANCH, branch, e.getMessage(), 404);
+                return mockResponse(response, 404);
+            }
+        }
+        return new MockResponse().setResponseCode(404);
     }
 
     private MockResponse generateFinalListPartitionsResponse(
