@@ -113,7 +113,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         ParquetFileReader reader =
                 new ParquetFileReader(
-                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        ParquetInputFile.fromPath(
+                                context.fileIO(), context.filePath(), context.fileSize()),
                         builder.build(),
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
@@ -145,7 +146,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         ParquetFileReader reader =
                 new ParquetFileReader(
-                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        ParquetInputFile.fromPath(
+                                context.fileIO(), context.filePath(), context.fileSize()),
                         builder.build(),
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();

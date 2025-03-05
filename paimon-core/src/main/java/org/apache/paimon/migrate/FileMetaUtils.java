@@ -218,7 +218,7 @@ public class FileMetaUtils {
         SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(rowTypeWithSchemaId);
 
         Pair<SimpleColStats[], SimpleStatsExtractor.FileInfo> fileInfo =
-                simpleStatsExtractor.extractWithFileInfo(fileIO, path);
+                simpleStatsExtractor.extractWithFileInfo(fileIO, path, fileSize);
         SimpleStats stats = statsArraySerializer.toBinaryAllMode(fileInfo.getLeft());
 
         return DataFileMeta.forAppend(

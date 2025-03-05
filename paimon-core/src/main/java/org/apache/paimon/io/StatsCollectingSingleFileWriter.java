@@ -96,13 +96,13 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
         super.writeBundle(bundle);
     }
 
-    public SimpleColStats[] fieldStats() throws IOException {
+    public SimpleColStats[] fieldStats(long fileSize) throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
         if (simpleStatsExtractor != null) {
             if (isStatsDisabled) {
                 return noneStats;
             } else {
-                return simpleStatsExtractor.extract(fileIO, path);
+                return simpleStatsExtractor.extract(fileIO, path, fileSize);
             }
         } else {
             return simpleStatsCollector.extract();
