@@ -596,6 +596,10 @@ public interface Catalog extends AutoCloseable {
             this.database = database;
         }
 
+        public DatabaseNoPermissionException(String database) {
+            this(database, null);
+        }
+
         public String database() {
             return database;
         }
@@ -653,6 +657,10 @@ public interface Catalog extends AutoCloseable {
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
             super(String.format(MSG, identifier.getFullName()), cause);
             this.identifier = identifier;
+        }
+
+        public TableNoPermissionException(Identifier identifier) {
+            this(identifier, null);
         }
 
         public Identifier identifier() {

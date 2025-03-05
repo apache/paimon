@@ -24,6 +24,8 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.SupportsBranches;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.CatalogOptions;
@@ -36,6 +38,7 @@ import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -49,6 +52,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.view.View;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -68,9 +72,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
+import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -89,6 +96,7 @@ class RESTCatalogTest extends CatalogTestBase {
     private ConfigResponse config;
     private Options options = new Options();
     private String dataPath;
+    private RESTCatalog restCatalog;
 
     @BeforeEach
     @Override
@@ -112,7 +120,8 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        this.catalog = new RESTCatalog(CatalogContext.create(options));
+        this.restCatalog = new RESTCatalog(CatalogContext.create(options));
+        this.catalog = restCatalog;
     }
 
     @AfterEach
@@ -133,7 +142,6 @@ class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testHeader() {
-        RESTCatalog restCatalog = (RESTCatalog) catalog;
         Map<String, String> parameters = new HashMap<>();
         parameters.put("k1", "v1");
         parameters.put("k2", "v2");
@@ -146,6 +154,121 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testDatabaseApiWhenNoPermission() {
+        String database = "test_no_permission_db";
+        restCatalogServer.addNoPermissionDatabase(database);
+        assertThrows(
+                Catalog.DatabaseNoPermissionException.class,
+                () -> catalog.createDatabase(database, false, Maps.newHashMap()));
+        assertThrows(
+                Catalog.DatabaseNoPermissionException.class, () -> catalog.getDatabase(database));
+        assertThrows(
+                Catalog.DatabaseNoPermissionException.class,
+                () -> catalog.dropDatabase(database, false, false));
+        assertThrows(
+                Catalog.DatabaseNoPermissionException.class,
+                () ->
+                        catalog.alterDatabase(
+                                database,
+                                Lists.newArrayList(PropertyChange.setProperty("key1", "value1")),
+                                false));
+    }
+
+    @Test
+    void testApiWhenDatabaseNoExistAndNotIgnore() {
+        String database = "test_no_exist_db";
+        assertThrows(
+                Catalog.DatabaseNotExistException.class,
+                () -> catalog.dropDatabase(database, false, false));
+        assertThrows(
+                Catalog.DatabaseNotExistException.class,
+                () ->
+                        catalog.alterDatabase(
+                                database,
+                                Lists.newArrayList(PropertyChange.setProperty("key1", "value1")),
+                                false));
+        assertThrows(
+                Catalog.DatabaseNotExistException.class,
+                () -> catalog.listTablesPaged(database, 100, null));
+        assertThrows(
+                Catalog.DatabaseNotExistException.class,
+                () -> catalog.listTableDetailsPaged(database, 100, null));
+    }
+
+    @Test
+    void testGetSystemDatabase() throws Catalog.DatabaseNotExistException {
+        assertThat(catalog.getDatabase(SYSTEM_DATABASE_NAME).name())
+                .isEqualTo(SYSTEM_DATABASE_NAME);
+    }
+
+    @Test
+    void testApiWhenTableNoPermission() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "no_permission_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        restCatalogServer.addNoPermissionTable(identifier);
+        assertThrows(Catalog.TableNoPermissionException.class, () -> catalog.getTable(identifier));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        catalog.alterTable(
+                                identifier,
+                                Lists.newArrayList(
+                                        SchemaChange.addColumn("col2", DataTypes.DATE())),
+                                false));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> catalog.dropTable(identifier, false));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        catalog.renameTable(
+                                identifier,
+                                Identifier.create("test_table_db", "no_permission_table2"),
+                                false));
+        assertThrows(
+                Catalog.TableNoPermissionException.class, () -> catalog.listPartitions(identifier));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> catalog.listPartitionsPaged(identifier, 100, null));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> restCatalog.createBranch(identifier, "test_branch", null));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> restCatalog.listBranches(identifier));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> restCatalog.dropBranch(identifier, "test_branch"));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> restCatalog.fastForward(identifier, "test_branch"));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> restCatalog.loadTableToken(identifier));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> restCatalog.loadSnapshot(identifier));
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        restCatalog.commitSnapshot(
+                                identifier,
+                                createSnapshotWithMillis(1L, System.currentTimeMillis()),
+                                new ArrayList<Partition>()));
+    }
+
+    @Test
+    void renameWhenTargetTableExist() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "rename_table");
+        Identifier targetIdentifier = Identifier.create("test_table_db", "target_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        createTable(targetIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        assertThrows(
+                Catalog.TableAlreadyExistException.class,
+                () -> catalog.renameTable(identifier, targetIdentifier, false));
+    }
+
+    @Test
     public void testListTables() throws Exception {
         super.testListTables();
 
@@ -153,25 +276,22 @@ class RESTCatalogTest extends CatalogTestBase {
         String[] tableNames = {"table4", "table5", "table1", "table2", "table3"};
         String[] sortedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
         Options options = new Options(this.catalog.options());
-        try (RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options))) {
+        restCatalog.createDatabase(databaseName, false);
+        List<String> restTables = restCatalog.listTables(databaseName);
+        assertThat(restTables).isEmpty();
 
-            restCatalog.createDatabase(databaseName, false);
-            List<String> restTables = restCatalog.listTables(databaseName);
-            assertThat(restTables).isEmpty();
+        // List tables returns a list with the names of all tables in the database
 
-            // List tables returns a list with the names of all tables in the database
-
-            for (String tableName : tableNames) {
-                restCatalog.createTable(
-                        Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
-            }
-            restTables = restCatalog.listTables(databaseName);
-            assertThat(restTables).containsExactly(sortedTableNames);
-
-            // List tables throws DatabaseNotExistException when the database does not exist
-            assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
-                    .isThrownBy(() -> restCatalog.listTables("non_existing_db"));
+        for (String tableName : tableNames) {
+            restCatalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
+        restTables = restCatalog.listTables(databaseName);
+        assertThat(restTables).containsExactly(sortedTableNames);
+
+        // List tables throws DatabaseNotExistException when the database does not exist
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(() -> restCatalog.listTables("non_existing_db"));
     }
 
     @Test
@@ -311,30 +431,23 @@ class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testListViews() throws Exception {
-        Options options = new Options(this.catalog.options());
-        String databaseName;
+        String databaseName = "views_paged_db";
         List<String> views;
         String[] viewNames = new String[] {"view1", "view2", "view3", "abd", "def", "opr", "xyz"};
         String[] sortedViewNames = Arrays.stream(viewNames).sorted().toArray(String[]::new);
-        List<String> restViews;
-        try (RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options))) {
+        // List tables returns an empty list when there are no tables in the database
+        restCatalog.createDatabase(databaseName, false);
+        views = restCatalog.listViews(databaseName);
+        assertThat(views).isEmpty();
 
-            // List tables returns an empty list when there are no tables in the database
-            databaseName = "views_paged_db";
-            restCatalog.createDatabase(databaseName, false);
-            views = restCatalog.listViews(databaseName);
-            assertThat(views).isEmpty();
+        View view = buildView(databaseName);
 
-            View view = buildView(databaseName);
-
-            for (String viewName : viewNames) {
-                restCatalog.createView(Identifier.create(databaseName, viewName), view, false);
-            }
-
-            // when maxResults is null or 0, the page length is set to a server configured value
-            restViews = restCatalog.listViews(databaseName);
+        for (String viewName : viewNames) {
+            restCatalog.createView(Identifier.create(databaseName, viewName), view, false);
         }
-        assertThat(restViews).containsExactly(sortedViewNames);
+
+        // when maxResults is null or 0, the page length is set to a server configured value
+        assertThat(restCatalog.listViews(databaseName)).containsExactly(sortedViewNames);
     }
 
     @Test
@@ -467,13 +580,26 @@ class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
+        String branchName = "test_branch";
         Identifier identifier = Identifier.create("test_db", "test_table");
+        Identifier branchIdentifier = new Identifier("test_db", "test_table", branchName);
+        assertThrows(
+                Catalog.TableNotExistException.class, () -> restCatalog.listPartitions(identifier));
+
         createTable(
                 identifier,
                 ImmutableMap.of(METASTORE_PARTITIONED_TABLE.key(), "" + true),
                 Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);
         assertEquals(0, result.size());
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102"));
+        restCatalog.createBranch(identifier, branchName, null);
+        restCatalog.createPartitions(branchIdentifier, Lists.newArrayList(partitionSpecs));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrder(partitionSpecs.get(0), partitionSpecs.get(1));
     }
 
     @Test
@@ -499,34 +625,23 @@ class RESTCatalogTest extends CatalogTestBase {
                         .sorted(Comparator.comparing(i -> i.get("dt")))
                         .toArray(Map[]::new);
 
-        Options options = new Options(this.catalog.options());
-        Identifier identifier;
-        try (RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options))) {
+        String databaseName = "partitions_db";
+        Identifier identifier = Identifier.create(databaseName, "table");
+        Schema schema =
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build();
 
-            String databaseName = "partitions_db";
-            identifier = Identifier.create(databaseName, "table");
-            Schema schema =
-                    Schema.newBuilder()
-                            .option(METASTORE_PARTITIONED_TABLE.key(), "true")
-                            .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
-                            .column("col", DataTypes.INT())
-                            .column("dt", DataTypes.STRING())
-                            .partitionKeys("dt")
-                            .build();
+        restCatalog.createDatabase(databaseName, true);
+        restCatalog.createTable(identifier, schema, true);
+        restCatalog.createPartitions(identifier, partitionSpecs);
 
-            restCatalog.createDatabase(databaseName, true);
-            restCatalog.createTable(identifier, schema, true);
-            restCatalog.createPartitions(identifier, partitionSpecs);
-
-            List<Partition> restPartitions = restCatalog.listPartitions(identifier);
-            assertThat(restPartitions.stream().map(Partition::spec)).containsExactly(sortedSpecs);
-
-            assertThatExceptionOfType(Catalog.TableNotExistException.class)
-                    .isThrownBy(
-                            () ->
-                                    restCatalog.listPartitions(
-                                            Identifier.create(databaseName, "non_existing_table")));
-        }
+        List<Partition> restPartitions = restCatalog.listPartitions(identifier);
+        assertThat(restPartitions.stream().map(Partition::spec)).containsExactly(sortedSpecs);
     }
 
     @Test
@@ -543,6 +658,11 @@ class RESTCatalogTest extends CatalogTestBase {
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
         Identifier identifier = Identifier.create(databaseName, "table");
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> catalog.listPartitionsPaged(identifier, 10, "dt=20250101"));
+
         catalog.createTable(
                 identifier,
                 Schema.newBuilder()
@@ -604,16 +724,6 @@ class RESTCatalogTest extends CatalogTestBase {
                 partitionSpecs.get(4),
                 partitionSpecs.get(3));
         assertNull(pagedPartitions.getNextPageToken());
-
-        // List partitions paged throws TableNotExistException when the table does not exist
-        final int finalMaxResults = maxResults;
-        assertThatExceptionOfType(Catalog.TableNotExistException.class)
-                .isThrownBy(
-                        () ->
-                                catalog.listPartitionsPaged(
-                                        Identifier.create(databaseName, "non_existing_table"),
-                                        finalMaxResults,
-                                        "dt=20250101"));
     }
 
     @Test
@@ -665,6 +775,19 @@ class RESTCatalogTest extends CatalogTestBase {
     void testSnapshotFromREST() throws Exception {
         RESTCatalog catalog = (RESTCatalog) this.catalog;
         Identifier hasSnapshotTableIdentifier = Identifier.create("test_db_a", "my_snapshot_table");
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.loadSnapshot(hasSnapshotTableIdentifier));
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () ->
+                        restCatalog.commitSnapshot(
+                                hasSnapshotTableIdentifier,
+                                createSnapshotWithMillis(1L, System.currentTimeMillis()),
+                                new ArrayList<Partition>()));
+
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
         long millis = System.currentTimeMillis();
@@ -743,14 +866,91 @@ class RESTCatalogTest extends CatalogTestBase {
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
         Identifier identifier = Identifier.create(databaseName, "table");
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.createBranch(identifier, "my_branch", null));
+
+        assertThrows(
+                Catalog.TableNotExistException.class, () -> restCatalog.listBranches(identifier));
+
         catalog.createTable(
                 identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
-
-        RESTCatalog restCatalog = (RESTCatalog) catalog;
+        assertThrows(
+                SupportsBranches.TagNotExistException.class,
+                () -> restCatalog.createBranch(identifier, "my_branch", "tag"));
         restCatalog.createBranch(identifier, "my_branch", null);
+        Identifier branchIdentifier = new Identifier(databaseName, "table", "my_branch");
+        assertThat(restCatalog.getTable(branchIdentifier)).isNotNull();
+        assertThrows(
+                SupportsBranches.BranchAlreadyExistException.class,
+                () -> restCatalog.createBranch(identifier, "my_branch", null));
         assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
         restCatalog.dropBranch(identifier, "my_branch");
+
+        assertThrows(
+                SupportsBranches.BranchNotExistException.class,
+                () -> restCatalog.dropBranch(identifier, "no_exist_branch"));
+        assertThrows(
+                SupportsBranches.BranchNotExistException.class,
+                () -> restCatalog.fastForward(identifier, "no_exist_branch"));
         assertThat(restCatalog.listBranches(identifier)).isEmpty();
+    }
+
+    @Test
+    void testListDataFromPageApiWhenLastPageTokenIsNull() {
+        List<Integer> testData = ImmutableList.of(1, 2, 3, 4, 5, 6, 7);
+        int maxResults = 2;
+        AtomicInteger fetchTimes = new AtomicInteger(0);
+        List<Integer> fetchData =
+                restCatalog.listDataFromPageApi(
+                        queryParams -> {
+                            return generateTestPagedResponse(
+                                    queryParams, testData, maxResults, fetchTimes, true);
+                        });
+        assertEquals(fetchTimes.get(), 4);
+        assertThat(fetchData).containsSequence(testData);
+    }
+
+    @Test
+    void testListDataFromPageApiWhenLastPageTokenIsNotNullAndDataIsNull() {
+        List<Integer> testData = ImmutableList.of(1, 2, 3, 4, 5, 6);
+        int maxResults = 2;
+        AtomicInteger fetchTimes = new AtomicInteger(0);
+        List<Integer> fetchData =
+                restCatalog.listDataFromPageApi(
+                        queryParams -> {
+                            return generateTestPagedResponse(
+                                    queryParams, testData, maxResults, fetchTimes, false);
+                        });
+
+        assertEquals(fetchTimes.get(), testData.size() / maxResults + 1);
+        assertThat(fetchData).containsSequence(testData);
+    }
+
+    private TestPagedResponse generateTestPagedResponse(
+            Map<String, String> queryParams,
+            List<Integer> testData,
+            int maxResults,
+            AtomicInteger fetchTimes,
+            boolean supportPageTokenNull) {
+        String nextToken = queryParams.getOrDefault(PAGE_TOKEN, null);
+        fetchTimes.incrementAndGet();
+        if (nextToken == null) {
+            return new TestPagedResponse(maxResults + "", testData.subList(0, maxResults));
+        } else {
+            int index = Integer.parseInt(nextToken);
+            if (index >= testData.size()) {
+                return new TestPagedResponse(null, null);
+            } else {
+                int endIndex = Math.min((index + maxResults), testData.size());
+                String nextPageToken =
+                        supportPageTokenNull && endIndex >= (testData.size())
+                                ? null
+                                : endIndex + "";
+                return new TestPagedResponse(nextPageToken, testData.subList(index, endIndex));
+            }
+        }
     }
 
     @Override
@@ -786,7 +986,7 @@ class RESTCatalogTest extends CatalogTestBase {
     private void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {
-        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createDatabase(identifier.getDatabaseName(), true);
         catalog.createTable(
                 identifier,
                 new Schema(

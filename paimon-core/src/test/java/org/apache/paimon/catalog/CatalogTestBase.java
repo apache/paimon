@@ -492,16 +492,6 @@ public abstract class CatalogTestBase {
         Table dataTable = catalog.getTable(identifier);
         assertThat(dataTable).isNotNull();
 
-        // Get system table throws Exception when table contains multiple '$' separator
-        assertThatExceptionOfType(IllegalArgumentException.class)
-                .isThrownBy(
-                        () ->
-                                catalog.getTable(
-                                        Identifier.create(
-                                                "test_db", "test_table$snapshots$snapshots")))
-                .withMessage(
-                        "System table can only contain one '$' separator, but this is: test_table$snapshots$snapshots");
-
         // Get system table throws TableNotExistException when data table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
                 .isThrownBy(
@@ -1290,6 +1280,12 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.markDonePartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        partitionSpecs));
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.dropPartitions(
                                         Identifier.create(databaseName, "non_existing_table"),
                                         partitionSpecs));
     }

@@ -127,11 +127,13 @@ public class RESTCatalogServer {
     private final MockWebServer server;
     private final String authToken;
 
-    public final Map<String, Database> databaseStore = new HashMap<>();
-    public final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
-    public final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
-    public final Map<String, View> viewStore = new HashMap<>();
-    public final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
+    private final Map<String, Database> databaseStore = new HashMap<>();
+    private final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
+    private final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
+    private final Map<String, View> viewStore = new HashMap<>();
+    private final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
+    private final List<String> noPermissionDatabases = new ArrayList<>();
+    private final List<String> noPermissionTables = new ArrayList<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
 
@@ -189,6 +191,14 @@ public class RESTCatalogServer {
         DataTokenStore.removeDataToken(warehouse, identifier.getFullName());
     }
 
+    public void addNoPermissionDatabase(String database) {
+        noPermissionDatabases.add(database);
+    }
+
+    public void addNoPermissionTable(Identifier identifier) {
+        noPermissionTables.add(identifier.getFullName());
+    }
+
     public RESTToken getDataToken(Identifier identifier) {
         return DataTokenStore.getDataToken(warehouse, identifier.getFullName());
     }
@@ -214,6 +224,9 @@ public class RESTCatalogServer {
                                         .substring((databaseUri + "/").length())
                                         .split("/");
                         String databaseName = resources[0];
+                        if (noPermissionDatabases.contains(databaseName)) {
+                            throw new Catalog.DatabaseNoPermissionException(databaseName);
+                        }
                         if (!databaseStore.containsKey(databaseName)) {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
@@ -280,8 +293,19 @@ public class RESTCatalogServer {
                                         && "branches".equals(resources[3]);
                         Identifier identifier =
                                 resources.length >= 3
+                                                && !"rename".equals(resources[2])
+                                                && !"commit".equals(resources[2])
                                         ? Identifier.create(databaseName, resources[2])
                                         : null;
+                        if (identifier != null && "tables".equals(resources[1])) {
+                            if (!identifier.isSystemTable()
+                                    && !tableMetadataStore.containsKey(identifier.getFullName())) {
+                                throw new Catalog.TableNotExistException(identifier);
+                            }
+                            if (noPermissionTables.contains(identifier.getFullName())) {
+                                throw new Catalog.TableNoPermissionException(identifier);
+                            }
+                        }
                         // validate partition
                         if (isPartitions
                                 || isDropPartitions
@@ -310,40 +334,7 @@ public class RESTCatalogServer {
                         } else if (isPartitions) {
                             return partitionsApiHandle(request, identifier);
                         } else if (isBranches) {
-                            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-                            BranchManager branchManager = table.branchManager();
-                            switch (request.getMethod()) {
-                                case "DELETE":
-                                    String branch = resources[4];
-                                    table.deleteBranch(branch);
-                                    return new MockResponse().setResponseCode(200);
-                                case "GET":
-                                    List<String> branches = branchManager.branches();
-                                    response = new ListBranchesResponse(branches);
-                                    return mockResponse(response, 200);
-                                case "POST":
-                                    if (resources.length == 5) {
-                                        ForwardBranchRequest requestBody =
-                                                OBJECT_MAPPER.readValue(
-                                                        request.getBody().readUtf8(),
-                                                        ForwardBranchRequest.class);
-                                        branchManager.fastForward(requestBody.branch());
-                                    } else {
-                                        CreateBranchRequest requestBody =
-                                                OBJECT_MAPPER.readValue(
-                                                        request.getBody().readUtf8(),
-                                                        CreateBranchRequest.class);
-                                        if (requestBody.fromTag() == null) {
-                                            branchManager.createBranch(requestBody.branch());
-                                        } else {
-                                            branchManager.createBranch(
-                                                    requestBody.branch(), requestBody.fromTag());
-                                        }
-                                    }
-                                    return new MockResponse().setResponseCode(200);
-                                default:
-                                    return new MockResponse().setResponseCode(404);
-                            }
+                            return branchApiHandle(resources, request, identifier);
                         } else if (isTableToken) {
                             return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
@@ -395,6 +386,22 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     404);
                     return mockResponse(response, 404);
+                } catch (Catalog.DatabaseNoPermissionException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.DATABASE,
+                                    e.database(),
+                                    e.getMessage(),
+                                    403);
+                    return mockResponse(response, 403);
+                } catch (Catalog.TableNoPermissionException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.TABLE,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    403);
+                    return mockResponse(response, 403);
                 } catch (Catalog.DatabaseAlreadyExistException e) {
                     response =
                             new ErrorResponse(
@@ -519,6 +526,12 @@ public class RESTCatalogServer {
         CommitTableRequest requestBody =
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), CommitTableRequest.class);
         Identifier identifier = requestBody.getIdentifier();
+        if (noPermissionTables.contains(requestBody.getIdentifier().getFullName())) {
+            throw new Catalog.TableNoPermissionException(requestBody.getIdentifier());
+        }
+        if (!tableMetadataStore.containsKey(requestBody.getIdentifier().getFullName())) {
+            throw new Catalog.TableNotExistException(requestBody.getIdentifier());
+        }
         FileStoreTable table = getFileTable(identifier);
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
@@ -545,6 +558,9 @@ public class RESTCatalogServer {
                         OBJECT_MAPPER.readValue(
                                 request.getBody().readUtf8(), CreateDatabaseRequest.class);
                 String databaseName = requestBody.getName();
+                if (noPermissionDatabases.contains(databaseName)) {
+                    throw new Catalog.DatabaseNoPermissionException(databaseName);
+                }
                 catalog.createDatabase(databaseName, false);
                 databaseStore.put(
                         databaseName, Database.of(databaseName, requestBody.getOptions(), null));
@@ -825,37 +841,45 @@ public class RESTCatalogServer {
     private MockResponse tableHandle(RecordedRequest request, Identifier identifier)
             throws Exception {
         RESTResponse response;
-        if (tableMetadataStore.containsKey(identifier.getFullName())) {
-            switch (request.getMethod()) {
-                case "GET":
-                    TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-                    response =
-                            new GetTableResponse(
-                                    tableMetadata.uuid(),
-                                    identifier.getTableName(),
-                                    tableMetadata.isExternal(),
-                                    tableMetadata.schema().id(),
-                                    tableMetadata.schema().toSchema());
-                    return mockResponse(response, 200);
-                case "POST":
-                    AlterTableRequest requestBody =
-                            OBJECT_MAPPER.readValue(
-                                    request.getBody().readUtf8(), AlterTableRequest.class);
-                    alterTableImpl(identifier, requestBody.getChanges());
-                    return new MockResponse().setResponseCode(200);
-                case "DELETE":
-                    try {
-                        catalog.dropTable(identifier, false);
-                    } catch (Exception e) {
-                        System.out.println(e.getMessage());
-                    }
-                    tableMetadataStore.remove(identifier.getFullName());
-                    return new MockResponse().setResponseCode(200);
-                default:
-                    return new MockResponse().setResponseCode(404);
-            }
-        } else {
-            throw new Catalog.TableNotExistException(identifier);
+        if (noPermissionTables.contains(identifier.getFullName())) {
+            throw new Catalog.TableNoPermissionException(identifier);
+        }
+        switch (request.getMethod()) {
+            case "GET":
+                TableMetadata tableMetadata;
+                identifier.isSystemTable();
+                if (identifier.isSystemTable()) {
+                    TableSchema schema = catalog.loadTableSchema(identifier);
+                    tableMetadata =
+                            createTableMetadata(
+                                    identifier, schema.id(), schema.toSchema(), null, false);
+                } else {
+                    tableMetadata = tableMetadataStore.get(identifier.getFullName());
+                }
+                response =
+                        new GetTableResponse(
+                                tableMetadata.uuid(),
+                                identifier.getTableName(),
+                                tableMetadata.isExternal(),
+                                tableMetadata.schema().id(),
+                                tableMetadata.schema().toSchema());
+                return mockResponse(response, 200);
+            case "POST":
+                AlterTableRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), AlterTableRequest.class);
+                alterTableImpl(identifier, requestBody.getChanges());
+                return new MockResponse().setResponseCode(200);
+            case "DELETE":
+                try {
+                    catalog.dropTable(identifier, false);
+                } catch (Exception e) {
+                    System.out.println(e.getMessage());
+                }
+                tableMetadataStore.remove(identifier.getFullName());
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
     }
 
@@ -864,10 +888,15 @@ public class RESTCatalogServer {
                 OBJECT_MAPPER.readValue(request.getBody().readUtf8(), RenameTableRequest.class);
         Identifier fromTable = requestBody.getSource();
         Identifier toTable = requestBody.getDestination();
-        if (tableMetadataStore.containsKey(fromTable.getFullName())) {
+        if (noPermissionTables.contains(fromTable.getFullName())) {
+            throw new Catalog.TableNoPermissionException(fromTable);
+        } else if (tableMetadataStore.containsKey(fromTable.getFullName())) {
             TableMetadata tableMetadata = tableMetadataStore.get(fromTable.getFullName());
             if (!isFormatTable(tableMetadata.schema().toSchema())) {
                 catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
+            }
+            if (tableMetadataStore.containsKey(toTable.getFullName())) {
+                throw new Catalog.TableAlreadyExistException(toTable);
             }
             tableMetadataStore.remove(fromTable.getFullName());
             tableMetadataStore.put(toTable.getFullName(), tableMetadata);
@@ -884,8 +913,14 @@ public class RESTCatalogServer {
                 && Objects.nonNull(request.getRequestUrl())) {
             switch (request.getMethod()) {
                 case "GET":
-                    List<Partition> partitions =
-                            tablePartitionsStore.get(tableIdentifier.getFullName());
+                    List<Partition> partitions = new ArrayList<>();
+                    for (Map.Entry<String, List<Partition>> entry :
+                            tablePartitionsStore.entrySet()) {
+                        String tableName = Identifier.fromString(entry.getKey()).getTableName();
+                        if (tableName.equals(tableIdentifier.getTableName())) {
+                            partitions.addAll(entry.getValue());
+                        }
+                    }
                     return generateFinalListPartitionsResponse(request, partitions);
                 case "POST":
                     CreatePartitionsRequest requestBody =
@@ -906,6 +941,86 @@ public class RESTCatalogServer {
                             ErrorResponseResourceType.TABLE, null, "invalid input " + request, 400),
                     400);
         }
+    }
+
+    private MockResponse branchApiHandle(
+            String[] resources, RecordedRequest request, Identifier identifier) throws Exception {
+        RESTResponse response;
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BranchManager branchManager = table.branchManager();
+        String fromTag = "";
+        String branch = "";
+        Identifier branchIdentifier;
+        try {
+            switch (request.getMethod()) {
+                case "DELETE":
+                    branch = resources[4];
+                    branchIdentifier =
+                            new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    branch);
+                    table.deleteBranch(branch);
+                    tableMetadataStore.remove(branchIdentifier.getFullName());
+                    return new MockResponse().setResponseCode(200);
+                case "GET":
+                    List<String> branches = branchManager.branches();
+                    response = new ListBranchesResponse(branches.isEmpty() ? null : branches);
+                    return mockResponse(response, 200);
+                case "POST":
+                    if (resources.length == 5) {
+                        ForwardBranchRequest requestBody =
+                                OBJECT_MAPPER.readValue(
+                                        request.getBody().readUtf8(), ForwardBranchRequest.class);
+                        branch = requestBody.branch();
+                        branchManager.fastForward(requestBody.branch());
+                    } else {
+                        CreateBranchRequest requestBody =
+                                OBJECT_MAPPER.readValue(
+                                        request.getBody().readUtf8(), CreateBranchRequest.class);
+                        branch = requestBody.branch();
+                        if (requestBody.fromTag() == null) {
+                            branchManager.createBranch(requestBody.branch());
+                        } else {
+                            fromTag = requestBody.fromTag();
+                            branchManager.createBranch(requestBody.branch(), requestBody.fromTag());
+                        }
+                        branchIdentifier =
+                                new Identifier(
+                                        identifier.getDatabaseName(),
+                                        identifier.getTableName(),
+                                        requestBody.branch());
+                        tableMetadataStore.put(
+                                branchIdentifier.getFullName(),
+                                tableMetadataStore.get(identifier.getFullName()));
+                    }
+                    return new MockResponse().setResponseCode(200);
+                default:
+                    return new MockResponse().setResponseCode(404);
+            }
+        } catch (Exception e) {
+            if (e.getMessage().contains("Tag")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponseResourceType.TAG, fromTag, e.getMessage(), 404);
+                return mockResponse(response, 404);
+            }
+            if (e.getMessage().contains("Branch name")
+                    && e.getMessage().contains("already exists")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponseResourceType.BRANCH, branch, e.getMessage(), 409);
+                return mockResponse(response, 409);
+            }
+            if (e.getMessage().contains("Branch name")
+                    && e.getMessage().contains("doesn't exist")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponseResourceType.BRANCH, branch, e.getMessage(), 404);
+                return mockResponse(response, 404);
+            }
+        }
+        return new MockResponse().setResponseCode(404);
     }
 
     private MockResponse generateFinalListPartitionsResponse(

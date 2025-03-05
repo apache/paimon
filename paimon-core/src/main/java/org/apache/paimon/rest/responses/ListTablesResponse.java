@@ -18,8 +18,6 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.rest.RESTResponse;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -29,7 +27,7 @@ import java.util.List;
 
 /** Response for listing tables. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListTablesResponse implements RESTResponse {
+public class ListTablesResponse implements PagedResponse<String> {
 
     private static final String FIELD_TABLES = "tables";
     private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
@@ -60,5 +58,10 @@ public class ListTablesResponse implements RESTResponse {
     @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
     public String getNextPageToken() {
         return this.nextPageToken;
+    }
+
+    @Override
+    public List<String> data() {
+        return getTables();
     }
 }

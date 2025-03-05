@@ -18,8 +18,6 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.rest.RESTResponse;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -29,7 +27,7 @@ import java.util.List;
 
 /** Response for listing view details. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListViewDetailsResponse implements RESTResponse {
+public class ListViewDetailsResponse implements PagedResponse<GetViewResponse> {
 
     private static final String FIELD_VIEW_DETAILS = "viewDetails";
     private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
@@ -61,5 +59,10 @@ public class ListViewDetailsResponse implements RESTResponse {
     @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
     public String getNextPageToken() {
         return this.nextPageToken;
+    }
+
+    @Override
+    public List<GetViewResponse> data() {
+        return getViewDetails();
     }
 }
