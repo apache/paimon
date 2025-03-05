@@ -329,7 +329,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.APPEND,
                                 noConflictCheck(),
-                                branchName,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -364,7 +363,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.COMPACT,
                                 hasConflictChecked(safeLatestSnapshotId),
-                                branchName,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -510,7 +508,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.COMPACT,
                                 mustConflictCheck(),
-                                branchName,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -605,7 +602,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 Collections.emptyMap(),
                 Snapshot.CommitKind.ANALYZE,
                 noConflictCheck(),
-                branchName,
                 statsFileName);
     }
 
@@ -721,7 +717,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             ConflictCheck conflictCheck,
-            String branchName,
             @Nullable String statsFileName) {
         int retryCount = 0;
         RetryResult retryResult = null;
@@ -740,7 +735,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             commitKind,
                             latestSnapshot,
                             conflictCheck,
-                            branchName,
                             statsFileName);
 
             if (result.isSuccess()) {
@@ -816,7 +810,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 logOffsets,
                 Snapshot.CommitKind.OVERWRITE,
                 mustConflictCheck(),
-                branchName,
                 null);
     }
 
@@ -832,7 +825,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Snapshot.CommitKind commitKind,
             @Nullable Snapshot latestSnapshot,
             ConflictCheck conflictCheck,
-            String branchName,
             @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
         long newSnapshotId =
