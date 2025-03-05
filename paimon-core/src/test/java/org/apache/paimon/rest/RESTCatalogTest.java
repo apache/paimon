@@ -889,7 +889,6 @@ class RESTCatalogTest extends CatalogTestBase {
         AtomicInteger fetchTimes = new AtomicInteger(0);
         List<Integer> fetchData =
                 restCatalog.listDataFromPageApi(
-                        Maps.newHashMap(),
                         queryParams -> {
                             String nextToken = queryParams.getOrDefault(PAGE_TOKEN, null);
                             fetchTimes.incrementAndGet();

@@ -275,11 +275,10 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
             return listDataFromPageApi(
-                    null,
-                    pageToken -> {
+                    queryParams -> {
                         return client.get(
                                 resourcePaths.tables(databaseName),
-                                Maps.newHashMap(),
+                                queryParams,
                                 ListTablesResponse.class,
                                 restAuthFunction);
                     });
@@ -617,7 +616,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         try {
             return listDataFromPageApi(
-                    Maps.newHashMap(),
                     queryParams -> {
                         return client.get(
                                 resourcePaths.partitions(
@@ -800,7 +798,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
         try {
             return listDataFromPageApi(
-                    Maps.newHashMap(),
                     queryParams -> {
                         return client.get(
                                 resourcePaths.views(databaseName),
@@ -939,9 +936,9 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     }
 
     protected <T> List<T> listDataFromPageApi(
-            Map<String, String> queryParams,
             Function<Map<String, String>, PagedResponse<T>> pageApi) {
         List<T> results = new ArrayList<>();
+        Map<String, String> queryParams = Maps.newHashMap();
         String pageToken = null;
         do {
             if (pageToken != null) {
