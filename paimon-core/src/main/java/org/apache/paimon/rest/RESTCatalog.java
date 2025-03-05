@@ -959,7 +959,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             if (nextPageToken2Result.getValue() != null
                     && nextPageToken2Result.getValue().size() > 0) {
                 results.addAll(nextPageToken2Result.getValue());
-            } else{
+            } else {
                 break;
             }
         } while (StringUtils.isNotEmpty(pageToken));

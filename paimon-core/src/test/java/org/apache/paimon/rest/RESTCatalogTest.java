@@ -455,7 +455,6 @@ class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testListViews() throws Exception {
         String databaseName = "views_paged_db";
-        ;
         List<String> views;
         String[] viewNames = new String[] {"view1", "view2", "view3", "abd", "def", "opr", "xyz"};
         String[] sortedViewNames = Arrays.stream(viewNames).sorted().toArray(String[]::new);
