@@ -26,6 +26,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for snapshots. */
 public class SnapshotTest {
@@ -48,6 +49,30 @@ public class SnapshotTest {
                         + "  \"deltaRecordCount\" : null,\n"
                         + "  \"unknownKey\" : 22222\n"
                         + "}");
+    }
+
+    @Test
+    public void testSnapshotWithSizes() {
+        String json =
+                "{\n"
+                        + "  \"version\" : 3,\n"
+                        + "  \"id\" : 5,\n"
+                        + "  \"schemaId\" : 0,\n"
+                        + "  \"baseManifestList\" : null,\n"
+                        + "  \"baseManifestListSize\" : 6,\n"
+                        + "  \"deltaManifestList\" : null,\n"
+                        + "  \"deltaManifestListSize\" : 8,\n"
+                        + "  \"changelogManifestListSize\" : 10,\n"
+                        + "  \"commitUser\" : null,\n"
+                        + "  \"commitIdentifier\" : 0,\n"
+                        + "  \"commitKind\" : \"APPEND\",\n"
+                        + "  \"timeMillis\" : 1234,\n"
+                        + "  \"totalRecordCount\" : null,\n"
+                        + "  \"deltaRecordCount\" : null,\n"
+                        + "  \"unknownKey\" : 22222\n"
+                        + "}";
+        Snapshot snapshot = Snapshot.fromJson(json);
+        assertThat(Snapshot.fromJson(snapshot.toJson())).isEqualTo(snapshot);
     }
 
     public static SnapshotManager newSnapshotManager(FileIO fileIO, Path tablePath) {
