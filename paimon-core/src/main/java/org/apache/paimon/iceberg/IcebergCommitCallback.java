@@ -83,12 +83,12 @@ import java.util.stream.Collectors;
  * A {@link CommitCallback} to create Iceberg compatible metadata, so Iceberg readers can read
  * Paimon's {@link RawFile}.
  */
-public abstract class AbstractIcebergCommitCallback implements CommitCallback {
+public class IcebergCommitCallback implements CommitCallback {
 
     // see org.apache.iceberg.hadoop.Util
     private static final String VERSION_HINT_FILENAME = "version-hint.text";
 
-    protected final FileStoreTable table;
+    private final FileStoreTable table;
     private final String commitUser;
 
     private final IcebergPathFactory pathFactory;
@@ -102,7 +102,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
     // Public interface
     // -------------------------------------------------------------------------------------
 
-    public AbstractIcebergCommitCallback(FileStoreTable table, String commitUser) {
+    public IcebergCommitCallback(FileStoreTable table, String commitUser) {
         this.table = table;
         this.commitUser = commitUser;
 
@@ -125,7 +125,7 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
         try {
             metadataCommitterFactory =
                     FactoryUtil.discoverFactory(
-                            AbstractIcebergCommitCallback.class.getClassLoader(),
+                            IcebergCommitCallback.class.getClassLoader(),
                             IcebergMetadataCommitterFactory.class,
                             storageType.toString());
         } catch (FactoryException ignore) {
@@ -488,7 +488,14 @@ public abstract class AbstractIcebergCommitCallback implements CommitCallback {
                 addedFiles);
     }
 
-    protected abstract boolean shouldAddFileToIceberg(DataFileMeta meta);
+    private boolean shouldAddFileToIceberg(DataFileMeta meta) {
+        if (table.primaryKeys().isEmpty()) {
+            return true;
+        } else {
+            int maxLevel = table.coreOptions().numLevels() - 1;
+            return meta.level() == maxLevel;
+        }
+    }
 
     private List<IcebergManifestFileMeta> createNewlyAddedManifestFileMetas(
             Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles, long currentSnapshotId)

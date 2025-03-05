@@ -31,7 +31,6 @@ import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthSession;
@@ -76,9 +75,8 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
@@ -105,7 +103,6 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
@@ -613,14 +610,11 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
             // not a metastore partitioned table
-            FileStoreTable fileStoreTable = (FileStoreTable) getTable(identifier);
-            try (FileStoreCommit commit =
-                    fileStoreTable
-                            .store()
-                            .newCommit(
-                                    createCommitUser(
-                                            fileStoreTable.coreOptions().toConfiguration()))) {
-                commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+            try (BatchTableCommit commit =
+                    getTable(identifier).newBatchWriteBuilder().newCommit()) {
+                commit.truncatePartitions(partitions);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         }
     }

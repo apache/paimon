@@ -455,9 +455,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         return new TableCommitImpl(
-                store().newCommit(commitUser),
+                store().newCommit(commitUser, this),
                 snapshotExpire,
-                options.writeOnly() ? null : store().newPartitionExpire(commitUser),
+                options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
                 options.writeOnly() ? null : store().newTagCreationManager(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),

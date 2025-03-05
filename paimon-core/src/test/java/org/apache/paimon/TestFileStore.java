@@ -157,7 +157,7 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public FileStoreCommitImpl newCommit() {
-        return super.newCommit(commitUser);
+        return super.newCommit(commitUser, null);
     }
 
     public ExpireSnapshots newExpire(int numRetainedMin, int numRetainedMax, long millisRetained) {
@@ -262,7 +262,7 @@ public class TestFileStore extends KeyValueFileStore {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
 
-        try (FileStoreCommit commit = newCommit(commitUser)) {
+        try (FileStoreCommit commit = newCommit(commitUser, null)) {
             commit.dropPartitions(partitions, Long.MAX_VALUE);
         }
 
@@ -352,7 +352,7 @@ public class TestFileStore extends KeyValueFileStore {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
 
-        try (FileStoreCommit commit = newCommit(commitUser)) {
+        try (FileStoreCommit commit = newCommit(commitUser, null)) {
             commitFunction.accept(commit, committable);
         }
 

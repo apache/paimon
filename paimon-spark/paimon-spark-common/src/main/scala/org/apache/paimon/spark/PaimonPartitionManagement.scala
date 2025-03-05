@@ -75,9 +75,9 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
             partitionHandler.close()
           }
         } else {
-          val commit: FileStoreCommit = fileStoreTable.store.newCommit(UUID.randomUUID.toString)
+          val commit = fileStoreTable.newBatchWriteBuilder().newCommit()
           try {
-            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER)
+            commit.truncatePartitions(partitions)
           } finally {
             commit.close()
           }
