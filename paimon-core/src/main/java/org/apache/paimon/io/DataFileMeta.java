@@ -278,6 +278,9 @@ public class DataFileMeta {
     }
 
     public String fileName() {
+        if (externalPath != null) {
+            return externalPath;
+        }
         return fileName;
     }
 
