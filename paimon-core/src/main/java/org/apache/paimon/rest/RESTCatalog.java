@@ -419,10 +419,12 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         GetTableResponse response;
         try {
+            // check table name
+            identifier.getTableName();
             response =
                     client.get(
                             resourcePaths.table(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
                             GetTableResponse.class,
                             restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -493,7 +495,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         try {
             AlterTableRequest request = new AlterTableRequest(changes);
             client.post(
-                    resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
+                    resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -524,7 +526,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         checkNotSystemTable(identifier, "dropTable");
         try {
             client.delete(
-                    resourcePaths.table(identifier.getDatabaseName(), identifier.getTableName()),
+                    resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -542,7 +544,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             CreatePartitionsRequest request = new CreatePartitionsRequest(partitions);
             client.post(
                     resourcePaths.partitions(
-                            identifier.getDatabaseName(), identifier.getTableName()),
+                            identifier.getDatabaseName(), identifier.getObjectName()),
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -559,7 +561,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             DropPartitionsRequest request = new DropPartitionsRequest(partitions);
             client.post(
                     resourcePaths.dropPartitions(
-                            identifier.getDatabaseName(), identifier.getTableName()),
+                            identifier.getDatabaseName(), identifier.getObjectName()),
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -585,7 +587,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             AlterPartitionsRequest request = new AlterPartitionsRequest(partitions);
             client.post(
                     resourcePaths.alterPartitions(
-                            identifier.getDatabaseName(), identifier.getTableName()),
+                            identifier.getDatabaseName(), identifier.getObjectName()),
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -602,7 +604,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             MarkDonePartitionsRequest request = new MarkDonePartitionsRequest(partitions);
             client.post(
                     resourcePaths.markDonePartitions(
-                            identifier.getDatabaseName(), identifier.getTableName()),
+                            identifier.getDatabaseName(), identifier.getObjectName()),
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -619,7 +621,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                     queryParams -> {
                         return client.get(
                                 resourcePaths.partitions(
-                                        identifier.getDatabaseName(), identifier.getTableName()),
+                                        identifier.getDatabaseName(), identifier.getObjectName()),
                                 queryParams,
                                 ListPartitionsResponse.class,
                                 restAuthFunction);
@@ -640,7 +642,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         try {
             CreateBranchRequest request = new CreateBranchRequest(branch, fromTag);
             client.post(
-                    resourcePaths.branches(identifier.getDatabaseName(), identifier.getTableName()),
+                    resourcePaths.branches(
+                            identifier.getDatabaseName(), identifier.getObjectName()),
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -663,7 +666,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         try {
             client.delete(
                     resourcePaths.branch(
-                            identifier.getDatabaseName(), identifier.getTableName(), branch),
+                            identifier.getDatabaseName(), identifier.getObjectName(), branch),
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
             throw new BranchNotExistException(identifier, branch, e);
@@ -678,7 +681,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             ForwardBranchRequest request = new ForwardBranchRequest(branch);
             client.post(
                     resourcePaths.forwardBranch(
-                            identifier.getDatabaseName(), identifier.getTableName()),
+                            identifier.getDatabaseName(), identifier.getObjectName()),
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -694,7 +697,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             ListBranchesResponse response =
                     client.get(
                             resourcePaths.branches(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
                             ListBranchesResponse.class,
                             restAuthFunction);
             if (response.branches() == null) {
@@ -717,7 +720,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             ListPartitionsResponse response =
                     client.get(
                             resourcePaths.partitions(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
                             queryParams,
                             ListPartitionsResponse.class,
                             restAuthFunction);
@@ -742,7 +745,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             GetViewResponse response =
                     client.get(
                             resourcePaths.view(
-                                    identifier.getDatabaseName(), identifier.getTableName()),
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
                             GetViewResponse.class,
                             restAuthFunction);
             ViewSchema schema = response.getSchema();
@@ -763,7 +766,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             throws ViewNotExistException {
         try {
             client.delete(
-                    resourcePaths.view(identifier.getDatabaseName(), identifier.getTableName()),
+                    resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
@@ -948,9 +951,10 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             }
             PagedResponse<T> response = pageApi.apply(queryParams);
             pageToken = response.getNextPageToken();
-            if (response.data() != null && response.data().size() > 0) {
+            if (response.data() != null) {
                 results.addAll(response.data());
-            } else {
+            }
+            if (pageToken == null || response.data() == null || response.data().isEmpty()) {
                 break;
             }
         } while (StringUtils.isNotEmpty(pageToken));

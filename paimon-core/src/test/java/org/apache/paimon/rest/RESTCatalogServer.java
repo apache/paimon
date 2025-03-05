@@ -298,7 +298,8 @@ public class RESTCatalogServer {
                                         ? Identifier.create(databaseName, resources[2])
                                         : null;
                         if (identifier != null && "tables".equals(resources[1])) {
-                            if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+                            if (!identifier.isSystemTable()
+                                    && !tableMetadataStore.containsKey(identifier.getFullName())) {
                                 throw new Catalog.TableNotExistException(identifier);
                             }
                             if (noPermissionTables.contains(identifier.getFullName())) {
@@ -842,37 +843,43 @@ public class RESTCatalogServer {
         RESTResponse response;
         if (noPermissionTables.contains(identifier.getFullName())) {
             throw new Catalog.TableNoPermissionException(identifier);
-        } else if (tableMetadataStore.containsKey(identifier.getFullName())) {
-            switch (request.getMethod()) {
-                case "GET":
-                    TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-                    response =
-                            new GetTableResponse(
-                                    tableMetadata.uuid(),
-                                    identifier.getTableName(),
-                                    tableMetadata.isExternal(),
-                                    tableMetadata.schema().id(),
-                                    tableMetadata.schema().toSchema());
-                    return mockResponse(response, 200);
-                case "POST":
-                    AlterTableRequest requestBody =
-                            OBJECT_MAPPER.readValue(
-                                    request.getBody().readUtf8(), AlterTableRequest.class);
-                    alterTableImpl(identifier, requestBody.getChanges());
-                    return new MockResponse().setResponseCode(200);
-                case "DELETE":
-                    try {
-                        catalog.dropTable(identifier, false);
-                    } catch (Exception e) {
-                        System.out.println(e.getMessage());
-                    }
-                    tableMetadataStore.remove(identifier.getFullName());
-                    return new MockResponse().setResponseCode(200);
-                default:
-                    return new MockResponse().setResponseCode(404);
-            }
-        } else {
-            throw new Catalog.TableNotExistException(identifier);
+        }
+        switch (request.getMethod()) {
+            case "GET":
+                TableMetadata tableMetadata;
+                identifier.isSystemTable();
+                if (identifier.isSystemTable()) {
+                    TableSchema schema = catalog.loadTableSchema(identifier);
+                    tableMetadata =
+                            createTableMetadata(
+                                    identifier, schema.id(), schema.toSchema(), null, false);
+                } else {
+                    tableMetadata = tableMetadataStore.get(identifier.getFullName());
+                }
+                response =
+                        new GetTableResponse(
+                                tableMetadata.uuid(),
+                                identifier.getTableName(),
+                                tableMetadata.isExternal(),
+                                tableMetadata.schema().id(),
+                                tableMetadata.schema().toSchema());
+                return mockResponse(response, 200);
+            case "POST":
+                AlterTableRequest requestBody =
+                        OBJECT_MAPPER.readValue(
+                                request.getBody().readUtf8(), AlterTableRequest.class);
+                alterTableImpl(identifier, requestBody.getChanges());
+                return new MockResponse().setResponseCode(200);
+            case "DELETE":
+                try {
+                    catalog.dropTable(identifier, false);
+                } catch (Exception e) {
+                    System.out.println(e.getMessage());
+                }
+                tableMetadataStore.remove(identifier.getFullName());
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
         }
     }
 

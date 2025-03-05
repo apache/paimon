@@ -883,35 +883,59 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testListDataFromPageApi() {
-        List<Integer> testData = ImmutableList.of(1, 2, 3, 4);
+    void testListDataFromPageApiWhenLastPageTokenIsNull() {
+        List<Integer> testData = ImmutableList.of(1, 2, 3, 4, 5, 6, 7);
         int maxResults = 2;
         AtomicInteger fetchTimes = new AtomicInteger(0);
         List<Integer> fetchData =
                 restCatalog.listDataFromPageApi(
                         queryParams -> {
-                            String nextToken = queryParams.getOrDefault(PAGE_TOKEN, null);
-                            fetchTimes.incrementAndGet();
-                            if (nextToken == null) {
-                                return new TestPagedResponse(
-                                        maxResults + "", testData.subList(0, maxResults));
-                            } else {
-                                Integer index = Integer.parseInt(nextToken);
-                                if (index >= testData.size()) {
-                                    return new TestPagedResponse(null, null);
-                                } else {
-                                    String nextPageToken =
-                                            (index + maxResults) == (testData.size())
-                                                    ? null
-                                                    : (index + maxResults + 1) + "";
-                                    return new TestPagedResponse(
-                                            nextPageToken,
-                                            testData.subList(index, index + maxResults));
-                                }
-                            }
+                            return generateTestPagedResponse(
+                                    queryParams, testData, maxResults, fetchTimes, true);
                         });
-        assertEquals(fetchTimes.get(), testData.size() / maxResults);
+        assertEquals(fetchTimes.get(), 4);
         assertThat(fetchData).containsSequence(testData);
+    }
+
+    @Test
+    void testListDataFromPageApiWhenLastPageTokenIsNotNullAndDataIsNull() {
+        List<Integer> testData = ImmutableList.of(1, 2, 3, 4, 5, 6);
+        int maxResults = 2;
+        AtomicInteger fetchTimes = new AtomicInteger(0);
+        List<Integer> fetchData =
+                restCatalog.listDataFromPageApi(
+                        queryParams -> {
+                            return generateTestPagedResponse(
+                                    queryParams, testData, maxResults, fetchTimes, false);
+                        });
+
+        assertEquals(fetchTimes.get(), testData.size() / maxResults + 1);
+        assertThat(fetchData).containsSequence(testData);
+    }
+
+    private TestPagedResponse generateTestPagedResponse(
+            Map<String, String> queryParams,
+            List<Integer> testData,
+            int maxResults,
+            AtomicInteger fetchTimes,
+            boolean supportPageTokenNull) {
+        String nextToken = queryParams.getOrDefault(PAGE_TOKEN, null);
+        fetchTimes.incrementAndGet();
+        if (nextToken == null) {
+            return new TestPagedResponse(maxResults + "", testData.subList(0, maxResults));
+        } else {
+            int index = Integer.parseInt(nextToken);
+            if (index >= testData.size()) {
+                return new TestPagedResponse(null, null);
+            } else {
+                int endIndex = Math.min((index + maxResults), testData.size());
+                String nextPageToken =
+                        supportPageTokenNull && endIndex >= (testData.size())
+                                ? null
+                                : endIndex + "";
+                return new TestPagedResponse(nextPageToken, testData.subList(index, endIndex));
+            }
+        }
     }
 
     @Override
