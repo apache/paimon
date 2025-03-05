@@ -258,31 +258,6 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testApiWhenTableNoExist() throws Exception {
-        Identifier identifier = Identifier.create("no_exit_table_db", "no_exit_table");
-        catalog.createDatabase(identifier.getDatabaseName(), true);
-        assertThrows(
-                Catalog.TableNotExistException.class, () -> restCatalog.loadSnapshot(identifier));
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () ->
-                        restCatalog.commitSnapshot(
-                                identifier,
-                                createSnapshotWithMillis(1L, System.currentTimeMillis()),
-                                new ArrayList<Partition>()));
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () -> restCatalog.createBranch(identifier, "my_branch", null));
-        assertThrows(
-                Catalog.TableNotExistException.class, () -> restCatalog.listBranches(identifier));
-        assertThrows(
-                Catalog.TableNotExistException.class, () -> restCatalog.listPartitions(identifier));
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () -> catalog.listPartitionsPaged(identifier, 10, "dt=20250101"));
-    }
-
-    @Test
     void renameWhenTargetTableExist() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "rename_table");
         Identifier targetIdentifier = Identifier.create("test_table_db", "target_table");
@@ -606,6 +581,10 @@ class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
         Identifier identifier = Identifier.create("test_db", "test_table");
+
+        assertThrows(
+                Catalog.TableNotExistException.class, () -> restCatalog.listPartitions(identifier));
+
         createTable(
                 identifier,
                 ImmutableMap.of(METASTORE_PARTITIONED_TABLE.key(), "" + true),
@@ -670,6 +649,11 @@ class RESTCatalogTest extends CatalogTestBase {
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
         Identifier identifier = Identifier.create(databaseName, "table");
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> catalog.listPartitionsPaged(identifier, 10, "dt=20250101"));
+
         catalog.createTable(
                 identifier,
                 Schema.newBuilder()
@@ -782,6 +766,19 @@ class RESTCatalogTest extends CatalogTestBase {
     void testSnapshotFromREST() throws Exception {
         RESTCatalog catalog = (RESTCatalog) this.catalog;
         Identifier hasSnapshotTableIdentifier = Identifier.create("test_db_a", "my_snapshot_table");
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.loadSnapshot(hasSnapshotTableIdentifier));
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () ->
+                        restCatalog.commitSnapshot(
+                                hasSnapshotTableIdentifier,
+                                createSnapshotWithMillis(1L, System.currentTimeMillis()),
+                                new ArrayList<Partition>()));
+
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
         long millis = System.currentTimeMillis();
@@ -860,6 +857,13 @@ class RESTCatalogTest extends CatalogTestBase {
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
         Identifier identifier = Identifier.create(databaseName, "table");
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.createBranch(identifier, "my_branch", null));
+
+        assertThrows(
+                Catalog.TableNotExistException.class, () -> restCatalog.listBranches(identifier));
 
         catalog.createTable(
                 identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
