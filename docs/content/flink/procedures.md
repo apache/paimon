@@ -784,7 +784,7 @@ All available procedures are listed below.
          <li>bucket_num: Resulting bucket number after rescale. The default value of argument bucket_num is the current bucket number of the table. Cannot be empty for postpone bucket tables.</li>
          <li>partition: What partition to rescale. For partitioned table this argument cannot be empty.</li>
          <li>source_parallelism: Parallelism of source operator. The default value is the current bucket number of the partition.</li>
-         <li>partition: Parallelism of sink operator. The default value is equal to bucket_num.</li>
+         <li>sink_parallelism: Parallelism of sink operator. The default value is equal to bucket_num.</li>
       </td>
       <td>
          CALL sys.rescale(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08')
