@@ -30,7 +30,9 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
+import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreScan;
@@ -54,8 +56,10 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
+import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -273,11 +277,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
-        return newCommit(commitUser, createCommitCallbacks(commitUser));
-    }
-
-    @Override
-    public FileStoreCommitImpl newCommit(String commitUser, List<CommitCallback> callbacks) {
         SnapshotManager snapshotManager = snapshotManager();
         SnapshotCommit snapshotCommit = catalogEnvironment.snapshotCommit(snapshotManager);
         if (snapshotCommit == null) {
@@ -308,7 +307,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newStatsFileHandler(),
                 bucketMode(),
                 options.scanManifestParallelism(),
-                callbacks,
+                createCommitCallbacks(commitUser),
                 options.commitMaxRetries(),
                 options.commitTimeout());
     }
@@ -360,7 +359,40 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     public abstract Comparator<InternalRow> newKeyComparator();
 
-    protected abstract List<CommitCallback> createCommitCallbacks(String commitUser);
+    protected List<CommitCallback> createCommitCallbacks(String commitUser) {
+        List<CommitCallback> callbacks =
+                new ArrayList<>(CallbackUtils.loadCommitCallbacks(options));
+
+        if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
+            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
+            if (partitionHandler != null) {
+                InternalRowPartitionComputer partitionComputer =
+                        new InternalRowPartitionComputer(
+                                options.partitionDefaultName(),
+                                schema.logicalPartitionType(),
+                                schema.partitionKeys().toArray(new String[0]),
+                                options.legacyPartitionName());
+                callbacks.add(new AddPartitionCommitCallback(partitionHandler, partitionComputer));
+            }
+        }
+
+        TagPreview tagPreview = TagPreview.create(options);
+        if (options.tagToPartitionField() != null
+                && tagPreview != null
+                && schema.partitionKeys().isEmpty()) {
+            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
+            if (partitionHandler != null) {
+                TagPreviewCommitCallback callback =
+                        new TagPreviewCommitCallback(
+                                new AddPartitionTagCallback(
+                                        partitionHandler, options.tagToPartitionField()),
+                                tagPreview);
+                callbacks.add(callback);
+            }
+        }
+
+        return callbacks;
+    }
 
     @Override
     @Nullable

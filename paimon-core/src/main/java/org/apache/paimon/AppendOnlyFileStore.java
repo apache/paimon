@@ -40,7 +40,6 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.types.RowType;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -174,7 +173,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     protected List<CommitCallback> createCommitCallbacks(String commitUser) {
-        List<CommitCallback> callbacks = new ArrayList<>();
+        List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
 
         if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
                 != IcebergOptions.StorageType.DISABLED) {

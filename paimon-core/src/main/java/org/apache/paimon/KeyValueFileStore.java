@@ -51,7 +51,6 @@ import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 import org.apache.paimon.utils.ValueEqualiserSupplier;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -268,7 +267,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     protected List<CommitCallback> createCommitCallbacks(String commitUser) {
-        List<CommitCallback> callbacks = new ArrayList<>();
+        List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
 
         if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
                 != IcebergOptions.StorageType.DISABLED) {

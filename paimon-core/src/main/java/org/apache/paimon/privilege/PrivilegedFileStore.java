@@ -39,7 +39,6 @@ import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
@@ -147,12 +146,6 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     public FileStoreCommit newCommit(String commitUser) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newCommit(commitUser);
-    }
-
-    @Override
-    public FileStoreCommit newCommit(String commitUser, List<CommitCallback> callbacks) {
-        privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newCommit(commitUser, callbacks);
     }
 
     @Override
