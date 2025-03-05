@@ -25,6 +25,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -50,6 +52,7 @@ import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
@@ -282,7 +285,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreCommitImpl newCommit(String commitUser) {
+    public FileStoreCommitImpl newCommit(String commitUser, FileStoreTable table) {
         SnapshotManager snapshotManager = snapshotManager();
         SnapshotCommit snapshotCommit = catalogEnvironment.snapshotCommit(snapshotManager);
         if (snapshotCommit == null) {
@@ -313,7 +316,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newStatsFileHandler(),
                 bucketMode(),
                 options.scanManifestParallelism(),
-                createCommitCallbacks(commitUser),
+                createCommitCallbacks(commitUser, table),
                 options.commitMaxRetries(),
                 options.commitTimeout());
     }
@@ -365,7 +368,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     public abstract Comparator<InternalRow> newKeyComparator();
 
-    protected List<CommitCallback> createCommitCallbacks(String commitUser) {
+    private List<CommitCallback> createCommitCallbacks(String commitUser, FileStoreTable table) {
         List<CommitCallback> callbacks =
                 new ArrayList<>(CallbackUtils.loadCommitCallbacks(options));
 
@@ -397,28 +400,48 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             }
         }
 
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
+            callbacks.add(new IcebergCommitCallback(table, commitUser));
+        }
+
         return callbacks;
     }
 
     @Override
     @Nullable
-    public PartitionExpire newPartitionExpire(String commitUser) {
+    public PartitionExpire newPartitionExpire(String commitUser, FileStoreTable table) {
         Duration partitionExpireTime = options.partitionExpireTime();
         if (partitionExpireTime == null || partitionType().getFieldCount() == 0) {
             return null;
         }
 
+        return newPartitionExpire(
+                commitUser,
+                table,
+                partitionExpireTime,
+                options.partitionExpireCheckInterval(),
+                PartitionExpireStrategy.createPartitionExpireStrategy(options, partitionType()));
+    }
+
+    @Override
+    public PartitionExpire newPartitionExpire(
+            String commitUser,
+            FileStoreTable table,
+            Duration expirationTime,
+            Duration checkInterval,
+            PartitionExpireStrategy expireStrategy) {
         PartitionHandler partitionHandler = null;
         if (options.partitionedTableInMetastore()) {
             partitionHandler = catalogEnvironment.partitionHandler();
         }
 
         return new PartitionExpire(
-                partitionExpireTime,
-                options.partitionExpireCheckInterval(),
-                PartitionExpireStrategy.createPartitionExpireStrategy(options, partitionType()),
+                expirationTime,
+                checkInterval,
+                expireStrategy,
                 newScan(ScanType.FOR_COMMIT),
-                newCommit(commitUser),
+                newCommit(commitUser, table),
                 partitionHandler,
                 options.endInputCheckPartitionExpire(),
                 options.partitionExpireMaxNum());

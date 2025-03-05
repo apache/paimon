@@ -18,19 +18,18 @@
 
 package org.apache.paimon.flink.source.statistics;
 
-import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.BigIntType;
@@ -83,14 +82,13 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null));
 
-        FileStore<?> fileStore = table.store();
-        FileStoreCommit fileStoreCommit = fileStore.newCommit(commitUser);
-        Snapshot latestSnapshot = fileStore.snapshotManager().latestSnapshot();
+        BatchTableCommit commit = table.newBatchWriteBuilder().newCommit();
+        Snapshot latestSnapshot = table.latestSnapshot().get();
         Statistics colStats =
                 new Statistics(
                         latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
-        fileStoreCommit.commitStatistics(colStats, Long.MAX_VALUE);
-        fileStoreCommit.close();
+        commit.updateStatistics(colStats);
+        commit.close();
         DataTableSource scanSource = new DataTableSource(identifier, table, false, null, null);
         Assertions.assertThat(scanSource.reportStatistics().getRowCount()).isEqualTo(9L);
         Map<String, ColumnStats> expectedColStats = new HashMap<>();
@@ -170,14 +168,13 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null));
 
-        FileStore<?> fileStore = table.store();
-        FileStoreCommit fileStoreCommit = fileStore.newCommit(commitUser);
-        Snapshot latestSnapshot = fileStore.snapshotManager().latestSnapshot();
+        BatchTableCommit commit = table.newBatchWriteBuilder().newCommit();
+        Snapshot latestSnapshot = table.latestSnapshot().get();
         Statistics colStats =
                 new Statistics(
                         latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
-        fileStoreCommit.commitStatistics(colStats, Long.MAX_VALUE);
-        fileStoreCommit.close();
+        commit.updateStatistics(colStats);
+        commit.close();
 
         Map<String, ColumnStats> expectedColStats = new HashMap<>();
         expectedColStats.put(
@@ -249,14 +246,13 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null));
 
-        FileStore<?> fileStore = table.store();
-        FileStoreCommit fileStoreCommit = fileStore.newCommit(commitUser);
-        Snapshot latestSnapshot = fileStore.snapshotManager().latestSnapshot();
+        BatchTableCommit commit = table.newBatchWriteBuilder().newCommit();
+        Snapshot latestSnapshot = table.latestSnapshot().get();
         Statistics colStats =
                 new Statistics(
                         latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
-        fileStoreCommit.commitStatistics(colStats, Long.MAX_VALUE);
-        fileStoreCommit.close();
+        commit.updateStatistics(colStats);
+        commit.close();
 
         Map<String, ColumnStats> expectedColStats = new HashMap<>();
         expectedColStats.put(
@@ -328,14 +324,13 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null));
 
-        FileStore<?> fileStore = table.store();
-        FileStoreCommit fileStoreCommit = fileStore.newCommit(commitUser);
-        Snapshot latestSnapshot = fileStore.snapshotManager().latestSnapshot();
+        BatchTableCommit commit = table.newBatchWriteBuilder().newCommit();
+        Snapshot latestSnapshot = table.latestSnapshot().get();
         Statistics colStats =
                 new Statistics(
                         latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
-        fileStoreCommit.commitStatistics(colStats, Long.MAX_VALUE);
-        fileStoreCommit.close();
+        commit.updateStatistics(colStats);
+        commit.close();
 
         Map<String, ColumnStats> expectedColStats = new HashMap<>();
         expectedColStats.put(

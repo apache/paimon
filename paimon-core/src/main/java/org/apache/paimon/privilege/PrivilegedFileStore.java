@@ -36,9 +36,11 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
@@ -52,6 +54,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.List;
 
 /** {@link FileStore} with privilege checks. */
@@ -150,9 +153,9 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public FileStoreCommit newCommit(String commitUser) {
+    public FileStoreCommit newCommit(String commitUser, FileStoreTable table) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newCommit(commitUser);
+        return wrapped.newCommit(commitUser, table);
     }
 
     @Override
@@ -181,9 +184,21 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
 
     @Nullable
     @Override
-    public PartitionExpire newPartitionExpire(String commitUser) {
+    public PartitionExpire newPartitionExpire(String commitUser, FileStoreTable table) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newPartitionExpire(commitUser);
+        return wrapped.newPartitionExpire(commitUser, table);
+    }
+
+    @Override
+    public PartitionExpire newPartitionExpire(
+            String commitUser,
+            FileStoreTable table,
+            Duration expirationTime,
+            Duration checkInterval,
+            PartitionExpireStrategy expireStrategy) {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newPartitionExpire(
+                commitUser, table, expirationTime, checkInterval, expireStrategy);
     }
 
     @Override
