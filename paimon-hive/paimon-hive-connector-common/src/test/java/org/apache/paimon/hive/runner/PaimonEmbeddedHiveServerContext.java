@@ -23,11 +23,13 @@ import com.klarna.hiverunner.config.HiveRunnerConfig;
 import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Map;
 import java.util.UUID;
 
@@ -57,11 +59,11 @@ public class PaimonEmbeddedHiveServerContext implements HiveServerContext {
 
     private final HiveConf hiveConf = new HiveConf();
 
-    private final TemporaryFolder basedir;
+    private final Path basedir;
     private final HiveRunnerConfig hiveRunnerConfig;
     private boolean inited = false;
 
-    PaimonEmbeddedHiveServerContext(TemporaryFolder basedir, HiveRunnerConfig hiveRunnerConfig) {
+    PaimonEmbeddedHiveServerContext(Path basedir, HiveRunnerConfig hiveRunnerConfig) {
         this.basedir = basedir;
         this.hiveRunnerConfig = hiveRunnerConfig;
     }
@@ -95,7 +97,7 @@ public class PaimonEmbeddedHiveServerContext implements HiveServerContext {
     // such code can
     // read the configurations we set here.
     private void setHiveSitePath() {
-        File hiveSite = new File(newFolder(basedir, "hive-conf"), "hive-site.xml");
+        File hiveSite = new File(newFolder(basedir, "hive-conf").toFile(), "hive-site.xml");
         try (FileOutputStream outputStream = new FileOutputStream(hiveSite)) {
             hiveConf.writeXml(outputStream);
             HiveConf.setHiveSiteLocation(hiveSite.toURI().toURL());
@@ -205,10 +207,11 @@ public class PaimonEmbeddedHiveServerContext implements HiveServerContext {
         createAndSetFolderProperty("test.log.dir", "logs", hiveConf, basedir);
     }
 
-    private File newFolder(TemporaryFolder basedir, String folder) {
+    private Path newFolder(Path basedir, String folder) {
         try {
-            File newFolder = basedir.newFolder(folder);
-            FileUtil.setPermission(newFolder, FsPermission.getDirDefault());
+            Path subDirectoryPath = Paths.get(basedir.toString(), folder);
+            Path newFolder = Files.createDirectory(subDirectoryPath);
+            FileUtil.setPermission(newFolder.toFile(), FsPermission.getDirDefault());
             return newFolder;
         } catch (IOException e) {
             throw new IllegalStateException("Failed to create tmp dir: " + e.getMessage(), e);
@@ -220,17 +223,17 @@ public class PaimonEmbeddedHiveServerContext implements HiveServerContext {
     }
 
     @Override
-    public TemporaryFolder getBaseDir() {
+    public Path getBaseDir() {
         return basedir;
     }
 
     private void createAndSetFolderProperty(
-            HiveConf.ConfVars var, String folder, HiveConf conf, TemporaryFolder basedir) {
-        conf.setVar(var, newFolder(basedir, folder).getAbsolutePath());
+            HiveConf.ConfVars var, String folder, HiveConf conf, Path basedir) {
+        conf.setVar(var, newFolder(basedir, folder).toAbsolutePath().toString());
     }
 
     private void createAndSetFolderProperty(
-            String key, String folder, HiveConf conf, TemporaryFolder basedir) {
-        conf.set(key, newFolder(basedir, folder).getAbsolutePath());
+            String key, String folder, HiveConf conf, Path basedir) {
+        conf.set(key, newFolder(basedir, folder).toAbsolutePath().toString());
     }
 }
