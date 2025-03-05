@@ -419,8 +419,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         GetTableResponse response;
         try {
-            // check table name
-            identifier.getTableName();
             response =
                     client.get(
                             resourcePaths.table(
