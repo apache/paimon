@@ -22,6 +22,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.iceberg.AppendOnlyIcebergCommitCallback;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
@@ -32,8 +34,10 @@ import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.types.RowType;
 
 import java.util.Comparator;
@@ -166,5 +170,20 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     @Override
     public Comparator<InternalRow> newKeyComparator() {
         return null;
+    }
+
+    protected List<CommitCallback> createCommitCallbacks(String commitUser) {
+        List<CommitCallback> callbacks = super.createCommitCallbacks(commitUser);
+
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
+            callbacks.add(
+                    new AppendOnlyIcebergCommitCallback(
+                            new AppendOnlyFileStoreTable(
+                                    fileIO, pathFactory().root(), schema, catalogEnvironment),
+                            commitUser));
+        }
+
+        return callbacks;
     }
 }
