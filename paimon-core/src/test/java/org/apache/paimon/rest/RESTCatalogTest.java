@@ -50,7 +50,6 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -912,25 +911,20 @@ class RESTCatalogTest extends CatalogTestBase {
                         Maps.newHashMap(),
                         queryParams -> {
                             String nextToken = queryParams.getOrDefault(PAGE_TOKEN, null);
-                            Pair<String, List<Integer>> result;
                             fetchTimes.incrementAndGet();
                             if (nextToken == null) {
-                                result =
-                                        Pair.of(
-                                                (maxResults - 1) + "",
-                                                testData.subList(0, maxResults));
+                                return new TestPagedResponse(
+                                        (maxResults - 1) + "", testData.subList(0, maxResults));
                             } else {
                                 Integer index = Integer.parseInt(nextToken) + 1;
                                 if (index >= testData.size() - 1) {
-                                    result = Pair.of(null, null);
+                                    return new TestPagedResponse(null, null);
                                 } else {
-                                    result =
-                                            Pair.of(
-                                                    (index + maxResults - 1) + "",
-                                                    testData.subList(index, index + maxResults));
+                                    return new TestPagedResponse(
+                                            (index + maxResults - 1) + "",
+                                            testData.subList(index, index + maxResults));
                                 }
                             }
-                            return result;
                         });
         assertEquals(fetchTimes.get(), 3);
         assertThat(fetchData).containsSequence(testData);

@@ -19,7 +19,6 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.partition.Partition;
-import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -30,7 +29,7 @@ import java.util.List;
 
 /** Response for listing partitions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListPartitionsResponse implements RESTResponse {
+public class ListPartitionsResponse implements PagedResponse<Partition> {
 
     public static final String FIELD_PARTITIONS = "partitions";
 
@@ -62,5 +61,10 @@ public class ListPartitionsResponse implements RESTResponse {
     @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
     public String getNextPageToken() {
         return this.nextPageToken;
+    }
+
+    @Override
+    public List<Partition> data() {
+        return getPartitions();
     }
 }

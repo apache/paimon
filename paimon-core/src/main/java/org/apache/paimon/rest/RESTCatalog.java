@@ -73,6 +73,7 @@ import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
+import org.apache.paimon.rest.responses.PagedResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -276,13 +277,11 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             return listDataFromPageApi(
                     null,
                     pageToken -> {
-                        ListTablesResponse response =
-                                client.get(
-                                        resourcePaths.tables(databaseName),
-                                        Maps.newHashMap(),
-                                        ListTablesResponse.class,
-                                        restAuthFunction);
-                        return Pair.of(response.getNextPageToken(), response.getTables());
+                        return client.get(
+                                resourcePaths.tables(databaseName),
+                                Maps.newHashMap(),
+                                ListTablesResponse.class,
+                                restAuthFunction);
                     });
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
@@ -620,15 +619,12 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             return listDataFromPageApi(
                     Maps.newHashMap(),
                     queryParams -> {
-                        ListPartitionsResponse response =
-                                client.get(
-                                        resourcePaths.partitions(
-                                                identifier.getDatabaseName(),
-                                                identifier.getTableName()),
-                                        queryParams,
-                                        ListPartitionsResponse.class,
-                                        restAuthFunction);
-                        return Pair.of(response.getNextPageToken(), response.getPartitions());
+                        return client.get(
+                                resourcePaths.partitions(
+                                        identifier.getDatabaseName(), identifier.getTableName()),
+                                queryParams,
+                                ListPartitionsResponse.class,
+                                restAuthFunction);
                     });
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
@@ -806,14 +802,11 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             return listDataFromPageApi(
                     Maps.newHashMap(),
                     queryParams -> {
-                        ListViewsResponse response =
-                                client.get(
-                                        resourcePaths.views(databaseName),
-                                        queryParams,
-                                        ListViewsResponse.class,
-                                        restAuthFunction);
-                        ;
-                        return Pair.of(response.getNextPageToken(), response.getViews());
+                        return client.get(
+                                resourcePaths.views(databaseName),
+                                queryParams,
+                                ListViewsResponse.class,
+                                restAuthFunction);
                     });
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
@@ -947,18 +940,17 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
 
     protected <T> List<T> listDataFromPageApi(
             Map<String, String> queryParams,
-            Function<Map<String, String>, Pair<String, List<T>>> pageApi) {
+            Function<Map<String, String>, PagedResponse<T>> pageApi) {
         List<T> results = new ArrayList<>();
         String pageToken = null;
         do {
             if (pageToken != null) {
                 queryParams.put(PAGE_TOKEN, pageToken);
             }
-            Pair<String, List<T>> nextPageToken2Result = pageApi.apply(queryParams);
-            pageToken = nextPageToken2Result.getKey();
-            if (nextPageToken2Result.getValue() != null
-                    && nextPageToken2Result.getValue().size() > 0) {
-                results.addAll(nextPageToken2Result.getValue());
+            PagedResponse<T> response = pageApi.apply(queryParams);
+            pageToken = response.getNextPageToken();
+            if (response.data() != null && response.data().size() > 0) {
+                results.addAll(response.data());
             } else {
                 break;
             }
