@@ -880,6 +880,8 @@ class RESTCatalogTest extends CatalogTestBase {
                 SupportsBranches.TagNotExistException.class,
                 () -> restCatalog.createBranch(identifier, "my_branch", "tag"));
         restCatalog.createBranch(identifier, "my_branch", null);
+        Identifier branchIdentifier = new Identifier(databaseName, "table", "my_branch");
+        assertThat(restCatalog.getTable(branchIdentifier)).isNotNull();
         assertThrows(
                 SupportsBranches.BranchAlreadyExistException.class,
                 () -> restCatalog.createBranch(identifier, "my_branch", null));
