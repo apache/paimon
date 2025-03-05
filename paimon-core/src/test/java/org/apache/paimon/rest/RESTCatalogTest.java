@@ -580,8 +580,9 @@ class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
+        String branchName = "test_branch";
         Identifier identifier = Identifier.create("test_db", "test_table");
-
+        Identifier branchIdentifier = new Identifier("test_db", "test_table", branchName);
         assertThrows(
                 Catalog.TableNotExistException.class, () -> restCatalog.listPartitions(identifier));
 
@@ -591,6 +592,14 @@ class RESTCatalogTest extends CatalogTestBase {
                 Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);
         assertEquals(0, result.size());
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102"));
+        restCatalog.createBranch(identifier, branchName, null);
+        restCatalog.createPartitions(branchIdentifier, Lists.newArrayList(partitionSpecs));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrder(partitionSpecs.get(0), partitionSpecs.get(1));
     }
 
     @Test

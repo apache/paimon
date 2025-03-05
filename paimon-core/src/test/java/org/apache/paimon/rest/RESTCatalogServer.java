@@ -913,8 +913,14 @@ public class RESTCatalogServer {
                 && Objects.nonNull(request.getRequestUrl())) {
             switch (request.getMethod()) {
                 case "GET":
-                    List<Partition> partitions =
-                            tablePartitionsStore.get(tableIdentifier.getFullName());
+                    List<Partition> partitions = new ArrayList<>();
+                    for (Map.Entry<String, List<Partition>> entry :
+                            tablePartitionsStore.entrySet()) {
+                        String tableName = Identifier.fromString(entry.getKey()).getTableName();
+                        if (tableName.equals(tableIdentifier.getTableName())) {
+                            partitions.addAll(entry.getValue());
+                        }
+                    }
                     return generateFinalListPartitionsResponse(request, partitions);
                 case "POST":
                     CreatePartitionsRequest requestBody =
@@ -944,11 +950,18 @@ public class RESTCatalogServer {
         BranchManager branchManager = table.branchManager();
         String fromTag = "";
         String branch = "";
+        Identifier branchIdentifier;
         try {
             switch (request.getMethod()) {
                 case "DELETE":
                     branch = resources[4];
+                    branchIdentifier =
+                            new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    branch);
                     table.deleteBranch(branch);
+                    tableMetadataStore.remove(branchIdentifier.getFullName());
                     return new MockResponse().setResponseCode(200);
                 case "GET":
                     List<String> branches = branchManager.branches();
@@ -972,6 +985,14 @@ public class RESTCatalogServer {
                             fromTag = requestBody.fromTag();
                             branchManager.createBranch(requestBody.branch(), requestBody.fromTag());
                         }
+                        branchIdentifier =
+                                new Identifier(
+                                        identifier.getDatabaseName(),
+                                        identifier.getTableName(),
+                                        requestBody.branch());
+                        tableMetadataStore.put(
+                                branchIdentifier.getFullName(),
+                                tableMetadataStore.get(identifier.getFullName()));
                     }
                     return new MockResponse().setResponseCode(200);
                 default:
