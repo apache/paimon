@@ -697,7 +697,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                                     identifier.getDatabaseName(), identifier.getTableName()),
                             ListBranchesResponse.class,
                             restAuthFunction);
-            response.branches();
             if (response.branches() == null) {
                 return Collections.emptyList();
             }
@@ -722,8 +721,11 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
                             queryParams,
                             ListPartitionsResponse.class,
                             restAuthFunction);
-            return new PagedList<>(response.getPartitions(), response.getNextPageToken());
-
+            if (Objects.nonNull(response.getPartitions())) {
+                return new PagedList<>(response.getPartitions(), response.getNextPageToken());
+            } else {
+                return new PagedList<>(Collections.emptyList(), null);
+            }
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
