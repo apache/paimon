@@ -34,16 +34,33 @@ public class ListPartitionsResponse implements RESTResponse {
 
     public static final String FIELD_PARTITIONS = "partitions";
 
+    private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
+
     @JsonProperty(FIELD_PARTITIONS)
     private final List<Partition> partitions;
 
-    @JsonCreator
+    @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
+    private final String nextPageToken;
+
     public ListPartitionsResponse(@JsonProperty(FIELD_PARTITIONS) List<Partition> partitions) {
+        this(partitions, null);
+    }
+
+    @JsonCreator
+    public ListPartitionsResponse(
+            @JsonProperty(FIELD_PARTITIONS) List<Partition> partitions,
+            @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
         this.partitions = partitions;
+        this.nextPageToken = nextPageToken;
     }
 
     @JsonGetter(FIELD_PARTITIONS)
     public List<Partition> getPartitions() {
         return partitions;
+    }
+
+    @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
+    public String getNextPageToken() {
+        return this.nextPageToken;
     }
 }

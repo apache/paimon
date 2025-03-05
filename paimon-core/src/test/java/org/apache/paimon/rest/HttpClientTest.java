@@ -88,6 +88,30 @@ public class HttpClientTest {
     }
 
     @Test
+    public void testGetSuccessWithQueryParams() {
+        server.enqueueResponse(mockResponseDataStr, 200);
+        Map<String, String> queryParams = ImmutableMap.of("maxResults", "10", "pageToken", "abc");
+        MockRESTData response =
+                httpClient.get(MOCK_PATH, queryParams, MockRESTData.class, restAuthFunction);
+        assertEquals(mockResponseData.data(), response.data());
+
+        server.enqueueResponse(mockResponseDataStr, 200);
+        queryParams = ImmutableMap.of("pageToken", "abc");
+        response = httpClient.get(MOCK_PATH, queryParams, MockRESTData.class, restAuthFunction);
+        assertEquals(mockResponseData.data(), response.data());
+
+        server.enqueueResponse(mockResponseDataStr, 200);
+        queryParams = ImmutableMap.of("maxResults", "10");
+        response = httpClient.get(MOCK_PATH, queryParams, MockRESTData.class, restAuthFunction);
+        assertEquals(mockResponseData.data(), response.data());
+
+        server.enqueueResponse(mockResponseDataStr, 200);
+        queryParams = new HashMap<>();
+        response = httpClient.get(MOCK_PATH, queryParams, MockRESTData.class, restAuthFunction);
+        assertEquals(mockResponseData.data(), response.data());
+    }
+
+    @Test
     public void testGetFail() {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(

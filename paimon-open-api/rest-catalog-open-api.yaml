@@ -215,6 +215,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -248,6 +259,43 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/table-details:
+    get:
+      tags:
+        - table
+      summary: List table details
+      operationId: listTableDetails
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTableDetailsResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}:
@@ -538,6 +586,17 @@ paths:
         - name: table
           in: path
           required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
           schema:
             type: string
       responses:
@@ -879,6 +938,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -918,6 +988,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/view-details:
+    get:
+      tags:
+        - view
+      summary: List view details
+      operationId: listViewDetails
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListViewDetailsResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/views/{view}:
@@ -1487,6 +1594,17 @@ components:
           type: array
           items:
             type: string
+        nextPageToken:
+          type: string
+    ListTableDetailsResponse:
+      type: object
+      properties:
+        tableDetails:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetTableResponse'
+        nextPageToken:
+          type: string
     ConfigResponse:
       type: object
       properties:
@@ -1505,6 +1623,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
+          nextPageToken:
+            type: string
     CreateBranchRequest:
       type: object
       properties:
@@ -1541,6 +1661,17 @@ components:
           type: array
           items:
             type: string
+          nextPageToken:
+            type: string
+    ListViewDetailsResponse:
+      type: object
+      properties:
+        viewDetails:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetViewResponse'
+        nextPageToken:
+          type: string
     ViewSchema:
       type: object
       properties:
