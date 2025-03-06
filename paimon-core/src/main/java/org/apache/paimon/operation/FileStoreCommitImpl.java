@@ -877,10 +877,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         Snapshot newSnapshot;
-        String baseManifestList = null;
-        String deltaManifestList = null;
-        List<PartitionEntry> deltaStatistics = null;
-        String changelogManifestList = null;
+        Pair<String, Long> baseManifestList = null;
+        Pair<String, Long> deltaManifestList = null;
+        List<PartitionEntry> deltaStatistics;
+        Pair<String, Long> changelogManifestList = null;
         String oldIndexManifest = null;
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
@@ -974,9 +974,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     new Snapshot(
                             newSnapshotId,
                             latestSchemaId,
-                            baseManifestList,
-                            deltaManifestList,
-                            changelogManifestList,
+                            baseManifestList.getLeft(),
+                            baseManifestList.getRight(),
+                            deltaManifestList.getKey(),
+                            deltaManifestList.getRight(),
+                            changelogManifestList == null ? null : changelogManifestList.getKey(),
+                            changelogManifestList == null ? null : changelogManifestList.getRight(),
                             indexManifest,
                             commitUser,
                             identifier,
@@ -1110,16 +1113,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        String baseManifestList = manifestList.write(mergeAfterManifests);
-        String deltaManifestList = manifestList.write(emptyList());
+        Pair<String, Long> baseManifestList = manifestList.write(mergeAfterManifests);
+        Pair<String, Long> deltaManifestList = manifestList.write(emptyList());
 
         // prepare snapshot file
         Snapshot newSnapshot =
                 new Snapshot(
                         latestSnapshot.id() + 1,
                         latestSnapshot.schemaId(),
-                        baseManifestList,
-                        deltaManifestList,
+                        baseManifestList.getLeft(),
+                        baseManifestList.getRight(),
+                        deltaManifestList.getLeft(),
+                        deltaManifestList.getRight(),
+                        null,
                         null,
                         latestSnapshot.indexManifest(),
                         commitUser,
@@ -1403,11 +1409,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void cleanUpNoReuseTmpManifests(
-            String baseManifestList,
+            Pair<String, Long> baseManifestList,
             List<ManifestFileMeta> mergeBeforeManifests,
             List<ManifestFileMeta> mergeAfterManifests) {
         if (baseManifestList != null) {
-            manifestList.delete(baseManifestList);
+            manifestList.delete(baseManifestList.getKey());
         }
         Set<String> oldMetaSet =
                 mergeBeforeManifests.stream()
@@ -1421,22 +1427,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void cleanUpReuseTmpManifests(
-            String deltaManifestList,
-            String changelogManifestList,
+            Pair<String, Long> deltaManifestList,
+            Pair<String, Long> changelogManifestList,
             String oldIndexManifest,
             String newIndexManifest) {
         if (deltaManifestList != null) {
-            for (ManifestFileMeta manifest : manifestList.read(deltaManifestList)) {
+            for (ManifestFileMeta manifest : manifestList.read(deltaManifestList.getKey())) {
                 manifestFile.delete(manifest.fileName());
             }
-            manifestList.delete(deltaManifestList);
+            manifestList.delete(deltaManifestList.getKey());
         }
 
         if (changelogManifestList != null) {
-            for (ManifestFileMeta manifest : manifestList.read(changelogManifestList)) {
+            for (ManifestFileMeta manifest : manifestList.read(changelogManifestList.getKey())) {
                 manifestFile.delete(manifest.fileName());
             }
-            manifestList.delete(changelogManifestList);
+            manifestList.delete(changelogManifestList.getKey());
         }
 
         cleanIndexManifest(oldIndexManifest, newIndexManifest);
@@ -1518,8 +1524,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private class RetryResult implements CommitResult {
 
         private final List<PartitionEntry> deltaStatistics;
-        private final String deltaManifestList;
-        private final String changelogManifestList;
+        private final Pair<String, Long> deltaManifestList;
+        private final Pair<String, Long> changelogManifestList;
 
         private final String oldIndexManifest;
         private final String newIndexManifest;
@@ -1529,8 +1535,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         private RetryResult(
                 List<PartitionEntry> deltaStatistics,
-                String deltaManifestList,
-                String changelogManifestList,
+                Pair<String, Long> deltaManifestList,
+                Pair<String, Long> changelogManifestList,
                 String oldIndexManifest,
                 String newIndexManifest,
                 Snapshot latestSnapshot,
@@ -1557,14 +1563,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private class ManifestCompactResult implements CommitResult {
 
-        private final String baseManifestList;
-        private final String deltaManifestList;
+        private final Pair<String, Long> baseManifestList;
+        private final Pair<String, Long> deltaManifestList;
         private final List<ManifestFileMeta> mergeBeforeManifests;
         private final List<ManifestFileMeta> mergeAfterManifests;
 
         public ManifestCompactResult(
-                String baseManifestList,
-                String deltaManifestList,
+                Pair<String, Long> baseManifestList,
+                Pair<String, Long> deltaManifestList,
                 List<ManifestFileMeta> mergeBeforeManifests,
                 List<ManifestFileMeta> mergeAfterManifests) {
             this.baseManifestList = baseManifestList;
@@ -1574,7 +1580,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         public void cleanAll() {
-            manifestList.delete(deltaManifestList);
+            manifestList.delete(deltaManifestList.getKey());
             cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
         }
 

@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.VersionedObjectSerializer;
@@ -83,7 +84,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
      */
     public List<ManifestFileMeta> readDataManifests(Snapshot snapshot) {
         List<ManifestFileMeta> result = new ArrayList<>();
-        result.addAll(read(snapshot.baseManifestList()));
+        result.addAll(read(snapshot.baseManifestList(), snapshot.baseManifestListSize()));
         result.addAll(readDeltaManifests(snapshot));
         return result;
     }
@@ -94,7 +95,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
      * @return a list of ManifestFileMeta.
      */
     public List<ManifestFileMeta> readDeltaManifests(Snapshot snapshot) {
-        return read(snapshot.deltaManifestList());
+        return read(snapshot.deltaManifestList(), snapshot.deltaManifestListSize());
     }
 
     /**
@@ -105,7 +106,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
     public List<ManifestFileMeta> readChangelogManifests(Snapshot snapshot) {
         return snapshot.changelogManifestList() == null
                 ? Collections.emptyList()
-                : read(snapshot.changelogManifestList());
+                : read(snapshot.changelogManifestList(), snapshot.changelogManifestListSize());
     }
 
     /**
@@ -113,8 +114,8 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
      *
      * <p>NOTE: This method is atomic.
      */
-    public String write(List<ManifestFileMeta> metas) {
-        return super.writeWithoutRolling(metas);
+    public Pair<String, Long> write(List<ManifestFileMeta> metas) {
+        return super.writeWithoutRolling(metas.iterator());
     }
 
     /** Creator of {@link ManifestList}. */

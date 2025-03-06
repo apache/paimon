@@ -52,6 +52,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     private FormatWriter writer;
     private PositionOutputStream out;
 
+    protected long outputBytes;
     private long recordCount;
     protected boolean closed;
 
@@ -170,7 +171,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Closing file " + path);
+            LOG.debug("Closing file {}", path);
         }
 
         try {
@@ -180,6 +181,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             }
             if (out != null) {
                 out.flush();
+                outputBytes = out.getPos();
                 out.close();
                 out = null;
             }
