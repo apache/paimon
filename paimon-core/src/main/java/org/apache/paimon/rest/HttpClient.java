@@ -41,7 +41,6 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Objects;
 import java.util.function.Function;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
@@ -169,16 +168,15 @@ public class HttpClient implements RESTClient {
         }
     }
 
+    @VisibleForTesting
     protected static String getRequestUrl(
             String uri, String path, Map<String, String> queryParams) {
         String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
         if (queryParams != null && !queryParams.isEmpty()) {
             HttpUrl httpUrl = HttpUrl.parse(fullPath);
-            if (Objects.nonNull(httpUrl)) {
-                HttpUrl.Builder builder = httpUrl.newBuilder();
-                queryParams.forEach(builder::addQueryParameter);
-                fullPath = builder.build().toString();
-            }
+            HttpUrl.Builder builder = httpUrl.newBuilder();
+            queryParams.forEach(builder::addQueryParameter);
+            fullPath = builder.build().toString();
         }
         return fullPath;
     }

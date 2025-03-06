@@ -67,8 +67,7 @@ public class RESTUtil {
     public static String encodeString(String toEncode) {
         Preconditions.checkArgument(toEncode != null, "Invalid string to encode: null");
         try {
-            return URLEncoder.encode(toEncode, StandardCharsets.UTF_8.name())
-                    .replaceAll("\\+", "%20");
+            return URLEncoder.encode(toEncode, StandardCharsets.UTF_8.name());
         } catch (UnsupportedEncodingException e) {
             throw new UncheckedIOException(
                     String.format(
