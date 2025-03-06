@@ -92,7 +92,8 @@ public class HttpClientTest {
     @Test
     public void testGetSuccessWithQueryParams() {
         server.enqueueResponse(mockResponseDataStr, 200);
-        Map<String, String> queryParams = ImmutableMap.of("maxResults", "10", "pageToken", "abc");
+        Map<String, String> queryParams =
+                ImmutableMap.of("maxResults", "10", "pageToken", "abc=123");
         MockRESTData response =
                 httpClient.get(MOCK_PATH, queryParams, MockRESTData.class, restAuthFunction);
         assertEquals(mockResponseData.data(), response.data());
@@ -153,6 +154,20 @@ public class HttpClientTest {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
                 BadRequestException.class, () -> httpClient.delete(MOCK_PATH, restAuthFunction));
+    }
+
+    @Test
+    public void testDeleteWithDataSuccess() {
+        server.enqueueResponse(mockResponseDataStr, 200);
+        assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, mockResponseData, restAuthFunction));
+    }
+
+    @Test
+    public void testDeleteWithDataFail() {
+        server.enqueueResponse(errorResponseStr, 400);
+        assertThrows(
+                BadRequestException.class,
+                () -> httpClient.delete(MOCK_PATH, mockResponseData, restAuthFunction));
     }
 
     @Test

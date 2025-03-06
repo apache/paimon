@@ -86,7 +86,7 @@ public class HttpClient implements RESTClient {
         Map<String, String> authHeaders = getHeaders(uri, path, "GET", "", restAuthFunction);
         Request request =
                 new Request.Builder()
-                        .url(getRequestUrl(path))
+                        .url(getRequestUrl(uri, path, null))
                         .get()
                         .headers(Headers.of(authHeaders))
                         .build();
@@ -99,11 +99,14 @@ public class HttpClient implements RESTClient {
             Map<String, String> queryParams,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        String url = getRequestUrl(uri, path, queryParams);
         Map<String, String> authHeaders =
                 getHeaders(uri, path, queryParams, "GET", "", restAuthFunction);
         Request request =
-                new Request.Builder().url(url).get().headers(Headers.of(authHeaders)).build();
+                new Request.Builder()
+                        .url(getRequestUrl(uri, path, queryParams))
+                        .get()
+                        .headers(Headers.of(authHeaders))
+                        .build();
         return exec(request, responseType);
     }
 
@@ -126,7 +129,7 @@ public class HttpClient implements RESTClient {
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
-                            .url(getRequestUrl(path))
+                            .url(getRequestUrl(uri, path, null))
                             .post(requestBody)
                             .headers(Headers.of(authHeaders))
                             .build();
@@ -141,7 +144,7 @@ public class HttpClient implements RESTClient {
         Map<String, String> authHeaders = getHeaders(uri, path, "DELETE", "", restAuthFunction);
         Request request =
                 new Request.Builder()
-                        .url(getRequestUrl(path))
+                        .url(getRequestUrl(uri, path, null))
                         .delete()
                         .headers(Headers.of(authHeaders))
                         .build();
@@ -158,7 +161,7 @@ public class HttpClient implements RESTClient {
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
-                            .url(getRequestUrl(path))
+                            .url(getRequestUrl(uri, path, null))
                             .delete(requestBody)
                             .headers(Headers.of(authHeaders))
                             .build();
@@ -216,10 +219,6 @@ public class HttpClient implements RESTClient {
 
     private static RequestBody buildRequestBody(String body) throws JsonProcessingException {
         return RequestBody.create(body.getBytes(StandardCharsets.UTF_8), MEDIA_TYPE);
-    }
-
-    private String getRequestUrl(String path) {
-        return getRequestUrl(uri, path, null);
     }
 
     private static Map<String, String> getHeaders(
