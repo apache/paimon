@@ -42,15 +42,29 @@ public class IcebergOptions {
                     .intType()
                     .defaultValue(10)
                     .withDescription(
-                            "Minimum number of Iceberg metadata files to trigger metadata compaction.");
+                            "Minimum number of Iceberg manifest metadata files to trigger manifest metadata compaction.");
 
     public static final ConfigOption<Integer> COMPACT_MAX_FILE_NUM =
             ConfigOptions.key("metadata.iceberg.compaction.max.file-num")
                     .intType()
                     .defaultValue(50)
                     .withDescription(
-                            "If number of small Iceberg metadata files exceeds this limit, "
-                                    + "always trigger metadata compaction regardless of their total size.");
+                            "If number of small Iceberg manifest metadata files exceeds this limit, "
+                                    + "always trigger manifest metadata compaction regardless of their total size.");
+
+    public static final ConfigOption<Boolean> METADATA_DELETE_AFTER_COMMIT =
+            key("metadata.iceberg.delete-after-commit.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to delete old metadata files after each table commit");
+
+    public static final ConfigOption<Integer> METADATA_PREVIOUS_VERSIONS_MAX =
+            key("metadata.iceberg.previous-versions-max")
+                    .intType()
+                    .defaultValue(0)
+                    .withDescription(
+                            "The number of old metadata files to keep after each table commit");
 
     public static final ConfigOption<String> URI =
             key("metadata.iceberg.uri")
