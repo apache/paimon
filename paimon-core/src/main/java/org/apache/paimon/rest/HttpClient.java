@@ -258,7 +258,7 @@ public class HttpClient implements RESTClient {
                         .collect(
                                 Collectors.toMap(
                                         pair -> pair[0].trim(), // key
-                                        pair -> pair[1].trim(), // value
+                                        pair -> pair[1].trim().replaceAll("%3D", "="), // value
                                         (existing, replacement) -> existing // handle duplicates
                                         ));
         return Pair.of(resourcePath, parameters);

@@ -32,6 +32,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
@@ -97,6 +98,7 @@ class RESTCatalogTest extends CatalogTestBase {
     private Options options = new Options();
     private String dataPath;
     private RESTCatalog restCatalog;
+    private AuthProvider authProvider;
 
     @BeforeEach
     @Override
@@ -114,7 +116,9 @@ class RESTCatalogTest extends CatalogTestBase {
                                 CatalogOptions.WAREHOUSE.key(),
                                 restWarehouse),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(dataPath, initToken, this.config, restWarehouse);
+        this.authProvider = new BearTokenAuthProvider(initToken);
+        restCatalogServer =
+                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
         restCatalogServer.start();
         options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
