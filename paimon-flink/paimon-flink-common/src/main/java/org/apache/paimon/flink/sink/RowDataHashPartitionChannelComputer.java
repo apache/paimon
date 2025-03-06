@@ -49,4 +49,9 @@ public class RowDataHashPartitionChannelComputer implements ChannelComputer<Inte
         extractor.setRecord(record);
         return ChannelComputer.select(extractor.partition(), 0, numChannels);
     }
+
+    @Override
+    public String toString() {
+        return "shuffle by partition";
+    }
 }
