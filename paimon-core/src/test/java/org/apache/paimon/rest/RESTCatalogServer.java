@@ -214,7 +214,10 @@ public class RESTCatalogServer {
                     if (!("Bearer " + authToken).equals(token)) {
                         return new MockResponse().setResponseCode(401);
                     }
-                    if (request.getPath().equals(resourcePaths.config(warehouse))) {
+                    if (request.getPath().startsWith(resourcePaths.config())
+                            && request.getRequestUrl()
+                                    .queryParameter(RESTCatalog.QUERY_PARAMETER_WAREHOUSE_KEY)
+                                    .equals(warehouse)) {
                         return mockResponse(configResponse, 200);
                     } else if (databaseUri.equals(request.getPath())) {
                         return databasesApiHandler(request);

@@ -23,7 +23,6 @@ import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -44,7 +43,6 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
@@ -86,7 +84,7 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
-        Map<String, String> authHeaders = getHeaders(path, "GET", "", restAuthFunction);
+        Map<String, String> authHeaders = getHeaders(uri, path, "GET", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
@@ -102,13 +100,11 @@ public class HttpClient implements RESTClient {
             Map<String, String> queryParams,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        Map<String, String> authHeaders = getHeaders(path, "GET", "", restAuthFunction);
+        String url = getRequestUrl(uri, path, queryParams);
+        Map<String, String> authHeaders =
+                getHeaders(uri, path, queryParams, "GET", "", restAuthFunction);
         Request request =
-                new Request.Builder()
-                        .url(getRequestUrl(path, queryParams))
-                        .get()
-                        .headers(Headers.of(authHeaders))
-                        .build();
+                new Request.Builder().url(url).get().headers(Headers.of(authHeaders)).build();
         return exec(request, responseType);
     }
 
@@ -126,7 +122,8 @@ public class HttpClient implements RESTClient {
             RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
-            Map<String, String> authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
+            Map<String, String> authHeaders =
+                    getHeaders(uri, path, "POST", bodyStr, restAuthFunction);
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
@@ -142,7 +139,7 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
-        Map<String, String> authHeaders = getHeaders(path, "DELETE", "", restAuthFunction);
+        Map<String, String> authHeaders = getHeaders(uri, path, "DELETE", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(path))
@@ -157,7 +154,8 @@ public class HttpClient implements RESTClient {
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
-            Map<String, String> authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
+            Map<String, String> authHeaders =
+                    getHeaders(uri, path, "DELETE", bodyStr, restAuthFunction);
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
@@ -169,6 +167,20 @@ public class HttpClient implements RESTClient {
         } catch (JsonProcessingException e) {
             throw new RESTException(e, "build request failed.");
         }
+    }
+
+    protected static String getRequestUrl(
+            String uri, String path, Map<String, String> queryParams) {
+        String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
+        if (queryParams != null && !queryParams.isEmpty()) {
+            HttpUrl httpUrl = HttpUrl.parse(fullPath);
+            if (Objects.nonNull(httpUrl)) {
+                HttpUrl.Builder builder = httpUrl.newBuilder();
+                queryParams.forEach(builder::addQueryParameter);
+                fullPath = builder.build().toString();
+            }
+        }
+        return fullPath;
     }
 
     private <T extends RESTResponse> T exec(Request request, Class<T> responseType) {
@@ -209,59 +221,29 @@ public class HttpClient implements RESTClient {
     }
 
     private String getRequestUrl(String path) {
-        return getRequestUrl(path, null);
+        return getRequestUrl(uri, path, null);
     }
 
-    private String getRequestUrl(String path, Map<String, String> queryParams) {
-        String fullPath = StringUtils.isNullOrWhitespaceOnly(path) ? uri : uri + path;
-        if (queryParams != null && !queryParams.isEmpty()) {
-            HttpUrl httpUrl = HttpUrl.parse(fullPath);
-            if (Objects.nonNull(httpUrl)) {
-                HttpUrl.Builder builder = httpUrl.newBuilder();
-                queryParams.forEach(builder::addQueryParameter);
-                return builder.build().toString();
-            } else {
-                return fullPath;
-            }
-        } else {
-            return fullPath;
-        }
-    }
-
-    private Map<String, String> getHeaders(
+    private static Map<String, String> getHeaders(
+            String uri,
             String path,
             String method,
             String data,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
-        Pair<String, Map<String, String>> resourcePath2Parameters = parsePath(path);
-        RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter(
-                        URI.create(uri).getHost(),
-                        resourcePath2Parameters.getLeft(),
-                        resourcePath2Parameters.getValue(),
-                        method,
-                        data);
-        return headerFunction.apply(restAuthParameter);
+
+        return getHeaders(uri, path, Collections.emptyMap(), method, data, headerFunction);
     }
 
-    @VisibleForTesting
-    protected static Pair<String, Map<String, String>> parsePath(String path) {
-        String[] paths = path.split("\\?");
-        String resourcePath = paths[0];
-        if (paths.length == 1) {
-            return Pair.of(resourcePath, Collections.emptyMap());
-        }
-        String query = paths[1];
-        Map<String, String> parameters =
-                Arrays.stream(query.split("&"))
-                        .map(pair -> pair.split("=", 2))
-                        .collect(
-                                Collectors.toMap(
-                                        pair -> pair[0].trim(), // key
-                                        pair -> pair[1].trim(), // value
-                                        (existing, replacement) -> existing // handle duplicates
-                                        ));
-        return Pair.of(resourcePath, parameters);
+    private static Map<String, String> getHeaders(
+            String uri,
+            String path,
+            Map<String, String> queryParams,
+            String method,
+            String data,
+            Function<RESTAuthParameter, Map<String, String>> headerFunction) {
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter(URI.create(uri).getHost(), path, queryParams, method, data);
+        return headerFunction.apply(restAuthParameter);
     }
 
     @Override

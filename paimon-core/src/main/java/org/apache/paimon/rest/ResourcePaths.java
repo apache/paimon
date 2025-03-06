@@ -34,10 +34,9 @@ public class ResourcePaths {
     private static final String VIEWS = "views";
     private static final String TABLE_DETAILS = "table-details";
     private static final String VIEW_DETAILS = "view-details";
-    public static final String QUERY_PARAMETER_WAREHOUSE_KEY = "warehouse";
 
-    public static String config(String warehouse) {
-        return String.format("%s/config?%s=%s", V1, QUERY_PARAMETER_WAREHOUSE_KEY, warehouse);
+    public static String config() {
+        return String.format("%s/config", V1);
     }
 
     public static ResourcePaths forCatalogProperties(Options options) {
@@ -70,8 +69,8 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, databaseName, TABLE_DETAILS);
     }
 
-    public String table(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName);
+    public String table(String databaseName, String objectName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, objectName);
     }
 
     public String renameTable(String databaseName) {
@@ -82,45 +81,45 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, "commit");
     }
 
-    public String tableToken(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "token");
+    public String tableToken(String databaseName, String objectName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, objectName, "token");
     }
 
-    public String tableSnapshot(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "snapshot");
+    public String tableSnapshot(String databaseName, String objectName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, objectName, "snapshot");
     }
 
-    public String partitions(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, PARTITIONS);
+    public String partitions(String databaseName, String objectName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, objectName, PARTITIONS);
     }
 
-    public String dropPartitions(String databaseName, String tableName) {
+    public String dropPartitions(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, PARTITIONS, "drop");
+                V1, prefix, DATABASES, databaseName, TABLES, objectName, PARTITIONS, "drop");
     }
 
-    public String alterPartitions(String databaseName, String tableName) {
+    public String alterPartitions(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, PARTITIONS, "alter");
+                V1, prefix, DATABASES, databaseName, TABLES, objectName, PARTITIONS, "alter");
     }
 
-    public String markDonePartitions(String databaseName, String tableName) {
+    public String markDonePartitions(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, PARTITIONS, "mark");
+                V1, prefix, DATABASES, databaseName, TABLES, objectName, PARTITIONS, "mark");
     }
 
-    public String branches(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, BRANCHES);
+    public String branches(String databaseName, String objectName) {
+        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, objectName, BRANCHES);
     }
 
-    public String branch(String databaseName, String tableName, String branchName) {
+    public String branch(String databaseName, String objectName, String branchName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, BRANCHES, branchName);
+                V1, prefix, DATABASES, databaseName, TABLES, objectName, BRANCHES, branchName);
     }
 
-    public String forwardBranch(String databaseName, String tableName) {
+    public String forwardBranch(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, BRANCHES, "forward");
+                V1, prefix, DATABASES, databaseName, TABLES, objectName, BRANCHES, "forward");
     }
 
     public String views(String databaseName) {
