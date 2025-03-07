@@ -156,7 +156,7 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>com.klarna</groupId>
+            <groupId>io.github.hiverunner</groupId>
             <artifactId>hiverunner</artifactId>
             <version>${hiverunner.version}</version>
             <scope>test</scope>

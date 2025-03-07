@@ -92,9 +92,7 @@ public class HiveLocationTest {
         options.set(CatalogOptions.METASTORE, "hive");
         options.set(CatalogOptions.URI, "");
         options.set(CatalogOptions.LOCK_ENABLED, false);
-        options.set(
-                HiveCatalogOptions.HIVE_CONF_DIR,
-                hiveShell.getBaseDir().getRoot().getPath() + HIVE_CONF);
+        options.set(HiveCatalogOptions.HIVE_CONF_DIR, hiveShell.getBaseDir() + HIVE_CONF);
         options.set(HiveCatalogOptions.LOCATION_IN_PROPERTIES, true);
 
         for (Map.Entry<String, String> stringStringEntry :
@@ -248,7 +246,7 @@ public class HiveLocationTest {
         String[][] params =
                 new String[][] {
                     {"table1", objectStorePath},
-                    {"table2", hiveShell.getBaseDir().getRoot().getAbsolutePath()},
+                    {"table2", hiveShell.getBaseDir().toAbsolutePath().toString()},
                 };
         for (String[] param : params) {
             String tableName = param[0];
