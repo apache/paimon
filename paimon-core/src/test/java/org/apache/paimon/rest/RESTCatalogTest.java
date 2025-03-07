@@ -35,6 +35,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
+import org.apache.paimon.rest.auth.DLFAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -142,6 +143,53 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
                 .isInstanceOf(NotAuthorizedException.class);
+    }
+
+    @Test
+    void testDlfAuth() throws Exception {
+        String restWarehouse = UUID.randomUUID().toString();
+        String akId = "akId" + UUID.randomUUID();
+        String akSecret = "akSecret" + UUID.randomUUID();
+        String securityToken = "securityToken" + UUID.randomUUID();
+        String region = "cn-hangzhou";
+        ConfigResponse config =
+                new ConfigResponse(
+                        ImmutableMap.of(
+                                RESTCatalogInternalOptions.PREFIX.key(),
+                                "paimon",
+                                "header." + serverDefineHeaderName,
+                                serverDefineHeaderValue,
+                                CatalogOptions.WAREHOUSE.key(),
+                                restWarehouse),
+                        ImmutableMap.of());
+        DLFAuthProvider authProvider =
+                DLFAuthProvider.buildAKToken(akId, akSecret, securityToken, region);
+        restCatalogServer =
+                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
+        restCatalogServer.start();
+        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.DLF.identifier());
+        options.set(RESTCatalogOptions.DLF_REGION, region);
+        options.set(RESTCatalogOptions.DLF_ACCESS_KEY_ID, akId);
+        options.set(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET, akSecret);
+        options.set(RESTCatalogOptions.DLF_SECURITY_TOKEN, securityToken);
+        RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
+        String databaseName = "db1";
+        restCatalog.createDatabase(databaseName, true);
+        String[] tableNames = {"dt=20230101", "dt=20230102", "dt=20230103"};
+        for (String tableName : tableNames) {
+            restCatalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+
+        // when maxResults is null or 0, the page length is set to a server configured value
+        PagedList<String> listTablesPaged =
+                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101");
+        PagedList<String> listTablesPaged2 =
+                restCatalog.listTablesPaged(databaseName, 1, listTablesPaged.getNextPageToken());
+        assertEquals(listTablesPaged.getElements().get(0), "dt=20230102");
+        assertEquals(listTablesPaged2.getElements().get(0), "dt=20230103");
     }
 
     @Test

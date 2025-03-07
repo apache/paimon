@@ -39,7 +39,6 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthProvider;
-import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
@@ -97,6 +96,7 @@ import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -118,8 +118,9 @@ public class RESTCatalogServer {
     private static final Logger LOG = LoggerFactory.getLogger(RESTCatalogServer.class);
 
     public static final int DEFAULT_MAX_RESULTS = 100;
-    public static final String MAX_RESULTS = "maxResults";
-    public static final String PAGE_TOKEN = "pageToken";
+    public static final String MAX_RESULTS = RESTCatalog.MAX_RESULTS;
+    public static final String PAGE_TOKEN = RESTCatalog.PAGE_TOKEN;
+    public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
 
     private final String prefix;
     private final String databaseUri;
@@ -127,7 +128,6 @@ public class RESTCatalogServer {
     private final FileSystemCatalog catalog;
     private final Dispatcher dispatcher;
     private final MockWebServer server;
-    private final AuthProvider authProvider;
 
     private final Map<String, Database> databaseStore = new HashMap<>();
     private final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
@@ -149,7 +149,6 @@ public class RESTCatalogServer {
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
         ResourcePaths resourcePaths = new ResourcePaths(prefix);
         this.databaseUri = resourcePaths.databases();
-        this.authProvider = authProvider;
         Options conf = new Options();
         this.configResponse.getDefaults().forEach((k, v) -> conf.setString(k, v));
         conf.setString(CatalogOptions.WAREHOUSE.key(), dataPath);
@@ -218,25 +217,26 @@ public class RESTCatalogServer {
         return new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
-                String token =
-                        request.getHeaders().get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY);
+                String token = request.getHeaders().get(AUTHORIZATION_HEADER_KEY);
                 RESTResponse response;
                 try {
                     Map<String, String> headers = getHeader(request);
-                    Pair<String, Map<String, String>> resourcePath2Parameters =
-                            HttpClient.parsePath(request.getPath());
+                    String[] paths = request.getPath().split("\\?");
+                    String resourcePath = paths[0];
+                    Map<String, String> parameters =
+                            paths.length == 2 ? getParameters(paths[1]) : Collections.emptyMap();
                     String data = request.getBody().readUtf8();
                     RESTAuthParameter restAuthParameter =
                             new RESTAuthParameter(
                                     request.getHeader("Host"),
-                                    resourcePath2Parameters.getKey(),
-                                    resourcePath2Parameters.getValue(),
+                                    resourcePath,
+                                    parameters,
                                     request.getMethod(),
                                     data);
                     String authToken =
                             authProvider
-                                    .header(headers, null)
-                                    .get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY);
+                                    .header(headers, restAuthParameter)
+                                    .get(AUTHORIZATION_HEADER_KEY);
                     if (!authToken.equals(token)) {
                         return new MockResponse().setResponseCode(401);
                     }
@@ -363,7 +363,7 @@ public class RESTCatalogServer {
                             return partitionsApiHandle(
                                     restAuthParameter.method(),
                                     restAuthParameter.data(),
-                                    restAuthParameter.parameters(),
+                                    parameters,
                                     identifier);
                         } else if (isBranches) {
                             return branchApiHandle(
@@ -389,20 +389,18 @@ public class RESTCatalogServer {
                                     restAuthParameter.method(),
                                     restAuthParameter.data(),
                                     databaseName,
-                                    restAuthParameter.parameters());
+                                    parameters);
                         } else if (isTableDetails) {
-                            return tableDetailsHandle(restAuthParameter.parameters(), databaseName);
+                            return tableDetailsHandle(parameters, databaseName);
                         } else if (isViews) {
                             return viewsHandle(
                                     restAuthParameter.method(),
                                     restAuthParameter.data(),
                                     databaseName,
-                                    restAuthParameter.parameters());
+                                    parameters);
                         } else if (isViewsDetails) {
                             return viewDetailsHandle(
-                                    restAuthParameter.method(),
-                                    databaseName,
-                                    restAuthParameter.parameters());
+                                    restAuthParameter.method(), databaseName, parameters);
                         } else if (isViewRename) {
                             return renameViewHandle(restAuthParameter.data());
                         } else if (isView) {
@@ -1545,5 +1543,18 @@ public class RESTCatalogServer {
 
     private String getPartitionSortKey(Partition partition) {
         return partition.spec().toString().replace("{", "").replace("}", "");
+    }
+
+    private Map<String, String> getParameters(String query) {
+        Map<String, String> parameters =
+                Arrays.stream(query.split("&"))
+                        .map(pair -> pair.split("=", 2))
+                        .collect(
+                                Collectors.toMap(
+                                        pair -> pair[0].trim(), // key
+                                        pair -> RESTUtil.decodeString(pair[1].trim()), // value
+                                        (existing, replacement) -> existing // handle duplicates
+                                        ));
+        return parameters;
     }
 }
