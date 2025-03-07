@@ -630,7 +630,7 @@ public class FileDeletionTest {
         List<ManifestFileMeta> newManifests =
                 Arrays.asList(newAddManifests.get(0), newDeleteManifests.get(0));
 
-        String newManifestListName = manifestList.write(newManifests);
+        String newManifestListName = manifestList.write(newManifests).getKey();
 
         fileIO.rename(
                 pathFactory.toManifestListPath(newManifestListName),

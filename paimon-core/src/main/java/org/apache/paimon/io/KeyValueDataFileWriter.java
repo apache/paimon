@@ -169,7 +169,7 @@ public abstract class KeyValueDataFileWriter
             return null;
         }
 
-        long fileSize = fileIO.getFileSize(path);
+        long fileSize = outputBytes;
         Pair<SimpleColStats[], SimpleColStats[]> keyValueStats =
                 fetchKeyValueStats(fieldStats(fileSize));
 

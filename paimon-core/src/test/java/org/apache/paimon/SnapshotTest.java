@@ -72,6 +72,9 @@ public class SnapshotTest {
                         + "  \"unknownKey\" : 22222\n"
                         + "}";
         Snapshot snapshot = Snapshot.fromJson(json);
+        assertThat(snapshot.baseManifestListSize).isEqualTo(6);
+        assertThat(snapshot.deltaManifestListSize).isEqualTo(8);
+        assertThat(snapshot.changelogManifestListSize).isEqualTo(10);
         assertThat(Snapshot.fromJson(snapshot.toJson())).isEqualTo(snapshot);
     }
 
