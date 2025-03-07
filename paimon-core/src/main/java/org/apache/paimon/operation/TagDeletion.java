@@ -34,7 +34,6 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -74,7 +73,7 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
         Collection<ExpireFileEntry> manifestEntries;
         try {
             manifestEntries = readMergedDataFiles(taggedSnapshot);
-        } catch (IOException e) {
+        } catch (Exception e) {
             LOG.info("Skip data file clean for the tag of id {}.", taggedSnapshot.id(), e);
             return;
         }
