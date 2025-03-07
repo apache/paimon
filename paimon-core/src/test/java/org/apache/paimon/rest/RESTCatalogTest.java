@@ -36,6 +36,7 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.DLFAuthProvider;
+import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -59,12 +60,16 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
+import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -80,6 +85,7 @@ import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -146,22 +152,12 @@ class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testDlfAuth() throws Exception {
+    void testDlfStSTokenAuth() throws Exception {
         String restWarehouse = UUID.randomUUID().toString();
         String akId = "akId" + UUID.randomUUID();
         String akSecret = "akSecret" + UUID.randomUUID();
         String securityToken = "securityToken" + UUID.randomUUID();
         String region = "cn-hangzhou";
-        ConfigResponse config =
-                new ConfigResponse(
-                        ImmutableMap.of(
-                                RESTCatalogInternalOptions.PREFIX.key(),
-                                "paimon",
-                                "header." + serverDefineHeaderName,
-                                serverDefineHeaderValue,
-                                CatalogOptions.WAREHOUSE.key(),
-                                restWarehouse),
-                        ImmutableMap.of());
         DLFAuthProvider authProvider =
                 DLFAuthProvider.buildAKToken(akId, akSecret, securityToken, region);
         restCatalogServer =
@@ -175,21 +171,27 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET, akSecret);
         options.set(RESTCatalogOptions.DLF_SECURITY_TOKEN, securityToken);
         RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
-        String databaseName = "db1";
-        restCatalog.createDatabase(databaseName, true);
-        String[] tableNames = {"dt=20230101", "dt=20230102", "dt=20230103"};
-        for (String tableName : tableNames) {
-            restCatalog.createTable(
-                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
-        }
+        testDlfAuth(restCatalog);
+    }
 
-        // when maxResults is null or 0, the page length is set to a server configured value
-        PagedList<String> listTablesPaged =
-                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101");
-        PagedList<String> listTablesPaged2 =
-                restCatalog.listTablesPaged(databaseName, 1, listTablesPaged.getNextPageToken());
-        assertEquals(listTablesPaged.getElements().get(0), "dt=20230102");
-        assertEquals(listTablesPaged2.getElements().get(0), "dt=20230103");
+    @Test
+    void testDlfStSTokenPathAuth() throws Exception {
+        String restWarehouse = UUID.randomUUID().toString();
+        String region = "cn-hangzhou";
+        String tokenPath = dataPath + UUID.randomUUID();
+        generateTokenAndWriteToFile(tokenPath);
+        DLFAuthProvider authProvider =
+                DLFAuthProvider.buildRefreshToken(tokenPath, 1000_000L, region);
+        restCatalogServer =
+                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
+        restCatalogServer.start();
+        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.DLF.identifier());
+        options.set(RESTCatalogOptions.DLF_REGION, region);
+        options.set(RESTCatalogOptions.DLF_TOKEN_PATH, tokenPath);
+        RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
+        testDlfAuth(restCatalog);
     }
 
     @Test
@@ -1085,5 +1087,31 @@ class RESTCatalogTest extends CatalogTestBase {
                     result.add(rowStr);
                 });
         return result;
+    }
+
+    private void generateTokenAndWriteToFile(String tokenPath) throws IOException {
+        File tokenFile = new File(tokenPath);
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String expiration = now.format(TOKEN_DATE_FORMATTER);
+        String secret = UUID.randomUUID().toString();
+        DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
+        String tokenStr = RESTObjectMapper.OBJECT_MAPPER.writeValueAsString(token);
+        FileUtils.writeStringToFile(tokenFile, tokenStr);
+    }
+
+    private void testDlfAuth(RESTCatalog restCatalog) throws Exception {
+        String databaseName = "db1";
+        restCatalog.createDatabase(databaseName, true);
+        String[] tableNames = {"dt=20230101", "dt=20230102", "dt=20230103"};
+        for (String tableName : tableNames) {
+            restCatalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+        PagedList<String> listTablesPaged =
+                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101");
+        PagedList<String> listTablesPaged2 =
+                restCatalog.listTablesPaged(databaseName, 1, listTablesPaged.getNextPageToken());
+        assertEquals(listTablesPaged.getElements().get(0), "dt=20230102");
+        assertEquals(listTablesPaged2.getElements().get(0), "dt=20230103");
     }
 }
