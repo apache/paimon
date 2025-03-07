@@ -38,7 +38,7 @@ Schema File is JSON, it includes:
 
 ## Example
 
-```shell
+```json
 {
   "version" : 3,
   "id" : 0,

@@ -167,7 +167,7 @@ create table my_table (
 ) USING paimon
 tblproperties (
     'primary-key' = 'k'
-) ;
+);
 
 ```
 
