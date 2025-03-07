@@ -423,10 +423,20 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         GetTableResponse response;
         try {
+            // if the table is system table, we need to load table metadata from the system table's
+            // data table
+            Identifier loadTableIdentifier =
+                    identifier.isSystemTable()
+                            ? new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    identifier.getBranchName())
+                            : identifier;
             response =
                     client.get(
                             resourcePaths.table(
-                                    identifier.getDatabaseName(), identifier.getObjectName()),
+                                    loadTableIdentifier.getDatabaseName(),
+                                    loadTableIdentifier.getObjectName()),
                             GetTableResponse.class,
                             restAuthFunction);
         } catch (NoSuchResourceException e) {
