@@ -78,7 +78,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.rest.ResourcePaths.QUERY_PARAMETER_WAREHOUSE_KEY;
+import static org.apache.paimon.rest.RESTCatalog.QUERY_PARAMETER_WAREHOUSE_KEY;
 
 /** RESTCatalog management APIs. */
 @CrossOrigin(origins = "http://localhost:8081")

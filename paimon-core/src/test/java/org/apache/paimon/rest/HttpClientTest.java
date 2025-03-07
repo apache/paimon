@@ -22,10 +22,10 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
+import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -34,9 +34,11 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
@@ -90,7 +92,8 @@ public class HttpClientTest {
     @Test
     public void testGetSuccessWithQueryParams() {
         server.enqueueResponse(mockResponseDataStr, 200);
-        Map<String, String> queryParams = ImmutableMap.of("maxResults", "10", "pageToken", "abc");
+        Map<String, String> queryParams =
+                ImmutableMap.of("maxResults", "10", "pageToken", "abc=123");
         MockRESTData response =
                 httpClient.get(MOCK_PATH, queryParams, MockRESTData.class, restAuthFunction);
         assertEquals(mockResponseData.data(), response.data());
@@ -154,6 +157,20 @@ public class HttpClientTest {
     }
 
     @Test
+    public void testDeleteWithDataSuccess() {
+        server.enqueueResponse(mockResponseDataStr, 200);
+        assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, mockResponseData, restAuthFunction));
+    }
+
+    @Test
+    public void testDeleteWithDataFail() {
+        server.enqueueResponse(errorResponseStr, 400);
+        assertThrows(
+                BadRequestException.class,
+                () -> httpClient.delete(MOCK_PATH, mockResponseData, restAuthFunction));
+    }
+
+    @Test
     public void testRetry() {
         HttpClient httpClient = new HttpClient(server.getBaseUrl());
         server.enqueueResponse(mockResponseDataStr, 429);
@@ -162,18 +179,41 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testParsePath() {
+    public void testUrl() {
+        String queryKey = "pageToken";
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter(
+                        "http://a.b.c:8080",
+                        "/api/v1/tables/my_table$schemas",
+                        ImmutableMap.of(queryKey, "dt=20230101"),
+                        "GET",
+                        "");
+        String url =
+                HttpClient.getRequestUrl(
+                        "http://a.b.c:8080",
+                        "/api/v1/tables/my_table$schemas",
+                        ImmutableMap.of("pageToken", "dt=20230101"));
         assertEquals(
-                Pair.of("/api/v1/tables", Collections.emptyMap()),
-                HttpClient.parsePath("/api/v1/tables"));
-        assertEquals(
-                Pair.of("/api/v1/tables/my_table$schemas", Collections.emptyMap()),
-                HttpClient.parsePath("/api/v1/tables/my_table$schemas"));
-        assertEquals(
-                Pair.of("/api/v1/tables", ImmutableMap.of("pageSize", "10", "pageNum", "1")),
-                HttpClient.parsePath("/api/v1/tables?pageSize=10&pageNum=1"));
-        assertEquals(
-                Pair.of("/api/v1/tables", ImmutableMap.of("tableName", "t1,t2")),
-                HttpClient.parsePath("/api/v1/tables?tableName=t1,t2"));
+                "http://a.b.c:8080/api/v1/tables/my_table$schemas?pageToken=dt%3D20230101", url);
+        Map<String, String> queryParameters = getParameters(url);
+        assertEquals(restAuthParameter.parameters().get(queryKey), queryParameters.get(queryKey));
+    }
+
+    private Map<String, String> getParameters(String path) {
+        String[] paths = path.split("\\?");
+        if (paths.length == 1) {
+            return Collections.emptyMap();
+        }
+        String query = paths[1];
+        Map<String, String> parameters =
+                Arrays.stream(query.split("&"))
+                        .map(pair -> pair.split("=", 2))
+                        .collect(
+                                Collectors.toMap(
+                                        pair -> pair[0].trim(), // key
+                                        pair -> pair[1].trim(), // value
+                                        (existing, replacement) -> existing // handle duplicates
+                                        ));
+        return parameters;
     }
 }

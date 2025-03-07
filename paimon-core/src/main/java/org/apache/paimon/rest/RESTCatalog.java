@@ -84,6 +84,7 @@ import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.commons.lang3.StringUtils;
@@ -125,6 +126,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     public static final String HEADER_PREFIX = "header.";
     public static final String MAX_RESULTS = "maxResults";
     public static final String PAGE_TOKEN = "pageToken";
+    public static final String QUERY_PARAMETER_WAREHOUSE_KEY = "warehouse";
 
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
@@ -145,11 +147,16 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         Map<String, String> baseHeaders = Collections.emptyMap();
         if (configRequired) {
             String warehouse = options.get(WAREHOUSE);
+            Map<String, String> queryParams =
+                    StringUtils.isNotEmpty(warehouse)
+                            ? ImmutableMap.of(QUERY_PARAMETER_WAREHOUSE_KEY, warehouse)
+                            : ImmutableMap.of();
             baseHeaders = extractPrefixMap(context.options(), HEADER_PREFIX);
             options =
                     new Options(
                             client.get(
-                                            ResourcePaths.config(warehouse),
+                                            ResourcePaths.config(),
+                                            queryParams,
                                             ConfigResponse.class,
                                             new RESTAuthFunction(
                                                     Collections.emptyMap(), catalogAuth))
@@ -416,10 +423,20 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         GetTableResponse response;
         try {
+            // if the table is system table, we need to load table metadata from the system table's
+            // data table
+            Identifier loadTableIdentifier =
+                    identifier.isSystemTable()
+                            ? new Identifier(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    identifier.getBranchName())
+                            : identifier;
             response =
                     client.get(
                             resourcePaths.table(
-                                    identifier.getDatabaseName(), identifier.getObjectName()),
+                                    loadTableIdentifier.getDatabaseName(),
+                                    loadTableIdentifier.getObjectName()),
                             GetTableResponse.class,
                             restAuthFunction);
         } catch (NoSuchResourceException e) {

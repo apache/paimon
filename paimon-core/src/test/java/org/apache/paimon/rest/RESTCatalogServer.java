@@ -214,7 +214,10 @@ public class RESTCatalogServer {
                     if (!("Bearer " + authToken).equals(token)) {
                         return new MockResponse().setResponseCode(401);
                     }
-                    if (request.getPath().equals(resourcePaths.config(warehouse))) {
+                    if (request.getPath().startsWith(resourcePaths.config())
+                            && request.getRequestUrl()
+                                    .queryParameter(RESTCatalog.QUERY_PARAMETER_WAREHOUSE_KEY)
+                                    .equals(warehouse)) {
                         return mockResponse(configResponse, 200);
                     } else if (databaseUri.equals(request.getPath())) {
                         return databasesApiHandler(request);
@@ -223,7 +226,7 @@ public class RESTCatalogServer {
                                 request.getPath()
                                         .substring((databaseUri + "/").length())
                                         .split("/");
-                        String databaseName = resources[0];
+                        String databaseName = RESTUtil.decodeString(resources[0]);
                         if (noPermissionDatabases.contains(databaseName)) {
                             throw new Catalog.DatabaseNoPermissionException(databaseName);
                         }
@@ -295,7 +298,8 @@ public class RESTCatalogServer {
                                 resources.length >= 3
                                                 && !"rename".equals(resources[2])
                                                 && !"commit".equals(resources[2])
-                                        ? Identifier.create(databaseName, resources[2])
+                                        ? Identifier.create(
+                                                databaseName, RESTUtil.decodeString(resources[2]))
                                         : null;
                         if (identifier != null && "tables".equals(resources[1])) {
                             if (!identifier.isSystemTable()
@@ -311,7 +315,7 @@ public class RESTCatalogServer {
                                 || isDropPartitions
                                 || isAlterPartitions
                                 || isMarkDonePartitions) {
-                            String tableName = resources[2];
+                            String tableName = RESTUtil.decodeString(resources[2]);
                             Optional<MockResponse> error =
                                     checkTablePartitioned(
                                             Identifier.create(databaseName, tableName));
@@ -954,7 +958,7 @@ public class RESTCatalogServer {
         try {
             switch (request.getMethod()) {
                 case "DELETE":
-                    branch = resources[4];
+                    branch = RESTUtil.decodeString(resources[4]);
                     branchIdentifier =
                             new Identifier(
                                     identifier.getDatabaseName(),

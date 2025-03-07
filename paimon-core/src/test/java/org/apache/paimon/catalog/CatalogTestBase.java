@@ -489,6 +489,9 @@ public abstract class CatalogTestBase {
         catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
         Table systemTable = catalog.getTable(Identifier.create("test_db", "test_table$snapshots"));
         assertThat(systemTable).isNotNull();
+        Table systemTableCheckWithBranch =
+                catalog.getTable(new Identifier("test_db", "test_table", "main", "snapshots"));
+        assertThat(systemTableCheckWithBranch).isNotNull();
         Table dataTable = catalog.getTable(identifier);
         assertThat(dataTable).isNotNull();
 
