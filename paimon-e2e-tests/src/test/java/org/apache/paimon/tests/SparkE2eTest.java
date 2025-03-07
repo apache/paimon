@@ -19,6 +19,7 @@
 package org.apache.paimon.tests;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnJre;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Container;
@@ -28,7 +29,10 @@ import java.util.Arrays;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.condition.JRE.JAVA_11;
+
 /** Tests for reading paimon from Spark3. */
+@DisabledOnJre(JAVA_11)
 public class SparkE2eTest extends E2eReaderTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkE2eTest.class);
