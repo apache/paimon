@@ -18,10 +18,10 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.rest.RESTUtil;
-
 import java.util.HashMap;
 import java.util.Map;
+
+import static org.apache.paimon.rest.RESTUtil.encodeString;
 
 /** RestAuthParameter for building rest auth header. */
 public class RESTAuthParameter {
@@ -42,7 +42,7 @@ public class RESTAuthParameter {
         this.resourcePath = resourcePath;
         this.parameters = new HashMap<>();
         for (Map.Entry<String, String> entry : parameters.entrySet()) {
-            this.parameters.put(entry.getKey(), RESTUtil.encodeString(entry.getValue()));
+            this.parameters.put(entry.getKey(), encodeString(entry.getValue()));
         }
         this.method = method;
         this.data = data;

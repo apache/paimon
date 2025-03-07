@@ -22,6 +22,8 @@ import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 
+import static org.apache.paimon.rest.RESTUtil.encodeString;
+
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
 
@@ -54,20 +56,19 @@ public class ResourcePaths {
     }
 
     public String database(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, RESTUtil.encodeString(databaseName));
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
     }
 
     public String databaseProperties(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, RESTUtil.encodeString(databaseName), "properties");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), "properties");
     }
 
     public String tables(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, RESTUtil.encodeString(databaseName), TABLES);
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES);
     }
 
     public String tableDetails(String databaseName) {
-        return SLASH.join(
-                V1, prefix, DATABASES, RESTUtil.encodeString(databaseName), TABLE_DETAILS);
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLE_DETAILS);
     }
 
     public String table(String databaseName, String objectName) {
@@ -75,19 +76,17 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName));
+                encodeString(objectName));
     }
 
     public String renameTable(String databaseName) {
-        return SLASH.join(
-                V1, prefix, DATABASES, RESTUtil.encodeString(databaseName), TABLES, "rename");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "rename");
     }
 
     public String commitTable(String databaseName) {
-        return SLASH.join(
-                V1, prefix, DATABASES, RESTUtil.encodeString(databaseName), TABLES, "commit");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "commit");
     }
 
     public String tableToken(String databaseName, String objectName) {
@@ -95,9 +94,9 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 "token");
     }
 
@@ -106,9 +105,9 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 "snapshot");
     }
 
@@ -117,9 +116,9 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 PARTITIONS);
     }
 
@@ -128,9 +127,9 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 PARTITIONS,
                 "drop");
     }
@@ -140,9 +139,9 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 PARTITIONS,
                 "alter");
     }
@@ -152,9 +151,9 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 PARTITIONS,
                 "mark");
     }
@@ -164,9 +163,9 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 BRANCHES);
     }
 
@@ -175,11 +174,11 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 BRANCHES,
-                RESTUtil.encodeString(branchName));
+                encodeString(branchName));
     }
 
     public String forwardBranch(String databaseName, String objectName) {
@@ -187,33 +186,27 @@ public class ResourcePaths {
                 V1,
                 prefix,
                 DATABASES,
-                RESTUtil.encodeString(databaseName),
+                encodeString(databaseName),
                 TABLES,
-                RESTUtil.encodeString(objectName),
+                encodeString(objectName),
                 BRANCHES,
                 "forward");
     }
 
     public String views(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, RESTUtil.encodeString(databaseName), VIEWS);
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEWS);
     }
 
     public String viewDetails(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, RESTUtil.encodeString(databaseName), VIEW_DETAILS);
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEW_DETAILS);
     }
 
     public String view(String databaseName, String viewName) {
         return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                RESTUtil.encodeString(databaseName),
-                VIEWS,
-                RESTUtil.encodeString(viewName));
+                V1, prefix, DATABASES, encodeString(databaseName), VIEWS, encodeString(viewName));
     }
 
     public String renameView(String databaseName) {
-        return SLASH.join(
-                V1, prefix, DATABASES, RESTUtil.encodeString(databaseName), VIEWS, "rename");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEWS, "rename");
     }
 }
