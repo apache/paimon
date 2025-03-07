@@ -1,0 +1,19 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+{"id": "dummy"}
+{"id": {"$oid": "596e275826f08b2730779e1f"},"name": "Sally","age": 25,"created_time": {"$numberLong": "1735934393769"},"updated_time": 1735934393769,"deleted_time": {"$date": 1735934393769 },"register_time": {"$timestamp": {"t": 1736997330, "i": 2}},"double_nan": {"$numberDouble": "NaN"},"double_inf": {"$numberDouble": "Infinity"},"double_ninf": {"$numberDouble": "-Infinity"},"double_zero": {"$numberDouble": "0"},"boolean_true": true,"boolean_false": false,"array": ["a", "b", "c"],"array_mix": ["1", 2, {"$numberLong": "1735934393769"}],"decimal": {"$numberDecimal": "3.14"},"decimal_nan": {"$numberDecimal": "NaN"},"regex": {"$regularExpression": {"pattern": "^pass$", "options": "i"}},"symbol": {"$symbol": "symbol"},"minKey": {"$minKey": 1},"maxKey": {"$maxKey": 1},"code": {"$code": "function(){}"},"null": null,"undefined": {"$undefined": true},"binary": {"$binary": "uE2/4v5MSVOiJZkOo3APKQ==", "$type": "0"},"uuid": {"$binary": "uE2/4v5MSVOiJZkOo3APKQ==", "$type": "4"}	,"context": {  "city": "Shanghai",  "location": {    "lat": 31.2304,    "lon": {"$numberDouble": "121.4737"}  },  "start_time": 0,  "end_time": {"$numberLong": "1735934393769"},  "args": [1, 2],  "nan": {"$numberDouble": "NaN"}}}
