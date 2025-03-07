@@ -26,7 +26,9 @@ import org.apache.paimon.rest.RESTCatalogServer;
 import org.apache.paimon.rest.RESTFileIOTestLoader;
 import org.apache.paimon.rest.RESTTestFileIO;
 import org.apache.paimon.rest.RESTToken;
+import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
+import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.responses.ConfigResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -74,7 +76,8 @@ class RESTCatalogITCase extends CatalogITCaseBase {
                                 CatalogOptions.WAREHOUSE.key(),
                                 warehouse),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(dataPath, initToken, config, warehouse);
+        AuthProvider authProvider = new BearTokenAuthProvider(initToken);
+        restCatalogServer = new RESTCatalogServer(dataPath, authProvider, config, warehouse);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
         super.before();

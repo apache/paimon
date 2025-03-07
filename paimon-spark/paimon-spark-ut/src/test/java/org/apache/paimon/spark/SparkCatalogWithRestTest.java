@@ -21,7 +21,9 @@ package org.apache.paimon.spark;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
+import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
+import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.responses.ConfigResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -59,7 +61,8 @@ public class SparkCatalogWithRestTest {
                                 CatalogOptions.WAREHOUSE.key(),
                                 warehouse),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(dataPath, initToken, config, warehouse);
+        AuthProvider authProvider = new BearTokenAuthProvider(initToken);
+        restCatalogServer = new RESTCatalogServer(dataPath, authProvider, config, warehouse);
         restCatalogServer.start();
         serverUrl = restCatalogServer.getUrl();
     }
