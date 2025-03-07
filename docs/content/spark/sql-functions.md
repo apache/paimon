@@ -44,7 +44,7 @@ It would throw exception when:
 
 **Example**
 
-```sql
+```shell
 > SELECT max_pt('t');
  20250101
  

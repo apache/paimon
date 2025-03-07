@@ -232,7 +232,7 @@ ALTER TABLE my_table DROP WATERMARK;
 The following SQL modifies the watermark strategy to `ts - INTERVAL '2' HOUR`.
 
 ```sql
-ALTER TABLE my_table MODIFY WATERMARK FOR ts AS ts - INTERVAL '2' HOUR
+ALTER TABLE my_table MODIFY WATERMARK FOR ts AS ts - INTERVAL '2' HOUR;
 ```
 
 # ALTER DATABASE
@@ -240,7 +240,7 @@ ALTER TABLE my_table MODIFY WATERMARK FOR ts AS ts - INTERVAL '2' HOUR
 The following SQL sets one or more properties in the specified database. If a particular property is already set in the database, override the old value with the new one.
 
 ```sql
-ALTER DATABASE [catalog_name.]db_name SET (key1=val1, key2=val2, ...)
+ALTER DATABASE [catalog_name.]db_name SET (key1=val1, key2=val2, ...);
 ```
 
 ## Altering Database Location
@@ -248,5 +248,5 @@ ALTER DATABASE [catalog_name.]db_name SET (key1=val1, key2=val2, ...)
 The following SQL changes location of database `my_database` to `file:/temp/my_database`.
 
 ```sql
-ALTER DATABASE my_database SET ('location' =  'file:/temp/my_database')
+ALTER DATABASE my_database SET ('location' =  'file:/temp/my_database');
 ```
