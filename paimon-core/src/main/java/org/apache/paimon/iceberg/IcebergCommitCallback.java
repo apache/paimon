@@ -701,7 +701,9 @@ public class IcebergCommitCallback implements CommitCallback {
     private boolean shouldExpire(IcebergSnapshot snapshot, long currentSnapshotId) {
         Options options = new Options(table.options());
         if (snapshot.snapshotId()
-                > currentSnapshotId - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN)) {
+                > currentSnapshotId
+                        - options.get(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN)
+                        - options.get(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX)) {
             return false;
         }
         if (snapshot.snapshotId()
@@ -752,24 +754,22 @@ public class IcebergCommitCallback implements CommitCallback {
                 }
                 table.fileIO().deleteQuietly(listPath);
             }
-            deleteApplicableMetadataFiles(snapshotId);
+            table.fileIO().deleteQuietly(path);
         }
     }
 
     private void deleteApplicableMetadataFiles(long snapshotId) throws IOException {
         Options options = new Options(table.options());
-        if (options.get(IcebergOptions.METADATA_DELETE_AFTER_COMMIT)) {
-            long earliestMetadataId =
-                    snapshotId - options.get(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX);
-            if (earliestMetadataId > 0) {
-                Iterator<Path> it =
-                        pathFactory
-                                .getAllMetadataPathBefore(table.fileIO(), earliestMetadataId)
-                                .iterator();
-                while (it.hasNext()) {
-                    Path path = it.next();
-                    table.fileIO().deleteQuietly(path);
-                }
+        long earliestMetadataId =
+                snapshotId - options.get(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX);
+        if (earliestMetadataId > 0) {
+            Iterator<Path> it =
+                    pathFactory
+                            .getAllMetadataPathBefore(table.fileIO(), earliestMetadataId)
+                            .iterator();
+            while (it.hasNext()) {
+                Path path = it.next();
+                table.fileIO().deleteQuietly(path);
             }
         }
     }
