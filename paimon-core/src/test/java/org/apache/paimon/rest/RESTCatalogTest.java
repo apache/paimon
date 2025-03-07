@@ -192,6 +192,8 @@ class RESTCatalogTest extends CatalogTestBase {
         options.set(RESTCatalogOptions.DLF_TOKEN_PATH, tokenPath);
         RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
         testDlfAuth(restCatalog);
+        File file = new File(tokenPath);
+        file.delete();
     }
 
     @Test
