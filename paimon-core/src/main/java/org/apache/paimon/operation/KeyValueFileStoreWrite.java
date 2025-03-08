@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactManager;
@@ -42,6 +43,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStrategy;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
@@ -79,6 +81,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -268,21 +271,55 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             userDefinedSeqComparator,
                             levels,
                             dvMaintainer);
-            return new MergeTreeCompactManager(
-                    compactExecutor,
-                    levels,
-                    compactStrategy,
-                    keyComparator,
-                    options.compactionFileSize(true),
-                    options.numSortedRunStopTrigger(),
-                    rewriter,
-                    compactionMetrics == null
-                            ? null
-                            : compactionMetrics.createReporter(partition, bucket),
-                    dvMaintainer,
-                    options.prepareCommitWaitCompaction(),
-                    options.needLookup());
+            if (options.compactionForceRefreshFiles()) {
+                Supplier<List<DataFileMeta>> latestL0FilesSupplier =
+                        () -> scanL0FileMetas(snapshotManager.latestSnapshot(), partition, bucket);
+                return new MergeTreeCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        compactionMetrics == null
+                                ? null
+                                : compactionMetrics.createReporter(partition, bucket),
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction(),
+                        options.needLookup(),
+                        latestL0FilesSupplier);
+            } else {
+                return new MergeTreeCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        compactionMetrics == null
+                                ? null
+                                : compactionMetrics.createReporter(partition, bucket),
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction(),
+                        options.needLookup());
+            }
         }
+    }
+
+    private List<DataFileMeta> scanL0FileMetas(Snapshot snapshot, BinaryRow partition, int bucket) {
+        List<ManifestEntry> files =
+                scan.withSnapshot(snapshot)
+                        .withPartitionBucket(partition, bucket)
+                        .withLevelFilter(level -> level == 0)
+                        .plan()
+                        .files();
+        List<DataFileMeta> l0FileMetas = new ArrayList<>(files.size());
+        for (ManifestEntry entry : files) {
+            l0FileMetas.add(entry.file());
+        }
+        return l0FileMetas;
     }
 
     private MergeTreeCompactRewriter createRewriter(
