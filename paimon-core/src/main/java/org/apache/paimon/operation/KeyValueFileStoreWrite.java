@@ -65,6 +65,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.OrphanFilesScan;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
@@ -79,9 +82,12 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -109,6 +115,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final RowType partitionType;
     private final String commitUser;
     @Nullable private final RecordLevelExpire recordLevelExpire;
+    @Nullable private final OrphanFilesScan orphanFilesScan;
     @Nullable private Cache<String, LookupFile> lookupFileCache;
 
     public KeyValueFileStoreWrite(
@@ -131,7 +138,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
-            String tableName) {
+            String tableName,
+            @Nullable OrphanFilesScan orphanFilesScan) {
         super(
                 snapshotManager,
                 scan,
@@ -172,6 +180,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.logDedupEqualSupplier = logDedupEqualSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
+        this.orphanFilesScan = orphanFilesScan;
     }
 
     @Override
@@ -268,22 +277,92 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             userDefinedSeqComparator,
                             levels,
                             dvMaintainer);
-            return new MergeTreeCompactManager(
-                    compactExecutor,
-                    levels,
-                    compactStrategy,
-                    keyComparator,
-                    options.compactionFileSize(true),
-                    options.numSortedRunStopTrigger(),
-                    rewriter,
-                    compactionMetrics == null
-                            ? null
-                            : compactionMetrics.createReporter(partition, bucket),
-                    dvMaintainer,
-                    options.prepareCommitWaitCompaction(),
-                    options.needLookup(),
-                    recordLevelExpire);
+            if (orphanFilesScan != null) {
+                Supplier<Optional<List<DataFileMeta>>> orphanFilesSupplier =
+                        () -> scanOrphanFiles(orphanFilesScan, snapshotManager, bucket, partition);
+                return new MergeTreeCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        compactionMetrics == null
+                                ? null
+                                : compactionMetrics.createReporter(partition, bucket),
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction(),
+                        options.needLookup(),
+                        recordLevelExpire,
+                        orphanFilesSupplier);
+            } else {
+                return new MergeTreeCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        compactionMetrics == null
+                                ? null
+                                : compactionMetrics.createReporter(partition, bucket),
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction(),
+                        options.needLookup(),
+                        recordLevelExpire);
+            }
         }
+    }
+
+    private Optional<List<DataFileMeta>> scanOrphanFiles(
+            OrphanFilesScan scan,
+            SnapshotManager snapshotManager,
+            int bucket,
+            BinaryRow partition) {
+        if (scan.checkpoint() == null) {
+            // scan not initialized
+            Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+            if (earliestSnapshotId == null) {
+                return Optional.empty();
+            }
+
+            // restore scan with the earliest snapshot id
+            scan.restore(earliestSnapshotId);
+        }
+
+        // set bucket, partition and level scan filter. For pk table, new files committed by
+        // other users should only be placed in level 0
+        scan.withBucket(bucket);
+        scan.withPartitionFilter(Collections.singletonList(partition));
+        scan.withLevelFilter(level -> level == 0);
+
+        List<DataFileMeta> orphanFiles = new ArrayList<>();
+        while (true) {
+            // generate scan plan
+            List<Split> splits = scan.plan().splits();
+            if (!splits.isEmpty()) {
+                splits.stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .forEach(orphanFiles::add);
+            }
+
+            Long nextSnapshotId = scan.checkpoint();
+            Long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+            if (nextSnapshotId == null || latestSnapshotId == null) {
+                LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
+                break;
+            }
+
+            if (nextSnapshotId > latestSnapshotId) {
+                LOG.debug("NextSnapshotId greater than the latest snapshot. Wait for the next.");
+                break;
+            }
+        }
+
+        return Optional.of(orphanFiles);
     }
 
     private MergeTreeCompactRewriter createRewriter(

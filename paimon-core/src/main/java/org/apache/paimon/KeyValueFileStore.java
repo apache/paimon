@@ -30,6 +30,8 @@ import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.BucketSelectConverter;
+import org.apache.paimon.operation.DefaultValueAssigner;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -41,6 +43,10 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.source.OrphanFilesScan;
+import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.KeyComparatorSupplier;
@@ -54,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.predicate.PredicateBuilder.and;
@@ -70,6 +77,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
+    private final Supplier<SplitGenerator> splitGeneratorSupplier;
+    private final Supplier<BiConsumer<FileStoreScan, Predicate>> nonPartitionFilterConsumerSupplier;
     private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
 
@@ -86,7 +95,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
-            CatalogEnvironment catalogEnvironment) {
+            CatalogEnvironment catalogEnvironment,
+            Supplier<SplitGenerator> splitGeneratorSupplier,
+            Supplier<BiConsumer<FileStoreScan, Predicate>> nonPartitionFilterConsumerSupplier) {
         super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
@@ -95,6 +106,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
+        this.splitGeneratorSupplier = splitGeneratorSupplier;
+        this.nonPartitionFilterConsumerSupplier = nonPartitionFilterConsumerSupplier;
         List<String> logDedupIgnoreFields = options.changelogRowDeduplicateIgnoreFields();
         this.logDedupEqualSupplier =
                 options.changelogRowDeduplicate()
@@ -184,6 +197,31 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     options,
                     tableName);
         } else {
+            OrphanFilesScan orphanFilesScan = null;
+            if (options.multiWriteModeEnabled()) {
+                SnapshotReader snapshotReader =
+                        new SnapshotReaderImpl(
+                                newScan(),
+                                schema,
+                                options,
+                                snapshotManager(),
+                                changelogManager(),
+                                splitGeneratorSupplier.get(),
+                                nonPartitionFilterConsumerSupplier.get(),
+                                DefaultValueAssigner.create(schema),
+                                pathFactory(),
+                                tableName,
+                                newIndexFileHandler());
+
+                orphanFilesScan =
+                        new OrphanFilesScan.Builder()
+                                .withOptions(options)
+                                .withCurrentUser(commitUser)
+                                .withSnapshotReader(snapshotReader)
+                                .withSnapshotManager(snapshotManager())
+                                .build();
+            }
+
             return new KeyValueFileStoreWrite(
                     fileIO,
                     schemaManager,
@@ -204,7 +242,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     deletionVectorsMaintainerFactory,
                     options,
                     keyValueFieldsExtractor,
-                    tableName);
+                    tableName,
+                    orphanFilesScan);
         }
     }
 

@@ -41,10 +41,13 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -55,13 +58,16 @@ import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.MergeTreeSplitGenerator;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.HintFileUtils;
+import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -86,8 +92,12 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.predicate.PredicateBuilder.and;
+import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** {@link FileStore} for tests. */
@@ -115,7 +125,9 @@ public class TestFileStore extends KeyValueFileStore {
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory,
-            TableSchema tableSchema) {
+            TableSchema tableSchema,
+            Supplier<SplitGenerator> splitGeneratorSupplier,
+            Supplier<BiConsumer<FileStoreScan, Predicate>> nonPartitionFilterConsumerSupplier) {
         super(
                 FileIOFinder.find(new Path(root)),
                 schemaManager(root, options),
@@ -138,7 +150,9 @@ public class TestFileStore extends KeyValueFileStore {
                 keyValueFieldsExtractor,
                 mfFactory,
                 (new Path(root)).getName(),
-                CatalogEnvironment.empty());
+                CatalogEnvironment.empty(),
+                splitGeneratorSupplier,
+                nonPartitionFilterConsumerSupplier);
         this.root = root;
         this.fileIO = FileIOFinder.find(new Path(root));
         this.keySerializer = new InternalRowSerializer(keyType);
@@ -156,7 +170,15 @@ public class TestFileStore extends KeyValueFileStore {
         return super.newWrite(commitUser);
     }
 
+    public AbstractFileStoreWrite<KeyValue> newWrite(String commitUser) {
+        return super.newWrite(commitUser);
+    }
+
     public FileStoreCommitImpl newCommit() {
+        return super.newCommit(commitUser, null);
+    }
+
+    public FileStoreCommitImpl newCommit(String commitUser) {
         return super.newCommit(commitUser, null);
     }
 
@@ -199,7 +221,16 @@ public class TestFileStore extends KeyValueFileStore {
             Function<KeyValue, BinaryRow> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator)
             throws Exception {
-        return commitData(kvs, partitionCalculator, bucketCalculator, new HashMap<>());
+        return commitData(kvs, partitionCalculator, bucketCalculator, commitUser);
+    }
+
+    public List<Snapshot> commitData(
+            List<KeyValue> kvs,
+            Function<KeyValue, BinaryRow> partitionCalculator,
+            Function<KeyValue, Integer> bucketCalculator,
+            String commitUser)
+            throws Exception {
+        return commitData(kvs, partitionCalculator, bucketCalculator, new HashMap<>(), commitUser);
     }
 
     public List<Snapshot> commitDataWatermark(
@@ -222,6 +253,16 @@ public class TestFileStore extends KeyValueFileStore {
             Function<KeyValue, Integer> bucketCalculator,
             Map<Integer, Long> logOffsets)
             throws Exception {
+        return commitData(kvs, partitionCalculator, bucketCalculator, logOffsets, commitUser);
+    }
+
+    public List<Snapshot> commitData(
+            List<KeyValue> kvs,
+            Function<KeyValue, BinaryRow> partitionCalculator,
+            Function<KeyValue, Integer> bucketCalculator,
+            Map<Integer, Long> logOffsets,
+            String commitUser)
+            throws Exception {
         return commitDataImpl(
                 kvs,
                 partitionCalculator,
@@ -234,7 +275,8 @@ public class TestFileStore extends KeyValueFileStore {
                     logOffsets.forEach(
                             (bucket, offset) -> committable.addLogOffset(bucket, offset, false));
                     commit.commit(committable, Collections.emptyMap());
-                });
+                },
+                commitUser);
     }
 
     public List<Snapshot> overwriteData(
@@ -299,6 +341,29 @@ public class TestFileStore extends KeyValueFileStore {
             Long watermark,
             List<IndexFileMeta> indexFiles,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
+            throws Exception {
+        return commitDataImpl(
+                kvs,
+                partitionCalculator,
+                bucketCalculator,
+                ignorePreviousFiles,
+                identifier,
+                watermark,
+                indexFiles,
+                commitFunction,
+                commitUser);
+    }
+
+    public List<Snapshot> commitDataImpl(
+            List<KeyValue> kvs,
+            Function<KeyValue, BinaryRow> partitionCalculator,
+            Function<KeyValue, Integer> bucketCalculator,
+            boolean ignorePreviousFiles,
+            Long identifier,
+            Long watermark,
+            List<IndexFileMeta> indexFiles,
+            BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction,
+            String commitUser)
             throws Exception {
         AbstractFileStoreWrite<KeyValue> write = newWrite();
         Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
@@ -778,6 +843,7 @@ public class TestFileStore extends KeyValueFileStore {
         private final MergeFunctionFactory<KeyValue> mfFactory;
         private final TableSchema tableSchema;
 
+        private CoreOptions coreOptions;
         private CoreOptions.ChangelogProducer changelogProducer;
 
         public Builder(
@@ -829,16 +895,52 @@ public class TestFileStore extends KeyValueFileStore {
 
             // disable dynamic-partition-overwrite in FileStoreCommit layer test
             conf.set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false);
+            this.coreOptions = new CoreOptions(conf);
 
             return new TestFileStore(
                     root,
-                    new CoreOptions(conf),
+                    coreOptions,
                     partitionType,
                     keyType,
                     valueType,
                     keyValueFieldsExtractor,
                     mfFactory,
-                    tableSchema);
+                    tableSchema,
+                    this::splitGenerator,
+                    this::nonPartitionFilterConsumer);
+        }
+
+        protected SplitGenerator splitGenerator() {
+            return new MergeTreeSplitGenerator(
+                    (new KeyComparatorSupplier(keyType)).get(),
+                    coreOptions.splitTargetSize(),
+                    coreOptions.splitOpenFileCost(),
+                    coreOptions.deletionVectorsEnabled(),
+                    coreOptions.mergeEngine());
+        }
+
+        protected BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
+            return (scan, predicate) -> {
+                // currently we can only perform filter push down on keys
+                // consider this case:
+                //   data file 1: insert key = a, value = 1
+                //   data file 2: update key = a, value = 2
+                //   filter: value = 1
+                // if we perform filter push down on values, data file 1 will be chosen, but data
+                // file 2 will be ignored, and the final result will be key = a, value = 1 while the
+                // correct result is an empty set
+                List<Predicate> keyFilters =
+                        pickTransformFieldMapping(
+                                splitAnd(predicate),
+                                tableSchema.fieldNames(),
+                                tableSchema.trimmedPrimaryKeys());
+                if (keyFilters.size() > 0) {
+                    ((KeyValueFileStoreScan) scan).withKeyFilter(and(keyFilters));
+                }
+
+                // support value filter in bucket level
+                ((KeyValueFileStoreScan) scan).withValueFilter(predicate);
+            };
         }
     }
 }
