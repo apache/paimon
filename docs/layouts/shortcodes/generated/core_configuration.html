@@ -147,6 +147,12 @@ under the License.
             <td>Specifies the commit user prefix.</td>
         </tr>
         <tr>
+            <td><h5>compaction.force-refresh-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force refresh local DataFileMetas for the CompactManager before triggering next compaction. This option is not available for dedicated compaction job.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>

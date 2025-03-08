@@ -40,7 +40,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -55,9 +55,24 @@ public class KeyValueFileStoreWriteTest {
 
     private IOManager ioManager;
 
+    private TableSchema tableSchema;
+
     @BeforeEach
-    public void before() throws IOException {
+    public void before() throws Exception {
         this.ioManager = new IOManagerImpl(tempDir.toString());
+
+        SchemaManager schemaManager =
+                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+
+        tableSchema =
+                schemaManager.createTable(
+                        new Schema(
+                                TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
+                                TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
+                                TestKeyValueGenerator.getPrimaryKeys(
+                                        TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                                new HashMap<>(),
+                                null));
     }
 
     @Test
@@ -102,33 +117,62 @@ public class KeyValueFileStoreWriteTest {
         }
     }
 
-    private KeyValueFileStoreWrite createWriteWithOptions(Map<String, String> options)
-            throws Exception {
-        SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+    @Test
+    public void testRefreshL0Files() throws Exception {
+        Map<String, String> options1 = new HashMap<>();
+        options1.put(CoreOptions.COMPACTION_FORCE_REFRESH_FILES.key(), "true");
 
-        TableSchema schema =
-                schemaManager.createTable(
-                        new Schema(
-                                TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
-                                TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
-                                TestKeyValueGenerator.getPrimaryKeys(
-                                        TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
-                                options,
-                                null));
-        TestFileStore store =
-                new TestFileStore.Builder(
-                                "avro",
-                                tempDir.toString(),
-                                NUM_BUCKETS,
-                                TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                                TestKeyValueGenerator.KEY_TYPE,
-                                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                                TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                                DeduplicateMergeFunction.factory(),
-                                schema)
-                        .build();
+        Map<String, String> options2 = new HashMap<>();
+        options2.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        TestFileStore store1 = createStoreWithOptions(options1);
+        TestFileStore store2 = createStoreWithOptions(options2);
+
+        KeyValueFileStoreWrite write1 = (KeyValueFileStoreWrite) store1.newWrite();
+        KeyValueFileStoreWrite write2 = (KeyValueFileStoreWrite) store2.newWrite();
+        write1.withIOManager(ioManager);
+        write2.withIOManager(ioManager);
+
+        TestKeyValueGenerator gen = new TestKeyValueGenerator();
+        KeyValue keyValue = gen.next();
+
+        // 1, init writer1, write value and compact at first
+        AbstractFileStoreWrite.WriterContainer<KeyValue> writerContainer1 =
+                write1.createWriterContainer(gen.getPartition(keyValue), 1, false);
+        MergeTreeWriter writer1 = (MergeTreeWriter) writerContainer1.writer;
+
+        writer1.write(keyValue);
+        writer1.compact(false);
+        assertThat(writer1.dataFiles()).hasSize(1);
+
+        // 2, commit new data in writer2 (write-only)
+        store2.commitData(Collections.singletonList(keyValue), gen::getPartition, kv -> 1);
+
+        // 3, compact writer 1 again, the L0 files should be refreshed
+        writer1.compact(false);
+        assertThat(writer1.dataFiles()).hasSize(2);
+    }
+
+    private KeyValueFileStoreWrite createWriteWithOptions(Map<String, String> options) {
+
+        TestFileStore store = createStoreWithOptions(options);
 
         return (KeyValueFileStoreWrite) store.newWrite();
+    }
+
+    private TestFileStore createStoreWithOptions(Map<String, String> options) {
+        TableSchema schema = tableSchema.copy(options);
+
+        return new TestFileStore.Builder(
+                        "avro",
+                        tempDir.toString(),
+                        NUM_BUCKETS,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory(),
+                        schema)
+                .build();
     }
 }

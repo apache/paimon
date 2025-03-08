@@ -627,6 +627,14 @@ public class CoreOptions implements Serializable {
                                             text("Default value of Bucketed Append Table is '5'."))
                                     .build());
 
+    public static final ConfigOption<Boolean> COMPACTION_FORCE_REFRESH_FILES =
+            key("compaction.force-refresh-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to force refresh local DataFileMetas for the CompactManager before triggering "
+                                    + "next compaction. This option is not available for dedicated compaction job.");
+
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
                     .enumType(ChangelogProducer.class)
@@ -2109,6 +2117,10 @@ public class CoreOptions implements Serializable {
 
     public Optional<Integer> compactionMaxFileNum() {
         return options.getOptional(COMPACTION_MAX_FILE_NUM);
+    }
+
+    public boolean compactionForceRefreshFiles() {
+        return options.get(COMPACTION_FORCE_REFRESH_FILES);
     }
 
     public long dynamicBucketTargetRowNum() {
