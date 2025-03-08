@@ -187,7 +187,7 @@ public class FileStoreCommitTest {
         Path firstSnapshotPath = snapshotManager.snapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
         LocalFileIO.create().deleteQuietly(firstSnapshotPath);
         // this test succeeds if this call does not fail
-        try (FileStoreCommit commit = store.newCommit(UUID.randomUUID().toString())) {
+        try (FileStoreCommit commit = store.newCommit(UUID.randomUUID().toString(), null)) {
             commit.filterCommitted(Collections.singletonList(new ManifestCommittable(999L)));
         }
     }
@@ -208,7 +208,7 @@ public class FileStoreCommitTest {
         }
 
         // all commit identifiers should be filtered out
-        try (FileStoreCommit commit = store.newCommit(user)) {
+        try (FileStoreCommit commit = store.newCommit(user, null)) {
             assertThat(
                             commit.filterCommitted(
                                     commitIdentifiers.stream()

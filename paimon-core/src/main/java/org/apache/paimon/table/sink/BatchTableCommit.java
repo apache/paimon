@@ -18,9 +18,12 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.stats.Statistics;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * A {@link TableCommit} for batch processing. Recommended for one-time committing.
@@ -56,4 +59,16 @@ public interface BatchTableCommit extends TableCommit {
      * logically deleted and will be deleted after the snapshot expires.
      */
     void truncateTable();
+
+    /**
+     * Truncate partitions, like normal {@link #commit}, files are not immediately deleted, they are
+     * only logically deleted and will be deleted after the snapshot expires.
+     */
+    void truncatePartitions(List<Map<String, String>> partitionSpecs);
+
+    /** Commit new statistics. Generates a snapshot with {@link CommitKind#ANALYZE}. */
+    void updateStatistics(Statistics statistics);
+
+    /** Compact the manifest entries. Generates a snapshot with {@link CommitKind#COMPACT}. */
+    void compactManifests();
 }

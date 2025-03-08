@@ -37,8 +37,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * A object table refers to a directory that contains multiple objects (files), Object table
- * provides metadata indexes for unstructured data objects in this directory. Allowing users to
+ * An object table refers to a directory that contains multiple objects (files). Object table
+ * provides metadata indexes for unstructured data objects in this directory, allowing users to
  * analyze unstructured data in Object Storage.
  *
  * <p>Object Table stores the metadata of objects in the underlying table.

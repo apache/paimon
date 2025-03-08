@@ -16,33 +16,30 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.rest;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.rest.responses.PagedResponse;
 
-import java.io.IOException;
+import java.util.List;
 
-/** Extracts statistics directly from file. */
-public interface SimpleStatsExtractor {
+/** test for page response. */
+public class TestPagedResponse implements PagedResponse<Integer> {
 
-    SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException;
+    private final String nextPageToken;
+    private final List<Integer> data;
 
-    Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path, long length)
-            throws IOException;
+    public TestPagedResponse(String nextPageToken, List<Integer> data) {
+        this.nextPageToken = nextPageToken;
+        this.data = data;
+    }
 
-    /** File info fetched from physical file. */
-    class FileInfo {
+    @Override
+    public List<Integer> data() {
+        return this.data;
+    }
 
-        private final long rowCount;
-
-        public FileInfo(long rowCount) {
-            this.rowCount = rowCount;
-        }
-
-        public long getRowCount() {
-            return rowCount;
-        }
+    @Override
+    public String getNextPageToken() {
+        return this.nextPageToken;
     }
 }

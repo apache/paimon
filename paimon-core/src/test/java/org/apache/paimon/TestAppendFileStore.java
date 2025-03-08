@@ -93,7 +93,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
     }
 
     public FileStoreCommitImpl newCommit() {
-        return super.newCommit(commitUser);
+        return super.newCommit(commitUser, null);
     }
 
     public void commit(CommitMessage... commitMessages) {

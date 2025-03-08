@@ -16,21 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.iceberg;
+package org.apache.paimon.rest;
 
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.table.FileStoreTable;
+import org.junit.Test;
 
-/** {@link AbstractIcebergCommitCallback} for primary key tables. */
-public class PrimaryKeyIcebergCommitCallback extends AbstractIcebergCommitCallback {
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-    public PrimaryKeyIcebergCommitCallback(FileStoreTable table, String commitUser) {
-        super(table, commitUser);
-    }
+/** Test for {@link ResourcePaths}. */
+public class ResourcePathsTest {
 
-    @Override
-    protected boolean shouldAddFileToIceberg(DataFileMeta meta) {
-        int maxLevel = table.coreOptions().numLevels() - 1;
-        return meta.level() == maxLevel;
+    @Test
+    public void testUrlEncode() {
+        String database = "test_db";
+        String objectName = "test_table$snapshot";
+        ResourcePaths resourcePaths = new ResourcePaths("paimon");
+        assertEquals(
+                "/v1/paimon/databases/test_db/tables/test_table%24snapshot",
+                resourcePaths.table(database, objectName));
     }
 }

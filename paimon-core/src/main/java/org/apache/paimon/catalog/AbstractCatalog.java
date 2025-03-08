@@ -19,11 +19,11 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
@@ -34,9 +34,12 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -44,13 +47,13 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.OBJECT_LOCATION;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
-import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
@@ -64,6 +67,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractCatalog.class);
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
@@ -161,13 +166,10 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException {
         checkNotSystemTable(identifier, "dropPartition");
         Table table = getTable(identifier);
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-        try (FileStoreCommit commit =
-                fileStoreTable
-                        .store()
-                        .newCommit(
-                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
-            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -182,6 +184,13 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         return listPartitionsFromFileSystem(getTable(identifier));
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsPaged(
+            Identifier identifier, Integer maxResults, String pageToken)
+            throws TableNotExistException {
+        return new PagedList<>(listPartitions(identifier), null);
     }
 
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
@@ -240,7 +249,68 @@ public abstract class AbstractCatalog implements Catalog {
         return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
 
+    @Override
+    public PagedList<String> listTablesPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        return new PagedList<>(listTables(databaseName), null);
+    }
+
+    @Override
+    public PagedList<Table> listTableDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            List<Table> systemTables =
+                    SystemTableLoader.loadGlobalTableNames().stream()
+                            .map(
+                                    tableName -> {
+                                        try {
+                                            return getTable(
+                                                    Identifier.create(databaseName, tableName));
+                                        } catch (TableNotExistException ignored) {
+                                            LOG.warn(
+                                                    "system table {}.{} does not exist",
+                                                    databaseName,
+                                                    tableName);
+                                            return null;
+                                        }
+                                    })
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
+            return new PagedList<>(systemTables, null);
+        }
+
+        // check db exists
+        getDatabase(databaseName);
+
+        return listTableDetailsPagedImpl(databaseName, maxResults, pageToken);
+    }
+
     protected abstract List<String> listTablesImpl(String databaseName);
+
+    protected PagedList<Table> listTableDetailsPagedImpl(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        PagedList<String> pagedTableNames = listTablesPaged(databaseName, maxResults, pageToken);
+        return new PagedList<>(
+                pagedTableNames.getElements().stream()
+                        .map(
+                                tableName -> {
+                                    try {
+                                        return getTable(Identifier.create(databaseName, tableName));
+                                    } catch (TableNotExistException ignored) {
+                                        LOG.warn(
+                                                "table {}.{} does not exist",
+                                                databaseName,
+                                                tableName);
+                                        return null;
+                                    }
+                                })
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()),
+                pagedTableNames.getNextPageToken());
+    }
 
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)

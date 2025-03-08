@@ -113,7 +113,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         ParquetFileReader reader =
                 new ParquetFileReader(
-                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        ParquetInputFile.fromPath(
+                                context.fileIO(), context.filePath(), context.fileSize()),
                         builder.build(),
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
@@ -145,11 +146,21 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         ParquetFileReader reader =
                 new ParquetFileReader(
-                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        ParquetInputFile.fromPath(
+                                context.fileIO(), context.filePath(), context.fileSize()),
                         builder.build(),
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Create reader of the parquet file {}, the fileSchema is {}, the requestedSchema is {}.",
+                    context.filePath(),
+                    fileSchema,
+                    requestedSchema);
+        }
+
         reader.setRequestedSchema(requestedSchema);
         WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
 

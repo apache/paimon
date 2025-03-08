@@ -29,7 +29,6 @@ class DLFAuthProviderFactoryTest {
     @Test
     void getRegion() {
         String region = "cn-hangzhou";
-        String ipPortUri = "http://127.0.0.1:8080";
         String url = "https://dlf-" + region + "-internal.aliyuncs.com";
         assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
         url = "https://dlf-" + region + ".aliyuncs.com";
@@ -41,6 +40,7 @@ class DLFAuthProviderFactoryTest {
         assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
         url = "https://dlf-" + region + "-internal.aliyuncs.com";
         assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
+        String ipPortUri = "http://127.0.0.1:8080";
         assertThrows(
                 IllegalArgumentException.class,
                 () -> DLFAuthProviderFactory.parseRegionFromUri(ipPortUri));

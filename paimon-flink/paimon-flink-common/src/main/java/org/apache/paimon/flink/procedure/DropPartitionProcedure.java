@@ -20,14 +20,12 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -50,16 +48,11 @@ public class DropPartitionProcedure extends ProcedureBase {
         checkArgument(
                 partitionStrings.length > 0, "drop-partition procedure must specify partitions.");
 
-        FileStoreTable fileStoreTable =
-                (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
-        try (FileStoreCommit commit =
-                fileStoreTable
-                        .store()
-                        .newCommit(
-                                createCommitUser(fileStoreTable.coreOptions().toConfiguration()))) {
-            commit.dropPartitions(
-                    ParameterUtils.getPartitions(partitionStrings),
-                    BatchWriteBuilder.COMMIT_IDENTIFIER);
+        Table table = catalog.getTable(Identifier.fromString(tableId));
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(ParameterUtils.getPartitions(partitionStrings));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
 
         return new String[] {"Success"};

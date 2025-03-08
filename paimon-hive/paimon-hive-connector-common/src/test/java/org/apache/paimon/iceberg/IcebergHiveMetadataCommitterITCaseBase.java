@@ -106,6 +106,12 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         Row.of(2, 2, "elephant")),
                 collect(tEnv.executeSql("SELECT * FROM my_iceberg.test_db.t ORDER BY pt, id")));
 
+        // test drop partition
+        tEnv.executeSql("ALTER TABLE my_paimon.test_db.t DROP PARTITION (pt = 1)").await();
+        Assert.assertEquals(
+                Arrays.asList(Row.of(2, 1, "cat"), Row.of(2, 2, "elephant")),
+                collect(tEnv.executeSql("SELECT * FROM my_iceberg.test_db.t ORDER BY pt, id")));
+
         Assert.assertTrue(
                 hiveShell
                         .executeQuery("DESC DATABASE EXTENDED test_db")
@@ -192,6 +198,14 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         Row.of("cherry", 3, 1),
                         Row.of("dog", 2, 2),
                         Row.of("elephant", 3, 2)),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT data, id, pt FROM my_iceberg.test_db.t WHERE id > 1 ORDER BY pt, id")));
+
+        // test drop partition
+        tEnv.executeSql("ALTER TABLE my_paimon.test_db.t DROP PARTITION (pt = 2)").await();
+        Assert.assertEquals(
+                Arrays.asList(Row.of("pear", 2, 1), Row.of("cherry", 3, 1)),
                 collect(
                         tEnv.executeSql(
                                 "SELECT data, id, pt FROM my_iceberg.test_db.t WHERE id > 1 ORDER BY pt, id")));

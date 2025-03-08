@@ -18,8 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -67,13 +67,12 @@ public class CompactManifestProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
 
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        FileStoreTable table = (FileStoreTable) loadSparkTable(tableIdent).getTable();
+        Table table = loadSparkTable(tableIdent).getTable();
 
-        try (FileStoreCommit commit =
-                table.store()
-                        .newCommit(table.coreOptions().createCommitUser())
-                        .ignoreEmptyCommit(false)) {
-            commit.compactManifest();
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.compactManifests();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
 
         return new InternalRow[] {newInternalRow(true)};

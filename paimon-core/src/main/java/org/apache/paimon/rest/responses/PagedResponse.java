@@ -16,33 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.rest.RESTResponse;
 
-import java.io.IOException;
+import java.util.List;
 
-/** Extracts statistics directly from file. */
-public interface SimpleStatsExtractor {
+/** Response for page. */
+public interface PagedResponse<T> extends RESTResponse {
+    List<T> data();
 
-    SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException;
-
-    Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path, long length)
-            throws IOException;
-
-    /** File info fetched from physical file. */
-    class FileInfo {
-
-        private final long rowCount;
-
-        public FileInfo(long rowCount) {
-            this.rowCount = rowCount;
-        }
-
-        public long getRowCount() {
-            return rowCount;
-        }
-    }
+    String getNextPageToken();
 }

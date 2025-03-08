@@ -16,33 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Pair;
+import javax.annotation.Nullable;
 
-import java.io.IOException;
+import java.util.List;
 
-/** Extracts statistics directly from file. */
-public interface SimpleStatsExtractor {
+/**
+ * Paged List which supports request data from page streaming.
+ *
+ * @since 1.1.0
+ */
+public class PagedList<T> {
+    private final List<T> elements;
 
-    SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException;
+    @Nullable private final String nextPageToken;
 
-    Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path, long length)
-            throws IOException;
+    public PagedList(List<T> elements, @Nullable String nextPageToken) {
+        this.elements = elements;
+        this.nextPageToken = nextPageToken;
+    }
 
-    /** File info fetched from physical file. */
-    class FileInfo {
+    public List<T> getElements() {
+        return this.elements;
+    }
 
-        private final long rowCount;
-
-        public FileInfo(long rowCount) {
-            this.rowCount = rowCount;
-        }
-
-        public long getRowCount() {
-            return rowCount;
-        }
+    @Nullable
+    public String getNextPageToken() {
+        return this.nextPageToken;
     }
 }

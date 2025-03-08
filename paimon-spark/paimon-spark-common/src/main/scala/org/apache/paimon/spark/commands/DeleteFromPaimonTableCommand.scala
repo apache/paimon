@@ -54,9 +54,9 @@ case class DeleteFromPaimonTableCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
 
-    val commit = fileStore.newCommit(UUID.randomUUID.toString)
+    val commit = table.newBatchWriteBuilder().newCommit()
     if (condition == null || condition == TrueLiteral) {
-      commit.truncateTable(BatchWriteBuilder.COMMIT_IDENTIFIER)
+      commit.truncateTable()
     } else {
       val (partitionCondition, otherCondition) = splitPruePartitionAndOtherPredicates(
         condition,
@@ -94,7 +94,7 @@ case class DeleteFromPaimonTableCommand(
           partition => rowDataPartitionComputer.generatePartValues(partition).asScala.asJava
         }
         if (dropPartitions.nonEmpty) {
-          commit.dropPartitions(dropPartitions.asJava, BatchWriteBuilder.COMMIT_IDENTIFIER)
+          commit.truncatePartitions(dropPartitions.asJava)
         } else {
           writer.commit(Seq.empty)
         }

@@ -25,34 +25,35 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.List;
 
-/** Response for listing tables. */
+/** Response for listing view details. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListTablesResponse implements PagedResponse<String> {
+public class ListViewDetailsResponse implements PagedResponse<GetViewResponse> {
 
-    private static final String FIELD_TABLES = "tables";
+    private static final String FIELD_VIEW_DETAILS = "viewDetails";
     private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
 
-    @JsonProperty(FIELD_TABLES)
-    private final List<String> tables;
+    @JsonProperty(FIELD_VIEW_DETAILS)
+    private final List<GetViewResponse> viewDetails;
 
     @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
     private final String nextPageToken;
 
-    public ListTablesResponse(@JsonProperty(FIELD_TABLES) List<String> tables) {
-        this(tables, null);
+    public ListViewDetailsResponse(
+            @JsonProperty(FIELD_VIEW_DETAILS) List<GetViewResponse> viewDetails) {
+        this(viewDetails, null);
     }
 
     @JsonCreator
-    public ListTablesResponse(
-            @JsonProperty(FIELD_TABLES) List<String> tables,
+    public ListViewDetailsResponse(
+            @JsonProperty(FIELD_VIEW_DETAILS) List<GetViewResponse> viewDetails,
             @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
-        this.tables = tables;
+        this.viewDetails = viewDetails;
         this.nextPageToken = nextPageToken;
     }
 
-    @JsonGetter(FIELD_TABLES)
-    public List<String> getTables() {
-        return this.tables;
+    @JsonGetter(FIELD_VIEW_DETAILS)
+    public List<GetViewResponse> getViewDetails() {
+        return this.viewDetails;
     }
 
     @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
@@ -61,7 +62,7 @@ public class ListTablesResponse implements PagedResponse<String> {
     }
 
     @Override
-    public List<String> data() {
-        return getTables();
+    public List<GetViewResponse> data() {
+        return getViewDetails();
     }
 }

@@ -22,6 +22,8 @@ import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 
+import static org.apache.paimon.rest.RESTUtil.encodeString;
+
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
 
@@ -32,10 +34,11 @@ public class ResourcePaths {
     private static final String PARTITIONS = "partitions";
     private static final String BRANCHES = "branches";
     private static final String VIEWS = "views";
-    public static final String QUERY_PARAMETER_WAREHOUSE_KEY = "warehouse";
+    private static final String TABLE_DETAILS = "table-details";
+    private static final String VIEW_DETAILS = "view-details";
 
-    public static String config(String warehouse) {
-        return String.format("%s/config?%s=%s", V1, QUERY_PARAMETER_WAREHOUSE_KEY, warehouse);
+    public static String config() {
+        return String.format("%s/config", V1);
     }
 
     public static ResourcePaths forCatalogProperties(Options options) {
@@ -53,79 +56,157 @@ public class ResourcePaths {
     }
 
     public String database(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName);
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
     }
 
     public String databaseProperties(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, "properties");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), "properties");
     }
 
     public String tables(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES);
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES);
     }
 
-    public String table(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName);
+    public String tableDetails(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLE_DETAILS);
+    }
+
+    public String table(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName));
     }
 
     public String renameTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, "rename");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "rename");
     }
 
     public String commitTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, "commit");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "commit");
     }
 
-    public String tableToken(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "token");
-    }
-
-    public String tableSnapshot(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, "snapshot");
-    }
-
-    public String partitions(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, PARTITIONS);
-    }
-
-    public String dropPartitions(String databaseName, String tableName) {
+    public String tableToken(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, PARTITIONS, "drop");
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "token");
     }
 
-    public String alterPartitions(String databaseName, String tableName) {
+    public String tableSnapshot(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, PARTITIONS, "alter");
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "snapshot");
     }
 
-    public String markDonePartitions(String databaseName, String tableName) {
+    public String partitions(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, PARTITIONS, "mark");
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS);
     }
 
-    public String branches(String databaseName, String tableName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, TABLES, tableName, BRANCHES);
-    }
-
-    public String branch(String databaseName, String tableName, String branchName) {
+    public String dropPartitions(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, BRANCHES, branchName);
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "drop");
     }
 
-    public String forwardBranch(String databaseName, String tableName) {
+    public String alterPartitions(String databaseName, String objectName) {
         return SLASH.join(
-                V1, prefix, DATABASES, databaseName, TABLES, tableName, BRANCHES, "forward");
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "alter");
+    }
+
+    public String markDonePartitions(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "mark");
+    }
+
+    public String branches(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                BRANCHES);
+    }
+
+    public String branch(String databaseName, String objectName, String branchName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                BRANCHES,
+                encodeString(branchName));
+    }
+
+    public String forwardBranch(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                BRANCHES,
+                "forward");
     }
 
     public String views(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, VIEWS);
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEWS);
+    }
+
+    public String viewDetails(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEW_DETAILS);
     }
 
     public String view(String databaseName, String viewName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, VIEWS, viewName);
+        return SLASH.join(
+                V1, prefix, DATABASES, encodeString(databaseName), VIEWS, encodeString(viewName));
     }
 
     public String renameView(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, databaseName, VIEWS, "rename");
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEWS, "rename");
     }
 }

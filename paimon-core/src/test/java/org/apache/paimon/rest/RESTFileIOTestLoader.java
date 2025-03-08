@@ -16,20 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.iceberg;
+package org.apache.paimon.rest;
 
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.Path;
 
-/** {@link AbstractIcebergCommitCallback} for append only tables. */
-public class AppendOnlyIcebergCommitCallback extends AbstractIcebergCommitCallback {
+/** RESTFileIOTestLoader for testing. */
+public class RESTFileIOTestLoader implements FileIOLoader {
 
-    public AppendOnlyIcebergCommitCallback(FileStoreTable table, String commitUser) {
-        super(table, commitUser);
+    public static final String SCHEME = "rest-test-file-io";
+
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public String getScheme() {
+        return SCHEME;
     }
 
     @Override
-    protected boolean shouldAddFileToIceberg(DataFileMeta meta) {
-        return true;
+    public FileIO load(Path path) {
+        return new RESTTestFileIO();
     }
 }

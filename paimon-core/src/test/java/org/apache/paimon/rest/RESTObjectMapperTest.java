@@ -47,7 +47,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 
 import org.junit.Test;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -72,8 +71,7 @@ public class RESTObjectMapperTest {
     public void errorResponseParseTest() throws Exception {
         String message = "message";
         Integer code = 400;
-        ErrorResponse response =
-                new ErrorResponse(null, null, message, code, new ArrayList<String>());
+        ErrorResponse response = new ErrorResponse(null, null, message, code);
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         ErrorResponse parseData = OBJECT_MAPPER.readValue(responseStr, ErrorResponse.class);
         assertEquals(message, parseData.getMessage());
