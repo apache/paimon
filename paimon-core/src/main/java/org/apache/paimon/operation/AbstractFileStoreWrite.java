@@ -70,7 +70,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
     protected final SnapshotManager snapshotManager;
-    private final FileStoreScan scan;
+    protected final FileStoreScan scan;
     private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
     @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
