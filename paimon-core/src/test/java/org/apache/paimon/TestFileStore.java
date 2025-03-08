@@ -23,6 +23,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -165,7 +166,7 @@ public class TestFileStore extends KeyValueFileStore {
                         snapshotManager(),
                         changelogManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()))
+                        new TagManager(LocalFileIO.create(), options.path()))
                 .config(
                         ExpireConfig.builder()
                                 .snapshotRetainMax(numRetainedMax)
@@ -179,7 +180,7 @@ public class TestFileStore extends KeyValueFileStore {
                         snapshotManager(),
                         changelogManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()))
+                        new TagManager(LocalFileIO.create(), options.path()))
                 .config(expireConfig);
     }
 
@@ -192,6 +193,26 @@ public class TestFileStore extends KeyValueFileStore {
                         newChangelogDeletion());
         impl.config(config);
         return impl;
+    }
+
+    @Override
+    public SnapshotManager snapshotManager() {
+        return new SnapshotManager(
+                LocalFileIO.create(),
+                options.path(),
+                options.branch(),
+                catalogEnvironment.snapshotLoader(),
+                null);
+    }
+
+    @Override
+    protected ManifestList.Factory manifestListFactory(boolean forWrite) {
+        return new ManifestList.Factory(
+                LocalFileIO.create(),
+                options.manifestFormat(),
+                options.manifestCompression(),
+                pathFactory(),
+                null);
     }
 
     public List<Snapshot> commitData(

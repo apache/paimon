@@ -42,6 +42,7 @@ import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -52,6 +53,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.testcontainers.shaded.org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -62,6 +64,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -252,7 +255,8 @@ public class FileDeletionTest {
      */
     @Test
     public void testExpireWithExistingTags() throws Exception {
-        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
+        TestFileStore store =
+                createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4, null);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
@@ -329,6 +333,83 @@ public class FileDeletionTest {
     }
 
     @Test
+    public void testExpireWithExistingTagsAndFailing() throws Exception {
+        String failingTagName = UUID.randomUUID().toString();
+        TestFileStore store =
+                createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4, failingTagName);
+        FailingFileIO.reset(failingTagName, 0, 1);
+        tagManager = new TagManager(fileIO, store.options().path());
+        SnapshotManager snapshotManager = store.snapshotManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // step 1: commit A to bucket 0 and B to bucket 1
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        for (int bucket : Arrays.asList(0, 1)) {
+            List<KeyValue> kvs = partitionedData(5, gen);
+            writeData(store, kvs, partition, bucket, writers);
+        }
+        commitData(store, commitIdentifier++, writers);
+
+        // step 2: commit -A (by clean bucket 0) and create tag1
+        cleanBucket(store, gen.getPartition(gen.next()), 0);
+        createTag(snapshotManager.snapshot(2), "tag1", store.options().tagDefaultTimeRetained());
+        assertThat(tagManager.tagExists("tag1")).isTrue();
+
+        // step 3: commit C to bucket 2
+        writers.clear();
+        List<KeyValue> kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 2, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        // step 4: commit -B (by clean bucket 1) and create tag2
+        cleanBucket(store, partition, 1);
+        createTag(snapshotManager.snapshot(4), "tag2", store.options().tagDefaultTimeRetained());
+        assertThat(tagManager.tagExists("tag2")).isTrue();
+
+        // step 5: commit D to bucket 3
+        writers.clear();
+        kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 3, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        // step 6: commit -D (by clean bucket 3)
+        cleanBucket(store, partition, 3);
+
+        // check before expiring
+        FileStorePathFactory pathFactory = store.pathFactory();
+        for (int i = 0; i < 4; i++) {
+            assertPathExists(fileIO, pathFactory.bucketPath(partition, i));
+        }
+
+        // check expiring results with failing
+        FailingFileIO.reset(failingTagName, 10, 10);
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
+
+        // check files which won't be deleted definitely
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 2));
+
+        // check manifests
+        ManifestList manifestList = store.manifestListFactory().create();
+        for (String tagName : Arrays.asList("tag1", "tag2")) {
+            Snapshot snapshot = tagManager.getOrThrow(tagName);
+            List<Path> manifestFilePaths =
+                    manifestList.readDataManifests(snapshot).stream()
+                            .map(ManifestFileMeta::fileName)
+                            .map(pathFactory::toManifestFilePath)
+                            .collect(Collectors.toList());
+            for (Path path : manifestFilePaths) {
+                assertPathExists(fileIO, path);
+            }
+
+            assertPathExists(fileIO, pathFactory.toManifestListPath(snapshot.baseManifestList()));
+            assertPathExists(fileIO, pathFactory.toManifestListPath(snapshot.deltaManifestList()));
+        }
+    }
+
+    @Test
     public void testExpireWithUpgradeAndTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         tagManager = new TagManager(fileIO, store.options().path());
@@ -384,7 +465,8 @@ public class FileDeletionTest {
 
     @Test
     public void testDeleteTagWithSnapshot() throws Exception {
-        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
+        TestFileStore store =
+                createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3, null);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
@@ -458,7 +540,8 @@ public class FileDeletionTest {
 
     @Test
     public void testDeleteTagWithOtherTag() throws Exception {
-        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
+        TestFileStore store =
+                createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3, null);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
@@ -644,7 +727,8 @@ public class FileDeletionTest {
 
     @Test
     public void testExpireWithDeletingTags() throws Exception {
-        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2);
+        TestFileStore store =
+                createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2, null);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         ChangelogManager changelogManager = store.changelogManager();
@@ -703,10 +787,11 @@ public class FileDeletionTest {
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode) throws Exception {
-        return createStore(mode, 2);
+        return createStore(mode, 2, null);
     }
 
-    private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)
+    private TestFileStore createStore(
+            TestKeyValueGenerator.GeneratorMode mode, int buckets, @Nullable String failingName)
             throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
@@ -749,7 +834,9 @@ public class FileDeletionTest {
 
         return new TestFileStore.Builder(
                         "avro",
-                        root,
+                        failingName == null
+                                ? root
+                                : FailingFileIO.getFailingPath(failingName, root),
                         buckets,
                         partitionType,
                         TestKeyValueGenerator.KEY_TYPE,

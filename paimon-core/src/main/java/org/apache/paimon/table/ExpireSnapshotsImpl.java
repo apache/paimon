@@ -236,7 +236,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         } catch (Exception e) {
             // maybe snapshot been deleted by other jobs.
             if (e.getCause() == null || !(e.getCause() instanceof FileNotFoundException)) {
-                throw e;
+                return 0;
             }
         }
 
