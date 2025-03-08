@@ -65,6 +65,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
+    private final Supplier<Optional<List<DataFileMeta>>> orphanFilesSupplier;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
@@ -81,6 +82,36 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             boolean lazyGenDeletionFile,
             boolean needLookup,
             @Nullable RecordLevelExpire recordLevelExpire) {
+        this(
+                executor,
+                levels,
+                strategy,
+                keyComparator,
+                compactionFileSize,
+                numSortedRunStopTrigger,
+                rewriter,
+                metricsReporter,
+                dvMaintainer,
+                lazyGenDeletionFile,
+                needLookup,
+                recordLevelExpire,
+                null);
+    }
+
+    public MergeTreeCompactManager(
+            ExecutorService executor,
+            Levels levels,
+            CompactStrategy strategy,
+            Comparator<InternalRow> keyComparator,
+            long compactionFileSize,
+            int numSortedRunStopTrigger,
+            CompactRewriter rewriter,
+            @Nullable CompactionMetrics.Reporter metricsReporter,
+            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            boolean lazyGenDeletionFile,
+            boolean needLookup,
+            @Nullable RecordLevelExpire recordLevelExpire,
+            @Nullable Supplier<Optional<List<DataFileMeta>>> orphanFilesSupplier) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -93,6 +124,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.lazyGenDeletionFile = lazyGenDeletionFile;
         this.recordLevelExpire = recordLevelExpire;
         this.needLookup = needLookup;
+        this.orphanFilesSupplier = orphanFilesSupplier;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
@@ -121,6 +153,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Override
     public void triggerCompaction(boolean fullCompaction) {
+        if (orphanFilesSupplier != null) {
+            syncOrphanFiles();
+        }
         Optional<CompactUnit> optionalUnit;
         List<LevelSortedRun> runs = levels.levelSortedRuns();
         if (fullCompaction) {
@@ -183,6 +218,23 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                     }
                     submitCompaction(unit, dropDelete);
                 });
+    }
+
+    @VisibleForTesting
+    protected void syncOrphanFiles() {
+        Optional<List<DataFileMeta>> orphanFiles = orphanFilesSupplier.get();
+
+        if (!orphanFiles.isPresent()) {
+            return;
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Sync {} new orphan files committed by other users.", orphanFiles.get().size());
+        }
+
+        // Add orphan files to level 0
+        orphanFiles.get().forEach(this::addNewFile);
     }
 
     @VisibleForTesting
