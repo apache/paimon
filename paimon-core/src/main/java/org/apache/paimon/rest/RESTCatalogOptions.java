@@ -63,19 +63,19 @@ public class RESTCatalogOptions {
                     .withDescription("REST Catalog auth DLF token file path.");
 
     public static final ConfigOption<String> DLF_ACCESS_KEY_ID =
-            ConfigOptions.key("dlf.accessKeyId")
+            ConfigOptions.key("dlf.access-key-id")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth DLF access key id");
 
     public static final ConfigOption<String> DLF_ACCESS_KEY_SECRET =
-            ConfigOptions.key("dlf.accessKeySecret")
+            ConfigOptions.key("dlf.access-key-secret")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth DLF access key secret");
 
     public static final ConfigOption<String> DLF_SECURITY_TOKEN =
-            ConfigOptions.key("dlf.securityToken")
+            ConfigOptions.key("dlf.security-token")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth DLF security token");
