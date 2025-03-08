@@ -377,7 +377,7 @@ public class IcebergCompatibilityTest {
         assertThat(metadata.currentSnapshotId()).isEqualTo(3);
 
         // Number of snapshots will become 5 with the next commit, however only 3 Iceberg snapshots
-        // are kept. So the first 2 Iceberg snapshots will be expired.
+        // are kept + 1 for old retained metadata files. So the first 1 Iceberg snapshots will be expired.
 
         IcebergPathFactory pathFactory =
                 new IcebergPathFactory(new Path(table.location(), "metadata"));
@@ -434,7 +434,7 @@ public class IcebergCompatibilityTest {
         metadata =
                 IcebergMetadata.fromPath(
                         fileIO, new Path(table.location(), "metadata/v5.metadata.json"));
-        assertThat(metadata.snapshots()).hasSize(3);
+        assertThat(metadata.snapshots()).hasSize(4);
         assertThat(metadata.currentSnapshotId()).isEqualTo(5);
 
         write.close();
@@ -961,6 +961,7 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
+        options.set(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX, 1);
         options.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofKibiBytes(8));
         Schema schema =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");
