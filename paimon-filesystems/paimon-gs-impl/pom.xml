@@ -210,17 +210,7 @@
         <dependency>
             <groupId>com.google.cloud.bigdataoss</groupId>
             <artifactId>gcs-connector</artifactId>
-            <version>3.0.5</version>
-        </dependency>
-        <dependency>
-            <groupId>com.google.cloud.bigdataoss</groupId>
-            <artifactId>gcsio</artifactId>
-            <version>3.0.5</version>
-        </dependency>
-        <dependency>
-            <groupId>com.google.cloud.bigdataoss</groupId>
-            <artifactId>util-hadoop</artifactId>
-            <version>3.0.5</version>
+            <version>1.9.4-hadoop3</version>
         </dependency>
     </dependencies>
 
