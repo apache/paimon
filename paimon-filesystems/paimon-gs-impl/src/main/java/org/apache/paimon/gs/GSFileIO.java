@@ -23,7 +23,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
 
 import com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem;
-import com.google.cloud.hadoop.fs.gcs.HadoopCredentialsConfiguration;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -99,9 +98,6 @@ public class GSFileIO extends HadoopCompliantFileIO {
 
                     GoogleHadoopFileSystem fs = new GoogleHadoopFileSystem();
 
-                    HadoopCredentialsConfiguration hadoopCreConf =
-                            new HadoopCredentialsConfiguration();
-                    //                    hadoopConf.set(, hadoopCreConf);
                     try {
                         fs.initialize(fsUri, hadoopConf);
                     } catch (IOException e) {
