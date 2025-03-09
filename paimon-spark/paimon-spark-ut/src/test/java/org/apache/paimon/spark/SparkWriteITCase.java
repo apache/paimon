@@ -26,8 +26,11 @@ import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
+import org.apache.spark.sql.functions;
 import org.apache.spark.sql.internal.SQLConf;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -43,6 +46,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.spark.sql.functions.expr;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for spark writer. */
@@ -135,6 +139,55 @@ public class SparkWriteITCase {
                 "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
                         + " ('primary-key'='a', 'bucket'='4', 'file.format'='avro')");
         innerSimpleWrite();
+    }
+
+    @Test
+    public void testWrite1() throws NoSuchTableException {
+        spark.sql(
+                "CREATE TABLE T (a bigint, b INT, c STRING) TBLPROPERTIES"
+                        + " ('primary-key'='a', 'bucket'='4', 'file.format'='parquet')");
+        Dataset<Row> df =
+                spark.range(10)
+                        .withColumnRenamed("id", "a")
+                        .withColumn("b", functions.expr("CAST(a as INT)"))
+                        .withColumn("c", functions.expr("CAST(a as STRING)"))
+                        .coalesce(1);
+
+        df.writeTo("T").append();
+    }
+
+    @Test
+    public void testWrite2() throws NoSuchTableException {
+
+        spark.sql(
+                String.format(
+                        "CREATE TABLE %s ("
+                                + "intCol INT NOT NULL, "
+                                + "longCol BIGINT NOT NULL, "
+                                + "floatCol FLOAT NOT NULL, "
+                                + "doubleCol DOUBLE NOT NULL, "
+                                + "decimalCol DECIMAL(20, 5) NOT NULL, "
+                                + "stringCol1 STRING NOT NULL, "
+                                + "stringCol2 STRING NOT NULL, "
+                                + "stringCol3 STRING NOT NULL"
+                                + ") using paimon "
+                                + "TBLPROPERTIES('primary-key'='stringCol1,stringCol2', 'bucket'='4')",
+                        "T"));
+
+        benchmarkData().writeTo("T").append();
+    }
+
+    private Dataset<Row> benchmarkData() {
+        return spark.range(1)
+                .withColumnRenamed("id", "longCol")
+                .withColumn("intCol", expr("CAST(longCol AS INT)"))
+                .withColumn("floatCol", expr("CAST(longCol AS FLOAT)"))
+                .withColumn("doubleCol", expr("CAST(longCol AS DOUBLE)"))
+                .withColumn("decimalCol", expr("CAST(longCol AS DECIMAL(20, 5))"))
+                .withColumn("stringCol1", expr("CAST(longCol AS STRING)"))
+                .withColumn("stringCol2", expr("CAST(longCol AS STRING)"))
+                .withColumn("stringCol3", expr("CAST(longCol AS STRING)"))
+                .coalesce(1);
     }
 
     @Test

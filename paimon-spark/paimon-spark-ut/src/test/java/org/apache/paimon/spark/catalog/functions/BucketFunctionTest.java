@@ -68,6 +68,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** Tests for Spark bucket functions. */
 public class BucketFunctionTest {
     private static final int NUM_BUCKETS =
             ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);

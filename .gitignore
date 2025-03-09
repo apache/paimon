@@ -18,6 +18,7 @@ target
 *.iws
 .java-version
 dependency-reduced-pom.xml
+benchmark/*
 
 ### VS Code ###
 .vscode/

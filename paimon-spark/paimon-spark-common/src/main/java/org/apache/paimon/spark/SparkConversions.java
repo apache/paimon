@@ -24,6 +24,7 @@ import org.apache.spark.sql.types.Decimal;
 
 import java.util.function.Function;
 
+/** Data conversions between Spark and Paimon. */
 public class SparkConversions {
     private SparkConversions() {}
 

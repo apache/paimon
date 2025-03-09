@@ -63,6 +63,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/** A Spark function implementation for the Paimon bucket transform. */
 public class BucketFunction implements UnboundFunction {
     private static final int NUM_BUCKETS_ORDINAL = 0;
     private static final int SPARK_TIMESTAMP_PRECISION = 6;
@@ -192,6 +193,7 @@ public class BucketFunction implements UnboundFunction {
         return "bucket";
     }
 
+    /** Bound bucket function for generic type. */
     public static class BucketGeneric implements ScalarFunction<Integer> {
         protected final DataType[] bucketKeyTypes;
         protected final BinaryRow bucketKeyRow;
@@ -273,6 +275,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Boolean} type. */
     public static class BucketBoolean extends BucketGeneric {
 
         public BucketBoolean(DataType[] sqlTypes) {
@@ -287,6 +290,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Byte} type. */
     public static class BucketByte extends BucketGeneric {
 
         public BucketByte(DataType[] sqlTypes) {
@@ -301,6 +305,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Short} type. */
     public static class BucketShort extends BucketGeneric {
 
         public BucketShort(DataType[] sqlTypes) {
@@ -315,6 +320,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Integer} type. */
     public static class BucketInteger extends BucketGeneric {
 
         public BucketInteger(DataType[] sqlTypes) {
@@ -329,6 +335,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Long} type. */
     public static class BucketLong extends BucketGeneric {
 
         public BucketLong(DataType[] sqlTypes) {
@@ -343,6 +350,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Float} type. */
     public static class BucketFloat extends BucketGeneric {
 
         public BucketFloat(DataType[] sqlTypes) {
@@ -357,6 +365,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Double} type. */
     public static class BucketDouble extends BucketGeneric {
 
         public BucketDouble(DataType[] sqlTypes) {
@@ -371,6 +380,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {String} type. */
     public static class BucketString extends BucketGeneric {
 
         public BucketString(DataType[] sqlTypes) {
@@ -385,6 +395,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Decimal} type. */
     public static class BucketDecimal extends BucketGeneric {
         private final int precision;
         private final int scale;
@@ -406,7 +417,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
-    /** Bucket function for {@code TimestampType} type with precision 6. */
+    /** Bound bucket function for paimon {@code TimestampType} type with precision 6. */
     public static class BucketTimestamp extends BucketGeneric {
 
         public BucketTimestamp(DataType[] sqlTypes) {
@@ -422,6 +433,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bound bucket function for {Binary} type. */
     public static class BucketBinary extends BucketGeneric {
 
         public BucketBinary(DataType[] sqlTypes) {
@@ -436,6 +448,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {Integer, Integer} composite type. */
     public static class BucketIntegerInteger extends BucketGeneric {
 
         public BucketIntegerInteger(DataType[] sqlTypes) {
@@ -451,6 +464,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {Integer, Long} composite type. */
     public static class BucketIntegerLong extends BucketGeneric {
 
         public BucketIntegerLong(DataType[] sqlTypes) {
@@ -466,6 +480,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {Integer, String} composite type. */
     public static class BucketIntegerString extends BucketGeneric {
 
         public BucketIntegerString(DataType[] sqlTypes) {
@@ -481,6 +496,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {Long, Long} composite type. */
     public static class BucketLongLong extends BucketGeneric {
 
         public BucketLongLong(DataType[] sqlTypes) {
@@ -496,6 +512,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {Long, Integer} composite type. */
     public static class BucketLongInteger extends BucketGeneric {
 
         public BucketLongInteger(DataType[] sqlTypes) {
@@ -511,6 +528,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {Long, String} composite type. */
     public static class BucketLongString extends BucketGeneric {
 
         public BucketLongString(DataType[] sqlTypes) {
@@ -526,6 +544,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {String, Integer} composite type. */
     public static class BucketStringInteger extends BucketGeneric {
 
         public BucketStringInteger(DataType[] sqlTypes) {
@@ -541,6 +560,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {String, Long} composite type. */
     public static class BucketStringLong extends BucketGeneric {
 
         public BucketStringLong(DataType[] sqlTypes) {
@@ -556,6 +576,7 @@ public class BucketFunction implements UnboundFunction {
         }
     }
 
+    /** Bucket function for {String, String} composite type. */
     public static class BucketStringString extends BucketGeneric {
 
         public BucketStringString(DataType[] sqlTypes) {
