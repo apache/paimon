@@ -74,8 +74,8 @@ WITH (
     'metastore' = 'rest',
     'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
-    'dlf.accessKeyId'='<accessKeyId>',
-    'dlf.accessKeySecret'='<accessKeySecret>',
+    'dlf.access-key-id'='<access-key-id>',
+    'dlf.access-key-secret'='<access-key-secret>',
 );
 ```
 
@@ -89,9 +89,9 @@ WITH (
     'metastore' = 'rest',
     'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
-    'dlf.accessKeyId'='<accessKeyId>',
-    'dlf.accessKeySecret'='<accessKeySecret>',
-    'dlf.securityToken'='<securityToken>'
+    'dlf.access-key-id'='<access-key-id>',
+    'dlf.access-key-secret'='<access-key-secret>',
+    'dlf.security-token'='<security-token>'
 );
 ```
 
