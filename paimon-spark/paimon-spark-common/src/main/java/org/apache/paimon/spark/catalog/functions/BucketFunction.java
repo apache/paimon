@@ -22,7 +22,13 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.spark.utils.SparkConversions;
+import org.apache.paimon.spark.SparkConversions;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -90,6 +96,36 @@ public class BucketFunction implements UnboundFunction {
         builder.put("BucketStringString", BucketStringString.class);
 
         BUCKET_FUNCTIONS = builder.build();
+    }
+
+    public static boolean supportsTable(FileStoreTable table) {
+        if (table.bucketMode() != BucketMode.HASH_FIXED) {
+            return false;
+        }
+
+        return table.schema().logicalBucketKeyType().getFieldTypes().stream()
+                .allMatch(BucketFunction::supportsType);
+    }
+
+    private static boolean supportsType(org.apache.paimon.types.DataType type) {
+        if (type instanceof ArrayType
+                || type instanceof MapType
+                || type instanceof RowType
+                || type instanceof VariantType) {
+            return false;
+        }
+
+        if (type instanceof org.apache.paimon.types.TimestampType) {
+            return ((org.apache.paimon.types.TimestampType) type).getPrecision()
+                    == SPARK_TIMESTAMP_PRECISION;
+        }
+
+        if (type instanceof org.apache.paimon.types.LocalZonedTimestampType) {
+            return ((org.apache.paimon.types.LocalZonedTimestampType) type).getPrecision()
+                    == SPARK_TIMESTAMP_PRECISION;
+        }
+
+        return true;
     }
 
     @Override
@@ -557,6 +593,7 @@ public class BucketFunction implements UnboundFunction {
                         writer.writeByte(writePos, srcRow.getByte(srcPos));
                     }
                 };
+
             } else if (type instanceof ShortType) {
                 return (writer, writePos, srcRow, srcPos) -> {
                     if (srcRow.isNullAt(srcPos)) {
@@ -565,6 +602,7 @@ public class BucketFunction implements UnboundFunction {
                         writer.writeShort(writePos, srcRow.getShort(srcPos));
                     }
                 };
+
             } else if (type instanceof IntegerType) {
                 return (writer, writePos, srcRow, srcPos) -> {
                     if (srcRow.isNullAt(srcPos)) {

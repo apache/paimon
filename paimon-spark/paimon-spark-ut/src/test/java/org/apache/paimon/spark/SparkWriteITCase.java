@@ -28,6 +28,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.internal.SQLConf;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -79,6 +80,53 @@ public class SparkWriteITCase {
     @AfterEach
     public void afterEach() {
         spark.sql("DROP TABLE T");
+    }
+
+    @Test
+    public void testV2Write() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) partitioned by (a)  TBLPROPERTIES"
+                        + " ('primary-key'='a,b', 'bucket'='4', 'file.format'='parquet')");
+
+        spark.conf().set(SparkSQLProperties.USE_V2_WRITE, true);
+
+        spark.sql("INSERT INTO T VALUES(1, 1, 'a'), (2, 2, 'b')");
+        spark.sql("INSERT INTO T VALUES (1, 1, 'A')");
+
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,1,A], [2,2,b]]");
+    }
+
+    @Test
+    public void testStaticV2Overwrite() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) partitioned by (a)  TBLPROPERTIES"
+                        + " ('primary-key'='a,b', 'bucket'='4', 'file.format'='parquet')");
+
+        spark.conf().set(SparkSQLProperties.USE_V2_WRITE, true);
+        spark.conf().set(SQLConf.PARTITION_OVERWRITE_MODE(), "STATIC");
+
+        spark.sql("INSERT INTO T VALUES(1, 1, 'a'), (2, 2, 'b')");
+        spark.sql("INSERT OVERWRITE T VALUES (1, 1, 'A')");
+
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,1,A]]");
+    }
+
+    @Test
+    public void testDynamicV2Overwrite() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) partitioned by (a)  TBLPROPERTIES"
+                        + " ('primary-key'='a,b', 'bucket'='4', 'file.format'='parquet')");
+
+        spark.conf().set(SparkSQLProperties.USE_V2_WRITE, true);
+        spark.conf().set(SQLConf.PARTITION_OVERWRITE_MODE(), "DYNAMIC");
+
+        spark.sql("INSERT INTO T VALUES(1, 1, 'a'), (2, 2, 'b')");
+        spark.sql("INSERT OVERWRITE T VALUES (1, 1, 'A')");
+
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[2,2,b], [1,1,A]]");
     }
 
     @Test

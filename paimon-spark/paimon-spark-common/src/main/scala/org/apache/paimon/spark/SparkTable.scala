@@ -20,10 +20,12 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
+import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.{DataTable, FileStoreTable, KnownSplitsTable, Table}
+import org.apache.paimon.table.{BucketMode, DataTable, FileStoreTable, KnownSplitsTable, Table}
 import org.apache.paimon.utils.StringUtils
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
@@ -42,6 +44,27 @@ case class SparkTable(table: Table)
   with SupportsWrite
   with SupportsMetadataColumns
   with PaimonPartitionManagement {
+
+  private lazy val sparkSession: SparkSession = SparkSession.active
+  private lazy val useV2Write: Boolean = {
+    val v2WriteConfigured = sparkSession.conf
+      .get(SparkSQLProperties.USE_V2_WRITE, SparkSQLProperties.USE_V2_WRITE_DEFAULT)
+      .toBoolean
+    v2WriteConfigured && supportsV2Write
+  }
+
+  private def supportsV2Write: Boolean = {
+    table match {
+      case storeTable: FileStoreTable =>
+        storeTable.bucketMode() match {
+          case BucketMode.HASH_FIXED => BucketFunction.supportsTable(storeTable)
+          case BucketMode.BUCKET_UNAWARE => true
+          case _ => false
+        }
+
+      case _ => false
+    }
+  }
 
   def getTable: Table = table
 
@@ -73,14 +96,18 @@ case class SparkTable(table: Table)
   }
 
   override def capabilities: JSet[TableCapability] = {
-    JEnumSet.of(
+    val capabilities = JEnumSet.of(
       TableCapability.ACCEPT_ANY_SCHEMA,
       TableCapability.BATCH_READ,
-      TableCapability.V1_BATCH_WRITE,
       TableCapability.OVERWRITE_BY_FILTER,
       TableCapability.OVERWRITE_DYNAMIC,
       TableCapability.MICRO_BATCH_READ
     )
+
+    capabilities.add(
+      if (useV2Write) TableCapability.BATCH_WRITE else TableCapability.V1_BATCH_WRITE)
+
+    capabilities
   }
 
   override def metadataColumns: Array[MetadataColumn] = {
@@ -105,7 +132,12 @@ case class SparkTable(table: Table)
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        new SparkWriteBuilder(fileStoreTable, Options.fromMap(info.options))
+        val options = Options.fromMap(info.options)
+        if (useV2Write) {
+          new SparkV2WriteBuilder(fileStoreTable, options)
+        } else {
+          new SparkWriteBuilder(fileStoreTable, options)
+        }
       case _ =>
         throw new RuntimeException("Only FileStoreTable can be written.")
     }

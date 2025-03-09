@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.utils;
+package org.apache.paimon.spark;
 
 import org.apache.paimon.utils.Preconditions;
 
