@@ -371,7 +371,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected void addMergedDataFiles(
             Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, Snapshot snapshot)
             throws IOException {
-        for (ExpireFileEntry entry : readMergedDataFiles(snapshot)) {
+        for (ExpireFileEntry entry : readMergedDataFiles(manifestList.readAllManifests(snapshot))) {
             dataFiles
                     .computeIfAbsent(entry.partition(), p -> new HashMap<>())
                     .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
@@ -379,14 +379,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         }
     }
 
-    protected Collection<ExpireFileEntry> readMergedDataFiles(Snapshot snapshot)
+    protected Collection<ExpireFileEntry> readMergedDataFiles(List<ManifestFileMeta> manifests)
             throws IOException {
-        // read data manifests
-
-        List<ManifestFileMeta> manifests = tryReadManifestList(snapshot.baseManifestList());
-        manifests.addAll(tryReadManifestList(snapshot.deltaManifestList()));
-
-        // read and merge manifest entries
         Map<Identifier, ExpireFileEntry> map = new HashMap<>();
         for (ManifestFileMeta manifest : manifests) {
             List<ExpireFileEntry> entries =
