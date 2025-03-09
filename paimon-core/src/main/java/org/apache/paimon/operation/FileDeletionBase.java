@@ -340,9 +340,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         if (index >= 0) {
             Snapshot previousTag = taggedSnapshots.get(index);
             if (previousTag.id() != cachedTag) {
-                cachedTag = previousTag.id();
                 cachedTagDataFiles.clear();
                 addMergedDataFiles(cachedTagDataFiles, previousTag);
+                // IMPORTANT: update cachedTag after read tag successfully
+                cachedTag = previousTag.id();
             }
             return entry -> containsDataFile(cachedTagDataFiles, entry);
         }
@@ -370,7 +371,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
      */
     protected void addMergedDataFiles(
             Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, Snapshot snapshot)
-            throws IOException {
+            throws Exception {
         for (ExpireFileEntry entry : readMergedDataFiles(snapshot)) {
             dataFiles
                     .computeIfAbsent(entry.partition(), p -> new HashMap<>())
@@ -379,12 +380,14 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         }
     }
 
-    protected Collection<ExpireFileEntry> readMergedDataFiles(Snapshot snapshot)
-            throws IOException {
+    /**
+     * IMPORTANT: if exception happens, it must be returned to notify the caller to stop cleaning
+     * files to avoid deleting used files mistakenly.
+     */
+    protected Collection<ExpireFileEntry> readMergedDataFiles(Snapshot snapshot) throws Exception {
         // read data manifests
-
-        List<ManifestFileMeta> manifests = tryReadManifestList(snapshot.baseManifestList());
-        manifests.addAll(tryReadManifestList(snapshot.deltaManifestList()));
+        List<ManifestFileMeta> manifests = manifestList.read(snapshot.baseManifestList());
+        manifests.addAll(manifestList.read(snapshot.deltaManifestList()));
 
         // read and merge manifest entries
         Map<Identifier, ExpireFileEntry> map = new HashMap<>();
