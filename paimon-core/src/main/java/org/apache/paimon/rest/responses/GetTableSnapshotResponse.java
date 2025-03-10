@@ -18,8 +18,8 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.table.TableSnapshot;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -33,15 +33,15 @@ public class GetTableSnapshotResponse implements RESTResponse {
     private static final String FIELD_SNAPSHOT = "snapshot";
 
     @JsonProperty(FIELD_SNAPSHOT)
-    private final Snapshot snapshot;
+    private final TableSnapshot snapshot;
 
     @JsonCreator
-    public GetTableSnapshotResponse(@JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot) {
+    public GetTableSnapshotResponse(@JsonProperty(FIELD_SNAPSHOT) TableSnapshot snapshot) {
         this.snapshot = snapshot;
     }
 
     @JsonGetter(FIELD_SNAPSHOT)
-    public Snapshot getSnapshot() {
+    public TableSnapshot getSnapshot() {
         return snapshot;
     }
 }

@@ -1516,6 +1516,23 @@ components:
           format: int64
         statistics:
           type: string
+    TableSnapshot:
+      type: object
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+        recordCount:
+          type: integer
+          format: int64
+        fileSizeInBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        lastFileCreationTime:
+          type: integer
+          format: int64
     CommitTableResponse:
       type: object
       properties:
@@ -1535,7 +1552,7 @@ components:
       type: object
       properties:
         snapshot:
-          $ref: '#/components/schemas/Snapshot'
+          $ref: '#/components/schemas/TableSnapshot'
     AlterDatabaseRequest:
       type: object
       properties:

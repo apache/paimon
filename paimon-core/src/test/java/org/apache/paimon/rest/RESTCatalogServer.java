@@ -77,6 +77,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
@@ -133,7 +134,7 @@ public class RESTCatalogServer {
     private final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
     private final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
     private final Map<String, View> viewStore = new HashMap<>();
-    private final Map<String, Snapshot> tableSnapshotStore = new HashMap<>();
+    private final Map<String, TableSnapshot> tableSnapshotStore = new HashMap<>();
     private final List<String> noPermissionDatabases = new ArrayList<>();
     private final List<String> noPermissionTables = new ArrayList<>();
     public final ConfigResponse configResponse;
@@ -150,7 +151,7 @@ public class RESTCatalogServer {
         ResourcePaths resourcePaths = new ResourcePaths(prefix);
         this.databaseUri = resourcePaths.databases();
         Options conf = new Options();
-        this.configResponse.getDefaults().forEach((k, v) -> conf.setString(k, v));
+        this.configResponse.getDefaults().forEach(conf::setString);
         conf.setString(CatalogOptions.WAREHOUSE.key(), dataPath);
         CatalogContext context = CatalogContext.create(conf);
         Path warehousePath = new Path(dataPath);
@@ -180,8 +181,17 @@ public class RESTCatalogServer {
         server.shutdown();
     }
 
-    public void setTableSnapshot(Identifier identifier, Snapshot snapshot) {
-        tableSnapshotStore.put(identifier.getFullName(), snapshot);
+    public void setTableSnapshot(
+            Identifier identifier,
+            Snapshot snapshot,
+            long recordCount,
+            long fileSizeInBytes,
+            long fileCount,
+            long lastFileCreationTime) {
+        tableSnapshotStore.put(
+                identifier.getFullName(),
+                new TableSnapshot(
+                        snapshot, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime));
     }
 
     public void setDataToken(Identifier identifier, RESTToken token) {
@@ -539,7 +549,7 @@ public class RESTCatalogServer {
 
     private MockResponse snapshotHandle(Identifier identifier) throws Exception {
         RESTResponse response;
-        Optional<Snapshot> snapshotOptional =
+        Optional<TableSnapshot> snapshotOptional =
                 Optional.ofNullable(tableSnapshotStore.get(identifier.getFullName()));
         if (!snapshotOptional.isPresent()) {
             response =
@@ -1354,7 +1364,38 @@ public class RESTCatalogServer {
         }
         try {
             boolean success = commit.commit(snapshot, branchName, Collections.emptyList());
-            tableSnapshotStore.put(identifier.getFullName(), snapshot);
+            tableSnapshotStore.compute(
+                    identifier.getFullName(),
+                    (k, old) -> {
+                        long recordCount = 0;
+                        long fileSizeInBytes = 0;
+                        long fileCount = 0;
+                        long lastFileCreationTime = 0;
+                        if (statistics != null) {
+                            for (Partition partition : statistics) {
+                                recordCount += partition.recordCount();
+                                fileSizeInBytes += partition.fileSizeInBytes();
+                                fileCount += partition.fileCount();
+                                if (partition.lastFileCreationTime() > lastFileCreationTime) {
+                                    lastFileCreationTime = partition.lastFileCreationTime();
+                                }
+                            }
+                        }
+                        if (old != null) {
+                            recordCount += old.recordCount();
+                            fileSizeInBytes += old.fileSizeInBytes();
+                            fileCount += old.fileCount();
+                            if (old.lastFileCreationTime() > lastFileCreationTime) {
+                                lastFileCreationTime = old.lastFileCreationTime();
+                            }
+                        }
+                        return new TableSnapshot(
+                                snapshot,
+                                recordCount,
+                                fileCount,
+                                lastFileCreationTime,
+                                fileSizeInBytes);
+                    });
             return success;
         } catch (Exception e) {
             throw new RuntimeException(e);
