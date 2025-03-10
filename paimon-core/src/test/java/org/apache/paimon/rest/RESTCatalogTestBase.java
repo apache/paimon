@@ -18,6 +18,24 @@
 
 package org.apache.paimon.rest;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.junit.jupiter.api.Test;
+
+import org.apache.commons.io.FileUtils;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
@@ -30,9 +48,14 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -46,32 +69,15 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.view.View;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
-
-import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
-
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -721,8 +727,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
         long millis = System.currentTimeMillis();
-        updateSnapshotOnRestServer(
-                hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis));
+        updateSnapshotOnRestServer(hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis));
         Optional<Snapshot> snapshot = catalog.loadSnapshot(hasSnapshotTableIdentifier);
         assertThat(snapshot).isPresent();
         assertThat(snapshot.get().id()).isEqualTo(id);
@@ -858,7 +863,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         assertThat(fetchData).containsSequence(testData);
     }
 
-    protected TestPagedResponse generateTestPagedResponse(
+    private TestPagedResponse generateTestPagedResponse(
             Map<String, String> queryParams,
             List<Integer> testData,
             int maxResults,
@@ -937,7 +942,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
     protected abstract RESTToken getDataTokenFromRestServer(Identifier identifier);
 
     protected abstract void setDataTokenToRestServerForMock(
-            Identifier identifier, RESTToken expiredDataToken);
+     Identifier identifier, RESTToken expiredDataToken);
 
     protected abstract void resetDataTokenOnRestServer(Identifier identifier);
 
@@ -971,4 +976,15 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
                 });
         return result;
     }
+
+    protected void generateTokenAndWriteToFile(String tokenPath) throws IOException {
+        File tokenFile = new File(tokenPath);
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String expiration = now.format(TOKEN_DATE_FORMATTER);
+        String secret = UUID.randomUUID().toString();
+        DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
+        String tokenStr = RESTObjectMapper.OBJECT_MAPPER.writeValueAsString(token);
+        FileUtils.writeStringToFile(tokenFile, tokenStr);
+    }
+
 }

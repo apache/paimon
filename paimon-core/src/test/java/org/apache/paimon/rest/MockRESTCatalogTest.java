@@ -18,14 +18,17 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
+import org.apache.paimon.rest.auth.DLFAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -36,22 +39,26 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test REST Catalog on Mocked REST server. */
-public class RESTCatalogTest extends RESTCatalogTestBase {
+class MockRESTCatalogTest extends RESTCatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
-    protected String initToken = "init_token";
-    protected String dataPath;
-
-    protected String serverDefineHeaderName = "test-header";
-    protected String serverDefineHeaderValue = "test-value";
+    private String initToken = "init_token";
+    private String serverDefineHeaderName = "test-header";
+    private String serverDefineHeaderValue = "test-value";
+    private String dataPath;
+    private AuthProvider authProvider;
 
     @BeforeEach
     @Override
@@ -69,7 +76,9 @@ public class RESTCatalogTest extends RESTCatalogTestBase {
                                 CatalogOptions.WAREHOUSE.key(),
                                 restWarehouse),
                         ImmutableMap.of());
-        restCatalogServer = new RESTCatalogServer(dataPath, initToken, this.config, restWarehouse);
+        this.authProvider = new BearTokenAuthProvider(initToken);
+        restCatalogServer =
+                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
         restCatalogServer.start();
         options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
@@ -87,12 +96,57 @@ public class RESTCatalogTest extends RESTCatalogTestBase {
     @Test
     void testAuthFail() {
         Options options = new Options();
-        options.set(RESTCatalogOptions.URI, getRestCatalogURL());
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, "aaaaa");
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
-                .isInstanceOf(NotAuthorizedException.class);
+            .isInstanceOf(NotAuthorizedException.class);
+    }
+
+    @Test
+    void testDlfStSTokenAuth() throws Exception {
+        String restWarehouse = UUID.randomUUID().toString();
+        String akId = "akId" + UUID.randomUUID();
+        String akSecret = "akSecret" + UUID.randomUUID();
+        String securityToken = "securityToken" + UUID.randomUUID();
+        String region = "cn-hangzhou";
+        DLFAuthProvider authProvider =
+            DLFAuthProvider.buildAKToken(akId, akSecret, securityToken, region);
+        restCatalogServer =
+            new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
+        restCatalogServer.start();
+        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.DLF.identifier());
+        options.set(RESTCatalogOptions.DLF_REGION, region);
+        options.set(RESTCatalogOptions.DLF_ACCESS_KEY_ID, akId);
+        options.set(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET, akSecret);
+        options.set(RESTCatalogOptions.DLF_SECURITY_TOKEN, securityToken);
+        RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
+        testDlfAuth(restCatalog);
+    }
+
+    @Test
+    void testDlfStSTokenPathAuth() throws Exception {
+        String restWarehouse = UUID.randomUUID().toString();
+        String region = "cn-hangzhou";
+        String tokenPath = dataPath + UUID.randomUUID();
+        generateTokenAndWriteToFile(tokenPath);
+        DLFAuthProvider authProvider =
+            DLFAuthProvider.buildRefreshToken(tokenPath, 1000_000L, region);
+        restCatalogServer =
+            new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
+        restCatalogServer.start();
+        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.DLF.identifier());
+        options.set(RESTCatalogOptions.DLF_REGION, region);
+        options.set(RESTCatalogOptions.DLF_TOKEN_PATH, tokenPath);
+        RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
+        testDlfAuth(restCatalog);
+        File file = new File(tokenPath);
+        file.delete();
     }
 
     @Test
@@ -101,15 +155,36 @@ public class RESTCatalogTest extends RESTCatalogTestBase {
         parameters.put("k1", "v1");
         parameters.put("k2", "v2");
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter("host", "/path", parameters, "method", "data");
+            new RESTAuthParameter("host", "/path", parameters, "method", "data");
         Map<String, String> headers = restCatalog.headers(restAuthParameter);
         assertEquals(
-                headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
+            headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
         assertEquals(headers.get(serverDefineHeaderName), serverDefineHeaderValue);
     }
 
-    private String getRestCatalogURL() {
-        return restCatalogServer.getUrl();
+    private void testDlfAuth(RESTCatalog restCatalog) throws Exception {
+        String databaseName = "db1";
+        restCatalog.createDatabase(databaseName, true);
+        String[] tableNames = {"dt=20230101", "dt=20230102", "dt=20230103"};
+        for (String tableName : tableNames) {
+            restCatalog.createTable(
+                Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+        PagedList<String> listTablesPaged =
+            restCatalog.listTablesPaged(databaseName, 1, "dt=20230101");
+        PagedList<String> listTablesPaged2 =
+            restCatalog.listTablesPaged(databaseName, 1, listTablesPaged.getNextPageToken());
+        assertEquals(listTablesPaged.getElements().get(0), "dt=20230102");
+        assertEquals(listTablesPaged2.getElements().get(0), "dt=20230103");
+    }
+
+    @Override
+    protected Catalog newRestCatalogWithDataToken() {
+        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
+        options.set(
+            RESTTestFileIO.DATA_PATH_CONF_KEY,
+            dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
+        return new RESTCatalog(CatalogContext.create(options));
     }
 
     @Override
@@ -128,8 +203,8 @@ public class RESTCatalogTest extends RESTCatalogTestBase {
     }
 
     @Override
-    protected void setDataTokenToRestServerForMock(
-            Identifier identifier, RESTToken expiredDataToken) {
+    protected void setDataTokenToRestServerForMock(Identifier identifier,
+        RESTToken expiredDataToken) {
         restCatalogServer.setDataToken(identifier, expiredDataToken);
     }
 
@@ -141,14 +216,5 @@ public class RESTCatalogTest extends RESTCatalogTestBase {
     @Override
     protected void updateSnapshotOnRestServer(Identifier identifier, Snapshot snapshot) {
         restCatalogServer.setTableSnapshot(identifier, snapshot);
-    }
-
-    @Override
-    protected Catalog newRestCatalogWithDataToken() {
-        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
-        options.set(
-                RESTTestFileIO.DATA_PATH_CONF_KEY,
-                dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
-        return new RESTCatalog(CatalogContext.create(options));
     }
 }
