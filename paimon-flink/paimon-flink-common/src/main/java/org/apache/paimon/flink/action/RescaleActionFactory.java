@@ -26,8 +26,8 @@ public class RescaleActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "rescale";
     private static final String BUCKET_NUM = "bucket_num";
     private static final String PARTITION = "partition";
-    private static final String SOURCE_PARALLELISM = "source_parallelism";
-    private static final String SINK_PARALLELISM = "sink_parallelism";
+    private static final String SOURCE_PARALLELISM = "source.parallelism";
+    private static final String SINK_PARALLELISM = "sink.parallelism";
 
     @Override
     public String identifier() {
@@ -68,15 +68,15 @@ public class RescaleActionFactory implements ActionFactory {
                 "  rescale --warehouse <warehouse_path> --database <database_name> "
                         + "--table <table_name> [--bucket_num <bucket_num>] "
                         + "[--partition <partition>] "
-                        + "[--source_parallelism <source_parallelism>] [--sink_parallelism <sink_parallelism>]");
+                        + "[--source.parallelism <source.parallelism>] [--sink.parallelism <sink.parallelism>]");
         System.out.println(
                 "The default value of argument bucket_num is the value of 'bucket' option of the table. "
                         + "For postpone bucket tables, this argument must be specified.");
         System.out.println(
                 "Argument partition must be specified if the table is a partitioned table.");
         System.out.println(
-                "The default value of argument source_parallelism is the current bucket number of the partition.");
+                "The default value of argument source.parallelism is the current bucket number of the partition.");
         System.out.println(
-                "The default value of argument sink_parallelism is equal to bucket_num.");
+                "The default value of argument sink.parallelism is equal to bucket_num.");
     }
 }

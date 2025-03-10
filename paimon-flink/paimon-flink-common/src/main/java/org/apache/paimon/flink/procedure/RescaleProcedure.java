@@ -43,11 +43,11 @@ public class RescaleProcedure extends ProcedureBase {
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
                 @ArgumentHint(
-                        name = "source_parallelism",
+                        name = "source.parallelism",
                         type = @DataTypeHint("INT"),
                         isOptional = true),
                 @ArgumentHint(
-                        name = "sink_parallelism",
+                        name = "sink.parallelism",
                         type = @DataTypeHint("INT"),
                         isOptional = true)
             })
