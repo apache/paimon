@@ -297,6 +297,12 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                             "Exception in nextBatch, filePath: %s fileSchema: %s",
                             filePath, fileSchema),
                     e);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    format(
+                            "Exception in nextBatch, filePath: %s fileSchema: %s",
+                            filePath, fileSchema),
+                    e);
         }
     }
 
