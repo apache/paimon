@@ -89,7 +89,9 @@ public class MigrateTableProcedure extends ProcedureBase {
                         p,
                         parseCommaSeparatedKeyValues(notnull(properties)));
         LOG.info("create migrator success.");
-        migrator.deleteOriginTable(deleteOrigin);
+        if (deleteOrigin != null) {
+            migrator.deleteOriginTable(deleteOrigin);
+        }
         migrator.executeMigrate();
 
         if (targetTable == null) {
