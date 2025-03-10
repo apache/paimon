@@ -746,13 +746,15 @@ All available procedures are listed below.
    <tr>
       <td>rescale</td>
       <td>
-         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition')
+         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `source.parallelism` => 'source.parallelism', `sink.parallelism` => 'sink.parallelism')
       </td>
       <td>
          Rescale one partition of a table. Arguments:
          <li>identifier: The target table identifier. Cannot be empty.</li>
          <li>bucket_num: Resulting bucket number after rescale. The default value of argument bucket_num is the current bucket number of the table. Cannot be empty for postpone bucket tables.</li>
          <li>partition: What partition to rescale. For partitioned table this argument cannot be empty.</li>
+         <li>source.parallelism: Parallelism of source operator. The default value is the current bucket number of the partition.</li>
+         <li>sink.parallelism: Parallelism of sink operator. The default value is equal to bucket_num.</li>
       </td>
       <td>
          CALL sys.rescale(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08')
