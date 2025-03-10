@@ -25,7 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
-/** A {@link PluginLoader} to load oss. */
+/** A {@link PluginLoader} to load gcs. */
 public class GSLoader implements FileIOLoader {
 
     private static final long serialVersionUID = 1L;
