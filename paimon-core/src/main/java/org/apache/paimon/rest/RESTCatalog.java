@@ -152,7 +152,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             String warehouse = options.get(WAREHOUSE);
             Map<String, String> queryParams =
                     StringUtils.isNotEmpty(warehouse)
-                            ? ImmutableMap.of(QUERY_PARAMETER_WAREHOUSE_KEY, warehouse)
+                            ? ImmutableMap.of(
+                                    QUERY_PARAMETER_WAREHOUSE_KEY, RESTUtil.encodeString(warehouse))
                             : ImmutableMap.of();
             baseHeaders = extractPrefixMap(context.options(), HEADER_PREFIX);
             options =
@@ -382,7 +383,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         try {
             response =
                     client.post(
-                            resourcePaths.commitTable(identifier.getDatabaseName()),
+                            resourcePaths.commitTable(),
                             request,
                             CommitTableResponse.class,
                             restAuthFunction);
@@ -479,10 +480,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         checkNotSystemTable(toTable, "renameTable");
         try {
             RenameTableRequest request = new RenameTableRequest(fromTable, toTable);
-            client.post(
-                    resourcePaths.renameTable(fromTable.getDatabaseName()),
-                    request,
-                    restAuthFunction);
+            client.post(resourcePaths.renameTable(), request, restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
                 throw new TableNotExistException(fromTable);

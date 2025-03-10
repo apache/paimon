@@ -375,11 +375,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/rename")
-    public void renameTable(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @RequestBody RenameTableRequest request) {}
+    @PostMapping("/v1/{prefix}/tables/rename")
+    public void renameTable(@PathVariable String prefix, @RequestBody RenameTableRequest request) {}
 
     @Operation(
             summary = "Commit table",
@@ -396,11 +393,9 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/commit")
+    @PostMapping("/v1/{prefix}/tables/commit")
     public CommitTableResponse commitTable(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @RequestBody CommitTableRequest request) {
+            @PathVariable String prefix, @RequestBody CommitTableRequest request) {
         return new CommitTableResponse(true);
     }
 

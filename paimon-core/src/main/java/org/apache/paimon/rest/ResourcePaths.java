@@ -48,7 +48,7 @@ public class ResourcePaths {
     private final String prefix;
 
     public ResourcePaths(String prefix) {
-        this.prefix = prefix;
+        this.prefix = encodeString(prefix);
     }
 
     public String databases() {
@@ -81,12 +81,12 @@ public class ResourcePaths {
                 encodeString(objectName));
     }
 
-    public String renameTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "rename");
+    public String renameTable() {
+        return SLASH.join(V1, prefix, TABLES, "rename");
     }
 
-    public String commitTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "commit");
+    public String commitTable() {
+        return SLASH.join(V1, prefix, TABLES, "commit");
     }
 
     public String tableToken(String databaseName, String objectName) {
