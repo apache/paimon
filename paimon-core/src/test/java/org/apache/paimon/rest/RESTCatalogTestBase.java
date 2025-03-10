@@ -76,7 +76,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** Test for REST Catalog. */
+/** Base test class for {@link RESTCatalog}. */
 public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     protected ConfigResponse config;
@@ -86,7 +86,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
     @Test
     void testDatabaseApiWhenNoPermission() {
         String database = "test_no_permission_db";
-        setupNoPermissionDatabase(database);
+        revokeDatabasePermission(database);
         assertThrows(
                 Catalog.DatabaseNoPermissionException.class,
                 () -> catalog.createDatabase(database, false, Maps.newHashMap()));
@@ -135,7 +135,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
     void testApiWhenTableNoPermission() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "no_permission_table");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
-        setupNoPermissionTable(identifier);
+        revokeTablePermission(identifier);
         assertThrows(Catalog.TableNoPermissionException.class, () -> catalog.getTable(identifier));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
@@ -658,7 +658,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     @Test
     void testRefreshFileIO() throws Exception {
-        this.catalog = initCatalogWithDataToken();
+        this.catalog = newRestCatalogWithDataToken();
         List<Identifier> identifiers =
                 Lists.newArrayList(
                         Identifier.create("test_db_a", "test_table_a"),
@@ -678,7 +678,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     @Test
     void testRefreshFileIOWhenExpired() throws Exception {
-        this.catalog = initCatalogWithDataToken();
+        this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
                 Identifier.create("test_data_token", "table_for_testing_date_token");
         RESTToken expiredDataToken =
@@ -721,7 +721,8 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         long id = 10086;
         long millis = System.currentTimeMillis();
-        mockSnapshotOnRestServer(hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis));
+        updateSnapshotOnRestServer(
+                hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis));
         Optional<Snapshot> snapshot = catalog.loadSnapshot(hasSnapshotTableIdentifier);
         assertThat(snapshot).isPresent();
         assertThat(snapshot.get().id()).isEqualTo(id);
@@ -734,7 +735,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     @Test
     public void testDataTokenExpired() throws Exception {
-        this.catalog = initCatalogWithDataToken();
+        this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
                 Identifier.create("test_data_token", "table_for_expired_date_token");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
@@ -761,7 +762,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     @Test
     public void testDataTokenUnExistInServer() throws Exception {
-        this.catalog = initCatalogWithDataToken();
+        this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
                 Identifier.create("test_data_token", "table_for_un_exist_date_token");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
@@ -770,7 +771,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         List<Integer> data = Lists.newArrayList(12);
         // as RESTTokenFileIO is lazy so we need to call isObjectStore() to init fileIO
         restTokenFileIO.isObjectStore();
-        cleanDataTokenOnRestServer(identifier);
+        resetDataTokenOnRestServer(identifier);
         Exception exception =
                 assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
         assertEquals(RESTTestFileIO.TOKEN_UN_EXIST_MSG, exception.getCause().getMessage());
@@ -927,22 +928,20 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
                 true);
     }
 
-    protected abstract Catalog initCatalogWithDataToken();
+    protected abstract Catalog newRestCatalogWithDataToken();
 
-    protected abstract String getRestCatalogURL();
+    protected abstract void revokeTablePermission(Identifier identifier);
 
-    protected abstract void setupNoPermissionTable(Identifier identifier);
-
-    protected abstract void setupNoPermissionDatabase(String database);
+    protected abstract void revokeDatabasePermission(String database);
 
     protected abstract RESTToken getDataTokenFromRestServer(Identifier identifier);
 
     protected abstract void setDataTokenToRestServerForMock(
             Identifier identifier, RESTToken expiredDataToken);
 
-    protected abstract void cleanDataTokenOnRestServer(Identifier identifier);
+    protected abstract void resetDataTokenOnRestServer(Identifier identifier);
 
-    protected abstract void mockSnapshotOnRestServer(Identifier identifier, Snapshot snapshot);
+    protected abstract void updateSnapshotOnRestServer(Identifier identifier, Snapshot snapshot);
 
     private void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
         BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();

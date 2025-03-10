@@ -43,7 +43,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Test for REST Catalog on Mocked REST server. */
+/** Test REST Catalog on Mocked REST server. */
 public class RESTCatalogTest extends RESTCatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
@@ -108,36 +108,43 @@ public class RESTCatalogTest extends RESTCatalogTestBase {
         assertEquals(headers.get(serverDefineHeaderName), serverDefineHeaderValue);
     }
 
-    protected String getRestCatalogURL() {
+    private String getRestCatalogURL() {
         return restCatalogServer.getUrl();
     }
 
-    protected void setupNoPermissionTable(Identifier identifier) {
+    @Override
+    protected void revokeTablePermission(Identifier identifier) {
         restCatalogServer.addNoPermissionTable(identifier);
     }
 
-    protected void setupNoPermissionDatabase(String database) {
+    @Override
+    protected void revokeDatabasePermission(String database) {
         restCatalogServer.addNoPermissionDatabase(database);
     }
 
+    @Override
     protected RESTToken getDataTokenFromRestServer(Identifier identifier) {
         return restCatalogServer.getDataToken(identifier);
     }
 
+    @Override
     protected void setDataTokenToRestServerForMock(
             Identifier identifier, RESTToken expiredDataToken) {
         restCatalogServer.setDataToken(identifier, expiredDataToken);
     }
 
-    protected void cleanDataTokenOnRestServer(Identifier identifier) {
+    @Override
+    protected void resetDataTokenOnRestServer(Identifier identifier) {
         restCatalogServer.removeDataToken(identifier);
     }
 
-    protected void mockSnapshotOnRestServer(Identifier identifier, Snapshot snapshot) {
+    @Override
+    protected void updateSnapshotOnRestServer(Identifier identifier, Snapshot snapshot) {
         restCatalogServer.setTableSnapshot(identifier, snapshot);
     }
 
-    protected Catalog initCatalogWithDataToken() {
+    @Override
+    protected Catalog newRestCatalogWithDataToken() {
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
         options.set(
                 RESTTestFileIO.DATA_PATH_CONF_KEY,
