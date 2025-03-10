@@ -44,11 +44,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test REST Catalog on Mocked REST server. */
 class MockRESTCatalogTest extends RESTCatalogTestBase {
@@ -101,7 +98,7 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
-            .isInstanceOf(NotAuthorizedException.class);
+                .isInstanceOf(NotAuthorizedException.class);
     }
 
     @Test
@@ -112,9 +109,9 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         String securityToken = "securityToken" + UUID.randomUUID();
         String region = "cn-hangzhou";
         DLFAuthProvider authProvider =
-            DLFAuthProvider.buildAKToken(akId, akSecret, securityToken, region);
+                DLFAuthProvider.buildAKToken(akId, akSecret, securityToken, region);
         restCatalogServer =
-            new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
+                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
         restCatalogServer.start();
         options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
@@ -134,9 +131,9 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         String tokenPath = dataPath + UUID.randomUUID();
         generateTokenAndWriteToFile(tokenPath);
         DLFAuthProvider authProvider =
-            DLFAuthProvider.buildRefreshToken(tokenPath, 1000_000L, region);
+                DLFAuthProvider.buildRefreshToken(tokenPath, 1000_000L, region);
         restCatalogServer =
-            new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
+                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
         restCatalogServer.start();
         options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
@@ -155,10 +152,10 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         parameters.put("k1", "v1");
         parameters.put("k2", "v2");
         RESTAuthParameter restAuthParameter =
-            new RESTAuthParameter("host", "/path", parameters, "method", "data");
+                new RESTAuthParameter("host", "/path", parameters, "method", "data");
         Map<String, String> headers = restCatalog.headers(restAuthParameter);
         assertEquals(
-            headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
+                headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
         assertEquals(headers.get(serverDefineHeaderName), serverDefineHeaderValue);
     }
 
@@ -168,12 +165,12 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         String[] tableNames = {"dt=20230101", "dt=20230102", "dt=20230103"};
         for (String tableName : tableNames) {
             restCatalog.createTable(
-                Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
         PagedList<String> listTablesPaged =
-            restCatalog.listTablesPaged(databaseName, 1, "dt=20230101");
+                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101");
         PagedList<String> listTablesPaged2 =
-            restCatalog.listTablesPaged(databaseName, 1, listTablesPaged.getNextPageToken());
+                restCatalog.listTablesPaged(databaseName, 1, listTablesPaged.getNextPageToken());
         assertEquals(listTablesPaged.getElements().get(0), "dt=20230102");
         assertEquals(listTablesPaged2.getElements().get(0), "dt=20230103");
     }
@@ -182,8 +179,8 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
     protected Catalog newRestCatalogWithDataToken() {
         options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
         options.set(
-            RESTTestFileIO.DATA_PATH_CONF_KEY,
-            dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
+                RESTTestFileIO.DATA_PATH_CONF_KEY,
+                dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
         return new RESTCatalog(CatalogContext.create(options));
     }
 
@@ -203,8 +200,8 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
     }
 
     @Override
-    protected void setDataTokenToRestServerForMock(Identifier identifier,
-        RESTToken expiredDataToken) {
+    protected void setDataTokenToRestServerForMock(
+            Identifier identifier, RESTToken expiredDataToken) {
         restCatalogServer.setDataToken(identifier, expiredDataToken);
     }
 
