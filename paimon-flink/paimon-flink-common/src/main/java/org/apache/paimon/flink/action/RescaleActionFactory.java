@@ -26,8 +26,8 @@ public class RescaleActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "rescale";
     private static final String BUCKET_NUM = "bucket_num";
     private static final String PARTITION = "partition";
-    private static final String SOURCE_PARALLELISM = "source.parallelism";
-    private static final String SINK_PARALLELISM = "sink.parallelism";
+    private static final String SCAN_PARALLELISM = "scan_parallelism";
+    private static final String SINK_PARALLELISM = "sink_parallelism";
 
     @Override
     public String identifier() {
@@ -48,8 +48,8 @@ public class RescaleActionFactory implements ActionFactory {
         if (params.has(PARTITION)) {
             action.withPartition(getPartitions(params).get(0));
         }
-        if (params.has(SOURCE_PARALLELISM)) {
-            action.withSourceParallelism(Integer.parseInt(params.get(SOURCE_PARALLELISM)));
+        if (params.has(SCAN_PARALLELISM)) {
+            action.withScanParallelism(Integer.parseInt(params.get(SCAN_PARALLELISM)));
         }
         if (params.has(SINK_PARALLELISM)) {
             action.withSinkParallelism(Integer.parseInt(params.get(SINK_PARALLELISM)));
@@ -68,15 +68,15 @@ public class RescaleActionFactory implements ActionFactory {
                 "  rescale --warehouse <warehouse_path> --database <database_name> "
                         + "--table <table_name> [--bucket_num <bucket_num>] "
                         + "[--partition <partition>] "
-                        + "[--source.parallelism <source.parallelism>] [--sink.parallelism <sink.parallelism>]");
+                        + "[--scan_parallelism <scan_parallelism>] [--sink_parallelism <sink_parallelism>]");
         System.out.println(
                 "The default value of argument bucket_num is the value of 'bucket' option of the table. "
                         + "For postpone bucket tables, this argument must be specified.");
         System.out.println(
                 "Argument partition must be specified if the table is a partitioned table.");
         System.out.println(
-                "The default value of argument source.parallelism is the current bucket number of the partition.");
+                "The default value of argument scan_parallelism is the current bucket number of the partition.");
         System.out.println(
-                "The default value of argument sink.parallelism is equal to bucket_num.");
+                "The default value of argument sink_parallelism is equal to bucket_num.");
     }
 }

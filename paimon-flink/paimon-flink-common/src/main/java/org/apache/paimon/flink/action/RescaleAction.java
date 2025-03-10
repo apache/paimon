@@ -47,7 +47,7 @@ public class RescaleAction extends TableActionBase {
 
     private @Nullable Integer bucketNum;
     private Map<String, String> partition = new HashMap<>();
-    private @Nullable Integer sourceParallelism;
+    private @Nullable Integer scanParallelism;
     private @Nullable Integer sinkParallelism;
 
     public RescaleAction(String databaseName, String tableName, Map<String, String> catalogConfig) {
@@ -64,8 +64,8 @@ public class RescaleAction extends TableActionBase {
         return this;
     }
 
-    public RescaleAction withSourceParallelism(int sourceParallelism) {
-        this.sourceParallelism = sourceParallelism;
+    public RescaleAction withScanParallelism(int scanParallelism) {
+        this.scanParallelism = scanParallelism;
         return this;
     }
 
@@ -94,7 +94,7 @@ public class RescaleAction extends TableActionBase {
                         .env(env)
                         .sourceBounded(true)
                         .sourceParallelism(
-                                sourceParallelism == null ? currentBucketNum() : sourceParallelism)
+                                scanParallelism == null ? currentBucketNum() : scanParallelism)
                         .predicate(partitionPredicate)
                         .build();
 
