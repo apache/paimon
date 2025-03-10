@@ -449,7 +449,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/tables/commit:
+  /v1/{prefix}/databases/{database}/tables/{table}/commit:
     post:
       tags:
         - table
@@ -462,6 +462,11 @@ paths:
           schema:
             type: string
         - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
           in: path
           required: true
           schema:
@@ -877,7 +882,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/branches/forward:
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
     post:
       tags:
         - branch
@@ -895,6 +900,11 @@ paths:
           schema:
             type: string
         - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
           in: path
           required: true
           schema:
@@ -1096,7 +1106,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/views/rename:
+  /v1/{prefix}/views/rename:
     post:
       tags:
         - view
@@ -1104,11 +1114,6 @@ paths:
       operationId: renameView
       parameters:
         - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
           in: path
           required: true
           schema:
