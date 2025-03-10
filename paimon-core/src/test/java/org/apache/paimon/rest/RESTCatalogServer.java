@@ -147,7 +147,7 @@ public class RESTCatalogServer {
         this.configResponse = config;
         this.prefix =
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
-        ResourcePaths resourcePaths = new ResourcePaths(prefix);
+        this.resourcePaths = new ResourcePaths(prefix);
         this.databaseUri = resourcePaths.databases();
         Options conf = new Options();
         this.configResponse.getDefaults().forEach((k, v) -> conf.setString(k, v));
@@ -247,6 +247,10 @@ public class RESTCatalogServer {
                         return mockResponse(configResponse, 200);
                     } else if (databaseUri.equals(request.getPath())) {
                         return databasesApiHandler(restAuthParameter.method(), data);
+                    } else if (resourcePaths.renameTable().equals(request.getPath())) {
+                        return renameTableHandle(restAuthParameter.data());
+                    } else if (resourcePaths.commitTable().equals(request.getPath())) {
+                        return commitTableHandle(restAuthParameter.data());
                     } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
                                 request.getPath()
@@ -266,10 +270,6 @@ public class RESTCatalogServer {
                                 resources.length == 2 && resources[1].startsWith("tables");
                         boolean isTableDetails =
                                 resources.length == 2 && resources[1].startsWith("table-details");
-                        boolean isTableRename =
-                                resources.length == 3
-                                        && "tables".equals(resources[1])
-                                        && "rename".equals(resources[2]);
                         boolean isViewRename =
                                 resources.length == 3
                                         && "views".equals(resources[1])
@@ -283,10 +283,6 @@ public class RESTCatalogServer {
                                         && "tables".equals(resources[1])
                                         && !"rename".equals(resources[2])
                                         && !"commit".equals(resources[2]);
-                        boolean isTableCommit =
-                                resources.length == 3
-                                        && "tables".equals(resources[1])
-                                        && "commit".equals(resources[2]);
                         boolean isTableToken =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
@@ -375,10 +371,6 @@ public class RESTCatalogServer {
                             return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
                             return snapshotHandle(identifier);
-                        } else if (isTableRename) {
-                            return renameTableHandle(restAuthParameter.data());
-                        } else if (isTableCommit) {
-                            return commitTableHandle(restAuthParameter.data());
                         } else if (isTable) {
                             return tableHandle(
                                     restAuthParameter.method(),

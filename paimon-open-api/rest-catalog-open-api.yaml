@@ -410,7 +410,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/rename:
+  /v1/{prefix}/tables/rename:
     post:
       tags:
         - table
@@ -449,7 +449,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/commit:
+  /v1/{prefix}/tables/commit:
     post:
       tags:
         - table

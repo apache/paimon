@@ -81,12 +81,12 @@ public class ResourcePaths {
                 encodeString(objectName));
     }
 
-    public String renameTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "rename");
+    public String renameTable() {
+        return SLASH.join(V1, prefix, TABLES, "rename");
     }
 
-    public String commitTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "commit");
+    public String commitTable() {
+        return SLASH.join(V1, prefix, TABLES, "commit");
     }
 
     public String tableToken(String databaseName, String objectName) {
