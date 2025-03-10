@@ -142,8 +142,8 @@ public class BucketFunctionTest {
                 Decimal.fromBigDecimal(bigDecimal1, DECIMAL_PRECISION, DECIMAL_SCALE),
                 Decimal.fromBigDecimal(
                         bigDecimal2, COMPACTED_DECIMAL_PRECISION, COMPACTED_DECIMAL_SCALE),
-                Timestamp.now(),
-                Timestamp.now(),
+                Timestamp.fromMicros(System.nanoTime() / 1000),
+                Timestamp.fromMicros(System.nanoTime() / 1000),
                 UUID.randomUUID().toString().getBytes());
     }
 
