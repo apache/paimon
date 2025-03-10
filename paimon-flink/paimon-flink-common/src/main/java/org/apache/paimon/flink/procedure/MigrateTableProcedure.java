@@ -67,10 +67,6 @@ public class MigrateTableProcedure extends ProcedureBase {
             Integer parallelism,
             Boolean deleteOrigin)
             throws Exception {
-        if (targetTable == null && !deleteOrigin) {
-            throw new IllegalArgumentException("delete_origin is false but targetTable is null.");
-        }
-
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier targetTableId =
                 Identifier.fromString(

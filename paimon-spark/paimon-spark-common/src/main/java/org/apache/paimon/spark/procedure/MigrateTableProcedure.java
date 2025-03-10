@@ -96,9 +96,6 @@ public class MigrateTableProcedure extends BaseProcedure {
         int parallelism =
                 args.isNullAt(6) ? Runtime.getRuntime().availableProcessors() : args.getInt(6);
 
-        if (targetTable == null && !deleteNeed) {
-            throw new IllegalArgumentException("delete_origin is false but targetTable is null.");
-        }
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId =
                 StringUtils.isEmpty(targetTable)
