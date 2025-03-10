@@ -103,11 +103,11 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
                 "CREATE TABLE paimontable (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
         if (isNamedArgument) {
             tEnv.executeSql(
-                            "CALL sys.migrate_file(connector => 'hive', source_table => 'default.hivetable', target_table => 'default.paimontable')")
+                            "CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable', target_table => 'default.paimontable')")
                     .await();
         } else {
             tEnv.executeSql(
-                            "CALL sys.migrate_file('hive', 'default.hivetable', 'default.paimontable')")
+                            "CALL sys.migrate_table('hive', 'default.hivetable', 'default.paimontable')")
                     .await();
         }
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM paimontable").collect());
@@ -149,11 +149,11 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
 
         if (isNamedArgument) {
             tEnv.executeSql(
-                            "CALL sys.migrate_file(connector => 'hive', source_table => 'default.hivetable01', target_table => 'default.paimontable01', delete_origin => false)")
+                            "CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable01', target_table => 'default.paimontable01', delete_origin => false)")
                     .await();
         } else {
             tEnv.executeSql(
-                            "CALL sys.migrate_file('hive', 'default.hivetable01', 'default.paimontable01', false)")
+                            "CALL sys.migrate_table('hive', 'default.hivetable01', 'default.paimontable01', false)")
                     .await();
         }
 
