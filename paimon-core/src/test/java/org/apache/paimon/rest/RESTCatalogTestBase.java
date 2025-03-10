@@ -858,7 +858,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         assertThat(fetchData).containsSequence(testData);
     }
 
-    private TestPagedResponse generateTestPagedResponse(
+    protected TestPagedResponse generateTestPagedResponse(
             Map<String, String> queryParams,
             List<Integer> testData,
             int maxResults,
@@ -913,7 +913,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
     @Test
     public void testTableUUID() {}
 
-    private void createTable(
+    protected void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {
         catalog.createDatabase(identifier.getDatabaseName(), true);
@@ -943,7 +943,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     protected abstract void updateSnapshotOnRestServer(Identifier identifier, Snapshot snapshot);
 
-    private void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
+    protected void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
         BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
         for (Integer i : data) {
@@ -957,7 +957,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         commit.close();
     }
 
-    private List<String> batchRead(FileStoreTable tableTestWrite) throws IOException {
+    protected List<String> batchRead(FileStoreTable tableTestWrite) throws IOException {
         ReadBuilder readBuilder = tableTestWrite.newReadBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
         TableRead read = readBuilder.newRead();
