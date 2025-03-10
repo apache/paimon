@@ -134,7 +134,7 @@ public class FlinkSinkBuilder {
     }
 
     /** Set sink parallelism. */
-    public FlinkSinkBuilder parallelism(int parallelism) {
+    public FlinkSinkBuilder parallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
         return this;
     }
