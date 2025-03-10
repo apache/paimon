@@ -78,6 +78,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
@@ -349,7 +350,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     }
 
     @Override
-    public Optional<Snapshot> loadSnapshot(Identifier identifier) throws TableNotExistException {
+    public Optional<TableSnapshot> loadSnapshot(Identifier identifier)
+            throws TableNotExistException {
         GetTableSnapshotResponse response;
         try {
             response =

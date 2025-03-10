@@ -36,6 +36,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -728,11 +729,15 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         long id = 10086;
         long millis = System.currentTimeMillis();
         updateSnapshotOnRestServer(
-                hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis));
-        Optional<Snapshot> snapshot = catalog.loadSnapshot(hasSnapshotTableIdentifier);
+                hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis), 1, 2, 3, 4);
+        Optional<TableSnapshot> snapshot = catalog.loadSnapshot(hasSnapshotTableIdentifier);
         assertThat(snapshot).isPresent();
-        assertThat(snapshot.get().id()).isEqualTo(id);
-        assertThat(snapshot.get().timeMillis()).isEqualTo(millis);
+        assertThat(snapshot.get().snapshot().id()).isEqualTo(id);
+        assertThat(snapshot.get().snapshot().timeMillis()).isEqualTo(millis);
+        assertThat(snapshot.get().recordCount()).isEqualTo(1);
+        assertThat(snapshot.get().fileSizeInBytes()).isEqualTo(2);
+        assertThat(snapshot.get().fileCount()).isEqualTo(3);
+        assertThat(snapshot.get().lastFileCreationTime()).isEqualTo(4);
         Identifier noSnapshotTableIdentifier = Identifier.create("test_db_a_1", "unknown");
         createTable(noSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         snapshot = catalog.loadSnapshot(noSnapshotTableIdentifier);
@@ -947,7 +952,13 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     protected abstract void resetDataTokenOnRestServer(Identifier identifier);
 
-    protected abstract void updateSnapshotOnRestServer(Identifier identifier, Snapshot snapshot);
+    protected abstract void updateSnapshotOnRestServer(
+            Identifier identifier,
+            Snapshot snapshot,
+            long recordCount,
+            long fileSizeInBytes,
+            long fileCount,
+            long lastFileCreationTime);
 
     protected void batchWrite(FileStoreTable tableTestWrite, List<Integer> data) throws Exception {
         BatchWriteBuilder writeBuilder = tableTestWrite.newBatchWriteBuilder();

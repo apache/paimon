@@ -211,7 +211,19 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
     }
 
     @Override
-    protected void updateSnapshotOnRestServer(Identifier identifier, Snapshot snapshot) {
-        restCatalogServer.setTableSnapshot(identifier, snapshot);
+    protected void updateSnapshotOnRestServer(
+            Identifier identifier,
+            Snapshot snapshot,
+            long recordCount,
+            long fileSizeInBytes,
+            long fileCount,
+            long lastFileCreationTime) {
+        restCatalogServer.setTableSnapshot(
+                identifier,
+                snapshot,
+                recordCount,
+                fileSizeInBytes,
+                fileCount,
+                lastFileCreationTime);
     }
 }
