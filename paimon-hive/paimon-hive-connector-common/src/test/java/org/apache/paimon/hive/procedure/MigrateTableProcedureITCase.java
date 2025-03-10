@@ -20,7 +20,6 @@ package org.apache.paimon.hive.procedure;
 
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.flink.action.MigrateTableAction;
-import org.apache.paimon.flink.procedure.MigrateFileProcedure;
 import org.apache.paimon.hive.TestHiveMetastore;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -43,7 +42,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.stream.Stream;
 
-/** Tests for {@link MigrateFileProcedure}. */
+/** Tests for {@code MigrateFileProcedure}. */
 public class MigrateTableProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();

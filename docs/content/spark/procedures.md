@@ -231,18 +231,6 @@ This section introduce all available spark procedures about paimon.
       <td>CALL sys.migrate_table(source_type => 'hive', table => 'default.T', options => 'file.format=parquet', options_map => map('k1','v1'), parallelism => 6)</td>
     </tr>
     <tr>
-      <td>migrate_file</td>
-      <td>
-         Migrate from hive table to a paimon table. Arguments:
-            <li>source_type: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
-            <li>source_table: name of the origin table to migrate. Cannot be empty.</li>
-            <li>target_table: name of the target table to be migrated. Cannot be empty.</li>
-            <li>delete_origin: If had set target_table, can set delete_origin to decide whether delete the origin table metadata from hms after migrate. Default is true</li>
-            <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
-      </td>
-      <td>CALL sys.migrate_file(connector => 'hive', source_table => 'default.hivetable', target_table => 'default.paimontable', delete_origin => true, parallelism => 6)</td>
-    </tr>
-    <tr>
       <td>remove_orphan_files</td>
       <td>
          To remove the orphan data files and metadata files. Arguments:
