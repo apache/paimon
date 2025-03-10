@@ -532,10 +532,6 @@ All available procedures are listed below.
    <tr>
       <td>migrate_table</td>
       <td>
-         -- for Flink 1.18<br/>
-         -- migrate hive table to a paimon table.<br/>
-         CALL [catalog.]sys.migrate_table('connector', 'tableIdentifier', 'options'[, &ltparallelism&gt])<br/><br/>
-         -- for Flink 1.19 and later<br/>
          -- migrate hive table to a paimon table.<br/>
          CALL [catalog.]sys.migrate_table(connector => 'connector', source_table => 'tableIdentifier', options => 'options'[, &ltparallelism => parallelism&gt])<br/><br/>
       </td>
@@ -543,39 +539,13 @@ All available procedures are listed below.
          To migrate hive table to a paimon table. Argument:
             <li>connector: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
             <li>source_table: name of the origin table to be migrated. Cannot be empty.</li>
+            <li>target_table: name of the target paimon table to migrate. If not set would keep the same name with origin table</li>
             <li>options: the table options of the paimon table to migrate.</li>
             <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
-      </td>
-      <td>
-         -- for Flink 1.18<br/>
-         CALL sys.migrate_table('hive', 'db01.t1', 'file.format=parquet', 6)
-         -- for Flink 1.19 and later<br/>
-         CALL sys.migrate_table(connector => 'hive', source_table => 'db01.t1', options => 'file.format=parquet', parallelism => 6)
-      </td>
-   </tr>
-   <tr>
-      <td>migrate_file</td>
-      <td>
-         -- for Flink 1.18<br/>
-         -- migrate files from hive table to a paimon table.<br/>
-         CALL [catalog.]sys.migrate_file('connector', 'srcTableIdentifier', 'destTableIdentifier', [, &ltdelete_origin&gt, &ltparallelism&gt])<br/><br/>
-         -- for Flink 1.19 and later<br/>
-         -- migrate hive table to a paimon table.<br/>
-         CALL [catalog.]sys.migrate_file(connector => 'connector', source_table => 'srcTableIdentifier', target_table => 'destTableIdentifier'[, &ltdelete_origin => bool&gt, &ltparallelism => parallelism&gt])<br/><br/>
-      </td>
-      <td>
-         To migrate files from hive table to a paimon table. Argument:
-            <li>connector: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
-            <li>source_table: name of the origin table to migrate. Cannot be empty.</li>
-            <li>target_table: name of the target table to be migrated. Cannot be empty.</li>
             <li>delete_origin: If had set target_table, can set delete_origin to decide whether delete the origin table metadata from hms after migrate. Default is true</li>
-            <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
       </td>
       <td>
-         -- for Flink 1.18<br/>
-         CALL sys.migrate_file('hive', 'default.T', 'default.T2', true, 6)
-         -- for Flink 1.19 and later<br/>
-         CALL sys.migrate_file(connector => 'hive', source_table => 'default.T', target_table => 'default.T2', delete_origin => true, parallelism => 6)
+         CALL sys.migrate_table(connector => 'hive', source_table => 'db01.t1', options => 'file.format=parquet', parallelism => 6)
       </td>
    </tr>
    <tr>

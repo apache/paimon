@@ -418,8 +418,6 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
                 .hasMessageContaining("Only support Hive Catalog.");
         assertThatThrownBy(() -> sql("CALL sys.migrate_table('hive', 'default.T', '')"))
                 .hasMessageContaining("Only support Hive Catalog.");
-        assertThatThrownBy(() -> sql("CALL sys.migrate_file('hive', 'default.T', 'default.S')"))
-                .hasMessageContaining("Only support Hive Catalog.");
     }
 
     @Test
