@@ -47,7 +47,10 @@ public class MigrateTableProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "connector", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "source_table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "target_table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "target_table",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
                 @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
                         name = "parallelism",
