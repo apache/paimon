@@ -377,13 +377,14 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     public boolean commitSnapshot(
             Identifier identifier, Snapshot snapshot, List<Partition> statistics)
             throws TableNotExistException {
-        CommitTableRequest request = new CommitTableRequest(identifier, snapshot, statistics);
+        CommitTableRequest request = new CommitTableRequest(snapshot, statistics);
         CommitTableResponse response;
 
         try {
             response =
                     client.post(
-                            resourcePaths.commitTable(),
+                            resourcePaths.commitTable(
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
                             request,
                             CommitTableResponse.class,
                             restAuthFunction);
@@ -680,10 +681,10 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     @Override
     public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
         try {
-            ForwardBranchRequest request = new ForwardBranchRequest(branch);
+            ForwardBranchRequest request = new ForwardBranchRequest();
             client.post(
                     resourcePaths.forwardBranch(
-                            identifier.getDatabaseName(), identifier.getObjectName()),
+                            identifier.getDatabaseName(), identifier.getObjectName(), branch),
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
@@ -867,10 +868,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             throws ViewNotExistException, ViewAlreadyExistException {
         try {
             RenameTableRequest request = new RenameTableRequest(fromView, toView);
-            client.post(
-                    resourcePaths.renameView(fromView.getDatabaseName()),
-                    request,
-                    restAuthFunction);
+            client.post(resourcePaths.renameView(), request, restAuthFunction);
 
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {

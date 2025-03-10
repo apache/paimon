@@ -20,27 +20,8 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.rest.RESTRequest;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 /** Request for forwarding branch. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ForwardBranchRequest implements RESTRequest {
-
-    private static final String FIELD_BRANCH = "branch";
-
-    @JsonProperty(FIELD_BRANCH)
-    private final String branch;
-
-    @JsonCreator
-    public ForwardBranchRequest(@JsonProperty(FIELD_BRANCH) String branch) {
-        this.branch = branch;
-    }
-
-    @JsonGetter(FIELD_BRANCH)
-    public String branch() {
-        return branch;
-    }
-}
+public class ForwardBranchRequest implements RESTRequest {}

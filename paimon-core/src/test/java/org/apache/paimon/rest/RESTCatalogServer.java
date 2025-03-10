@@ -50,7 +50,6 @@ import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
-import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -140,7 +139,7 @@ public class RESTCatalogServer {
     public final ConfigResponse configResponse;
     public final String warehouse;
 
-    private ResourcePaths resourcePaths;
+    private final ResourcePaths resourcePaths;
 
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
@@ -259,8 +258,8 @@ public class RESTCatalogServer {
                         return databasesApiHandler(restAuthParameter.method(), data);
                     } else if (resourcePaths.renameTable().equals(request.getPath())) {
                         return renameTableHandle(restAuthParameter.data());
-                    } else if (resourcePaths.commitTable().equals(request.getPath())) {
-                        return commitTableHandle(restAuthParameter.data());
+                    } else if (resourcePaths.renameView().equals(request.getPath())) {
+                        return renameViewHandle(restAuthParameter.data());
                     } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
                                 request.getPath()
@@ -301,6 +300,10 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && "tables".equals(resources[1])
                                         && "snapshot".equals(resources[3]);
+                        boolean isCommitSnapshot =
+                                resources.length == 4
+                                        && "tables".equals(resources[1])
+                                        && "commit".equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && "tables".equals(resources[1])
@@ -381,6 +384,8 @@ public class RESTCatalogServer {
                             return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
                             return snapshotHandle(identifier);
+                        } else if (isCommitSnapshot) {
+                            return commitTableHandle(identifier, restAuthParameter.data());
                         } else if (isTable) {
                             return tableHandle(
                                     restAuthParameter.method(),
@@ -403,8 +408,6 @@ public class RESTCatalogServer {
                         } else if (isViewsDetails) {
                             return viewDetailsHandle(
                                     restAuthParameter.method(), databaseName, parameters);
-                        } else if (isViewRename) {
-                            return renameViewHandle(restAuthParameter.data());
                         } else if (isView) {
                             return viewHandle(restAuthParameter.method(), identifier);
                         } else {
@@ -575,25 +578,24 @@ public class RESTCatalogServer {
                         new ErrorResponse(ErrorResponseResourceType.TABLE, null, "", 404), 404));
     }
 
-    private MockResponse commitTableHandle(String data) throws Exception {
+    private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {
         CommitTableRequest requestBody = OBJECT_MAPPER.readValue(data, CommitTableRequest.class);
-        Identifier identifier = requestBody.getIdentifier();
-        if (noPermissionTables.contains(requestBody.getIdentifier().getFullName())) {
-            throw new Catalog.TableNoPermissionException(requestBody.getIdentifier());
+        if (noPermissionTables.contains(identifier.getFullName())) {
+            throw new Catalog.TableNoPermissionException(identifier);
         }
-        if (!tableMetadataStore.containsKey(requestBody.getIdentifier().getFullName())) {
-            throw new Catalog.TableNotExistException(requestBody.getIdentifier());
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
         }
         FileStoreTable table = getFileTable(identifier);
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
-        String branchName = requestBody.getIdentifier().getBranchName();
+        String branchName = identifier.getBranchName();
         if (branchName == null) {
             branchName = "main";
         }
         boolean success =
                 commit.commit(requestBody.getSnapshot(), branchName, Collections.emptyList());
-        commitSnapshot(requestBody.getIdentifier(), requestBody.getSnapshot(), null);
+        commitSnapshot(identifier, requestBody.getSnapshot(), null);
         CommitTableResponse response = new CommitTableResponse(success);
         return mockResponse(response, 200);
     }
@@ -980,11 +982,9 @@ public class RESTCatalogServer {
                     response = new ListBranchesResponse(branches.isEmpty() ? null : branches);
                     return mockResponse(response, 200);
                 case "POST":
-                    if (resources.length == 5) {
-                        ForwardBranchRequest requestBody =
-                                OBJECT_MAPPER.readValue(data, ForwardBranchRequest.class);
-                        branch = requestBody.branch();
-                        branchManager.fastForward(requestBody.branch());
+                    if (resources.length == 6) {
+                        branch = RESTUtil.decodeString(resources[4]);
+                        branchManager.fastForward(branch);
                     } else {
                         CreateBranchRequest requestBody =
                                 OBJECT_MAPPER.readValue(data, CreateBranchRequest.class);
