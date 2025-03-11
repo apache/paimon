@@ -281,7 +281,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             : compactionMetrics.createReporter(partition, bucket),
                     dvMaintainer,
                     options.prepareCommitWaitCompaction(),
-                    options.needLookup());
+                    options.needLookup(),
+                    recordLevelExpire);
         }
     }
 

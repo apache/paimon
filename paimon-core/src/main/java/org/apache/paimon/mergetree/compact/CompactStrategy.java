@@ -19,8 +19,13 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.compact.CompactUnit;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.LevelSortedRun;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,11 +44,29 @@ public interface CompactStrategy {
     Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs);
 
     /** Pick a compaction unit consisting of all existing files. */
-    static Optional<CompactUnit> pickFullCompaction(int numLevels, List<LevelSortedRun> runs) {
+    static Optional<CompactUnit> pickFullCompaction(
+            int numLevels,
+            List<LevelSortedRun> runs,
+            @Nullable RecordLevelExpire recordLevelExpire) {
         int maxLevel = numLevels - 1;
-        if (runs.isEmpty() || (runs.size() == 1 && runs.get(0).level() == maxLevel)) {
-            // no sorted run or only 1 sorted run on the max level, no need to compact
+        if (runs.isEmpty()) {
+            // no sorted run, no need to compact
             return Optional.empty();
+        } else if ((runs.size() == 1 && runs.get(0).level() == maxLevel)) {
+            if (recordLevelExpire == null) {
+                // only 1 sorted run on the max level and don't check record-expire, no need to
+                // compact
+                return Optional.empty();
+            }
+
+            // pick the files which has expired records
+            List<DataFileMeta> filesContainExpireRecords = new ArrayList<>();
+            for (DataFileMeta file : runs.get(0).run().files()) {
+                if (recordLevelExpire.isExpireFile(file)) {
+                    filesContainExpireRecords.add(file);
+                }
+            }
+            return Optional.of(CompactUnit.fromFiles(maxLevel, filesContainExpireRecords));
         } else {
             return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
         }

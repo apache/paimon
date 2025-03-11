@@ -26,8 +26,11 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -35,6 +38,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -113,5 +119,80 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 4, currentSecs + 60 * 60),
                         GenericRow.of(1, 5, currentSecs + 60 * 60));
+    }
+
+    @Test
+    public void testIsExpireFile() throws Exception {
+        CoreOptions coreOptions = table.coreOptions();
+        RecordLevelExpire recordLevelExpire =
+                RecordLevelExpire.create(coreOptions, table.rowType());
+
+        int currentSecs = (int) (System.currentTimeMillis() / 1000);
+        writeCommit(
+                GenericRow.of(1, 1, currentSecs + 60 * 60),
+                GenericRow.of(1, 2, currentSecs + 30 * 60),
+                GenericRow.of(1, 3, currentSecs - 60 * 60),
+                GenericRow.of(1, 4, currentSecs - 30 * 60));
+
+        writeCommit(
+                GenericRow.of(1, 5, currentSecs + 60 * 60),
+                GenericRow.of(1, 6, currentSecs + 30 * 60),
+                GenericRow.of(1, 7, currentSecs + 20 * 60),
+                GenericRow.of(1, 8, currentSecs + 10 * 60));
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits.size()).isEqualTo(1);
+        List<DataFileMeta> files = splits.get(0).dataFiles();
+        assertThat(recordLevelExpire.isExpireFile(files.get(0))).isTrue();
+        assertThat(recordLevelExpire.isExpireFile(files.get(1))).isFalse();
+    }
+
+    @Test
+    public void testTotallyExpire() throws Exception {
+        Map<String, String> map = new HashMap<>();
+        map.put(CoreOptions.TARGET_FILE_SIZE.key(), "1500 B");
+        table = table.copy(map);
+
+        int currentSecs = (int) (System.currentTimeMillis() / 1000);
+
+        // large file A. It has no delete records and expired records, will be upgraded to maxLevel
+        // without rewriting when full compaction
+        writeCommit(
+                GenericRow.of(1, 1, currentSecs + 60 * 60), GenericRow.of(1, 2, currentSecs + 3));
+        compact(1);
+        assertThat(query())
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, currentSecs + 60 * 60),
+                        GenericRow.of(1, 2, currentSecs + 3));
+
+        // large file B. It has no delete records but has expired records
+        writeCommit(
+                GenericRow.of(1, 3, currentSecs + 60 * 60),
+                GenericRow.of(1, 4, currentSecs - 60 * 60));
+        // no full compaction, expired records can be queried
+        assertThat(query())
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, currentSecs + 60 * 60),
+                        GenericRow.of(1, 2, currentSecs + 3),
+                        GenericRow.of(1, 3, currentSecs + 60 * 60),
+                        GenericRow.of(1, 4, currentSecs - 60 * 60));
+        compact(1);
+        List<DataSplit> splits1 = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits1.size()).isEqualTo(1);
+        assertThat(splits1.get(0).dataFiles().size()).isEqualTo(2);
+        // full compaction, expired records will be removed
+        assertThat(query())
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, currentSecs + 60 * 60),
+                        GenericRow.of(1, 2, currentSecs + 3),
+                        GenericRow.of(1, 3, currentSecs + 60 * 60));
+
+        // ensure (1, 2, currentSecs + 3) out of date
+        Thread.sleep(4000);
+        compact(1);
+        assertThat(query())
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, currentSecs + 60 * 60),
+                        GenericRow.of(1, 3, currentSecs + 60 * 60));
     }
 }

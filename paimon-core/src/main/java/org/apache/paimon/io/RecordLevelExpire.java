@@ -75,6 +75,14 @@ public class RecordLevelExpire {
         this.fieldGetter = fieldGetter;
     }
 
+    public boolean isExpireFile(DataFileMeta file) {
+        int currentTime = (int) (System.currentTimeMillis() / 1000);
+        return fieldGetter
+                .apply(file.valueStats().minValues())
+                .map(minValue -> currentTime - expireTime > minValue)
+                .orElse(false);
+    }
+
     public FileReaderFactory<KeyValue> wrap(FileReaderFactory<KeyValue> readerFactory) {
         return file -> wrap(readerFactory.createRecordReader(file));
     }
