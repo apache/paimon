@@ -106,21 +106,9 @@ public class IcebergCommitCallback implements CommitCallback {
         this.table = table;
         this.commitUser = commitUser;
 
+        this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
         IcebergOptions.StorageType storageType =
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
-        switch (storageType) {
-            case TABLE_LOCATION:
-                this.pathFactory = new IcebergPathFactory(new Path(table.location(), "metadata"));
-                break;
-            case HADOOP_CATALOG:
-            case HIVE_CATALOG:
-                this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
-                break;
-            default:
-                throw new UnsupportedOperationException(
-                        "Unknown storage type " + storageType.name());
-        }
-
         IcebergMetadataCommitterFactory metadataCommitterFactory;
         try {
             metadataCommitterFactory =
@@ -147,13 +135,25 @@ public class IcebergCommitCallback implements CommitCallback {
     public static Path catalogDatabasePath(FileStoreTable table) {
         Path dbPath = table.location().getParent();
         final String dbSuffix = ".db";
-        if (dbPath.getName().endsWith(dbSuffix)) {
-            String dbName =
-                    dbPath.getName().substring(0, dbPath.getName().length() - dbSuffix.length());
-            return new Path(dbPath.getParent(), String.format("iceberg/%s/", dbName));
-        } else {
+        if (!dbPath.getName().endsWith(dbSuffix)) {
             throw new UnsupportedOperationException(
                     "Storage type ICEBERG_WAREHOUSE can only be used on Paimon tables in a Paimon warehouse.");
+        }
+
+        IcebergOptions.StorageType storageType =
+                table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        switch (storageType) {
+            case TABLE_LOCATION:
+                return dbPath;
+            case HADOOP_CATALOG:
+            case HIVE_CATALOG:
+                String dbName =
+                        dbPath.getName()
+                                .substring(0, dbPath.getName().length() - dbSuffix.length());
+                return new Path(dbPath.getParent(), String.format("iceberg/%s/", dbName));
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown storage type " + storageType.name());
         }
     }
 
@@ -533,13 +533,13 @@ public class IcebergCommitCallback implements CommitCallback {
     }
 
     private Pair<List<IcebergManifestFileMeta>, IcebergSnapshotSummary>
-            createWithDeleteManifestFileMetas(
-                    Map<String, BinaryRow> removedFiles,
-                    Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
-                    List<BinaryRow> modifiedPartitions,
-                    List<IcebergManifestFileMeta> baseManifestFileMetas,
-                    long currentSnapshotId)
-                    throws IOException {
+    createWithDeleteManifestFileMetas(
+            Map<String, BinaryRow> removedFiles,
+            Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
+            List<BinaryRow> modifiedPartitions,
+            List<IcebergManifestFileMeta> baseManifestFileMetas,
+            long currentSnapshotId)
+            throws IOException {
         IcebergSnapshotSummary snapshotSummary = IcebergSnapshotSummary.APPEND;
         List<IcebergManifestFileMeta> newManifestFileMetas = new ArrayList<>();
 
@@ -567,10 +567,10 @@ public class IcebergCommitCallback implements CommitCallback {
 
             if (predicate == null
                     || predicate.test(
-                            fileMeta.liveRowsCount(),
-                            minValues,
-                            maxValues,
-                            new GenericArray(nullCounts))) {
+                    fileMeta.liveRowsCount(),
+                    minValues,
+                    maxValues,
+                    new GenericArray(nullCounts))) {
                 // check if any IcebergManifestEntry in this manifest file meta is removed
                 List<IcebergManifestEntry> entries =
                         manifestFile.read(new Path(fileMeta.manifestPath()).getName());
@@ -710,7 +710,7 @@ public class IcebergCommitCallback implements CommitCallback {
         }
         return snapshot.timestampMs()
                 < System.currentTimeMillis()
-                        - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
+                - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
     }
 
     private void expireManifestList(String toExpire, String next) {
