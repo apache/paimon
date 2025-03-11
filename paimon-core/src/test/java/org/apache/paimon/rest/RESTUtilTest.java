@@ -31,40 +31,40 @@ public class RESTUtilTest {
     public void testMerge() {
         {
             Map<String, String> targets = new HashMap<>();
-            targets.put("a", "1");
-            targets.put("b", "2");
+            targets.put("key1", "default1");
+            targets.put("key2", "default2");
             Map<String, String> updates = new HashMap<>();
-            updates.put("b", "3");
+            updates.put("key2", "update2");
             Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("a"), "1");
-            assertEquals(result.get("b"), "3");
+            assertEquals(result.get("key1"), "default1");
+            assertEquals(result.get("key2"), "update2");
         }
         {
             Map<String, String> targets = new HashMap<>();
-            targets.put("a", "1");
-            targets.put("b", "2");
+            targets.put("key1", "default1");
+            targets.put("key2", "default2");
             Map<String, String> updates = new HashMap<>();
-            targets.put("a", "1");
-            updates.put("b", "3");
+            updates.put("key1", "default1");
+            updates.put("key2", "update2");
             Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("a"), "1");
-            assertEquals(result.get("b"), "3");
+            assertEquals(result.get("key1"), "default1");
+            assertEquals(result.get("key2"), "update2");
         }
         {
             Map<String, String> targets = new HashMap<>();
-            targets.put("a", "1");
-            targets.put("b", "2");
+            targets.put("key1", "default1");
+            targets.put("key2", "default2");
             Map<String, String> updates = new HashMap<>();
             Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("a"), "1");
-            assertEquals(result.get("b"), "2");
+            assertEquals(result.get("key1"), "default1");
+            assertEquals(result.get("key2"), "default2");
         }
         {
             Map<String, String> targets = new HashMap<>();
             Map<String, String> updates = new HashMap<>();
-            updates.put("b", "3");
+            updates.put("key2", "update2");
             Map<String, String> result = RESTUtil.merge(targets, updates);
-            assertEquals(result.get("b"), "3");
+            assertEquals(result.get("key2"), "update2");
         }
         {
             Map<String, String> targets = new HashMap<>();
@@ -73,7 +73,7 @@ public class RESTUtilTest {
             assertEquals(result.size(), 0);
         }
         {
-            Map<String, String> targets = new HashMap<>();
+            Map<String, String> targets = null;
             Map<String, String> updates = null;
             Map<String, String> result = RESTUtil.merge(targets, updates);
             assertEquals(result.size(), 0);
