@@ -223,7 +223,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                   table.coreOptions.dynamicBucketMaxBuckets
                 )
               val wrapper =
-                new SparkInternalRowWrapper(RowKind.INSERT, inputSchema, rowType.getFieldCount)
+                new SparkInternalRowWrapper(-1, inputSchema, rowType.getFieldCount)
               row => {
                 val sparkRow = wrapper.replace(row)
                 assigner.assign(

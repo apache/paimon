@@ -42,7 +42,7 @@ class SparkTableWrite(
   val write: BatchTableWrite =
     writeBuilder.newWrite().withIOManager(ioManager).asInstanceOf[BatchTableWrite]
 
-  val wrapper = new SparkInternalRowWrapper(RowKind.INSERT, inputSchema, rowType.getFieldCount)
+  val wrapper = new SparkInternalRowWrapper(rowKindColIdx, inputSchema, rowType.getFieldCount)
 
   def write(row: InternalRow): Unit = {
     write.write(toPaimonRow(row))
@@ -76,7 +76,7 @@ class SparkTableWrite(
   }
 
   private def toPaimonRow(row: InternalRow) =
-    wrapper.replace(row, SparkRowUtils.getRowKind(row, rowKindColIdx))
+    wrapper.replace(row)
 
   private def reportOutputMetrics(bytesWritten: Long, recordsWritten: Long): Unit = {
     val taskContext = TaskContext.get

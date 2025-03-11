@@ -18,13 +18,11 @@
 
 package org.apache.paimon.spark.catalyst
 
-import org.apache.spark.sql.Column
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, EvalMode, Expression}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Cast, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, V2WriteCommand}
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
-import org.apache.spark.sql.functions.call_function
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.DataType
 

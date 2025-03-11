@@ -50,10 +50,8 @@ case class FixedBucketExpression(_children: Seq[Expression])
 
   private lazy val numberBuckets = _children.head.asInstanceOf[Literal].value.asInstanceOf[Int]
   private lazy val serializer = new InternalRowSerializer(bucketKeyRowType)
-  private lazy val wrapper = new SparkInternalRowWrapper(
-    RowKind.INSERT,
-    bucketKeyStructType,
-    bucketKeyStructType.fields.length)
+  private lazy val wrapper =
+    new SparkInternalRowWrapper(-1, bucketKeyStructType, bucketKeyStructType.fields.length)
 
   override def nullable: Boolean = false
 

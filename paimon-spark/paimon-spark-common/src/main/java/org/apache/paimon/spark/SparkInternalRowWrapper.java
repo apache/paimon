@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.spark.util.SparkRowUtils$;
 import org.apache.paimon.spark.util.shim.TypeUtils$;
 import org.apache.paimon.types.RowKind;
 
@@ -45,36 +46,29 @@ import java.math.BigDecimal;
 public class SparkInternalRowWrapper implements InternalRow {
 
     private org.apache.spark.sql.catalyst.InternalRow internalRow;
-    private RowKind rowKind;
     private final int length;
+    private final int rowKindIdx;
     private final StructType structType;
 
     public SparkInternalRowWrapper(
             org.apache.spark.sql.catalyst.InternalRow internalRow,
-            RowKind rowKind,
+            int rowKindIdx,
             StructType structType,
             int length) {
         this.internalRow = internalRow;
-        this.rowKind = rowKind;
+        this.rowKindIdx = rowKindIdx;
         this.length = length;
         this.structType = structType;
     }
 
-    public SparkInternalRowWrapper(RowKind rowKind, StructType structType, int length) {
-        this.rowKind = rowKind;
+    public SparkInternalRowWrapper(int rowKindIdx, StructType structType, int length) {
+        this.rowKindIdx = rowKindIdx;
         this.length = length;
         this.structType = structType;
     }
 
     public SparkInternalRowWrapper replace(org.apache.spark.sql.catalyst.InternalRow internalRow) {
         this.internalRow = internalRow;
-        return this;
-    }
-
-    public SparkInternalRowWrapper replace(
-            org.apache.spark.sql.catalyst.InternalRow internalRow, RowKind rowKind) {
-        this.internalRow = internalRow;
-        this.rowKind = rowKind;
         return this;
     }
 
@@ -85,7 +79,7 @@ public class SparkInternalRowWrapper implements InternalRow {
 
     @Override
     public RowKind getRowKind() {
-        return rowKind;
+        return SparkRowUtils$.MODULE$.getRowKind(internalRow, rowKindIdx);
     }
 
     @Override
@@ -178,7 +172,7 @@ public class SparkInternalRowWrapper implements InternalRow {
     public InternalRow getRow(int pos, int numFields) {
         return new SparkInternalRowWrapper(
                 internalRow.getStruct(pos, numFields),
-                RowKind.INSERT,
+                -1,
                 (StructType) structType.fields()[pos].dataType(),
                 numFields);
     }
@@ -331,10 +325,7 @@ public class SparkInternalRowWrapper implements InternalRow {
         @Override
         public InternalRow getRow(int pos, int numFields) {
             return new SparkInternalRowWrapper(
-                    arrayData.getStruct(pos, numFields),
-                    RowKind.INSERT,
-                    (StructType) elementType,
-                    numFields);
+                    arrayData.getStruct(pos, numFields), -1, (StructType) elementType, numFields);
         }
     }
 
