@@ -103,7 +103,7 @@ public abstract class E2eTestBase {
                         .withEnv("NETWORK_ID", ((Network.NetworkImpl) network).getName())
                         .withLogConsumer("jobmanager-1", new LogConsumer(LOG))
                         .withLogConsumer("taskmanager-1", new LogConsumer(LOG))
-                        .withStartupTimeout(Duration.ofMinutes(10))
+                        .withStartupTimeout(Duration.ofMinutes(3))
                         .withLocalCompose(true);
         if (withKafka) {
             List<String> kafkaServices = Arrays.asList("zookeeper", "kafka");
@@ -153,8 +153,8 @@ public abstract class E2eTestBase {
     }
 
     private WaitStrategy buildWaitStrategy(String regex, int times) {
-        // Increase timeout from 60s (default value) to 600s
-        return Wait.forLogMessage(regex, times).withStartupTimeout(Duration.ofSeconds(600));
+        // Increase timeout from 60s (default value) to 180s
+        return Wait.forLogMessage(regex, times).withStartupTimeout(Duration.ofSeconds(180));
     }
 
     @AfterEach
