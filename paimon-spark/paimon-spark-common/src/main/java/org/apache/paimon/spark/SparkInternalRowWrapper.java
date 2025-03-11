@@ -44,8 +44,8 @@ import java.math.BigDecimal;
 /** Wrapper to fetch value from the spark internal row. */
 public class SparkInternalRowWrapper implements InternalRow {
 
-    private final org.apache.spark.sql.catalyst.InternalRow internalRow;
-    private final RowKind rowKind;
+    private org.apache.spark.sql.catalyst.InternalRow internalRow;
+    private RowKind rowKind;
     private final int length;
     private final StructType structType;
 
@@ -60,14 +60,22 @@ public class SparkInternalRowWrapper implements InternalRow {
         this.structType = structType;
     }
 
-    public SparkInternalRowWrapper(
-            org.apache.spark.sql.catalyst.InternalRow internalRow,
-            RowKind rowKind,
-            StructType structType) {
+    public SparkInternalRowWrapper(RowKind rowKind, StructType structType, int length) {
+        this.rowKind = rowKind;
+        this.length = length;
+        this.structType = structType;
+    }
+
+    public SparkInternalRowWrapper replace(org.apache.spark.sql.catalyst.InternalRow internalRow) {
+        this.internalRow = internalRow;
+        return this;
+    }
+
+    public SparkInternalRowWrapper replace(
+            org.apache.spark.sql.catalyst.InternalRow internalRow, RowKind rowKind) {
         this.internalRow = internalRow;
         this.rowKind = rowKind;
-        this.length = internalRow.numFields();
-        this.structType = structType;
+        return this;
     }
 
     @Override

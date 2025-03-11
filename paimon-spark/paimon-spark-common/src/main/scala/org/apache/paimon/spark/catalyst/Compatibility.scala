@@ -52,8 +52,4 @@ object Compatibility {
       ansiEnabled: Boolean = SQLConf.get.ansiEnabled): Cast = {
     Cast(child, dataType, timeZoneId, ansiEnabled)
   }
-
-  def callFunction(name: String, args: Seq[Column]): Column = {
-    call_function(name, args: _*)
-  }
 }

@@ -222,12 +222,10 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                   table.coreOptions.dynamicBucketTargetRowNum,
                   table.coreOptions.dynamicBucketMaxBuckets
                 )
+              val wrapper =
+                new SparkInternalRowWrapper(RowKind.INSERT, inputSchema, rowType.getFieldCount)
               row => {
-                val sparkRow = new SparkInternalRowWrapper(
-                  row,
-                  RowKind.INSERT,
-                  inputSchema,
-                  rowType.getFieldCount)
+                val sparkRow = wrapper.replace(row)
                 assigner.assign(
                   extractor.partition(sparkRow),
                   extractor.trimmedPrimaryKey(sparkRow).hashCode)
@@ -262,9 +260,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           .toSeq
         val args = Seq(lit(bucketNumber)) ++ bucketKeyCol
         val repartitioned =
-          repartitionByPartitionsAndBucket(
-            data,
-            Compatibility.callFunction(BucketExpression.FIXED_BUCKET, args))
+          repartitionByPartitionsAndBucket(data, call_udf(BucketExpression.FIXED_BUCKET, args: _*))
         writeWithBucket(repartitioned)
 
       case _ =>

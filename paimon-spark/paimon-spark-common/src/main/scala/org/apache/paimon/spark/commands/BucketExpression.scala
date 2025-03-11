@@ -31,6 +31,7 @@ import org.apache.spark.sql.catalyst.expressions.{Expression, ExpressionInfo, Li
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.types.{DataType, DataTypes, StructField, StructType}
 
+/** @param _children arg0: bucket number, arg1..argn bucket key */
 case class FixedBucketExpression(_children: Seq[Expression])
   extends Expression
   with CodegenFallback {
@@ -49,17 +50,19 @@ case class FixedBucketExpression(_children: Seq[Expression])
 
   private lazy val numberBuckets = _children.head.asInstanceOf[Literal].value.asInstanceOf[Int]
   private lazy val serializer = new InternalRowSerializer(bucketKeyRowType)
+  private lazy val wrapper = new SparkInternalRowWrapper(
+    RowKind.INSERT,
+    bucketKeyStructType,
+    bucketKeyStructType.fields.length)
 
   override def nullable: Boolean = false
 
   override def eval(input: SparkInternalRow): Int = {
     val bucketKeyValues = _children.tail.map(_.eval(input))
-    val wrapped = new SparkInternalRowWrapper(
-      SparkInternalRow.fromSeq(bucketKeyValues),
-      RowKind.INSERT,
-      bucketKeyStructType,
-      bucketKeyStructType.fields.length)
-    bucket(bucketKeyHashCode(serializer.toBinaryRow(wrapped)), numberBuckets)
+    bucket(
+      bucketKeyHashCode(
+        serializer.toBinaryRow(wrapper.replace(SparkInternalRow.fromSeq(bucketKeyValues)))),
+      numberBuckets)
   }
 
   override def dataType: DataType = DataTypes.IntegerType
