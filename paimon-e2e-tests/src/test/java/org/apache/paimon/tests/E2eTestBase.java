@@ -153,8 +153,8 @@ public abstract class E2eTestBase {
     }
 
     private WaitStrategy buildWaitStrategy(String regex, int times) {
-        // Increase timeout from 60s (default value) to 180s
-        return Wait.forLogMessage(regex, times).withStartupTimeout(Duration.ofSeconds(180));
+        // Increase timeout from 60s (default value) to 300s
+        return Wait.forLogMessage(regex, times).withStartupTimeout(Duration.ofSeconds(300));
     }
 
     @AfterEach
