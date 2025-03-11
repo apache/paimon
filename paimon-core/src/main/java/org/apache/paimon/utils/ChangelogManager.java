@@ -144,7 +144,7 @@ public class ChangelogManager implements Serializable {
                 .iterator();
     }
 
-    public List<Changelog> safelyGetAllChangelogs() throws IOException {
+    public List<Changelog> safelyGetAllChangelogsAndIgnoreEmpty() throws IOException {
         List<Path> paths =
                 listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
                         .map(this::longLivedChangelogPath)
@@ -154,7 +154,21 @@ public class ChangelogManager implements Serializable {
         collectSnapshots(
                 path -> {
                     try {
-                        changelogs.add(Changelog.fromJson(fileIO.readFileUtf8(path)));
+                        String changeLog = "";
+                        try {
+                            changeLog = fileIO.readFileUtf8(path);
+                            if (!StringUtils.isNullOrWhitespaceOnly(changeLog)) {
+                                changelogs.add(Changelog.fromJson(changeLog));
+                            } else {
+                                LOG.warn("skip this change meta as it is empty path: [{}]", path);
+                            }
+                        } catch (Throwable e) {
+                            LOG.error(
+                                    "read changelog failed path: [{}], changeLog: [{}]",
+                                    path,
+                                    changeLog);
+                            throw e;
+                        }
                     } catch (IOException e) {
                         if (!(e instanceof FileNotFoundException)) {
                             throw new RuntimeException(e);
