@@ -153,7 +153,8 @@ public class RESTTokenFileIO implements FileIO {
 
             CatalogContext context = catalogLoader.context();
             Options options = context.options();
-            options = new Options(RESTUtil.merge(options.toMap(), token.token()));
+            // the original options are not overwritten
+            options = new Options(RESTUtil.merge(token.token(), options.toMap()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
             try {
