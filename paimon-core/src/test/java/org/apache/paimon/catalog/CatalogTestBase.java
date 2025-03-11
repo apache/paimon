@@ -28,8 +28,6 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -38,6 +36,10 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1192,7 +1194,7 @@ public abstract class CatalogTestBase {
                 Schema.newBuilder()
                         .column("str", DataTypes.STRING())
                         .column("int", DataTypes.INT())
-                        .options(getFormattedTableOptions())
+                        .options(getFormatTableOptions())
                         .option("file.format", "csv")
                         .build();
         catalog.createTable(identifier, schema, false);
@@ -1567,7 +1569,7 @@ public abstract class CatalogTestBase {
         }
     }
 
-    protected Map<String, String> getFormattedTableOptions() {
+    protected Map<String, String> getFormatTableOptions() {
         Map<String, String> options = new HashMap<>(1);
         options.put("type", "format-table");
         return options;
