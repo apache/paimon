@@ -533,13 +533,13 @@ public class IcebergCommitCallback implements CommitCallback {
     }
 
     private Pair<List<IcebergManifestFileMeta>, IcebergSnapshotSummary>
-    createWithDeleteManifestFileMetas(
-            Map<String, BinaryRow> removedFiles,
-            Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
-            List<BinaryRow> modifiedPartitions,
-            List<IcebergManifestFileMeta> baseManifestFileMetas,
-            long currentSnapshotId)
-            throws IOException {
+            createWithDeleteManifestFileMetas(
+                    Map<String, BinaryRow> removedFiles,
+                    Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
+                    List<BinaryRow> modifiedPartitions,
+                    List<IcebergManifestFileMeta> baseManifestFileMetas,
+                    long currentSnapshotId)
+                    throws IOException {
         IcebergSnapshotSummary snapshotSummary = IcebergSnapshotSummary.APPEND;
         List<IcebergManifestFileMeta> newManifestFileMetas = new ArrayList<>();
 
@@ -567,10 +567,10 @@ public class IcebergCommitCallback implements CommitCallback {
 
             if (predicate == null
                     || predicate.test(
-                    fileMeta.liveRowsCount(),
-                    minValues,
-                    maxValues,
-                    new GenericArray(nullCounts))) {
+                            fileMeta.liveRowsCount(),
+                            minValues,
+                            maxValues,
+                            new GenericArray(nullCounts))) {
                 // check if any IcebergManifestEntry in this manifest file meta is removed
                 List<IcebergManifestEntry> entries =
                         manifestFile.read(new Path(fileMeta.manifestPath()).getName());
@@ -710,7 +710,7 @@ public class IcebergCommitCallback implements CommitCallback {
         }
         return snapshot.timestampMs()
                 < System.currentTimeMillis()
-                - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
+                        - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
     }
 
     private void expireManifestList(String toExpire, String next) {
