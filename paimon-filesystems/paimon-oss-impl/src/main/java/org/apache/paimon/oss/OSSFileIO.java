@@ -45,6 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
+import static org.apache.paimon.options.CatalogOptions.FILE_IO_POPULATE_META;
 
 /** OSS {@link FileIO}. */
 public class OSSFileIO extends HadoopCompliantFileIO {
@@ -83,6 +84,7 @@ public class OSSFileIO extends HadoopCompliantFileIO {
 
     private Options hadoopOptions;
     private boolean allowCache = true;
+    private boolean populateMeta = false;
 
     @Override
     public boolean isObjectStore() {
@@ -92,6 +94,7 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     @Override
     public void configure(CatalogContext context) {
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
+        populateMeta = context.options().get(FILE_IO_POPULATE_META);
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
@@ -193,6 +196,9 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     @Override
     public FileStatus getFileStatus(Path path) throws IOException {
         FileStatus basic = super.getFileStatus(path);
+        if (!populateMeta) {
+            return basic;
+        }
         AliyunOSSFileSystem fs = (AliyunOSSFileSystem) getFileSystem(path(path));
         return getExtendedFileStatus(fs, basic);
     }
@@ -200,6 +206,9 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
         FileStatus[] basic = super.listStatus(path);
+        if (!populateMeta) {
+            return basic;
+        }
         AliyunOSSFileSystem fs = (AliyunOSSFileSystem) getFileSystem(path(path));
         FileStatus[] extended = new FileStatus[basic.length];
         for (int i = 0; i < basic.length; i++) {
@@ -212,6 +221,9 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
             throws IOException {
         RemoteIterator<FileStatus> basicIter = super.listFilesIterative(path, recursive);
+        if (!populateMeta) {
+            return basicIter;
+        }
         AliyunOSSFileSystem fs = (AliyunOSSFileSystem) getFileSystem(path(path));
         return new RemoteIterator<FileStatus>() {
             @Override
