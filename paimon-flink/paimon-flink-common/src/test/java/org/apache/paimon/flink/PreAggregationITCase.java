@@ -26,6 +26,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringBitmap64;
 
 import org.apache.commons.codec.binary.Hex;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
@@ -2131,6 +2132,39 @@ public class PreAggregationITCase {
         private void checkOneRecord(Row row, int id, byte[] expected) {
             assertThat(row.getField(0)).isEqualTo(id);
             assertThat(row.getField(1)).isEqualTo(expected);
+        }
+    }
+
+    /** ITCase for testing the aggregation merge engine with not exist aggregation function. */
+    public static class NotExistAggregationFunctionITCase extends CatalogITCaseBase {
+
+        @Override
+        protected List<String> ddl() {
+            return Collections.singletonList(
+                    "CREATE TABLE test_not_exist("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 INT"
+                            + ") WITH ("
+                            + "  'merge-engine' = 'aggregation',"
+                            + "  'fields.f0.aggregate-function' = 'not_exist'"
+                            + ")");
+        }
+
+        @Test
+        public void testInsert() {
+            assertThatThrownBy(
+                            () -> sql("INSERT INTO test_not_exist VALUES (1, 1), (2, 2), (3, 3)"))
+                    .hasCauseInstanceOf(ValidationException.class)
+                    .hasMessageContaining(
+                            "Unable to create a sink for writing table 'PAIMON.default.test_not_exist'.");
+        }
+
+        @Test
+        public void testSelect() {
+            assertThatThrownBy(() -> sql("select * from test_not_exist"))
+                    .hasCauseInstanceOf(ValidationException.class)
+                    .hasMessageContaining(
+                            "Unable to create a source for reading table 'PAIMON.default.test_not_exist'.");
         }
     }
 }
