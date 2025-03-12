@@ -55,6 +55,7 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.OrderType.HILBERT;
 import static org.apache.paimon.CoreOptions.OrderType.ORDER;
 import static org.apache.paimon.CoreOptions.OrderType.ZORDER;
+import static org.apache.paimon.CoreOptions.UnawareAppendPartitionStrategy.HASH;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
@@ -303,6 +304,16 @@ public class FlinkSinkBuilder {
         checkArgument(
                 table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
+
+        if (!table.partitionKeys().isEmpty()
+                && table.coreOptions().partitionStrategyForUnawareAppend() == HASH) {
+            input =
+                    partition(
+                            input,
+                            new RowDataHashPartitionChannelComputer(table.schema()),
+                            parallelism);
+        }
+
         return new RowUnawareBucketSink(table, overwritePartition, logSinkFunction, parallelism)
                 .sinkFrom(input);
     }
