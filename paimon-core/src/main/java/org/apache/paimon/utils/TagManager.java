@@ -113,22 +113,12 @@ public class TagManager {
         Path tagPath = tagPath(tagName);
 
         try {
-            fileIO.tryToWriteAtomic(tagPath, content);
-        } catch (Exception e) {
-            // check existence again
-            if (tagExists(tagName)) {
-                checkArgument(
-                        ignoreIfExists,
-                        "Tag '%s' was created before this procedure is trying to create it.",
-                        tagName);
-                return;
+            boolean success = fileIO.tryToWriteAtomic(tagPath, content);
+            if (!success) {
+                checkTagExistenceAfterFailure(tagName, ignoreIfExists, null);
             }
-
-            throw new RuntimeException(
-                    String.format(
-                            "Exception occurs when committing tag '%s' (path %s).",
-                            tagName, tagPath),
-                    e);
+        } catch (Exception e) {
+            checkTagExistenceAfterFailure(tagName, ignoreIfExists, e);
         }
 
         if (callbacks != null) {
@@ -140,6 +130,23 @@ public class TagManager {
                 }
             }
         }
+    }
+
+    private void checkTagExistenceAfterFailure(
+            String tagName, boolean ignoreIfExists, @Nullable Exception e) {
+        if (tagExists(tagName)) {
+            checkArgument(
+                    ignoreIfExists,
+                    "Tag '%s' was created before this procedure is trying to create it.",
+                    tagName);
+            return;
+        }
+
+        throw e == null
+                ? new RuntimeException(
+                        String.format("Exception occurs when committing tag '%s'.", tagName))
+                : new RuntimeException(
+                        String.format("Exception occurs when committing tag '%s'.", tagName), e);
     }
 
     /** Replace a tag from given snapshot and save it in the storage. */

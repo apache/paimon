@@ -41,11 +41,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
@@ -134,6 +136,66 @@ public class TagManagerTest {
                 tagJson.contains("tagCreateTime") && tagJson.contains("tagTimeRetained"));
         Assertions.assertEquals(tag, Tag.fromJson(tagJson));
         assertThat(tags.get(0).getValue()).contains("tag");
+    }
+
+    @Test
+    public void testCreateTagWithMultiThreads() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
+        tagManager = new TagManager(fileIO, store.options().path());
+
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        for (int bucket : Arrays.asList(0, 1)) {
+            List<KeyValue> kvs = partitionedData(5, gen);
+            writeData(store, kvs, partition, bucket, writers);
+        }
+        commitData(store, commitIdentifier++, writers);
+
+        SnapshotManager snapshotManager = store.snapshotManager();
+        Snapshot latest = snapshotManager.latestSnapshot();
+
+        CountDownLatch startSignal = new CountDownLatch(1);
+        CountDownLatch doneSignal = new CountDownLatch(2);
+
+        List<Throwable> exceptions = Collections.synchronizedList(new ArrayList<>());
+
+        Thread thread1 =
+                new Thread(
+                        () -> {
+                            try {
+                                startSignal.await();
+                                tagManager.createTag(
+                                        latest, "tag1", null, Collections.emptyList(), true);
+                            } catch (Exception e) {
+                                exceptions.add(e);
+                            } finally {
+                                doneSignal.countDown();
+                            }
+                        });
+
+        Thread thread2 =
+                new Thread(
+                        () -> {
+                            try {
+                                startSignal.await();
+                                tagManager.createTag(
+                                        latest, "tag1", null, Collections.emptyList(), true);
+                            } catch (Exception e) {
+                                exceptions.add(e);
+                            } finally {
+                                doneSignal.countDown();
+                            }
+                        });
+
+        thread1.start();
+        thread2.start();
+        startSignal.countDown();
+        doneSignal.await();
+
+        assertThat(exceptions.size()).isEqualTo(0);
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)
