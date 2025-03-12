@@ -183,7 +183,6 @@ public class HttpClientTest {
         String queryKey = "pageToken";
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter(
-                        "http://a.b.c:8080",
                         "/api/v1/tables/my_table$schemas",
                         ImmutableMap.of(queryKey, "dt=20230101"),
                         "GET",
