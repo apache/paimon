@@ -33,7 +33,6 @@ public class DLFAuthSignatureTest {
 
     @Test
     public void testGetAuthorization() throws Exception {
-        String endpoint = "dlf.cn-hangzhou.aliyuncs.com";
         String region = "cn-hangzhou";
         String dateTime = "20231203T121212Z";
         String date = "20231203";
@@ -44,19 +43,16 @@ public class DLFAuthSignatureTest {
                 RESTObjectMapper.OBJECT_MAPPER.writeValueAsString(
                         MockRESTMessage.createDatabaseRequest("database"));
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter(endpoint, "/v1/paimon/databases", parameters, "POST", data);
+                new RESTAuthParameter("/v1/paimon/databases", parameters, "POST", data);
         DLFToken token = new DLFToken("access-key-id", "access-key-secret", "securityToken", null);
         Map<String, String> signHeaders =
                 DLFAuthProvider.generateSignHeaders(
-                        restAuthParameter.host(),
-                        restAuthParameter.data(),
-                        dateTime,
-                        "securityToken");
+                        restAuthParameter.data(), dateTime, "securityToken");
         String authorization =
                 DLFAuthSignature.getAuthorization(
                         restAuthParameter, token, region, signHeaders, dateTime, date);
         assertEquals(
-                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,AdditionalHeaders=host,Signature=5afbdad67b52f17c47e202da2222bff9f5cf2f86c3ed973bb919a8216d086fb7",
+                "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,Signature=c72caf1d40b55b1905d891ee3e3de48a2f8bebefa7e39e4f277acc93c269c5e3",
                 authorization);
     }
 }

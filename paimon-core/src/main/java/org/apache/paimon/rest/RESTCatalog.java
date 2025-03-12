@@ -171,8 +171,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
         this.context = context;
         this.resourcePaths = ResourcePaths.forCatalogProperties(options);
-
-        this.dataTokenEnabled = options.get(RESTCatalogOptions.DATA_TOKEN_ENABLED);
+        this.dataTokenEnabled = options.get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
     }
 
     @Override

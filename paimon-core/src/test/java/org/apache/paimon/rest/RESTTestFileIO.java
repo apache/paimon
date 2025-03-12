@@ -30,7 +30,7 @@ import org.apache.paimon.options.Options;
 
 import java.io.IOException;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.DATA_TOKEN_ENABLED;
+import static org.apache.paimon.rest.RESTTokenFileIO.DATA_TOKEN_ENABLED;
 
 /**
  * A {@link org.apache.paimon.fs.FileIO} implementation for testing.

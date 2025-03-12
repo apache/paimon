@@ -51,9 +51,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class MockRESTCatalogTest extends RESTCatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
-    private String initToken = "init_token";
-    private String serverDefineHeaderName = "test-header";
-    private String serverDefineHeaderValue = "test-value";
+    private final String initToken = "init_token";
+    private final String serverDefineHeaderName = "test-header";
+    private final String serverDefineHeaderValue = "test-value";
     private String dataPath;
     private AuthProvider authProvider;
 
@@ -152,7 +152,7 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         parameters.put("k1", "v1");
         parameters.put("k2", "v2");
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter("host", "/path", parameters, "method", "data");
+                new RESTAuthParameter("/path", parameters, "method", "data");
         Map<String, String> headers = restCatalog.headers(restAuthParameter);
         assertEquals(
                 headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer init_token");
@@ -177,7 +177,7 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
 
     @Override
     protected Catalog newRestCatalogWithDataToken() {
-        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
+        options.set(RESTTokenFileIO.DATA_TOKEN_ENABLED, true);
         options.set(
                 RESTTestFileIO.DATA_PATH_CONF_KEY,
                 dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));

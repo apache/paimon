@@ -237,11 +237,7 @@ public class RESTCatalogServer {
                     String data = request.getBody().readUtf8();
                     RESTAuthParameter restAuthParameter =
                             new RESTAuthParameter(
-                                    request.getHeader("Host"),
-                                    resourcePath,
-                                    parameters,
-                                    request.getMethod(),
-                                    data);
+                                    resourcePath, parameters, request.getMethod(), data);
                     String authToken =
                             authProvider
                                     .header(headers, restAuthParameter)
