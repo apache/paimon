@@ -30,6 +30,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -124,9 +126,8 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
     @Test
     public void testIsExpireFile() throws Exception {
         CoreOptions coreOptions = table.coreOptions();
-        RecordLevelExpire recordLevelExpire =
-                RecordLevelExpire.create(coreOptions, table.rowType());
 
+        // common case
         int currentSecs = (int) (System.currentTimeMillis() / 1000);
         writeCommit(
                 GenericRow.of(1, 1, currentSecs + 60 * 60),
@@ -140,11 +141,53 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
                 GenericRow.of(1, 7, currentSecs + 20 * 60),
                 GenericRow.of(1, 8, currentSecs + 10 * 60));
 
-        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
-        assertThat(splits.size()).isEqualTo(1);
-        List<DataFileMeta> files = splits.get(0).dataFiles();
-        assertThat(recordLevelExpire.isExpireFile(files.get(0))).isTrue();
-        assertThat(recordLevelExpire.isExpireFile(files.get(1))).isFalse();
+        RecordLevelExpire recordLevelExpire =
+                RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
+        List<DataSplit> splits1 = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits1.size()).isEqualTo(1);
+        List<DataFileMeta> files1 = splits1.get(0).dataFiles();
+        assertThat(files1.size()).isEqualTo(2);
+        assertThat(recordLevelExpire.isExpireFile(files1.get(0))).isTrue();
+        assertThat(recordLevelExpire.isExpireFile(files1.get(1))).isFalse();
+
+        // schema evolution
+        table.schemaManager()
+                .commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.addColumn(
+                                        "col0",
+                                        DataTypes.INT(),
+                                        null,
+                                        SchemaChange.Move.after("col0", "pk"))));
+        refreshTable();
+
+        recordLevelExpire =
+                RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
+        List<DataSplit> splits2 = table.newSnapshotReader().read().dataSplits();
+        List<DataFileMeta> files2 = splits2.get(0).dataFiles();
+        assertThat(recordLevelExpire.isExpireFile(files2.get(0))).isTrue();
+        assertThat(recordLevelExpire.isExpireFile(files2.get(1))).isFalse();
+
+        // metadata.stats-dense-store = true
+        Map<String, String> addedOptions = new HashMap<>();
+        addedOptions.put(CoreOptions.METADATA_STATS_DENSE_STORE.key(), "true");
+        addedOptions.put(CoreOptions.METADATA_STATS_MODE.key(), "none");
+        addedOptions.put("fields.col1.stats-mode", "full");
+        table = table.copy(addedOptions);
+
+        writeCommit(
+                GenericRow.of(1, 9, 9, currentSecs + 60 * 60),
+                GenericRow.of(1, 10, 10, currentSecs + 30 * 60));
+        writeCommit(
+                GenericRow.of(1, 11, 11, currentSecs + 60 * 60),
+                GenericRow.of(1, 12, 12, currentSecs - 30 * 60));
+
+        recordLevelExpire =
+                RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
+        List<DataSplit> splits3 = table.newSnapshotReader().read().dataSplits();
+        List<DataFileMeta> files3 = splits3.get(0).dataFiles();
+        assertThat(recordLevelExpire.isExpireFile(files3.get(2))).isFalse();
+        assertThat(recordLevelExpire.isExpireFile(files3.get(3))).isTrue();
     }
 
     @Test
@@ -194,5 +237,15 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, currentSecs + 60 * 60),
                         GenericRow.of(1, 3, currentSecs + 60 * 60));
+    }
+
+    private void refreshTable() throws Catalog.TableNotExistException {
+        CatalogContext context =
+                CatalogContext.create(
+                        new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString()));
+        Catalog catalog = CatalogFactory.createCatalog(context);
+        Identifier identifier = new Identifier("default", "T");
+
+        table = (FileStoreTable) catalog.getTable(identifier);
     }
 }

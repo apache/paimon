@@ -22,6 +22,12 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.KeyValueFieldsExtractor;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStatsEvolution;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
+import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
@@ -34,6 +40,8 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 
 /** A factory to create {@link RecordReader} expires records by time. */
@@ -42,8 +50,14 @@ public class RecordLevelExpire {
     private final int expireTime;
     private final Function<InternalRow, Optional<Integer>> fieldGetter;
 
+    private final ConcurrentMap<Long, TableSchema> tableSchemas;
+    private final TableSchema schema;
+    private final SchemaManager schemaManager;
+    private final SimpleStatsEvolutions fieldValueStatsConverters;
+
     @Nullable
-    public static RecordLevelExpire create(CoreOptions options, RowType rowType) {
+    public static RecordLevelExpire create(
+            CoreOptions options, TableSchema schema, SchemaManager schemaManager) {
         Duration expireTime = options.recordLevelExpireTime();
         if (expireTime == null) {
             return null;
@@ -56,6 +70,7 @@ public class RecordLevelExpire {
         }
 
         // should no project here, record level expire only works in compaction
+        RowType rowType = schema.logicalRowType();
         int fieldIndex = rowType.getFieldIndex(timeFieldName);
         if (fieldIndex == -1) {
             throw new IllegalArgumentException(
@@ -66,19 +81,50 @@ public class RecordLevelExpire {
         DataType dataType = rowType.getField(timeFieldName).type();
         Function<InternalRow, Optional<Integer>> fieldGetter =
                 createFieldGetter(dataType, fieldIndex);
-        return new RecordLevelExpire((int) expireTime.getSeconds(), fieldGetter);
+        return new RecordLevelExpire(
+                (int) expireTime.getSeconds(), fieldGetter, schema, schemaManager);
     }
 
     private RecordLevelExpire(
-            int expireTime, Function<InternalRow, Optional<Integer>> fieldGetter) {
+            int expireTime,
+            Function<InternalRow, Optional<Integer>> fieldGetter,
+            TableSchema schema,
+            SchemaManager schemaManager) {
         this.expireTime = expireTime;
         this.fieldGetter = fieldGetter;
+
+        this.tableSchemas = new ConcurrentHashMap<>();
+        this.schema = schema;
+        this.schemaManager = schemaManager;
+
+        KeyValueFieldsExtractor extractor =
+                PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
+
+        fieldValueStatsConverters =
+                new SimpleStatsEvolutions(
+                        sid -> extractor.valueFields(scanTableSchema(sid)), schema.id());
     }
 
     public boolean isExpireFile(DataFileMeta file) {
+        InternalRow minValues = file.valueStats().minValues();
+
+        if (file.schemaId() != schema.id() || file.valueStatsCols() != null) {
+            // In the following cases, can not read minValues with field index directly
+            //
+            // 1. if the table had suffered schema evolution, read minValues with new field index
+            // may cause exception.
+            // 2. if metadata.stats-dense-store = true, minValues may not contain all data fields
+            // which may cause exception when reading with origin field index
+            SimpleStatsEvolution.Result result =
+                    fieldValueStatsConverters
+                            .getOrCreate(file.schemaId())
+                            .evolution(file.valueStats(), file.rowCount(), file.valueStatsCols());
+            minValues = result.minValues();
+        }
+
         int currentTime = (int) (System.currentTimeMillis() / 1000);
         return fieldGetter
-                .apply(file.valueStats().minValues())
+                .apply(minValues)
                 .map(minValue -> currentTime - expireTime > minValue)
                 .orElse(false);
     }
@@ -137,5 +183,10 @@ public class RecordLevelExpire {
         }
 
         return fieldGetter;
+    }
+
+    private TableSchema scanTableSchema(long id) {
+        return tableSchemas.computeIfAbsent(
+                id, key -> key == schema.id() ? schema : schemaManager.schema(id));
     }
 }
