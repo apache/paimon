@@ -35,15 +35,12 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       expectedRows: Seq[Row],
       expectedNumAggregates: Int): Unit = {
     val df = spark.sql(query)
-//    df.show(false)
     checkAnswer(df, expectedRows)
     assert(df.schema.names.toSeq == df.queryExecution.executedPlan.output.map(_.name))
     assert(df.queryExecution.analyzed.find(_.isInstanceOf[Aggregate]).isDefined)
     val numAggregates = collect(df.queryExecution.executedPlan) {
       case agg: BaseAggregateExec => agg
     }.size
-//    println(df.queryExecution.executedPlan.treeString)
-//    println("\n\n\n")
     assert(numAggregates == expectedNumAggregates, query)
     if (numAggregates == 0) {
       assert(collect(df.queryExecution.executedPlan) {
@@ -180,6 +177,37 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
           2) :: Nil,
         2
       )
+    }
+  }
+
+  test("Push down aggregate - append table with dense statistics") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (c1 INT, c2 STRING, c3 DOUBLE, c4 DATE)
+                  |TBLPROPERTIES('metadata.stats-mode' = 'none')
+                  |""".stripMargin)
+      spark.sql(
+        s"""
+           |INSERT INTO T VALUES (1, 'xyz', 11.1, TO_DATE('2025-01-01', 'yyyy-MM-dd')),
+           |(2, null, null, TO_DATE('2025-01-01', 'yyyy-MM-dd')), (3, 'abc', 33.3, null),
+           |(3, 'abc', null, TO_DATE('2025-03-01', 'yyyy-MM-dd')), (null, 'abc', 44.4, TO_DATE('2025-03-01', 'yyyy-MM-dd'))
+           |""".stripMargin)
+
+      val date1 = Date.valueOf("2025-01-01")
+      val date2 = Date.valueOf("2025-03-01")
+      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(5) :: Nil, 0)
+
+      // for metadata.stats-mode = none, no available statistics.
+      runAndCheckAggregate("SELECT COUNT(*), MIN(c1), MAX(c1) FROM T", Row(5, 1, 3) :: Nil, 2)
+      runAndCheckAggregate(
+        "SELECT COUNT(*), MIN(c2), MAX(c2) FROM T",
+        Row(5, "abc", "xyz") :: Nil,
+        2)
+      runAndCheckAggregate("SELECT COUNT(*), MIN(c3), MAX(c3) FROM T", Row(5, 11.1, 44.4) :: Nil, 2)
+      runAndCheckAggregate(
+        "SELECT COUNT(*), MIN(c4), MAX(c4) FROM T",
+        Row(5, date1, date2) :: Nil,
+        2)
     }
   }
 

@@ -22,8 +22,11 @@ import org.apache.paimon.table.Table
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types._
 
-import org.apache.spark.sql.connector.expressions.aggregate.{AggregateFunc, Aggregation, Count, CountStar, Max, Min}
+import org.apache.spark.sql.connector.expressions.aggregate.{AggregateFunc, Aggregation, CountStar, Max, Min}
 import org.apache.spark.sql.execution.datasources.v2.V2ColumnUtils
+
+import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 object AggregatePushDownUtils {
 
@@ -33,6 +36,7 @@ object AggregatePushDownUtils {
       dataSplits: Seq[DataSplit]): Boolean = {
 
     var hasMinMax = false
+    val minmaxColumns = mutable.HashSet.empty[String]
     var hasCount = false
 
     def getDataFieldForCol(colName: String): DataField = {
@@ -64,6 +68,7 @@ object AggregatePushDownUtils {
         // not push down for ORC with same reason.
         case _: BooleanType | _: TinyIntType | _: SmallIntType | _: IntType | _: BigIntType |
             _: FloatType | _: DoubleType | _: DateType =>
+          minmaxColumns.add(columnName)
           hasMinMax = true
           true
         case _ =>
@@ -90,12 +95,27 @@ object AggregatePushDownUtils {
     }
 
     if (hasMinMax) {
-      dataSplits.forall(_.valueStatsAvailable())
+      dataSplits.forall {
+        dataSplit =>
+          dataSplit.dataFiles().asScala.forall {
+            dataFile => minmaxColumns.forall(dataFile.valueStatsCols().contains)
+          }
+      }
     } else if (hasCount) {
       dataSplits.forall(_.mergedRowCountAvailable())
     } else {
       true
     }
+  }
+
+  def hasMinMaxAggregation(aggregation: Aggregation): Boolean = {
+    var hasMinMax = false;
+    aggregation.aggregateExpressions().foreach {
+      case _: Min | _: Max =>
+        hasMinMax = true
+      case _ =>
+    }
+    hasMinMax
   }
 
 }
