@@ -32,7 +32,6 @@ import org.apache.thrift.server.TServer;
 import org.apache.thrift.server.TThreadPoolServer;
 import org.apache.thrift.transport.TServerSocket;
 import org.apache.thrift.transport.TTransportFactory;
-import org.junit.Assert;
 
 import java.io.File;
 import java.io.IOException;
@@ -50,6 +49,7 @@ import java.util.concurrent.Executors;
 import static java.nio.file.Files.createTempDirectory;
 import static java.nio.file.attribute.PosixFilePermissions.asFileAttribute;
 import static java.nio.file.attribute.PosixFilePermissions.fromString;
+import static org.junit.Assert.assertFalse;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -99,7 +99,7 @@ public class TestHiveMetastore {
                                         String errMsg = "Failed to delete " + localDirPath;
                                         try {
                                             if (!fs.delete(localDirPath, true)) {
-                                                Assert.assertFalse(errMsg, fs.exists(localDirPath));
+                                                assertFalse(errMsg, fs.exists(localDirPath));
                                             }
                                         } catch (IOException e) {
                                             throw new RuntimeException(errMsg, e);
