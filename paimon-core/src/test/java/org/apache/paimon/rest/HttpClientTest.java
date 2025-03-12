@@ -18,11 +18,6 @@
 
 package org.apache.paimon.rest;
 
-import okhttp3.Headers;
-import okhttp3.Interceptor;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -31,7 +26,14 @@ import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
+
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+
+import okhttp3.Headers;
+import okhttp3.Interceptor;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -209,33 +211,37 @@ public class HttpClientTest {
         assertEquals(restAuthParameter.parameters().get(queryKey), queryParameters.get(queryKey));
     }
 
-
     @Test
     public void testLoggingInterceptorWithRetry() throws IOException {
         AtomicInteger retryCount = new AtomicInteger(0);
         LoggingInterceptor loggingInterceptor = spy(new LoggingInterceptor());
-        doAnswer(invocation -> {
-            retryCount.incrementAndGet();
-            Object argument = invocation.getArguments()[0];
-            Interceptor.Chain chain = (Interceptor.Chain) argument;
-            return chain.proceed(chain.request());
-        }).when(loggingInterceptor).intercept(any());
-        OkHttpClient okHttpClient = new OkHttpClient.Builder()
-            .retryOnConnectionFailure(true)
-            .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
-            .addInterceptor(new ExponentialHttpRetryInterceptor(5))
-            .addInterceptor(loggingInterceptor)
-            .connectTimeout(Duration.ofMinutes(3))
-            .readTimeout(Duration.ofMinutes(3))
-            .build();
+        doAnswer(
+                        invocation -> {
+                            retryCount.incrementAndGet();
+                            Object argument = invocation.getArguments()[0];
+                            Interceptor.Chain chain = (Interceptor.Chain) argument;
+                            return chain.proceed(chain.request());
+                        })
+                .when(loggingInterceptor)
+                .intercept(any());
+        OkHttpClient okHttpClient =
+                new OkHttpClient.Builder()
+                        .retryOnConnectionFailure(true)
+                        .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
+                        .addInterceptor(new ExponentialHttpRetryInterceptor(5))
+                        .addInterceptor(loggingInterceptor)
+                        .connectTimeout(Duration.ofMinutes(3))
+                        .readTimeout(Duration.ofMinutes(3))
+                        .build();
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 200);
-        Request request = new Request.Builder()
-            .url(HttpClient.getRequestUrl(server.getBaseUrl(), MOCK_PATH, null))
-            .get()
-            .headers(Headers.of())
-            .build();
+        Request request =
+                new Request.Builder()
+                        .url(HttpClient.getRequestUrl(server.getBaseUrl(), MOCK_PATH, null))
+                        .get()
+                        .headers(Headers.of())
+                        .build();
         Response response = okHttpClient.newCall(request).execute();
         assertEquals(200, response.code());
         assertEquals(3, retryCount.get());
