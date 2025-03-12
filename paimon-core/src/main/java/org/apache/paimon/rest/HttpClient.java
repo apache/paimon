@@ -55,7 +55,9 @@ public class HttpClient implements RESTClient {
             new OkHttpClient.Builder()
                     .retryOnConnectionFailure(true)
                     .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
+                    .addInterceptor(new RequestIdInterceptor())
                     .addInterceptor(new ExponentialHttpRetryInterceptor(5))
+                    .addInterceptor(new LoggingInterceptor())
                     .connectTimeout(Duration.ofMinutes(3))
                     .readTimeout(Duration.ofMinutes(3))
                     .build();
