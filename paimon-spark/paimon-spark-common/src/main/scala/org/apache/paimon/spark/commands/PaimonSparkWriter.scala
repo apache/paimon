@@ -25,11 +25,10 @@ import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer
-import org.apache.paimon.index.{BucketAssigner, PartitionIndex, SimpleHashBucketAssigner}
+import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
 import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkRow, SparkTableWrite, SparkTypeUtils}
-import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.BucketMode._
@@ -61,6 +60,11 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   private lazy val log = LoggerFactory.getLogger(classOf[PaimonSparkWriter])
 
+  private val extensionKey = "spark.sql.extensions"
+
+  private val paimonSparkExtension =
+    "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions"
+
   @transient private lazy val serializer = new CommitMessageSerializer
 
   val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
@@ -73,8 +77,17 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
 
+    def paimonExtensionEnabled: Boolean = {
+      val extensions = sparkSession.sessionState.conf.getConfString(extensionKey)
+      if (extensions != null && extensions.contains(paimonSparkExtension)) {
+        true
+      } else {
+        false
+      }
+    }
     val withInitBucketCol = bucketMode match {
-      case HASH_FIXED | BUCKET_UNAWARE => data
+      case BUCKET_UNAWARE => data
+      case HASH_FIXED if paimonExtensionEnabled => data
       case CROSS_PARTITION if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
         data
           .withColumn(ROW_KIND_COL, lit(RowKind.INSERT.toByteValue))
@@ -250,18 +263,27 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         writeWithoutBucket(data)
 
       case HASH_FIXED =>
-        // Topology: input -> shuffle by partition & bucket
-        val bucketNumber = table.coreOptions().bucket()
-        val bucketKeyCol = tableSchema
-          .bucketKeys()
-          .asScala
-          .map(tableSchema.fieldNames().indexOf(_))
-          .map(x => col(data.schema.fieldNames(x)))
-          .toSeq
-        val args = Seq(lit(bucketNumber)) ++ bucketKeyCol
-        val repartitioned =
-          repartitionByPartitionsAndBucket(data, call_udf(BucketExpression.FIXED_BUCKET, args: _*))
-        writeWithBucket(repartitioned)
+        if (!paimonExtensionEnabled) {
+          // Topology: input -> bucket-assigner -> shuffle by partition & bucket
+          writeWithBucketProcessor(
+            withInitBucketCol,
+            CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol))
+        } else {
+          // Topology: input -> shuffle by partition & bucket
+          val bucketNumber = table.coreOptions().bucket()
+          val bucketKeyCol = tableSchema
+            .bucketKeys()
+            .asScala
+            .map(tableSchema.fieldNames().indexOf(_))
+            .map(x => col(data.schema.fieldNames(x)))
+            .toSeq
+          val args = Seq(lit(bucketNumber)) ++ bucketKeyCol
+          val repartitioned =
+            repartitionByPartitionsAndBucket(
+              data,
+              call_udf(BucketExpression.FIXED_BUCKET, args: _*))
+          writeWithBucket(repartitioned)
+        }
 
       case _ =>
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")

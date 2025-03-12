@@ -62,6 +62,34 @@ sealed trait BucketProcessor[In] {
   def processPartition(rowIterator: Iterator[In]): Iterator[Row]
 }
 
+case class CommonBucketProcessor(
+    table: FileStoreTable,
+    bucketColIndex: Int,
+    encoderGroup: EncoderSerDeGroup)
+  extends BucketProcessor[Row] {
+
+  def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
+    val rowType = table.rowType()
+    val rowKeyExtractor = table.createRowKeyExtractor()
+
+    def getBucketId(row: PaimonInternalRow): Int = {
+      rowKeyExtractor.setRecord(row)
+      rowKeyExtractor.bucket()
+    }
+
+    new Iterator[Row] {
+      override def hasNext: Boolean = rowIterator.hasNext
+
+      override def next(): Row = {
+        val row = rowIterator.next
+        val sparkInternalRow = encoderGroup.rowToInternal(row)
+        sparkInternalRow.setInt(bucketColIndex, getBucketId(new SparkRow(rowType, row)))
+        encoderGroup.internalToRow(sparkInternalRow)
+      }
+    }
+  }
+}
+
 case class DynamicBucketProcessor(
     fileStoreTable: FileStoreTable,
     bucketColIndex: Int,

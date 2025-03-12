@@ -51,6 +51,9 @@ class SparkWriteITCase extends PaimonSparkTestBase {
           |  array_col ARRAY<INT>,
           |  map_col MAP<STRING,INT>,
           |  struct_col STRUCT<f1:INT, f2:STRING>
+          |) TBLPROPERTIES (
+          | 'bucket' = '2',
+          | 'bucket-key' = 'int_col'
           |)
           |""".stripMargin
       sql(createTableSQL)
@@ -62,7 +65,7 @@ class SparkWriteITCase extends PaimonSparkTestBase {
             |  42, -- int_col (NOT NULL)
             |  9999999999L, -- long_col
             |  3.14F, -- float_col
-            |  2.71828, -- double_col (NOT NULL)
+            |  CAST(2.71828 as double), -- double_col (NOT NULL)
             |  CAST('123.45' AS DECIMAL(10,2)), -- decimal_col
             |  'test_string', -- string_col
             |  unhex('0001'), -- binary_col
@@ -128,7 +131,7 @@ class SparkWriteITCase extends PaimonSparkTestBase {
                   |  STRUCT(                                            -- struct_col
                   |    'user1',
                   |    MAP('age', 25, 'score', 99),
-                  |    ARRAY(90.5, 88.0)
+                  |    ARRAY(CAST(90.5 as double), CAST(88.0 as double))
                   |  ),
                   |  ARRAY(                                             -- nested_array_col
                   |    STRUCT(MAP('a', 1), ARRAY(10, 20)),
