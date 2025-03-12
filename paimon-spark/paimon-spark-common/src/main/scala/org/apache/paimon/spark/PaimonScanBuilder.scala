@@ -120,7 +120,7 @@ class PaimonScanBuilder(table: Table)
     } else {
       readBuilder.dropStats().newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
     }
-    if (AggregatePushDownUtils.canPushdownAggregation(table, aggregation, dataSplits)) {
+    if (AggregatePushDownUtils.canPushdownAggregation(table, aggregation, dataSplits.toSeq)) {
       val aggregator = new LocalAggregator(table)
       aggregator.initialize(aggregation)
       dataSplits.foreach(aggregator.update)
