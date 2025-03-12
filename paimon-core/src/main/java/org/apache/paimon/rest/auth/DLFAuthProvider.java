@@ -39,7 +39,6 @@ import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 /** Auth provider for <b>Ali CLoud</b> DLF. */
 public class DLFAuthProvider implements AuthProvider {
 
-    public static final String DLF_HOST_HEADER_KEY = "Host";
     public static final String DLF_AUTHORIZATION_HEADER_KEY = "Authorization";
     public static final String DLF_CONTENT_MD5_HEADER_KEY = "Content-MD5";
     public static final String DLF_CONTENT_TYPE_KEY = "Content-Type";
@@ -104,10 +103,7 @@ public class DLFAuthProvider implements AuthProvider {
             String dateTime = now.format(AUTH_DATE_TIME_FORMATTER);
             Map<String, String> signHeaders =
                     generateSignHeaders(
-                            restAuthParameter.host(),
-                            restAuthParameter.data(),
-                            dateTime,
-                            token.getSecurityToken());
+                            restAuthParameter.data(), dateTime, token.getSecurityToken());
             String authorization =
                     DLFAuthSignature.getAuthorization(
                             restAuthParameter, token, region, signHeaders, dateTime, date);
@@ -121,10 +117,9 @@ public class DLFAuthProvider implements AuthProvider {
     }
 
     public static Map<String, String> generateSignHeaders(
-            String host, String data, String dateTime, String securityToken) throws Exception {
+            String data, String dateTime, String securityToken) throws Exception {
         Map<String, String> signHeaders = new HashMap<>();
         signHeaders.put(DLF_DATE_HEADER_KEY, dateTime);
-        signHeaders.put(DLF_HOST_HEADER_KEY, host);
         signHeaders.put(DLF_CONTENT_SHA56_HEADER_KEY, DLF_CONTENT_SHA56_VALUE);
         signHeaders.put(DLF_AUTH_VERSION_HEADER_KEY, DLFAuthSignature.VERSION);
         if (data != null && !data.isEmpty()) {
