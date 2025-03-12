@@ -459,25 +459,6 @@ public class CoreOptions implements Serializable {
                             "Open file cost of a source file. It is used to avoid reading"
                                     + " too many files with a source split, which can be very slow.");
 
-    public static final ConfigOption<UnawareAppendPartitionStrategy>
-            PARTITION_STRATEGY_FOR_UNAWARE_APPEND =
-                    key("partition.strategy.for-unaware-append")
-                            .enumType(UnawareAppendPartitionStrategy.class)
-                            .defaultValue(UnawareAppendPartitionStrategy.NONE)
-                            .withDescription(
-                                    Description.builder()
-                                            .text(
-                                                    "This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance."
-                                                            + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
-                                            .list(
-                                                    text(
-                                                            "none: Rebalanced or Forward partitioning, this is the default behavior,"
-                                                                    + " this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism."),
-                                                    text(
-                                                            "hash: Hash the partitions value,"
-                                                                    + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."))
-                                            .build());
-
     public static final ConfigOption<MemorySize> WRITE_BUFFER_SIZE =
             key("write-buffer-size")
                     .memoryType()
@@ -1295,6 +1276,24 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.");
 
+    public static final ConfigOption<PartitionSinkStrategy> PARTITION_SINK_STRATEGY =
+            key("partition.sink-strategy")
+                    .enumType(PartitionSinkStrategy.class)
+                    .defaultValue(PartitionSinkStrategy.NONE)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance."
+                                                    + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
+                                    .list(
+                                            text(
+                                                    "none: Rebalanced or Forward partitioning, this is the default behavior,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism."),
+                                            text(
+                                                    "hash: Hash the partitions value,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."))
+                                    .build());
+
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
                     .booleanType()
@@ -2009,8 +2008,8 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_BUFFER_FOR_APPEND);
     }
 
-    public UnawareAppendPartitionStrategy partitionStrategyForUnawareAppend() {
-        return options.get(PARTITION_STRATEGY_FOR_UNAWARE_APPEND);
+    public PartitionSinkStrategy partitionSinkStrategy() {
+        return options.get(PARTITION_SINK_STRATEGY);
     }
 
     public int writeMaxWritersToSpill() {
@@ -3357,7 +3356,7 @@ public class CoreOptions implements Serializable {
     }
 
     /** Partition strategy for unaware bucket partitioned append only table. */
-    public enum UnawareAppendPartitionStrategy {
+    public enum PartitionSinkStrategy {
         NONE,
         HASH
         // TODO : Supports range-partition strategy.

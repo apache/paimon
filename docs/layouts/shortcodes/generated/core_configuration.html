@@ -708,7 +708,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Mark done action will reports the partition to the remote http server, this can only be used by http-report partition mark done action.</td>
         </tr>
         <tr>
-            <td><h5>partition.strategy.for-unaware-append</h5></td>
+            <td><h5>partition.sink-strategy</h5></td>
             <td style="word-wrap: break-word;">NONE</td>
             <td><p>Enum</p></td>
             <td>This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance. Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.<ul><li>none: Rebalanced or Forward partitioning, this is the default behavior, this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism.</li><li>hash: Hash the partitions value, this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism.</li></ul><br /><br />Possible values:<ul><li>"NONE"</li><li>"HASH"</li></ul></td>

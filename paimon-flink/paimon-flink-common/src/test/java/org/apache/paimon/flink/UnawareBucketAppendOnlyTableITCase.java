@@ -63,7 +63,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-import static org.apache.paimon.CoreOptions.PARTITION_STRATEGY_FOR_UNAWARE_APPEND;
+import static org.apache.paimon.CoreOptions.PARTITION_SINK_STRATEGY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -411,9 +411,8 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @EnumSource(CoreOptions.UnawareAppendPartitionStrategy.class)
-    public void testPartitionStrategyForPartitionedTable(
-            CoreOptions.UnawareAppendPartitionStrategy strategy)
+    @EnumSource(CoreOptions.PartitionSinkStrategy.class)
+    public void testPartitionStrategyForPartitionedTable(CoreOptions.PartitionSinkStrategy strategy)
             throws Catalog.TableNotExistException {
 
         int partitionNums = 5;
@@ -429,7 +428,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                         + "'bucket' = '-1',"
                         + "'%s' = '%s',"
                         + "'sink.parallelism' = '7')",
-                PARTITION_STRATEGY_FOR_UNAWARE_APPEND.key(), strategy);
+                PARTITION_SINK_STRATEGY.key(), strategy);
 
         // sink parallelism is less than the number of partitions write in a batch, there are 2 task
         // will write data to 2 partition.
@@ -440,7 +439,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                         + "'bucket' = '-1',"
                         + "'%s' = '%s',"
                         + "'sink.parallelism' = '3')",
-                PARTITION_STRATEGY_FOR_UNAWARE_APPEND.key(), strategy);
+                PARTITION_SINK_STRATEGY.key(), strategy);
 
         StringBuilder values = new StringBuilder();
         // 5 partition in a batch write.
@@ -465,7 +464,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 fileStoreTableLarger.newReadBuilder().newScan().listPartitionEntries();
         assertThat(partitionEntriesLarger.size()).isEqualTo(partitionNums);
         int fileCountLarger =
-                strategy == CoreOptions.UnawareAppendPartitionStrategy.HASH
+                strategy == CoreOptions.PartitionSinkStrategy.HASH
                         ? hashStrategyResultFileCount
                         : largerSinkParallelism;
         partitionEntriesLarger.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLarger));
@@ -475,7 +474,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 fileStoreTableLess.newReadBuilder().newScan().listPartitionEntries();
         assertThat(partitionEntriesLess.size()).isEqualTo(partitionNums);
         int fileCountLess =
-                strategy == CoreOptions.UnawareAppendPartitionStrategy.HASH
+                strategy == CoreOptions.PartitionSinkStrategy.HASH
                         ? hashStrategyResultFileCount
                         : lessSinkParallelism;
         partitionEntriesLess.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLess));
