@@ -26,11 +26,11 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
-import static org.apache.paimon.rest.RequestIdInterceptor.REQUEST_ID_KEY;
-
 /** Defines HTTP request log interceptor. */
 public class LoggingInterceptor implements Interceptor {
     private static final Logger LOG = LoggerFactory.getLogger(LoggingInterceptor.class);
+    public static final String REQUEST_ID_KEY = "x-dlf-request-id";
+    public static final String DEFAULT_REQUEST_ID = "unknown";
 
     @Override
     public Response intercept(Chain chain) throws IOException {
@@ -38,11 +38,12 @@ public class LoggingInterceptor implements Interceptor {
         long startTime = System.nanoTime();
         Response response = chain.proceed(request);
         long durationMs = (System.nanoTime() - startTime) / 1_000_000;
+        String requestId = response.header(REQUEST_ID_KEY, DEFAULT_REQUEST_ID);
         LOG.info(
-                "[rest] method={} url={} requestId={} duration={}ms",
+                "method:{} url:{} requestId:{} duration:{}ms",
                 request.method(),
                 request.url(),
-                request.header(REQUEST_ID_KEY),
+                requestId,
                 durationMs);
         return response;
     }

@@ -18,6 +18,11 @@
 
 package org.apache.paimon.rest;
 
+import okhttp3.Headers;
+import okhttp3.Interceptor;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -26,23 +31,29 @@ import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
-
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static okhttp3.ConnectionSpec.CLEARTEXT;
+import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
+import static okhttp3.ConnectionSpec.MODERN_TLS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.spy;
 
 /** Test for {@link HttpClient}. */
 public class HttpClientTest {
@@ -196,6 +207,38 @@ public class HttpClientTest {
                 "http://a.b.c:8080/api/v1/tables/my_table$schemas?pageToken=dt%3D20230101", url);
         Map<String, String> queryParameters = getParameters(url);
         assertEquals(restAuthParameter.parameters().get(queryKey), queryParameters.get(queryKey));
+    }
+
+
+    @Test
+    public void testLoggingInterceptorWithRetry() throws IOException {
+        AtomicInteger retryCount = new AtomicInteger(0);
+        LoggingInterceptor loggingInterceptor = spy(new LoggingInterceptor());
+        doAnswer(invocation -> {
+            retryCount.incrementAndGet();
+            Object argument = invocation.getArguments()[0];
+            Interceptor.Chain chain = (Interceptor.Chain) argument;
+            return chain.proceed(chain.request());
+        }).when(loggingInterceptor).intercept(any());
+        OkHttpClient okHttpClient = new OkHttpClient.Builder()
+            .retryOnConnectionFailure(true)
+            .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
+            .addInterceptor(new ExponentialHttpRetryInterceptor(5))
+            .addInterceptor(loggingInterceptor)
+            .connectTimeout(Duration.ofMinutes(3))
+            .readTimeout(Duration.ofMinutes(3))
+            .build();
+        server.enqueueResponse(mockResponseDataStr, 429);
+        server.enqueueResponse(mockResponseDataStr, 429);
+        server.enqueueResponse(mockResponseDataStr, 200);
+        Request request = new Request.Builder()
+            .url(HttpClient.getRequestUrl(server.getBaseUrl(), MOCK_PATH, null))
+            .get()
+            .headers(Headers.of())
+            .build();
+        Response response = okHttpClient.newCall(request).execute();
+        assertEquals(200, response.code());
+        assertEquals(3, retryCount.get());
     }
 
     private Map<String, String> getParameters(String path) {
