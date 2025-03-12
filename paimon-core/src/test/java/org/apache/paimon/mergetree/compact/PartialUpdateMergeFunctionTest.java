@@ -857,6 +857,31 @@ public class PartialUpdateMergeFunctionTest {
                                 "Must use sequence group for aggregation functions but not found for field f1."));
     }
 
+    @Test
+    public void testDeleteReproduceCorrectSequenceNumber() {
+        Options options = new Options();
+        options.set("partial-update.remove-record-on-delete", "true");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
+
+        MergeFunction<KeyValue> func = factory.create();
+
+        func.reset();
+
+        add(func, RowKind.INSERT, 1, 1, 1, 1, 1);
+        add(func, RowKind.DELETE, 1, 1, 1, 1, 1);
+
+        assertThat(func.getResult().sequenceNumber()).isEqualTo(1);
+    }
+
     private void add(MergeFunction<KeyValue> function, Integer... f) {
         add(function, RowKind.INSERT, f);
     }

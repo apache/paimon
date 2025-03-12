@@ -154,20 +154,25 @@ public class ObjectsFile<T> implements SimpleFileReader<T> {
     }
 
     public String writeWithoutRolling(Collection<T> records) {
-        return writeWithoutRolling(records.iterator());
+        return writeWithoutRolling(records.iterator()).getKey();
     }
 
-    public String writeWithoutRolling(Iterator<T> records) {
+    protected Pair<String, Long> writeWithoutRolling(Iterator<T> records) {
         Path path = pathFactory.newPath();
         try {
-            try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            PositionOutputStream out = fileIO.newOutputStream(path, false);
+            long pos;
+            try {
                 try (FormatWriter writer = writerFactory.create(out, compression)) {
                     while (records.hasNext()) {
                         writer.addElement(serializer.toRow(records.next()));
                     }
                 }
+            } finally {
+                pos = out.getPos();
+                out.close();
             }
-            return path.getName();
+            return Pair.of(path.getName(), pos);
         } catch (Throwable e) {
             fileIO.deleteQuietly(path);
             throw new RuntimeException(

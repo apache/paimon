@@ -45,6 +45,7 @@ import org.apache.flink.types.RowKind;
 import javax.annotation.Nullable;
 
 import static org.apache.paimon.CoreOptions.LOG_FORMAT;
+import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.LOG_KEY_FORMAT;
 
 /**
@@ -100,6 +101,12 @@ public interface LogStoreTableFactory extends Factory {
                 .defaultValue(LOG_FORMAT.defaultValue());
     }
 
+    static ConfigOption<Boolean> logIgnoreDelete() {
+        return ConfigOptions.key(LOG_IGNORE_DELETE.key())
+                .booleanType()
+                .defaultValue(LOG_IGNORE_DELETE.defaultValue());
+    }
+
     static LogStoreTableFactory discoverLogStoreFactory(ClassLoader cl, String identifier) {
         return FactoryUtil.discoverFactory(cl, LogStoreTableFactory.class, identifier);
     }
@@ -121,18 +128,20 @@ public interface LogStoreTableFactory extends Factory {
     }
 
     static DecodingFormat<DeserializationSchema<RowData>> getValueDecodingFormat(
-            FlinkTableFactoryHelper helper) {
+            FlinkTableFactoryHelper helper, boolean hasPrimaryKey) {
         DecodingFormat<DeserializationSchema<RowData>> format =
                 helper.discoverDecodingFormat(DeserializationFormatFactory.class, logFormat());
-        validateValueFormat(format, helper.getOptions().get(logFormat()));
+        boolean insertOnly = !hasPrimaryKey || helper.getOptions().get(logIgnoreDelete());
+        validateValueFormat(format, helper.getOptions().get(logFormat()), insertOnly);
         return format;
     }
 
     static EncodingFormat<SerializationSchema<RowData>> getValueEncodingFormat(
-            FlinkTableFactoryHelper helper) {
+            FlinkTableFactoryHelper helper, boolean hasPrimaryKey) {
         EncodingFormat<SerializationSchema<RowData>> format =
                 helper.discoverEncodingFormat(SerializationFormatFactory.class, logFormat());
-        validateValueFormat(format, helper.getOptions().get(logFormat()));
+        boolean insertOnly = !hasPrimaryKey || helper.getOptions().get(logIgnoreDelete());
+        validateValueFormat(format, helper.getOptions().get(logFormat()), insertOnly);
         return format;
     }
 
@@ -146,8 +155,8 @@ public interface LogStoreTableFactory extends Factory {
         }
     }
 
-    static void validateValueFormat(Format format, String name) {
-        if (!format.getChangelogMode().equals(ChangelogMode.all())) {
+    static void validateValueFormat(Format format, String name, boolean insertOnly) {
+        if (!insertOnly && !format.getChangelogMode().equals(ChangelogMode.all())) {
             throw new ValidationException(
                     String.format(
                             "A value format should deal with all records. "

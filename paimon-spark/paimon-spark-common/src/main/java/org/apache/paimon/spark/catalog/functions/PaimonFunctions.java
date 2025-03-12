@@ -21,7 +21,9 @@ package org.apache.paimon.spark.catalog.functions;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
+import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.functions.BoundFunction;
+import org.apache.spark.sql.connector.catalog.functions.ScalarFunction;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.StructField;
@@ -34,12 +36,15 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
+import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** Paimon functions. */
 public class PaimonFunctions {
 
     private static final Map<String, UnboundFunction> FUNCTIONS =
-            ImmutableMap.of("bucket", new PaimonFunctions.BucketFunction());
+            ImmutableMap.of(
+                    "bucket", new BucketFunction(),
+                    "max_pt", new MaxPtFunction());
 
     private static final List<String> FUNCTION_NAMES = ImmutableList.copyOf(FUNCTIONS.keySet());
 
@@ -103,6 +108,62 @@ public class PaimonFunctions {
         @Override
         public String name() {
             return "bucket";
+        }
+    }
+
+    /**
+     * For partitioned tables, this function returns the maximum value of the first level partition
+     * of the partitioned table, sorted alphabetically. Note, empty partitions will be skipped. For
+     * example, a partition created by `alter table ... add partition ...`.
+     */
+    public static class MaxPtFunction implements UnboundFunction {
+        @Override
+        public BoundFunction bind(StructType inputType) {
+            if (inputType.fields().length != 1) {
+                throw new UnsupportedOperationException(
+                        "Wrong number of inputs, expected 1 but got " + inputType.fields().length);
+            }
+            StructField identifier = inputType.fields()[0];
+            checkArgument(identifier.dataType() == StringType, "table name must be string type");
+
+            return new ScalarFunction<String>() {
+                @Override
+                public DataType[] inputTypes() {
+                    return new DataType[] {identifier.dataType()};
+                }
+
+                @Override
+                public DataType resultType() {
+                    return StringType;
+                }
+
+                @Override
+                public String produceResult(InternalRow input) {
+                    // Does not need to implement the `produceResult` method,
+                    // since `ReplacePaimonFunctions` will replace it with partition literal.
+                    throw new IllegalStateException("This method should not be called");
+                }
+
+                @Override
+                public String name() {
+                    return "max_pt";
+                }
+
+                @Override
+                public String canonicalName() {
+                    return "paimon.max_pt(" + identifier.dataType().catalogString() + ")";
+                }
+            };
+        }
+
+        @Override
+        public String description() {
+            return name();
+        }
+
+        @Override
+        public String name() {
+            return "max_pt";
         }
     }
 }

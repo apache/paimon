@@ -19,8 +19,8 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -42,18 +42,14 @@ public class CompactManifestProcedure extends ProcedureBase {
     @ProcedureHint(argument = {@ArgumentHint(name = "table", type = @DataTypeHint("STRING"))})
     public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
 
-        FileStoreTable table =
-                (FileStoreTable)
-                        table(tableId)
-                                .copy(
-                                        Collections.singletonMap(
-                                                CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER));
+        Table table =
+                table(tableId)
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER));
 
-        try (FileStoreCommit commit =
-                table.store()
-                        .newCommit(table.coreOptions().createCommitUser())
-                        .ignoreEmptyCommit(false)) {
-            commit.compactManifest();
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.compactManifests();
         }
         return new String[] {"success"};
     }

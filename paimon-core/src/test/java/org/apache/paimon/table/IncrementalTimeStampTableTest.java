@@ -35,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -56,7 +57,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
 
         Long timestampEarliest = System.currentTimeMillis();
         // snapshot 1: append
@@ -145,7 +146,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
 
         // snapshot 1: append
         write(table, GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 1), GenericRow.of(1, 3, 1));
@@ -183,7 +184,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
 
         // snapshot 1: append
         write(
@@ -240,7 +241,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
         Long timestampEarliest = System.currentTimeMillis();
         // snapshot 1: append
         write(

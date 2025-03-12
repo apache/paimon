@@ -37,9 +37,12 @@ public class MultiTableCommittableChannelComputer
 
     @Override
     public int channel(MultiTableCommittable multiTableCommittable) {
-        return Math.floorMod(
-                Objects.hash(multiTableCommittable.getDatabase(), multiTableCommittable.getTable()),
-                numChannels);
+        return computeChannel(
+                multiTableCommittable.getDatabase(), multiTableCommittable.getTable(), numChannels);
+    }
+
+    public static int computeChannel(String database, String table, int numChannels) {
+        return Math.floorMod(Objects.hash(database, table), numChannels);
     }
 
     @Override

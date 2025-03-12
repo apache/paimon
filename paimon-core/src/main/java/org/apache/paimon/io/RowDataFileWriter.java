@@ -109,7 +109,9 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
 
     @Override
     public DataFileMeta result() throws IOException {
-        Pair<List<String>, SimpleStats> statsPair = statsArraySerializer.toBinary(fieldStats());
+        long fileSize = outputBytes;
+        Pair<List<String>, SimpleStats> statsPair =
+                statsArraySerializer.toBinary(fieldStats(fileSize));
         DataFileIndexWriter.FileIndexResult indexResult =
                 dataFileIndexWriter == null
                         ? DataFileIndexWriter.EMPTY_RESULT
@@ -117,7 +119,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         String externalPath = isExternalPath ? path.toString() : null;
         return DataFileMeta.forAppend(
                 path.getName(),
-                fileIO.getFileSize(path),
+                fileSize,
                 recordCount(),
                 statsPair.getRight(),
                 seqNumCounter.getValue() - super.recordCount(),

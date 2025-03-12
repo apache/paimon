@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -40,7 +41,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /**
  * A file format table refers to a directory that contains multiple files of the same format, where
@@ -92,6 +92,7 @@ public interface FormatTable extends Table {
     /** Builder for {@link FormatTable}. */
     class Builder {
 
+        private FileIO fileIO;
         private Identifier identifier;
         private RowType rowType;
         private List<String> partitionKeys;
@@ -99,6 +100,11 @@ public interface FormatTable extends Table {
         private FormatTable.Format format;
         private Map<String, String> options;
         @Nullable private String comment;
+
+        public FormatTable.Builder fileIO(FileIO fileIO) {
+            this.fileIO = fileIO;
+            return this;
+        }
 
         public FormatTable.Builder identifier(Identifier identifier) {
             this.identifier = identifier;
@@ -137,13 +143,14 @@ public interface FormatTable extends Table {
 
         public FormatTable build() {
             return new FormatTable.FormatTableImpl(
-                    identifier, rowType, partitionKeys, location, format, options, comment);
+                    fileIO, identifier, rowType, partitionKeys, location, format, options, comment);
         }
     }
 
     /** An implementation for {@link FormatTable}. */
     class FormatTableImpl implements FormatTable {
 
+        private final FileIO fileIO;
         private final Identifier identifier;
         private final RowType rowType;
         private final List<String> partitionKeys;
@@ -153,6 +160,7 @@ public interface FormatTable extends Table {
         @Nullable private final String comment;
 
         public FormatTableImpl(
+                FileIO fileIO,
                 Identifier identifier,
                 RowType rowType,
                 List<String> partitionKeys,
@@ -160,6 +168,7 @@ public interface FormatTable extends Table {
                 Format format,
                 Map<String, String> options,
                 @Nullable String comment) {
+            this.fileIO = fileIO;
             this.identifier = identifier;
             this.rowType = rowType;
             this.partitionKeys = partitionKeys;
@@ -215,11 +224,23 @@ public interface FormatTable extends Table {
         }
 
         @Override
+        public FileIO fileIO() {
+            return fileIO;
+        }
+
+        @Override
         public FormatTable copy(Map<String, String> dynamicOptions) {
             Map<String, String> newOptions = new HashMap<>(options);
             newOptions.putAll(dynamicOptions);
             return new FormatTableImpl(
-                    identifier, rowType, partitionKeys, location, format, newOptions, comment);
+                    fileIO,
+                    identifier,
+                    rowType,
+                    partitionKeys,
+                    location,
+                    format,
+                    newOptions,
+                    comment);
         }
     }
 
@@ -231,7 +252,7 @@ public interface FormatTable extends Table {
     }
 
     @Override
-    default OptionalLong latestSnapshotId() {
+    default Optional<Snapshot> latestSnapshot() {
         throw new UnsupportedOperationException();
     }
 

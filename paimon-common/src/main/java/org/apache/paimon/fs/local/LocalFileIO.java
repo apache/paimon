@@ -26,6 +26,9 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -49,6 +52,8 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /** {@link FileIO} for local file. */
 public class LocalFileIO implements FileIO {
 
+    private static final Logger LOG = LoggerFactory.getLogger(LocalFileIO.class);
+
     private static final long serialVersionUID = 1L;
 
     // the lock to ensure atomic renaming
@@ -68,11 +73,13 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
+        LOG.debug("Invoking newInputStream for {}", path);
         return new LocalSeekableInputStream(toFile(path));
     }
 
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
+        LOG.debug("Invoking newOutputStream for {}", path);
         if (exists(path) && !overwrite) {
             throw new FileAlreadyExistsException("File already exists: " + path);
         }
@@ -87,6 +94,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public FileStatus getFileStatus(Path path) throws IOException {
+        LOG.debug("Invoking getFileStatus for {}", path);
         final File file = toFile(path);
         if (file.exists()) {
             return new LocalFileStatus(file, SCHEME);
@@ -103,6 +111,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
+        LOG.debug("Invoking listStatus for {}", path);
         final File file = toFile(path);
         FileStatus[] results = new FileStatus[0];
 
@@ -133,11 +142,13 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public boolean exists(Path path) throws IOException {
+        LOG.debug("Invoking exists for {}", path);
         return toFile(path).exists();
     }
 
     @Override
     public boolean delete(Path path, boolean recursive) throws IOException {
+        LOG.debug("Invoking delete for {}", path);
         File file = toFile(path);
         if (file.isFile()) {
             return file.delete();
@@ -175,6 +186,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public boolean mkdirs(Path path) throws IOException {
+        LOG.debug("Invoking mkdirs for {}", path);
         return mkdirsInternal(toFile(path));
     }
 
@@ -196,6 +208,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
+        LOG.debug("Invoking rename for {} to {}", src, dst);
         File srcFile = toFile(src);
         File dstFile = toFile(dst);
         File dstParent = dstFile.getParentFile();
@@ -219,6 +232,7 @@ public class LocalFileIO implements FileIO {
 
     @Override
     public void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
+        LOG.debug("Invoking copyFile for {} to {}", sourcePath, targetPath);
         if (!overwrite && exists(targetPath)) {
             return;
         }

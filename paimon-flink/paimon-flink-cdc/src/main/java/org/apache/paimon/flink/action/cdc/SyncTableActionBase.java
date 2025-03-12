@@ -168,6 +168,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                         .withParserFactory(parserFactory)
                         .withTable(fileStoreTable)
                         .withIdentifier(new Identifier(database, table))
+                        .withTypeMapping(typeMapping)
                         .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {

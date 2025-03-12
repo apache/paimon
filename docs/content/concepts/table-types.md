@@ -1,6 +1,6 @@
 ---
 title: "Table Types"
-weight: 5
+weight: 6
 type: docs
 aliases:
 - /concepts/table-types.html

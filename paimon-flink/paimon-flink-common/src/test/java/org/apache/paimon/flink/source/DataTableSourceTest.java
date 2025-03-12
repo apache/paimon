@@ -81,6 +81,7 @@ class DataTableSourceTest {
                         null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
+        sEnv1.setParallelism(-1);
         DataStream<RowData> sourceStream1 =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), sEnv1);
         assertThat(sourceStream1.getParallelism()).isEqualTo(1);
@@ -117,8 +118,7 @@ class DataTableSourceTest {
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         DataStream<RowData> sourceStream1 =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), sEnv1);
-        // parallelism = 1 for table with -1 bucket.
-        assertThat(sourceStream1.getParallelism()).isEqualTo(1);
+        assertThat(sourceStream1.getParallelism()).isEqualTo(sEnv1.getParallelism());
     }
 
     @Test

@@ -43,7 +43,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 
@@ -58,11 +57,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.utils.BranchManager.BRANCH_PREFIX;
-import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
 
 /** A {@link Table} for showing branches of table. */
 public class BranchesTable implements ReadonlyTable {
@@ -102,6 +98,11 @@ public class BranchesTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("branch_name");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return dataTable.fileIO();
     }
 
     @Override
@@ -216,18 +217,16 @@ public class BranchesTable implements ReadonlyTable {
         private List<InternalRow> branches(FileStoreTable table) throws IOException {
             BranchManager branchManager = table.branchManager();
 
-            List<Pair<Path, Long>> paths =
-                    listVersionedDirectories(fileIO, branchManager.branchDirectory(), BRANCH_PREFIX)
-                            .map(status -> Pair.of(status.getPath(), status.getModificationTime()))
-                            .collect(Collectors.toList());
             List<InternalRow> result = new ArrayList<>();
-
-            for (Pair<Path, Long> path : paths) {
-                String branchName = path.getLeft().getName().substring(BRANCH_PREFIX.length());
-                long creationTime = path.getRight();
+            List<String> branches = branchManager.branches();
+            Path tablePath = table.location();
+            for (String branch : branches) {
+                String branchPath = BranchManager.branchPath(tablePath, branch);
+                long creationTime =
+                        fileIO.getFileStatus(new Path(branchPath)).getModificationTime();
                 result.add(
                         GenericRow.of(
-                                BinaryString.fromString(branchName),
+                                BinaryString.fromString(branch),
                                 Timestamp.fromLocalDateTime(
                                         DateTimeUtils.toLocalDateTime(creationTime))));
             }

@@ -101,12 +101,12 @@ public class CompactActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  compact --warehouse <warehouse_path> --database <database_name> \\\n"
-                        + "--table <table_name> [--partition <partition_name>] \\\n"
-                        + "[--order_strategy <order_strategy>] \\\n"
-                        + "[--table_conf <key>=<value>] \\\n"
-                        + "[--order_by <order_columns>] \\\n"
-                        + "[--partition_idle_time <partition_idle_time>] \\\n"
+                "  compact --warehouse <warehouse_path> --database <database_name> \n"
+                        + "--table <table_name> [--partition <partition_name>] \n"
+                        + "[--order_strategy <order_strategy>] \n"
+                        + "[--table_conf <key>=<value>] \n"
+                        + "[--order_by <order_columns>] \n"
+                        + "[--partition_idle_time <partition_idle_time>] \n"
                         + "[--compact_strategy <compact_strategy>]");
         System.out.println(
                 "  compact --warehouse s3://path/to/warehouse --database <database_name> "
@@ -140,14 +140,14 @@ public class CompactActionFactory implements ActionFactory {
                         + "`full` : Only supports batch mode. All files will be selected for merging."
                         + "`minor`: Pick the set of files that need to be merged based on specified conditions.");
         System.out.println(
-                "  compact --warehouse s3:///path/to/warehouse \\\n"
-                        + "--database test_db \\\n"
-                        + "--table test_table \\\n"
-                        + "--order_strategy zorder \\\n"
-                        + "--order_by a,b,c \\\n"
-                        + "--table_conf sink.parallelism=9 \\\n"
-                        + "--catalog_conf s3.endpoint=https://****.com \\\n"
-                        + "--catalog_conf s3.access-key=***** \\\n"
+                "  compact --warehouse s3:///path/to/warehouse \n"
+                        + "--database test_db \n"
+                        + "--table test_table \n"
+                        + "--order_strategy zorder \n"
+                        + "--order_by a,b,c \n"
+                        + "--table_conf sink.parallelism=9 \n"
+                        + "--catalog_conf s3.endpoint=https://****.com \n"
+                        + "--catalog_conf s3.access-key=***** \n"
                         + "--catalog_conf s3.secret-key=***** ");
     }
 }

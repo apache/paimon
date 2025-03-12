@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
@@ -30,6 +31,7 @@ import java.util.Map;
  * A table to hold some known data splits. For now, it is only used by internal for Spark engine.
  */
 public class KnownSplitsTable implements ReadonlyTable {
+
     private final InnerTable origin;
     private final DataSplit[] splits;
 
@@ -69,6 +71,11 @@ public class KnownSplitsTable implements ReadonlyTable {
     @Override
     public Map<String, String> options() {
         return origin.options();
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return origin.fileIO();
     }
 
     @Override

@@ -31,7 +31,6 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -89,7 +88,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -1023,8 +1021,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         reader.close();
 
         // truncate table
-        FileStoreCommit truncateCommit = table.store().newCommit(UUID.randomUUID().toString());
-        truncateCommit.truncateTable(2);
+        BatchTableCommit truncateCommit = table.newBatchWriteBuilder().newCommit();
+        truncateCommit.truncateTable();
         truncateCommit.close();
 
         // test parquet row ranges filtering

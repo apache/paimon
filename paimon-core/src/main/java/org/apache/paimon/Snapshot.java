@@ -33,6 +33,7 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 
@@ -61,7 +62,9 @@ import java.util.Objects;
  */
 @Public
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class Snapshot {
+public class Snapshot implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     public static final long FIRST_SNAPSHOT_ID = 1;
 
@@ -72,8 +75,11 @@ public class Snapshot {
     protected static final String FIELD_ID = "id";
     protected static final String FIELD_SCHEMA_ID = "schemaId";
     protected static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
+    protected static final String FIELD_BASE_MANIFEST_LIST_SIZE = "baseManifestListSize";
     protected static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
+    protected static final String FIELD_DELTA_MANIFEST_LIST_SIZE = "deltaManifestListSize";
     protected static final String FIELD_CHANGELOG_MANIFEST_LIST = "changelogManifestList";
+    protected static final String FIELD_CHANGELOG_MANIFEST_LIST_SIZE = "changelogManifestListSize";
     protected static final String FIELD_INDEX_MANIFEST = "indexManifest";
     protected static final String FIELD_COMMIT_USER = "commitUser";
     protected static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
@@ -102,16 +108,31 @@ public class Snapshot {
     @JsonProperty(FIELD_BASE_MANIFEST_LIST)
     protected final String baseManifestList;
 
+    @JsonProperty(FIELD_BASE_MANIFEST_LIST_SIZE)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    protected final Long baseManifestListSize;
+
     // a manifest list recording all new changes occurred in this snapshot
     // for faster expire and streaming reads
     @JsonProperty(FIELD_DELTA_MANIFEST_LIST)
     protected final String deltaManifestList;
+
+    @JsonProperty(FIELD_DELTA_MANIFEST_LIST_SIZE)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    protected final Long deltaManifestListSize;
 
     // a manifest list recording all changelog produced in this snapshot
     // null if no changelog is produced, or for paimon <= 0.2
     @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST)
     @Nullable
     protected final String changelogManifestList;
+
+    @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST_SIZE)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    protected final Long changelogManifestListSize;
 
     // a manifest recording all index files of this table
     // null if no index file
@@ -182,8 +203,11 @@ public class Snapshot {
             long id,
             long schemaId,
             String baseManifestList,
+            @Nullable Long baseManifestListSize,
             String deltaManifestList,
+            @Nullable Long deltaManifestListSize,
             @Nullable String changelogManifestList,
+            @Nullable Long changelogManifestListSize,
             @Nullable String indexManifest,
             String commitUser,
             long commitIdentifier,
@@ -200,8 +224,11 @@ public class Snapshot {
                 id,
                 schemaId,
                 baseManifestList,
+                baseManifestListSize,
                 deltaManifestList,
+                deltaManifestListSize,
                 changelogManifestList,
+                changelogManifestListSize,
                 indexManifest,
                 commitUser,
                 commitIdentifier,
@@ -221,8 +248,12 @@ public class Snapshot {
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
+            @JsonProperty(FIELD_BASE_MANIFEST_LIST_SIZE) @Nullable Long baseManifestListSize,
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
+            @JsonProperty(FIELD_DELTA_MANIFEST_LIST_SIZE) @Nullable Long deltaManifestListSize,
             @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST) @Nullable String changelogManifestList,
+            @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST_SIZE) @Nullable
+                    Long changelogManifestListSize,
             @JsonProperty(FIELD_INDEX_MANIFEST) @Nullable String indexManifest,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
@@ -238,8 +269,11 @@ public class Snapshot {
         this.id = id;
         this.schemaId = schemaId;
         this.baseManifestList = baseManifestList;
+        this.baseManifestListSize = baseManifestListSize;
         this.deltaManifestList = deltaManifestList;
+        this.deltaManifestListSize = deltaManifestListSize;
         this.changelogManifestList = changelogManifestList;
+        this.changelogManifestListSize = changelogManifestListSize;
         this.indexManifest = indexManifest;
         this.commitUser = commitUser;
         this.commitIdentifier = commitIdentifier;
@@ -274,15 +308,33 @@ public class Snapshot {
         return baseManifestList;
     }
 
+    @JsonGetter(FIELD_BASE_MANIFEST_LIST_SIZE)
+    @Nullable
+    public Long baseManifestListSize() {
+        return baseManifestListSize;
+    }
+
     @JsonGetter(FIELD_DELTA_MANIFEST_LIST)
     public String deltaManifestList() {
         return deltaManifestList;
+    }
+
+    @JsonGetter(FIELD_DELTA_MANIFEST_LIST_SIZE)
+    @Nullable
+    public Long deltaManifestListSize() {
+        return deltaManifestListSize;
     }
 
     @JsonGetter(FIELD_CHANGELOG_MANIFEST_LIST)
     @Nullable
     public String changelogManifestList() {
         return changelogManifestList;
+    }
+
+    @JsonGetter(FIELD_CHANGELOG_MANIFEST_LIST_SIZE)
+    @Nullable
+    public Long changelogManifestListSize() {
+        return changelogManifestListSize;
     }
 
     @JsonGetter(FIELD_INDEX_MANIFEST)
@@ -358,8 +410,11 @@ public class Snapshot {
                 id,
                 schemaId,
                 baseManifestList,
+                baseManifestListSize,
                 deltaManifestList,
+                deltaManifestListSize,
                 changelogManifestList,
+                changelogManifestListSize,
                 indexManifest,
                 commitUser,
                 commitIdentifier,
@@ -382,8 +437,11 @@ public class Snapshot {
                 && id == that.id
                 && schemaId == that.schemaId
                 && Objects.equals(baseManifestList, that.baseManifestList)
+                && Objects.equals(baseManifestListSize, that.baseManifestListSize)
                 && Objects.equals(deltaManifestList, that.deltaManifestList)
+                && Objects.equals(deltaManifestListSize, that.deltaManifestListSize)
                 && Objects.equals(changelogManifestList, that.changelogManifestList)
+                && Objects.equals(changelogManifestListSize, that.changelogManifestListSize)
                 && Objects.equals(indexManifest, that.indexManifest)
                 && Objects.equals(commitUser, that.commitUser)
                 && commitIdentifier == that.commitIdentifier

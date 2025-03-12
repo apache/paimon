@@ -32,55 +32,51 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog server's uri.");
 
-    public static final ConfigOption<Duration> CONNECTION_TIMEOUT =
-            ConfigOptions.key("rest.client.connection-timeout")
-                    .durationType()
-                    .defaultValue(Duration.ofSeconds(180))
-                    .withDescription("REST Catalog http client connect timeout.");
-
-    public static final ConfigOption<Integer> MAX_CONNECTIONS =
-            ConfigOptions.key("rest.client.max-connections")
-                    .intType()
-                    .defaultValue(100)
-                    .withDescription("REST Catalog http client's max connections.");
-
-    public static final ConfigOption<Integer> MAX_RETIES =
-            ConfigOptions.key("rest.client.max-retries")
-                    .intType()
-                    .defaultValue(5)
-                    .withDescription("REST Catalog http client's max retry times.");
-
-    public static final ConfigOption<Integer> THREAD_POOL_SIZE =
-            ConfigOptions.key("rest.client.num-threads")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription("REST Catalog http client thread num.");
-
     public static final ConfigOption<String> TOKEN =
             ConfigOptions.key("token")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("REST Catalog auth token.");
+                    .withDescription("REST Catalog auth bear token.");
 
-    public static final ConfigOption<Duration> TOKEN_EXPIRATION_TIME =
-            ConfigOptions.key("token.expiration-time")
+    public static final ConfigOption<Duration> TOKEN_REFRESH_TIME =
+            ConfigOptions.key("token.refresh-time")
                     .durationType()
                     .defaultValue(Duration.ofHours(1))
-                    .withDescription(
-                            "REST Catalog auth token expires time.The token generates system refresh frequency is t1,"
-                                    + " the token expires time is t2, we need to guarantee that t2 > t1,"
-                                    + " the token validity time is [t2 - t1, t2],"
-                                    + " and the expires time defined here needs to be less than (t2 - t1)");
+                    .withDescription("REST Catalog auth token refresh time.");
 
-    public static final ConfigOption<String> TOKEN_PROVIDER_PATH =
-            ConfigOptions.key("token.provider.path")
+    public static final ConfigOption<String> TOKEN_PROVIDER =
+            ConfigOptions.key("token.provider")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("REST Catalog auth token provider path.");
+                    .withDescription("REST Catalog auth token provider.");
 
-    public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
-            ConfigOptions.key("data-token.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to support data token provided by the REST server.");
+    public static final ConfigOption<String> DLF_REGION =
+            ConfigOptions.key("dlf.region")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF region.");
+
+    public static final ConfigOption<String> DLF_TOKEN_PATH =
+            ConfigOptions.key("dlf.token-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF token file path.");
+
+    public static final ConfigOption<String> DLF_ACCESS_KEY_ID =
+            ConfigOptions.key("dlf.access-key-id")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF access key id");
+
+    public static final ConfigOption<String> DLF_ACCESS_KEY_SECRET =
+            ConfigOptions.key("dlf.access-key-secret")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF access key secret");
+
+    public static final ConfigOption<String> DLF_SECURITY_TOKEN =
+            ConfigOptions.key("dlf.security-token")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF security token");
 }

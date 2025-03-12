@@ -24,7 +24,7 @@ import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer
-import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
+import org.apache.paimon.index.{BucketAssigner, PartitionIndex, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
@@ -196,7 +196,9 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                 new SimpleHashBucketAssigner(
                   numAssigners,
                   TaskContext.getPartitionId(),
-                  table.coreOptions.dynamicBucketTargetRowNum)
+                  table.coreOptions.dynamicBucketTargetRowNum,
+                  table.coreOptions.dynamicBucketMaxBuckets
+                )
               row => {
                 val sparkRow = new SparkRow(rowType, row)
                 assigner.assign(
@@ -246,7 +248,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVectors]): Seq[CommitMessage] = {
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
-    val snapshotId = table.snapshotManager().latestSnapshotId();
+    val snapshot = table.snapshotManager().latestSnapshot()
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {
@@ -258,11 +260,11 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             if (dvIndexFileMaintainer == null) {
               val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
               dvIndexFileMaintainer = if (bucketMode == BUCKET_UNAWARE) {
-                AppendDeletionFileMaintainer.forUnawareAppend(indexHandler, snapshotId, partition)
+                AppendDeletionFileMaintainer.forUnawareAppend(indexHandler, snapshot, partition)
               } else {
                 AppendDeletionFileMaintainer.forBucketedAppend(
                   indexHandler,
-                  snapshotId,
+                  snapshot,
                   partition,
                   sdv.bucket)
               }
@@ -397,7 +399,13 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   }
 
   private def repartitionByPartitionsAndBucket(df: DataFrame): DataFrame = {
-    val partitionCols = tableSchema.partitionKeys().asScala.map(col).toSeq
+    val inputSchema = df.schema
+    val partitionCols = tableSchema
+      .partitionKeys()
+      .asScala
+      .map(tableSchema.fieldNames().indexOf(_))
+      .map(x => col(inputSchema.fieldNames(x)))
+      .toSeq
     df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
   }
 

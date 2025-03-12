@@ -62,6 +62,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 
 /** Util class to read and write data for source tests. */
 public class TestChangelogDataReadWrite {
@@ -113,7 +114,7 @@ public class TestChangelogDataReadWrite {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
                         null);
-        this.snapshotManager = new SnapshotManager(LocalFileIO.create(), new Path(root));
+        this.snapshotManager = newSnapshotManager(LocalFileIO.create(), new Path(root));
         this.commitUser = UUID.randomUUID().toString();
     }
 

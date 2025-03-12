@@ -31,6 +31,7 @@ import org.apache.paimon.flink.sink.RestoreAndFailCommittableStateManager;
 import org.apache.paimon.flink.sink.StoreMultiCommitter;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
+import org.apache.paimon.flink.sink.TableFilter;
 import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.MemorySize;
@@ -46,9 +47,11 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Collections;
 
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
 import static org.apache.paimon.flink.sink.FlinkSink.configureGlobalCommitter;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /**
  * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
@@ -64,16 +67,22 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
     private final String commitUser;
+    private boolean eagerInit = false;
+    private TableFilter tableFilter;
 
     public FlinkCdcMultiTableSink(
             CatalogLoader catalogLoader,
             double commitCpuCores,
             @Nullable MemorySize commitHeapMemory,
-            String commitUser) {
+            String commitUser,
+            boolean eagerInit,
+            TableFilter tableFilter) {
         this.catalogLoader = catalogLoader;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
         this.commitUser = commitUser;
+        this.eagerInit = eagerInit;
+        this.tableFilter = tableFilter;
     }
 
     private StoreSinkWrite.WithWriteBufferProvider createWriteProvider() {
@@ -109,10 +118,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
         MultiTableCommittableTypeInfo typeInfo = new MultiTableCommittableTypeInfo();
         SingleOutputStreamOperator<MultiTableCommittable> written =
                 input.transform(
-                                WRITER_NAME,
-                                typeInfo,
-                                createWriteOperator(sinkProvider, commitUser))
-                        .setParallelism(input.getParallelism());
+                        WRITER_NAME, typeInfo, createWriteOperator(sinkProvider, commitUser));
+        forwardParallelism(written, input);
 
         // shuffle committables by table
         DataStream<MultiTableCommittable> partitioned =
@@ -122,17 +129,16 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         input.getParallelism());
 
         SingleOutputStreamOperator<?> committed =
-                partitioned
-                        .transform(
-                                GLOBAL_COMMITTER_NAME,
-                                typeInfo,
-                                new CommitterOperatorFactory<>(
-                                        true,
-                                        false,
-                                        commitUser,
-                                        createCommitterFactory(),
-                                        createCommittableStateManager()))
-                        .setParallelism(input.getParallelism());
+                partitioned.transform(
+                        GLOBAL_COMMITTER_NAME,
+                        typeInfo,
+                        new CommitterOperatorFactory<>(
+                                true,
+                                false,
+                                commitUser,
+                                createCommitterFactory(tableFilter),
+                                createCommittableStateManager()));
+        forwardParallelism(committed, input);
         configureGlobalCommitter(committed, commitCpuCores, commitHeapMemory);
         return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
@@ -146,12 +152,20 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     // Table committers are dynamically created at runtime
     protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>
-            createCommitterFactory() {
+            createCommitterFactory(TableFilter tableFilter) {
+
         // If checkpoint is enabled for streaming job, we have to
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
         // a restart.
-        return context -> new StoreMultiCommitter(catalogLoader, context);
+        return context ->
+                new StoreMultiCommitter(
+                        catalogLoader,
+                        context,
+                        false,
+                        Collections.emptyMap(),
+                        eagerInit,
+                        tableFilter);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {

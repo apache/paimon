@@ -43,6 +43,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
 
+    private transient String commitUser;
     private transient StoreSinkWriteState state;
     protected transient StoreSinkWrite write;
 
@@ -90,11 +91,16 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     }
 
     protected String getCommitUser(StateInitializationContext context) throws Exception {
-        // Each job can only have one username and this name must be consistent across restarts.
-        // We cannot use job id as commit username here because user may change job id by creating
-        // a savepoint, stop the job and then resume from savepoint.
-        return StateUtils.getSingleValueFromState(
-                context, "commit_user_state", String.class, initialCommitUser);
+        if (commitUser == null) {
+            // Each job can only have one username and this name must be consistent across restarts.
+            // We cannot use job id as commit username here because user may change job id by
+            // creating a savepoint, stop the job and then resume from savepoint.
+            commitUser =
+                    StateUtils.getSingleValueFromState(
+                            context, "commit_user_state", String.class, initialCommitUser);
+        }
+
+        return commitUser;
     }
 
     @Override

@@ -35,8 +35,6 @@ import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-import org.apache.flink.connector.base.source.reader.SourceReaderOptions;
-import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
@@ -68,14 +66,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
         FileStoreSourceReaderMetrics sourceReaderMetrics =
                 new FileStoreSourceReaderMetrics(context.metricGroup());
         return new AlignedSourceReader(
-                context,
-                readBuilder.newRead(),
-                sourceReaderMetrics,
-                ioManager,
-                limit,
-                new FutureCompletingBlockingQueue<>(
-                        context.getConfiguration().get(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)),
-                rowData);
+                context, readBuilder.newRead(), sourceReaderMetrics, ioManager, limit, rowData);
     }
 
     @Override

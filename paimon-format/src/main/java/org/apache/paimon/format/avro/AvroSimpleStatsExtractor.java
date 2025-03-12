@@ -39,25 +39,23 @@ import java.util.stream.IntStream;
 public class AvroSimpleStatsExtractor implements SimpleStatsExtractor {
 
     private final RowType rowType;
-    private final SimpleColStatsCollector.Factory[] statsCollectors;
 
     public AvroSimpleStatsExtractor(
             RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
         this.rowType = rowType;
-        this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
                 rowType.getFieldCount() == statsCollectors.length,
                 "The stats collector is not aligned to write schema.");
     }
 
     @Override
-    public SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException {
-        return extractWithFileInfo(fileIO, path).getLeft();
+    public SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException {
+        return extractWithFileInfo(fileIO, path, length).getLeft();
     }
 
     @Override
-    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
-            throws IOException {
+    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
+            FileIO fileIO, Path path, long length) throws IOException {
 
         SeekableInputStream fileInputStream = fileIO.newInputStream(path);
         long rowCount = getRowCount(fileInputStream);

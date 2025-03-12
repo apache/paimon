@@ -30,11 +30,17 @@ import javax.annotation.Nullable;
 public class NextSnapshotFetcher {
 
     public static final Logger LOG = LoggerFactory.getLogger(NextSnapshotFetcher.class);
+
     private final SnapshotManager snapshotManager;
+    private final ChangelogManager changelogManager;
     private final boolean changelogDecoupled;
 
-    public NextSnapshotFetcher(SnapshotManager snapshotManager, boolean changelogDecoupled) {
+    public NextSnapshotFetcher(
+            SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
+            boolean changelogDecoupled) {
         this.snapshotManager = snapshotManager;
+        this.changelogManager = changelogManager;
         this.changelogDecoupled = changelogDecoupled;
     }
 
@@ -63,7 +69,7 @@ public class NextSnapshotFetcher {
             return null;
         }
 
-        if (!changelogDecoupled || !snapshotManager.longLivedChangelogExists(nextSnapshotId)) {
+        if (!changelogDecoupled || !changelogManager.longLivedChangelogExists(nextSnapshotId)) {
             throw new OutOfRangeException(
                     String.format(
                             "The snapshot with id %d has expired. You can: "
@@ -71,6 +77,6 @@ public class NextSnapshotFetcher {
                                     + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
                             nextSnapshotId));
         }
-        return snapshotManager.changelog(nextSnapshotId);
+        return changelogManager.changelog(nextSnapshotId);
     }
 }

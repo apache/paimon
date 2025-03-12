@@ -112,7 +112,7 @@ public class MigrateDatabaseProcedure extends BaseProcedure {
                 successCount++;
             } catch (Exception e) {
                 errorCount++;
-                LOG.error("Call migrate_database error:" + e.getMessage());
+                LOG.error("Call migrate_database error:{}", e.getMessage());
             }
         }
         String retStr =

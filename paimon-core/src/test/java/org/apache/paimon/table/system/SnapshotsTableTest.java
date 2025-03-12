@@ -48,6 +48,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SnapshotsTable}. */
@@ -71,7 +72,7 @@ public class SnapshotsTableTest extends TableTestBase {
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
                         .option(CoreOptions.BUCKET.key(), "2")
                         .build();
-        snapshotManager = new SnapshotManager(fileIO, tablePath);
+        snapshotManager = newSnapshotManager(fileIO, tablePath);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
         FileStoreTable table =

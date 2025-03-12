@@ -38,7 +38,7 @@ import scala.collection.JavaConverters._
 trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   self: SparkTable =>
 
-  private lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
+  lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
 
   override lazy val partitionSchema: StructType = SparkTypeUtils.fromPaimonRowType(partitionRowType)
 
@@ -75,9 +75,9 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
             partitionHandler.close()
           }
         } else {
-          val commit: FileStoreCommit = fileStoreTable.store.newCommit(UUID.randomUUID.toString)
+          val commit = fileStoreTable.newBatchWriteBuilder().newCommit()
           try {
-            commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER)
+            commit.truncatePartitions(partitions)
           } finally {
             commit.close()
           }

@@ -26,6 +26,7 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -57,9 +58,18 @@ public class FormatCatalogTable implements CatalogTable {
 
     @Override
     public Schema getUnresolvedSchema() {
-        return Schema.newBuilder()
-                .fromRowDataType(fromLogicalToDataType(toLogicalType(table.rowType())))
-                .build();
+        final Schema.Builder builder = Schema.newBuilder();
+        RowType logicalType = toLogicalType(table.rowType());
+        logicalType
+                .getFields()
+                .forEach(
+                        field -> {
+                            builder.column(field.getName(), fromLogicalToDataType(field.getType()));
+                            if (field.getDescription().isPresent()) {
+                                builder.withComment(field.getDescription().get());
+                            }
+                        });
+        return builder.build();
     }
 
     @Override

@@ -129,7 +129,7 @@ case class ShowCreatePaimonViewExec(output: Seq[Attribute], catalog: SupportView
     showDataColumns(view, builder)
     showComment(view, builder)
     showProperties(view, builder)
-    builder ++= s"AS\n${view.query}\n"
+    builder ++= s"AS\n${view.query("spark")}\n"
 
     Seq(new GenericInternalRow(values = Array(UTF8String.fromString(builder.toString))))
   }
@@ -203,7 +203,7 @@ case class DescribePaimonViewExec(
     rows += row("# Detailed View Information", "", "")
     rows += row("Name", view.fullName(), "")
     rows += row("Comment", view.comment().orElse(""), "")
-    rows += row("View Text", view.query, "")
+    rows += row("View Text", view.query("spark"), "")
     rows += row(
       "View Query Output Columns",
       view.rowType().getFieldNames.asScala.mkString("[", ", ", "]"),

@@ -69,6 +69,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_OPERATOR_UID_SU
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
+import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract sink of paimon. */
@@ -140,7 +141,7 @@ public abstract class FlinkSink<T> implements Serializable {
             }
         }
 
-        if (coreOptions.needLookup() && !coreOptions.prepareCommitWaitCompaction()) {
+        if (coreOptions.laziedLookup()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
                 assertNoSinkMaterializer.run();
                 return new AsyncLookupSinkWrite(
@@ -182,7 +183,7 @@ public abstract class FlinkSink<T> implements Serializable {
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input, String initialCommitUser) {
         // do the actually writing action, no snapshot generated in this stage
-        DataStream<Committable> written = doWrite(input, initialCommitUser, input.getParallelism());
+        DataStream<Committable> written = doWrite(input, initialCommitUser, null);
         // commit the committable to generate a new snapshot
         return doCommit(written, initialCommitUser);
     }
@@ -216,17 +217,19 @@ public abstract class FlinkSink<T> implements Serializable {
         boolean writeOnly = table.coreOptions().writeOnly();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
-                                (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME)
-                                        + " : "
-                                        + table.name(),
-                                new CommittableTypeInfo(),
-                                createWriteOperatorFactory(
-                                        createWriteProvider(
-                                                env.getCheckpointConfig(),
-                                                isStreaming,
-                                                hasSinkMaterializer(input)),
-                                        commitUser))
-                        .setParallelism(parallelism == null ? input.getParallelism() : parallelism);
+                        (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME) + " : " + table.name(),
+                        new CommittableTypeInfo(),
+                        createWriteOperatorFactory(
+                                createWriteProvider(
+                                        env.getCheckpointConfig(),
+                                        isStreaming,
+                                        hasSinkMaterializer(input)),
+                                commitUser));
+        if (parallelism == null) {
+            forwardParallelism(written, input);
+        } else {
+            written.setParallelism(parallelism);
+        }
 
         Options options = Options.fromMap(table.options());
 
@@ -239,8 +242,8 @@ public abstract class FlinkSink<T> implements Serializable {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
 
-        if (options.get(PRECOMMIT_COMPACT)) {
-            written =
+        if (!table.primaryKeys().isEmpty() && options.get(PRECOMMIT_COMPACT)) {
+            SingleOutputStreamOperator<Committable> newWritten =
                     written.transform(
                                     "Changelog Compact Coordinator",
                                     new EitherTypeInfo<>(
@@ -250,14 +253,15 @@ public abstract class FlinkSink<T> implements Serializable {
                             .transform(
                                     "Changelog Compact Worker",
                                     new CommittableTypeInfo(),
-                                    new ChangelogCompactWorkerOperator(table))
-                            .setParallelism(written.getParallelism());
+                                    new ChangelogCompactWorkerOperator(table));
+            forwardParallelism(newWritten, written);
+            written = newWritten;
         }
 
         return written;
     }
 
-    protected DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
+    public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
         ReadableConfig conf = env.getConfiguration();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();

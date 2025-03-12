@@ -332,6 +332,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_comment");
         mySqlConfig.put("debezium.include.schema.comments", "true");
+        mySqlConfig.put("jdbc.properties.useInformationSchema", "true");
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
@@ -350,6 +351,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     private void testSchemaEvolutionWithCommentImpl(Statement statement) throws Exception {
         FileStoreTable table = getFileStoreTable();
+        assertThat(table.comment()).hasValue("schema_evolution_comment");
         statement.executeUpdate("USE " + DATABASE_NAME);
         statement.executeUpdate("INSERT INTO schema_evolution_comment VALUES (1, 'one')");
 

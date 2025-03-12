@@ -19,16 +19,17 @@
 package org.apache.paimon.open.api;
 
 import org.apache.paimon.partition.Partition;
-import org.apache.paimon.rest.ResourcePaths;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -38,15 +39,18 @@ import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
+import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -64,6 +68,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Arrays;
@@ -72,6 +77,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import static org.apache.paimon.rest.RESTCatalog.QUERY_PARAMETER_WAREHOUSE_KEY;
 
 /** RESTCatalog management APIs. */
 @CrossOrigin(origins = "http://localhost:8081")
@@ -89,8 +96,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @GetMapping(ResourcePaths.V1_CONFIG)
-    public ConfigResponse getConfig() {
+    @GetMapping("/v1/config")
+    public ConfigResponse getConfig(@RequestParam(QUERY_PARAMETER_WAREHOUSE_KEY) String warehouse) {
         Map<String, String> defaults = new HashMap<>();
         Map<String, String> overrides = new HashMap<>();
         return new ConfigResponse(defaults, overrides);
@@ -221,8 +228,47 @@ public class RESTCatalogController {
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables")
     public ListTablesResponse listTables(
-            @PathVariable String prefix, @PathVariable String database) {
-        return new ListTablesResponse(ImmutableList.of("user"));
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // paged list tables in this database with provided maxResults and pageToken
+        return new ListTablesResponse(ImmutableList.of("user"), null);
+    }
+
+    @Operation(
+            summary = "List table details",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = ListTableDetailsResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/table-details")
+    public ListTableDetailsResponse listTableDetails(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // paged list table details in this database with provided maxResults and pageToken
+        GetTableResponse singleTable =
+                new GetTableResponse(
+                        UUID.randomUUID().toString(),
+                        "",
+                        false,
+                        1,
+                        new org.apache.paimon.schema.Schema(
+                                ImmutableList.of(),
+                                ImmutableList.of(),
+                                ImmutableList.of(),
+                                new HashMap<>(),
+                                "test-comment"));
+        return new ListTableDetailsResponse(ImmutableList.of(singleTable), null);
     }
 
     @Operation(
@@ -252,6 +298,7 @@ public class RESTCatalogController {
         return new GetTableResponse(
                 UUID.randomUUID().toString(),
                 "",
+                false,
                 1,
                 new org.apache.paimon.schema.Schema(
                         ImmutableList.of(),
@@ -328,11 +375,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/rename")
-    public void renameTable(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @RequestBody RenameTableRequest request) {}
+    @PostMapping("/v1/{prefix}/tables/rename")
+    public void renameTable(@PathVariable String prefix, @RequestBody RenameTableRequest request) {}
 
     @Operation(
             summary = "Commit table",
@@ -349,10 +393,11 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/commit")
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/commit")
     public CommitTableResponse commitTable(
             @PathVariable String prefix,
             @PathVariable String database,
+            @PathVariable String table,
             @RequestBody CommitTableRequest request) {
         return new CommitTableResponse(true);
     }
@@ -384,6 +429,31 @@ public class RESTCatalogController {
     }
 
     @Operation(
+            summary = "Get table snapshot",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = GetTableSnapshotResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/snapshot")
+    public GetTableSnapshotResponse getTableSnapshot(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table) {
+        return new GetTableSnapshotResponse(null);
+    }
+
+    @Operation(
             summary = "List partitions",
             tags = {"partition"})
     @ApiResponses({
@@ -404,7 +474,10 @@ public class RESTCatalogController {
     public ListPartitionsResponse listPartitions(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable String table) {
+            @PathVariable String table,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // paged list partitions in this table with provided maxResults and pageToken
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
         Partition partition = new Partition(spec, 1, 2, 3, 4);
@@ -492,6 +565,84 @@ public class RESTCatalogController {
             @RequestBody MarkDonePartitionsRequest request) {}
 
     @Operation(
+            summary = "List branches",
+            tags = {"branch"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = ListBranchesResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches")
+    public ListBranchesResponse listBranches(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table) {
+        return new ListBranchesResponse(ImmutableList.of("branch"));
+    }
+
+    @Operation(
+            summary = "Create branch",
+            tags = {"branch"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches")
+    public void createBranch(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody CreateBranchRequest request) {}
+
+    @Operation(
+            summary = "Forward branch",
+            tags = {"branch"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward")
+    public void forwardBranch(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @PathVariable String branch,
+            @RequestBody ForwardBranchRequest request) {}
+
+    @Operation(
+            summary = "Drop branch",
+            tags = {"branch"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @DeleteMapping("/v1/{prefix}/databases/{database}/tables/table/branches/branch")
+    public void dropBranch(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @PathVariable String branch) {}
+
+    @Operation(
             summary = "List views",
             tags = {"view"})
     @ApiResponses({
@@ -507,8 +658,50 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/views")
-    public ListViewsResponse listViews(@PathVariable String prefix, @PathVariable String database) {
-        return new ListViewsResponse(ImmutableList.of("view1"));
+    public ListViewsResponse listViews(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // support paged list views in this database with provided maxResults and pageToken
+        return new ListViewsResponse(ImmutableList.of("view1"), null);
+    }
+
+    @Operation(
+            summary = "List view details",
+            tags = {"view"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = ListViewsResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/views")
+    public ListViewDetailsResponse listViewDetails(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        // paged list view details in this database with provided maxResults and pageToken
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", new IntType()),
+                        new DataField(1, "f1", new IntType()));
+        ViewSchema schema =
+                new ViewSchema(
+                        fields,
+                        "select * from t1",
+                        Collections.emptyMap(),
+                        "comment",
+                        Collections.singletonMap("pt", "1"));
+        GetViewResponse singleView = new GetViewResponse("id", "name", schema);
+        return new ListViewDetailsResponse(ImmutableList.of(singleView), null);
     }
 
     @Operation(
@@ -554,10 +747,11 @@ public class RESTCatalogController {
                         new DataField(1, "f1", new IntType()));
         ViewSchema schema =
                 new ViewSchema(
-                        new RowType(fields),
-                        Collections.singletonMap("pt", "1"),
+                        fields,
+                        "select * from t1",
+                        Collections.emptyMap(),
                         "comment",
-                        "select * from t1");
+                        Collections.singletonMap("pt", "1"));
         return new GetViewResponse("id", "name", schema);
     }
 
@@ -574,11 +768,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/views/rename")
-    public void renameView(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @RequestBody RenameTableRequest request) {}
+    @PostMapping("/v1/{prefix}/views/rename")
+    public void renameView(@PathVariable String prefix, @RequestBody RenameTableRequest request) {}
 
     @Operation(
             summary = "Drop view",

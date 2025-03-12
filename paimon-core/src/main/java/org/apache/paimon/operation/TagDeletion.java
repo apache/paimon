@@ -26,6 +26,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.DataFilePathFactories;
@@ -73,7 +74,10 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
     public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ExpireFileEntry> skipper) {
         Collection<ExpireFileEntry> manifestEntries;
         try {
-            manifestEntries = readMergedDataFiles(taggedSnapshot);
+            List<ManifestFileMeta> manifests =
+                    tryReadManifestList(taggedSnapshot.baseManifestList());
+            manifests.addAll(tryReadManifestList(taggedSnapshot.deltaManifestList()));
+            manifestEntries = readMergedDataFiles(manifests);
         } catch (IOException e) {
             LOG.info("Skip data file clean for the tag of id {}.", taggedSnapshot.id(), e);
             return;

@@ -20,9 +20,7 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -32,15 +30,11 @@ import javax.annotation.Nullable;
  */
 public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
 
-    private final InternalRowSerializer keySerializer;
-    private final InternalRowSerializer valueSerializer;
     private KeyValue first;
     public boolean containsHighLevel;
     private final boolean ignoreDelete;
 
-    protected FirstRowMergeFunction(RowType keyType, RowType valueType, boolean ignoreDelete) {
-        this.keySerializer = new InternalRowSerializer(keyType);
-        this.valueSerializer = new InternalRowSerializer(valueType);
+    protected FirstRowMergeFunction(boolean ignoreDelete) {
         this.ignoreDelete = ignoreDelete;
     }
 
@@ -65,7 +59,7 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
         }
 
         if (first == null) {
-            this.first = kv.copy(keySerializer, valueSerializer);
+            this.first = kv;
         }
         if (kv.level() > 0) {
             containsHighLevel = true;
@@ -77,28 +71,27 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
         return first;
     }
 
-    public static MergeFunctionFactory<KeyValue> factory(
-            Options options, RowType keyType, RowType valueType) {
-        return new FirstRowMergeFunction.Factory(
-                keyType, valueType, options.get(CoreOptions.IGNORE_DELETE));
+    @Override
+    public boolean requireCopy() {
+        return true;
+    }
+
+    public static MergeFunctionFactory<KeyValue> factory(Options options) {
+        return new FirstRowMergeFunction.Factory(options.get(CoreOptions.IGNORE_DELETE));
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
 
         private static final long serialVersionUID = 1L;
-        private final RowType keyType;
-        private final RowType valueType;
         private final boolean ignoreDelete;
 
-        public Factory(RowType keyType, RowType valueType, boolean ignoreDelete) {
-            this.keyType = keyType;
-            this.valueType = valueType;
+        public Factory(boolean ignoreDelete) {
             this.ignoreDelete = ignoreDelete;
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            return new FirstRowMergeFunction(keyType, valueType, ignoreDelete);
+            return new FirstRowMergeFunction(ignoreDelete);
         }
     }
 }

@@ -21,6 +21,9 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -37,6 +40,8 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,6 +57,7 @@ public class InternalRowUtilsTest {
                     .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
                     .field("char", DataTypes.CHAR(10).notNull())
                     .field("varchar", DataTypes.VARCHAR(10).notNull())
+                    .field("binary", DataTypes.BINARY(10).notNull())
                     .field("boolean", DataTypes.BOOLEAN().nullable())
                     .field("tinyint", DataTypes.TINYINT())
                     .field("smallint", DataTypes.SMALLINT())
@@ -143,5 +149,77 @@ public class InternalRowUtilsTest {
                                 BinaryString.fromString("b"),
                                 DataTypeRoot.VARCHAR))
                 .isLessThan(0);
+    }
+
+    @Test
+    public void testEqualsAndHashCode() {
+        for (int i = 0; i < 10; i++) {
+            GenericRow row1 = (GenericRow) rowDataGenerator.next();
+            GenericRow row2 = (GenericRow) InternalRowUtils.copyInternalRow(row1, ROW_TYPE);
+            GenericRow row3 = (GenericRow) rowDataGenerator.next();
+            assertThat(InternalRowUtils.equals(row1, row2, ROW_TYPE)).isTrue();
+            assertThat(InternalRowUtils.equals(row1, row3, ROW_TYPE)).isFalse();
+
+            assertThat(InternalRowUtils.hash(row1, ROW_TYPE))
+                    .isEqualTo(InternalRowUtils.hash(row2, ROW_TYPE));
+            assertThat(InternalRowUtils.hash(row1, ROW_TYPE))
+                    .isNotEqualTo(InternalRowUtils.hash(row3, ROW_TYPE));
+        }
+
+        RowType rowType =
+                RowType.builder()
+                        .field("f1", DataTypes.DOUBLE())
+                        .field("f2", DataTypes.FLOAT())
+                        .field("f3", DataTypes.BINARY(3))
+                        .field("f4", DataTypes.STRING())
+                        .field("f5", DataTypes.ARRAY(DataTypes.ROW(DataTypes.INT())))
+                        .field(
+                                "f6",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.ROW(DataTypes.INT())))
+                        .field("f7", DataTypes.ROW(DataTypes.INT()))
+                        .build();
+        GenericRow row1 = new GenericRow(7);
+        row1.setField(0, Double.NaN);
+        row1.setField(1, Float.NaN);
+        row1.setField(2, "abc".getBytes());
+        row1.setField(3, null);
+        row1.setField(4, new GenericArray(new GenericRow[] {GenericRow.of(1), GenericRow.of(10)}));
+        Map<BinaryString, InternalRow> map = new HashMap<>();
+        map.put(BinaryString.fromString("a"), GenericRow.of(1));
+        map.put(BinaryString.fromString("b"), GenericRow.of(2));
+        row1.setField(5, new GenericMap(map));
+        row1.setField(6, GenericRow.of(1));
+        GenericRow row2 = (GenericRow) InternalRowUtils.copyInternalRow(row1, rowType);
+        assertThat(InternalRowUtils.equals(row1, row2, rowType)).isTrue();
+        assertThat(InternalRowUtils.hash(row1, rowType))
+                .isEqualTo(InternalRowUtils.hash(row2, rowType));
+    }
+
+    @Test
+    public void testEqualsAndHashCodeNegativeCase() {
+        // different array len
+        RowType rowType = RowType.builder().field("f1", DataTypes.ARRAY(DataTypes.INT())).build();
+        GenericRow rowWithArray1 = new GenericRow(1);
+        rowWithArray1.setField(
+                0, new GenericArray(new GenericRow[] {GenericRow.of(1), GenericRow.of(10)}));
+        GenericRow rowWithArray2 = new GenericRow(1);
+        rowWithArray2.setField(0, new GenericArray(new GenericRow[] {GenericRow.of(1)}));
+        assertThat(InternalRowUtils.equals(rowWithArray1, rowWithArray2, rowType)).isFalse();
+
+        // different map len
+        RowType rowType2 =
+                RowType.builder()
+                        .field("f1", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()))
+                        .build();
+        Map<BinaryString, InternalRow> map1 = new HashMap<>();
+        map1.put(BinaryString.fromString("a"), GenericRow.of(1));
+        map1.put(BinaryString.fromString("b"), GenericRow.of(2));
+        GenericRow rowWithMap1 = new GenericRow(1);
+        rowWithMap1.setField(0, new GenericMap(map1));
+        Map<BinaryString, InternalRow> map2 = new HashMap<>();
+        map2.put(BinaryString.fromString("a"), GenericRow.of(1));
+        GenericRow rowWithMap2 = new GenericRow(1);
+        rowWithMap2.setField(0, new GenericMap(map2));
+        assertThat(InternalRowUtils.equals(rowWithMap1, rowWithMap2, rowType2)).isFalse();
     }
 }

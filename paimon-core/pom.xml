@@ -284,12 +284,22 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>com.squareup.okhttp3:okhttp</include>
+                                    <include>com.squareup.okio:okio-jvm</include>
+                                    <include>org.jetbrains.kotlin:kotlin-stdlib</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
                                 <relocation>
                                     <pattern>okhttp3</pattern>
                                     <shadedPattern>org.apache.paimon.shade.okhttp3</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>kotlin</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.kotlin</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>okio</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.okio</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

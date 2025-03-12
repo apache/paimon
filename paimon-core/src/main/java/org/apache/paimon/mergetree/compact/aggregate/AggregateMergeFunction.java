@@ -96,6 +96,11 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         return reused.replace(latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, row);
     }
 
+    @Override
+    public boolean requireCopy() {
+        return false;
+    }
+
     public static MergeFunctionFactory<KeyValue> factory(
             Options conf,
             List<String> tableNames,

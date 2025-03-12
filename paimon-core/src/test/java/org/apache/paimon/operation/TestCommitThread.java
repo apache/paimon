@@ -96,7 +96,7 @@ public class TestCommitThread extends Thread {
         this.write = safeStore.newWrite(commitUser);
         this.commit =
                 retryArtificialException(
-                        () -> testStore.newCommit(commitUser).ignoreEmptyCommit(false));
+                        () -> testStore.newCommit(commitUser, null).ignoreEmptyCommit(false));
 
         this.commitIdentifier = 0;
     }

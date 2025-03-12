@@ -308,6 +308,27 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCrossPartitionFallbackBranchBatchRead() throws Exception {
+        sql(
+                "CREATE TABLE t ( pk INT PRIMARY KEY NOT ENFORCED, name STRING, dt STRING ) PARTITIONED BY (dt) WITH ( 'bucket' = '-1' )");
+        sql(
+                "INSERT INTO t VALUES (1, 'Jack', '20250227'), (1, 'Jackson', '20250227'), (2, 'Sam', '20250228')");
+        sql("CALL sys.create_branch('default.t', 'stream')");
+        sql("ALTER TABLE t SET ( 'scan.fallback-branch' = 'stream' )");
+
+        sql(
+                "INSERT INTO `t$branch_stream` VALUES (1, 'John Stream', '20250228'), (3, 'Rick Stream', '20250301')");
+        assertThat(collectResult("SELECT pk, name, dt FROM t order by dt"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, Jackson, 20250227]",
+                        "+I[2, Sam, 20250228]",
+                        "+I[3, Rick Stream, 20250301]");
+        assertThat(collectResult("SELECT pk, name, dt FROM `t$branch_stream` order by dt"))
+                .containsExactlyInAnyOrder(
+                        "+I[1, John Stream, 20250228]", "+I[3, Rick Stream, 20250301]");
+    }
+
+    @Test
     public void testDifferentRowTypes() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");

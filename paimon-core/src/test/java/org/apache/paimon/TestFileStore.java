@@ -57,9 +57,11 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.HintFileUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -155,12 +157,13 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public FileStoreCommitImpl newCommit() {
-        return super.newCommit(commitUser);
+        return super.newCommit(commitUser, null);
     }
 
     public ExpireSnapshots newExpire(int numRetainedMin, int numRetainedMax, long millisRetained) {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
+                        changelogManager(),
                         newSnapshotDeletion(),
                         new TagManager(fileIO, options.path()))
                 .config(
@@ -174,6 +177,7 @@ public class TestFileStore extends KeyValueFileStore {
     public ExpireSnapshots newExpire(ExpireConfig expireConfig) {
         return new ExpireSnapshotsImpl(
                         snapshotManager(),
+                        changelogManager(),
                         newSnapshotDeletion(),
                         new TagManager(fileIO, options.path()))
                 .config(expireConfig);
@@ -183,6 +187,7 @@ public class TestFileStore extends KeyValueFileStore {
         ExpireChangelogImpl impl =
                 new ExpireChangelogImpl(
                         snapshotManager(),
+                        changelogManager(),
                         new TagManager(fileIO, options.path()),
                         newChangelogDeletion());
         impl.config(config);
@@ -257,7 +262,7 @@ public class TestFileStore extends KeyValueFileStore {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
 
-        try (FileStoreCommit commit = newCommit(commitUser)) {
+        try (FileStoreCommit commit = newCommit(commitUser, null)) {
             commit.dropPartitions(partitions, Long.MAX_VALUE);
         }
 
@@ -347,7 +352,7 @@ public class TestFileStore extends KeyValueFileStore {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
 
-        try (FileStoreCommit commit = newCommit(commitUser)) {
+        try (FileStoreCommit commit = newCommit(commitUser, null)) {
             commitFunction.accept(commit, committable);
         }
 
@@ -493,32 +498,33 @@ public class TestFileStore extends KeyValueFileStore {
         // - latest should < true_latest
         // - earliest should < true_earliest
         SnapshotManager snapshotManager = snapshotManager();
+        ChangelogManager changelogManager = changelogManager();
         Path snapshotDir = snapshotManager.snapshotDirectory();
-        Path earliest = new Path(snapshotDir, SnapshotManager.EARLIEST);
-        Path latest = new Path(snapshotDir, SnapshotManager.LATEST);
+        Path earliest = new Path(snapshotDir, HintFileUtils.EARLIEST);
+        Path latest = new Path(snapshotDir, HintFileUtils.LATEST);
         if (actualFiles.remove(earliest)) {
-            long earliestId = snapshotManager.readHint(SnapshotManager.EARLIEST);
+            long earliestId = snapshotManager.earliestSnapshotId();
             fileIO.delete(earliest, false);
             assertThat(earliestId <= snapshotManager.earliestSnapshotId()).isTrue();
         }
         if (actualFiles.remove(latest)) {
-            long latestId = snapshotManager.readHint(SnapshotManager.LATEST);
+            long latestId = snapshotManager.latestSnapshotId();
             fileIO.delete(latest, false);
             assertThat(latestId <= snapshotManager.latestSnapshotId()).isTrue();
         }
-        Path changelogDir = snapshotManager.changelogDirectory();
-        Path earliestChangelog = new Path(changelogDir, SnapshotManager.EARLIEST);
-        Path latestChangelog = new Path(changelogDir, SnapshotManager.LATEST);
+        Path changelogDir = changelogManager.changelogDirectory();
+        Path earliestChangelog = new Path(changelogDir, HintFileUtils.EARLIEST);
+        Path latestChangelog = new Path(changelogDir, HintFileUtils.LATEST);
 
         if (actualFiles.remove(earliestChangelog)) {
-            long earliestId = snapshotManager.readHint(SnapshotManager.EARLIEST, changelogDir);
+            long earliestId = changelogManager.earliestLongLivedChangelogId();
             fileIO.delete(earliest, false);
-            assertThat(earliestId <= snapshotManager.earliestLongLivedChangelogId()).isTrue();
+            assertThat(earliestId <= changelogManager.earliestLongLivedChangelogId()).isTrue();
         }
         if (actualFiles.remove(latestChangelog)) {
-            long latestId = snapshotManager.readHint(SnapshotManager.LATEST, changelogDir);
+            long latestId = changelogManager.latestLongLivedChangelogId();
             fileIO.delete(latest, false);
-            assertThat(latestId <= snapshotManager.latestLongLivedChangelogId()).isTrue();
+            assertThat(latestId <= changelogManager.latestLongLivedChangelogId()).isTrue();
         }
 
         // for easier debugging
@@ -539,6 +545,7 @@ public class TestFileStore extends KeyValueFileStore {
         schemaManager.listAllIds().forEach(id -> result.add(schemaManager.toSchemaPath(id)));
 
         SnapshotManager snapshotManager = snapshotManager();
+        ChangelogManager changelogManager = changelogManager();
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
 
         if (latestSnapshotId == null) {
@@ -548,7 +555,7 @@ public class TestFileStore extends KeyValueFileStore {
         long firstInUseSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         for (long id = latestSnapshotId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
             if (!snapshotManager.snapshotExists(id)
-                    && !snapshotManager.longLivedChangelogExists(id)) {
+                    && !changelogManager.longLivedChangelogExists(id)) {
                 firstInUseSnapshotId = id + 1;
                 break;
             }
@@ -565,6 +572,7 @@ public class TestFileStore extends KeyValueFileStore {
         return getFilesInUse(
                 snapshotId,
                 snapshotManager(),
+                changelogManager(),
                 fileIO,
                 pathFactory(),
                 manifestListFactory().create(),
@@ -574,6 +582,7 @@ public class TestFileStore extends KeyValueFileStore {
     public static Set<Path> getFilesInUse(
             long snapshotId,
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestList manifestList,
@@ -585,16 +594,18 @@ public class TestFileStore extends KeyValueFileStore {
                     getSnapshotFileInUse(
                             snapshotId,
                             snapshotManager,
+                            changelogManager,
                             fileIO,
                             pathFactory,
                             manifestList,
                             manifestFile);
             result.addAll(files);
-        } else if (snapshotManager.longLivedChangelogExists(snapshotId)) {
+        } else if (changelogManager.longLivedChangelogExists(snapshotId)) {
             Set<Path> files =
                     getChangelogFileInUse(
                             snapshotId,
                             snapshotManager,
+                            changelogManager,
                             fileIO,
                             pathFactory,
                             manifestList,
@@ -611,6 +622,7 @@ public class TestFileStore extends KeyValueFileStore {
     private static Set<Path> getSnapshotFileInUse(
             long snapshotId,
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestList manifestList,
@@ -621,7 +633,7 @@ public class TestFileStore extends KeyValueFileStore {
         boolean produceChangelog =
                 options.changelogProducer() != CoreOptions.ChangelogProducer.NONE;
         // The option from the table may not align with the expiration config
-        boolean changelogDecoupled = snapshotManager.earliestLongLivedChangelogId() != null;
+        boolean changelogDecoupled = changelogManager.earliestLongLivedChangelogId() != null;
 
         Path snapshotPath = snapshotManager.snapshotPath(snapshotId);
         Snapshot snapshot = Snapshot.fromPath(fileIO, snapshotPath);
@@ -683,6 +695,7 @@ public class TestFileStore extends KeyValueFileStore {
     private static Set<Path> getChangelogFileInUse(
             long changelogId,
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestList manifestList,
@@ -691,7 +704,7 @@ public class TestFileStore extends KeyValueFileStore {
         SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
         CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
 
-        Path changelogPath = snapshotManager.longLivedChangelogPath(changelogId);
+        Path changelogPath = changelogManager.longLivedChangelogPath(changelogId);
         Changelog changelog = Changelog.fromPath(fileIO, changelogPath);
 
         // changelog file

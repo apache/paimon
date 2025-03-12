@@ -23,5 +23,8 @@ public enum ErrorResponseResourceType {
     DATABASE,
     TABLE,
     COLUMN,
+    SNAPSHOT,
+    BRANCH,
+    TAG,
     VIEW
 }

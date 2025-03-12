@@ -59,6 +59,8 @@ public interface FileStoreScan {
 
     FileStoreScan withBucket(int bucket);
 
+    FileStoreScan onlyReadRealBuckets();
+
     FileStoreScan withBucketFilter(Filter<Integer> bucketFilter);
 
     FileStoreScan withTotalAwareBucketFilter(BiFilter<Integer, Integer> bucketFilter);

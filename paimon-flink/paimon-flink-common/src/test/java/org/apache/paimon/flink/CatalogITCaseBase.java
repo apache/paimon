@@ -58,6 +58,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+
 /** ITCase for catalog. */
 public abstract class CatalogITCaseBase extends AbstractTestBase {
 
@@ -204,7 +206,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     @Nullable
     protected Snapshot findLatestSnapshot(String tableName) {
         SnapshotManager snapshotManager =
-                new SnapshotManager(LocalFileIO.create(), getTableDirectory(tableName));
+                newSnapshotManager(LocalFileIO.create(), getTableDirectory(tableName));
         Long id = snapshotManager.latestSnapshotId();
         return id == null ? null : snapshotManager.snapshot(id);
     }
@@ -212,7 +214,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     @Nullable
     protected Snapshot findSnapshot(String tableName, long snapshotId) {
         SnapshotManager snapshotManager =
-                new SnapshotManager(LocalFileIO.create(), getTableDirectory(tableName));
+                newSnapshotManager(LocalFileIO.create(), getTableDirectory(tableName));
         Long id = snapshotManager.latestSnapshotId();
         return id == null ? null : id >= snapshotId ? snapshotManager.snapshot(snapshotId) : null;
     }

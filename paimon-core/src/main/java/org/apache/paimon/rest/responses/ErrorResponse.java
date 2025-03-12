@@ -25,12 +25,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
 /** Response for error. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ErrorResponse implements RESTResponse {
@@ -39,7 +33,6 @@ public class ErrorResponse implements RESTResponse {
     private static final String FIELD_RESOURCE_TYPE = "resourceType";
     private static final String FIELD_RESOURCE_NAME = "resourceName";
     private static final String FIELD_CODE = "code";
-    private static final String FIELD_STACK = "stack";
 
     @JsonProperty(FIELD_RESOURCE_TYPE)
     private final ErrorResponseResourceType resourceType;
@@ -53,9 +46,6 @@ public class ErrorResponse implements RESTResponse {
     @JsonProperty(FIELD_CODE)
     private final Integer code;
 
-    @JsonProperty(FIELD_STACK)
-    private final List<String> stack;
-
     public ErrorResponse(
             ErrorResponseResourceType resourceType,
             String resourceName,
@@ -65,7 +55,6 @@ public class ErrorResponse implements RESTResponse {
         this.resourceName = resourceName;
         this.code = code;
         this.message = message;
-        this.stack = new ArrayList<String>();
     }
 
     @JsonCreator
@@ -73,13 +62,11 @@ public class ErrorResponse implements RESTResponse {
             @JsonProperty(FIELD_RESOURCE_TYPE) ErrorResponseResourceType resourceType,
             @JsonProperty(FIELD_RESOURCE_NAME) String resourceName,
             @JsonProperty(FIELD_MESSAGE) String message,
-            @JsonProperty(FIELD_CODE) int code,
-            @JsonProperty(FIELD_STACK) List<String> stack) {
+            @JsonProperty(FIELD_CODE) int code) {
         this.resourceType = resourceType;
         this.resourceName = resourceName;
         this.message = message;
         this.code = code;
-        this.stack = stack;
     }
 
     @JsonGetter(FIELD_MESSAGE)
@@ -100,22 +87,5 @@ public class ErrorResponse implements RESTResponse {
     @JsonGetter(FIELD_CODE)
     public Integer getCode() {
         return code;
-    }
-
-    @JsonGetter(FIELD_STACK)
-    public List<String> getStack() {
-        return stack;
-    }
-
-    private List<String> getStackFromThrowable(Throwable throwable) {
-        if (throwable == null) {
-            return new ArrayList<String>();
-        }
-        StringWriter sw = new StringWriter();
-        try (PrintWriter pw = new PrintWriter(sw)) {
-            throwable.printStackTrace(pw);
-        }
-
-        return Arrays.asList(sw.toString().split("\n"));
     }
 }

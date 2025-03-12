@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -33,16 +34,22 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
     private static final Logger LOG =
             LoggerFactory.getLogger(ContinuousFromTimestampStartingScanner.class);
 
+    private final ChangelogManager changelogManager;
     private final long startupMillis;
     private final boolean startFromChangelog;
 
     public ContinuousFromTimestampStartingScanner(
-            SnapshotManager snapshotManager, long startupMillis, boolean changelogDecoupled) {
+            SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
+            long startupMillis,
+            boolean changelogDecoupled) {
         super(snapshotManager);
+        this.changelogManager = changelogManager;
         this.startupMillis = startupMillis;
         this.startFromChangelog = changelogDecoupled;
         this.startingSnapshotId =
-                this.snapshotManager.earlierThanTimeMills(startupMillis, startFromChangelog);
+                TimeTravelUtil.earlierThanTimeMills(
+                        snapshotManager, changelogManager, startupMillis, startFromChangelog);
     }
 
     @Override
@@ -56,8 +63,11 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        Long startingSnapshotId =
-                snapshotManager.earlierThanTimeMills(startupMillis, startFromChangelog);
+        if (startingSnapshotId == null) {
+            startingSnapshotId =
+                    TimeTravelUtil.earlierThanTimeMills(
+                            snapshotManager, changelogManager, startupMillis, startFromChangelog);
+        }
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
             return new NoSnapshot();

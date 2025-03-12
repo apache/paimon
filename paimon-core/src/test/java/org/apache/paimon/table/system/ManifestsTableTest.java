@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertThrows;
@@ -76,7 +77,7 @@ public class ManifestsTableTest extends TableTestBase {
 
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        snapshotManager = new SnapshotManager(fileIO, tablePath);
+        snapshotManager = newSnapshotManager(fileIO, tablePath);
 
         ManifestList.Factory factory =
                 new ManifestList.Factory(

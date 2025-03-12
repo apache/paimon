@@ -410,6 +410,54 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void tesWriteBufferSpillAutoEnabled() {
+        HashMap<String, String> map = new HashMap<>();
+        // This is the default behavior,no object store and streaming mode.
+        Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(false, true, false))
+                .isFalse();
+
+        // Using object store.
+        Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(true, true, false))
+                .isTrue();
+
+        // Batch mode.
+        Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(false, false, false))
+                .isTrue();
+
+        // Append only table.
+        map.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "200 MB");
+        Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(false, false, false))
+                .isTrue();
+
+        // Primary key table.
+        map.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "100 MB");
+        Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(false, false, true))
+                .isTrue();
+
+        // targetFileSize is greater than write buffer size.
+        map.clear();
+        map.put(CoreOptions.TARGET_FILE_SIZE.key(), "2 b");
+        map.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "1 b");
+        Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(false, true, false))
+                .isTrue();
+
+        // target-file-size is smaller than write-buffer-size.
+        map.clear();
+        map.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
+        map.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "2 b");
+        Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(false, true, false))
+                .isFalse();
+
+        // Set to false manually.
+        map.clear();
+        map.put(CoreOptions.TARGET_FILE_SIZE.key(), "2 b");
+        map.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "1 b");
+        map.put(CoreOptions.WRITE_BUFFER_SPILLABLE.key(), "false");
+        Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(false, true, false))
+                .isFalse();
+    }
+
+    @Test
     public void testMultipleFlush() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 

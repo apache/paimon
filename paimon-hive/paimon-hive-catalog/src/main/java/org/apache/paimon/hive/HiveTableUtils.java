@@ -21,14 +21,12 @@ package org.apache.paimon.hive;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FormatTable.Format;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
+import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -53,12 +51,22 @@ class HiveTableUtils {
         List<String> partitionKeys = getFieldNames(hiveTable.getPartitionKeys());
         RowType rowType = createRowType(hiveTable);
         String comment = options.remove(COMMENT_PROP);
-        String location = hiveTable.getSd().getLocation();
+        StorageDescriptor sd = hiveTable.getSd();
+        if (sd == null) {
+            throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
+        }
+        String location = sd.getLocation();
 
         Format format;
-        SerDeInfo serdeInfo = hiveTable.getSd().getSerdeInfo();
-        String serLib = serdeInfo.getSerializationLib().toLowerCase();
-        String inputFormat = hiveTable.getSd().getInputFormat();
+        SerDeInfo serdeInfo = sd.getSerdeInfo();
+        if (serdeInfo == null) {
+            throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
+        }
+        String serLib =
+                serdeInfo.getSerializationLib() == null
+                        ? ""
+                        : serdeInfo.getSerializationLib().toLowerCase();
+        String inputFormat = sd.getInputFormat() == null ? "" : sd.getInputFormat();
         if (serLib.contains("parquet")) {
             format = Format.PARQUET;
         } else if (serLib.contains("orc")) {
@@ -96,24 +104,11 @@ class HiveTableUtils {
     public static RowType createRowType(Table table) {
         List<FieldSchema> allCols = new ArrayList<>(table.getSd().getCols());
         allCols.addAll(table.getPartitionKeys());
-        Pair<String[], DataType[]> columnInformation = extractColumnInformation(allCols);
-        return RowType.builder()
-                .fields(columnInformation.getRight(), columnInformation.getLeft())
-                .build();
-    }
 
-    private static Pair<String[], DataType[]> extractColumnInformation(List<FieldSchema> allCols) {
-        String[] colNames = new String[allCols.size()];
-        DataType[] colTypes = new DataType[allCols.size()];
-
-        for (int i = 0; i < allCols.size(); i++) {
-            FieldSchema fs = allCols.get(i);
-            colNames[i] = fs.getName();
-            colTypes[i] =
-                    HiveTypeUtils.toPaimonType(
-                            TypeInfoUtils.getTypeInfoFromTypeString(fs.getType()));
+        RowType.Builder builder = RowType.builder();
+        for (FieldSchema fs : allCols) {
+            builder.field(fs.getName(), HiveTypeUtils.toPaimonType(fs.getType()), fs.getComment());
         }
-
-        return Pair.of(colNames, colTypes);
+        return builder.build();
     }
 }

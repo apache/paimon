@@ -28,6 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Map;
 
@@ -46,8 +47,11 @@ public class Changelog extends Snapshot {
                 snapshot.id(),
                 snapshot.schemaId(),
                 snapshot.baseManifestList(),
+                snapshot.baseManifestListSize(),
                 snapshot.deltaManifestList(),
+                snapshot.deltaManifestListSize(),
                 snapshot.changelogManifestList(),
+                snapshot.changelogManifestListSize(),
                 snapshot.indexManifest(),
                 snapshot.commitUser(),
                 snapshot.commitIdentifier(),
@@ -67,8 +71,12 @@ public class Changelog extends Snapshot {
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
+            @JsonProperty(FIELD_BASE_MANIFEST_LIST_SIZE) @Nullable Long baseManifestListSize,
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
+            @JsonProperty(FIELD_DELTA_MANIFEST_LIST_SIZE) @Nullable Long deltaManifestListSize,
             @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST) @Nullable String changelogManifestList,
+            @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST_SIZE) @Nullable
+                    Long changelogManifestListSize,
             @JsonProperty(FIELD_INDEX_MANIFEST) @Nullable String indexManifest,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
@@ -85,8 +93,11 @@ public class Changelog extends Snapshot {
                 id,
                 schemaId,
                 baseManifestList,
+                baseManifestListSize,
                 deltaManifestList,
+                deltaManifestListSize,
                 changelogManifestList,
+                changelogManifestListSize,
                 indexManifest,
                 commitUser,
                 commitIdentifier,
@@ -106,8 +117,18 @@ public class Changelog extends Snapshot {
 
     public static Changelog fromPath(FileIO fileIO, Path path) {
         try {
+            return tryFromPath(fileIO, path);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException("Fails to read changelog from path " + path, e);
+        }
+    }
+
+    public static Changelog tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
+        try {
             String json = fileIO.readFileUtf8(path);
             return Changelog.fromJson(json);
+        } catch (FileNotFoundException e) {
+            throw e;
         } catch (IOException e) {
             throw new RuntimeException("Fails to read changelog from path " + path, e);
         }

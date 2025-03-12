@@ -23,6 +23,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.ReadonlyTable;
@@ -89,6 +91,12 @@ public class AllTableOptionsTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("table_name");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        // pass a useless file io, should never use this.
+        return new LocalFileIO();
     }
 
     @Override

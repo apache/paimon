@@ -26,7 +26,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -76,7 +76,7 @@ class BranchActionITCase extends ActionITCaseBase {
                         "CALL sys.create_tag('%s.%s', 'tag2', 2, '5 d')", database, tableName));
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
-        BranchManager branchManager = table.branchManager();
+        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
         executeSQL(
                 String.format(
                         "CALL sys.create_branch('%s.%s', 'branch_name', 'tag2')",
@@ -157,7 +157,7 @@ class BranchActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
-        BranchManager branchManager = table.branchManager();
+        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
         executeSQL(
                 String.format(
                         "CALL sys.create_branch('%s.%s', 'empty_branch_name')",
@@ -244,7 +244,7 @@ class BranchActionITCase extends ActionITCaseBase {
         assertThat(tagManager.tagExists("tag3")).isTrue();
 
         // Create branch_name branch
-        BranchManager branchManager = table.branchManager();
+        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
         executeSQL(
                 String.format(
                         "CALL sys.create_branch('%s.%s', 'branch_name', 'tag2')",

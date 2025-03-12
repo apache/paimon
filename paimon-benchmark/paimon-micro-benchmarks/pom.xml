@@ -57,6 +57,12 @@ under the License.
             <version>${log4j.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.roaringbitmap</groupId>
+            <artifactId>RoaringBitmap</artifactId>
+            <version>${roaringbitmap.version}</version>
+        </dependency>
+
         <!-- Orc and parquet dependencies -->
 
         <dependency>

@@ -22,6 +22,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Objects;
 
@@ -47,6 +48,7 @@ public class IcebergMapType {
     private final int keyId;
 
     @JsonProperty(FIELD_KEY)
+    @JsonDeserialize(using = IcebergDataTypeDeserializer.class)
     private final Object key;
 
     @JsonProperty(FIELD_VALUE_ID)
@@ -56,6 +58,7 @@ public class IcebergMapType {
     private final boolean valueRequired;
 
     @JsonProperty(FIELD_VALUE)
+    @JsonDeserialize(using = IcebergDataTypeDeserializer.class)
     private final Object value;
 
     public IcebergMapType(int keyId, Object key, int valueId, boolean valueRequired, Object value) {

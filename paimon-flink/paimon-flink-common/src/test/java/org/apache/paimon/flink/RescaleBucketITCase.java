@@ -26,6 +26,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -35,8 +36,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -118,7 +121,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         Snapshot lastSnapshot = findLatestSnapshot("T3");
         assertThat(lastSnapshot).isNotNull();
         SnapshotManager snapshotManager =
-                new SnapshotManager(LocalFileIO.create(), getTableDirectory("T3"));
+                newSnapshotManager(LocalFileIO.create(), getTableDirectory("T3"));
         for (long snapshotId = lastSnapshot.id();
                 snapshotId > snapshotAfterRescale.id();
                 snapshotId--) {
@@ -204,7 +207,13 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                         "Try to write table with a new bucket num 4, but the previous bucket num is 2. "
                                 + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.");
 
-        batchSql(rescaleOverwriteSql, tableName, tableName);
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            batchSql(rescaleOverwriteSql, tableName, tableName);
+        } else {
+            tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+            batchSql(String.format("CALL sys.rescale(`table` => 'default.%s')", tableName));
+        }
+
         snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.id()).isEqualTo(2L);

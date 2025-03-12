@@ -236,7 +236,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
         }
 
         @Override
-        public IcebergManifestFileMeta result() throws IOException {
+        public IcebergManifestFileMeta result() {
             SimpleColStats[] stats = partitionStatsCollector.extract();
             List<IcebergPartitionSummary> partitionSummaries = new ArrayList<>();
             for (int i = 0; i < stats.length; i++) {
@@ -251,7 +251,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             }
             return new IcebergManifestFileMeta(
                     path.toString(),
-                    fileIO.getFileSize(path),
+                    outputBytes,
                     IcebergPartitionSpec.SPEC_ID,
                     Content.DATA,
                     sequenceNumber,

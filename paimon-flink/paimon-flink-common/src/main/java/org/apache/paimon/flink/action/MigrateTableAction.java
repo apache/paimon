@@ -53,7 +53,9 @@ public class MigrateTableAction extends ActionBase {
                 new DefaultProcedureContext(env),
                 connector,
                 hiveTableFullName,
+                null,
                 tableProperties,
-                parallelism);
+                parallelism,
+                null);
     }
 }

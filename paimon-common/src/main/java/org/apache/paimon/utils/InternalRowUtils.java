@@ -48,12 +48,134 @@ import javax.annotation.Nullable;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /** Utils for {@link InternalRow} structures. */
 public class InternalRowUtils {
+
+    public static boolean equals(Object data1, Object data2, DataType dataType) {
+        if ((data1 == null) != (data2 == null)) {
+            return false;
+        }
+        if (data1 != null) {
+            if (data1 instanceof InternalRow) {
+                RowType rowType = (RowType) dataType;
+                int len = rowType.getFieldCount();
+                for (int i = 0; i < len; i++) {
+                    Object value1 = get((InternalRow) data1, i, rowType.getTypeAt(i));
+                    Object value2 = get((InternalRow) data2, i, rowType.getTypeAt(i));
+                    if (!equals(value1, value2, rowType.getTypeAt(i))) {
+                        return false;
+                    }
+                }
+            } else if (data1 instanceof InternalArray) {
+                if (((InternalArray) data1).size() != ((InternalArray) data2).size()) {
+                    return false;
+                }
+                ArrayType arrayType = (ArrayType) dataType;
+                for (int i = 0; i < ((InternalArray) data1).size(); i++) {
+                    Object value1 = get((InternalArray) data1, i, arrayType.getElementType());
+                    Object value2 = get((InternalArray) data2, i, arrayType.getElementType());
+                    if (!equals(value1, value2, arrayType.getElementType())) {
+                        return false;
+                    }
+                }
+            } else if (data1 instanceof InternalMap) {
+                if (((InternalMap) data1).size() != ((InternalMap) data2).size()) {
+                    return false;
+                }
+                MapType mapType = (MapType) dataType;
+                GenericMap map1;
+                GenericMap map2;
+                if (data1 instanceof GenericMap) {
+                    map1 = (GenericMap) data1;
+                    map2 = (GenericMap) data2;
+                } else {
+                    map1 =
+                            copyToGenericMap(
+                                    (InternalMap) data1,
+                                    mapType.getKeyType(),
+                                    mapType.getValueType());
+                    map2 =
+                            copyToGenericMap(
+                                    (InternalMap) data2,
+                                    mapType.getKeyType(),
+                                    mapType.getValueType());
+                }
+                InternalArray keyArray1 = map1.keyArray();
+                for (int i = 0; i < map1.size(); i++) {
+                    Object key = get(keyArray1, i, mapType.getKeyType());
+                    if (!map2.contains(key)
+                            || !equals(map1.get(key), map2.get(key), mapType.getValueType())) {
+                        return false;
+                    }
+                }
+            } else if (data1 instanceof byte[]) {
+                if (!java.util.Arrays.equals((byte[]) data1, (byte[]) data2)) {
+                    return false;
+                }
+            } else if (data1 instanceof Float && java.lang.Float.isNaN((Float) data1)) {
+                if (!java.lang.Float.isNaN((Float) data2)) {
+                    return false;
+                }
+            } else if (data1 instanceof Double && java.lang.Double.isNaN((Double) data1)) {
+                if (!java.lang.Double.isNaN((Double) data2)) {
+                    return false;
+                }
+            } else {
+                if (!data1.equals(data2)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    public static int hash(Object data, DataType dataType) {
+        if (data == null) {
+            return 0;
+        }
+        int result = 0;
+        if (data instanceof InternalRow) {
+            RowType rowType = (RowType) dataType;
+            int len = rowType.getFieldCount();
+            for (int i = 0; i < len; i++) {
+                Object v = get((InternalRow) data, i, rowType.getTypeAt(i));
+                result = 37 * result + hash(v, rowType.getTypeAt(i));
+            }
+        } else if (data instanceof InternalArray) {
+            ArrayType arrayType = (ArrayType) dataType;
+            int len = ((InternalArray) data).size();
+            for (int i = 0; i < len; i++) {
+                Object v = get((InternalArray) data, i, arrayType.getElementType());
+                result = 37 * result + hash(v, arrayType.getElementType());
+            }
+        } else if (data instanceof InternalMap) {
+            MapType mapType = (MapType) dataType;
+            GenericMap map;
+            if (data instanceof GenericMap) {
+                map = (GenericMap) data;
+            } else {
+                map =
+                        copyToGenericMap(
+                                (InternalMap) data, mapType.getKeyType(), mapType.getValueType());
+            }
+            InternalArray keyArray = map.keyArray();
+            for (int i = 0; i < map.size(); i++) {
+                Object key = get(keyArray, i, mapType.getKeyType());
+                result = 37 * result + hash(key, mapType.getKeyType());
+                result = 37 * result + hash(map.get(key), mapType.getValueType());
+            }
+        } else if (data instanceof byte[]) {
+            result = Arrays.hashCode((byte[]) data);
+        } else {
+            result = data.hashCode();
+        }
+        return result;
+    }
 
     public static InternalRow copyInternalRow(InternalRow row, RowType rowType) {
         if (row instanceof BinaryRow) {
@@ -117,6 +239,11 @@ public class InternalRowUtils {
             return ((BinaryMap) map).copy();
         }
 
+        return copyToGenericMap(map, keyType, valueType);
+    }
+
+    private static GenericMap copyToGenericMap(
+            InternalMap map, DataType keyType, DataType valueType) {
         Map<Object, Object> javaMap = new HashMap<>();
         InternalArray keys = map.keyArray();
         InternalArray values = map.valueArray();
@@ -145,6 +272,10 @@ public class InternalRowUtils {
                 return copyMap(
                         (InternalMap) o, ((MultisetType) type).getElementType(), new IntType());
             }
+        } else if (o instanceof byte[]) {
+            byte[] copy = new byte[((byte[]) o).length];
+            System.arraycopy(((byte[]) o), 0, copy, 0, ((byte[]) o).length);
+            return copy;
         } else if (o instanceof Decimal) {
             return ((Decimal) o).copy();
         }

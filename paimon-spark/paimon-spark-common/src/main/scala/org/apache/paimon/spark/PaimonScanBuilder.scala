@@ -116,7 +116,8 @@ class PaimonScanBuilder(table: Table)
       val pushedPartitionPredicate = PredicateBuilder.and(pushedPaimonPredicates.toList.asJava)
       readBuilder.withFilter(pushedPartitionPredicate)
     }
-    val dataSplits = readBuilder.newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
+    val dataSplits =
+      readBuilder.dropStats().newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
     if (!dataSplits.forall(_.mergedRowCountAvailable())) {
       return false
     }

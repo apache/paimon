@@ -37,14 +37,13 @@ case class PaimonTruncateTableCommand(v2Table: SparkTable, partitionSpec: TableP
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val commit = table.store.newCommit(UUID.randomUUID.toString)
+    val commit = table.newBatchWriteBuilder().newCommit()
 
     if (partitionSpec.isEmpty) {
-      commit.truncateTable(BatchWriteBuilder.COMMIT_IDENTIFIER)
+      commit.truncateTable()
     } else {
-      commit.dropPartitions(
-        Collections.singletonList(partitionSpec.asJava),
-        BatchWriteBuilder.COMMIT_IDENTIFIER
+      commit.truncatePartitions(
+        Collections.singletonList(partitionSpec.asJava)
       )
     }
 

@@ -266,3 +266,6 @@ to avoid potential name conflict.
 1. Chinese characters in records ingested from MySQL are garbled.
 * Try to set `env.java.opts: -Dfile.encoding=UTF-8` in `flink-conf.yaml`(Flink version < 1.19) or `config.yaml`(Flink version >= 1.19)
 (the option is changed to `env.java.opts.all` since Flink-1.17).
+
+2. Synchronize MySQL Table comment.
+* Synchronize MySQL create table comment to the paimon table, you need to configure `--mysql_conf jdbc.properties.useInformationSchema=true`.

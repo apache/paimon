@@ -64,7 +64,6 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     public void flush() {
         vectorSchemaRoot.setRowCount(rowId);
-        rowId = 0;
     }
 
     public boolean write(InternalRow currentRow) {
@@ -87,6 +86,13 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     public boolean empty() {
         return rowId == 0;
+    }
+
+    public void reset() {
+        for (ArrowFieldWriter fieldWriter : fieldWriters) {
+            fieldWriter.reset();
+        }
+        rowId = 0;
     }
 
     @Override

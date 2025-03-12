@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -605,7 +606,7 @@ public class SchemaValidation {
                 throw new RuntimeException(
                         "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
             }
-        } else if (bucket < 1) {
+        } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");
         } else {
             if (schema.crossPartitionUpdate()) {
@@ -644,5 +645,9 @@ public class SchemaValidation {
                 }
             }
         }
+    }
+
+    private static boolean isPostponeBucketTable(TableSchema schema, int bucket) {
+        return !schema.primaryKeys().isEmpty() && bucket == BucketMode.POSTPONE_BUCKET;
     }
 }

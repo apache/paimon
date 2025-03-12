@@ -279,6 +279,16 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>Gauge</td>
             <td>The average output file size for this task's compaction.</td>
         </tr>
+        <tr>
+            <td>maxTotalFileSize</td>
+            <td>Gauge</td>
+            <td>The maximum total file size of an active (currently being written) bucket.</td>
+        </tr>
+        <tr>
+            <td>avgTotalFileSize</td>
+            <td>Gauge</td>
+            <td>The average total file size of all active (currently being written) buckets.</td>
+        </tr>
     </tbody>
 </table>
 

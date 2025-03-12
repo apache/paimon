@@ -28,7 +28,7 @@ under the License.
 
 After the Flink Local Cluster has been started, you can execute the action jar by using the following command.
 
-```
+```bash
 <FLINK_HOME>/bin/flink run \
  /path/to/paimon-flink-action-{{< version >}}.jar \
  <action>
@@ -37,7 +37,7 @@ After the Flink Local Cluster has been started, you can execute the action jar b
 
 The following command is used to compact a table.
 
-```
+```bash
 <FLINK_HOME>/bin/flink run \
  /path/to/paimon-flink-action-{{< version >}}.jar \
  compact \

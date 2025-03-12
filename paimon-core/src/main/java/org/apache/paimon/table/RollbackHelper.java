@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -49,6 +50,7 @@ public class RollbackHelper {
     private static final Logger LOG = LoggerFactory.getLogger(RollbackHelper.class);
 
     private final SnapshotManager snapshotManager;
+    private final ChangelogManager changelogManager;
     private final TagManager tagManager;
     private final FileIO fileIO;
     private final SnapshotDeletion snapshotDeletion;
@@ -57,12 +59,14 @@ public class RollbackHelper {
 
     public RollbackHelper(
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             TagManager tagManager,
             FileIO fileIO,
             SnapshotDeletion snapshotDeletion,
             ChangelogDeletion changelogDeletion,
             TagDeletion tagDeletion) {
         this.snapshotManager = snapshotManager;
+        this.changelogManager = changelogManager;
         this.tagManager = tagManager;
         this.fileIO = fileIO;
         this.snapshotDeletion = snapshotDeletion;
@@ -143,8 +147,8 @@ public class RollbackHelper {
     }
 
     private List<Changelog> cleanLongLivedChangelogDataFiles(Snapshot retainedSnapshot) {
-        Long earliest = snapshotManager.earliestLongLivedChangelogId();
-        Long latest = snapshotManager.latestLongLivedChangelogId();
+        Long earliest = changelogManager.earliestLongLivedChangelogId();
+        Long latest = changelogManager.latestLongLivedChangelogId();
         if (earliest == null || latest == null) {
             return Collections.emptyList();
         }
@@ -153,7 +157,7 @@ public class RollbackHelper {
         List<Changelog> toBeCleaned = new ArrayList<>();
         long to = Math.max(earliest, retainedSnapshot.id() + 1);
         for (long i = latest; i >= to; i--) {
-            toBeCleaned.add(snapshotManager.changelog(i));
+            toBeCleaned.add(changelogManager.changelog(i));
         }
 
         // modify the latest hint
@@ -162,9 +166,9 @@ public class RollbackHelper {
                 if (to == earliest) {
                     // all changelog has been cleaned, so we do not know the actual latest id
                     // set to -1
-                    snapshotManager.commitLongLivedChangelogLatestHint(-1);
+                    changelogManager.commitLongLivedChangelogLatestHint(-1);
                 } else {
-                    snapshotManager.commitLongLivedChangelogLatestHint(to - 1);
+                    changelogManager.commitLongLivedChangelogLatestHint(to - 1);
                 }
             }
         } catch (IOException e) {
@@ -174,7 +178,7 @@ public class RollbackHelper {
         // delete data files of changelog
         for (Changelog changelog : toBeCleaned) {
             // delete changelog files first, cannot be read now
-            fileIO.deleteQuietly(snapshotManager.longLivedChangelogPath(changelog.id()));
+            fileIO.deleteQuietly(changelogManager.longLivedChangelogPath(changelog.id()));
             // clean the deleted file
             changelogDeletion.cleanUnusedDataFiles(changelog, manifestEntry -> false);
         }

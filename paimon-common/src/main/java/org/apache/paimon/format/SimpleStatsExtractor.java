@@ -27,9 +27,9 @@ import java.io.IOException;
 /** Extracts statistics directly from file. */
 public interface SimpleStatsExtractor {
 
-    SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException;
+    SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException;
 
-    Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+    Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path, long length)
             throws IOException;
 
     /** File info fetched from physical file. */

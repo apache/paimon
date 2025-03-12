@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
@@ -26,6 +27,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -64,6 +66,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
@@ -260,6 +263,102 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testListTablesPaged() throws Exception {
+        // List tables paged returns an empty list when there are no tables in the database
+        String databaseName = "tables_paged_db";
+        catalog.createDatabase(databaseName, false);
+        PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null);
+        assertThat(pagedTables.getElements()).isEmpty();
+        assertNull(pagedTables.getNextPageToken());
+
+        String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr"};
+        for (String tableName : tableNames) {
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+
+        // List tables paged returns a list with the names of all tables in the database in all
+        // catalogs except RestCatalog
+        // even if the maxResults or pageToken is not null
+        pagedTables = catalog.listTablesPaged(databaseName, null, null);
+        assertPagedTables(pagedTables, tableNames);
+
+        int maxResults = 2;
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null);
+        assertPagedTables(pagedTables, tableNames);
+
+        String pageToken = "table1";
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken);
+        assertPagedTables(pagedTables, tableNames);
+
+        maxResults = 8;
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null);
+        assertPagedTables(pagedTables, tableNames);
+
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken);
+        assertPagedTables(pagedTables, tableNames);
+
+        // List tables throws DatabaseNotExistException when the database does not exist
+        final int finalMaxResults = maxResults;
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listTablesPaged(
+                                        "non_existing_db", finalMaxResults, pageToken));
+    }
+
+    @Test
+    public void testListTableDetailsPaged() throws Exception {
+        // List table details returns an empty list when there are no tables in the database
+        String databaseName = "table_details_paged_db";
+        catalog.createDatabase(databaseName, false);
+        PagedList<Table> pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, null, null);
+        assertThat(pagedTableDetails.getElements()).isEmpty();
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        // List table details paged returns a list with all table in the database in all catalogs
+        // except RestCatalog
+        // even if the maxResults or pageToken is not null
+        String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr"};
+        for (String tableName : tableNames) {
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null);
+        assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        int maxResults = 2;
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null);
+        assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        String pageToken = "table1";
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, pageToken);
+        assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        maxResults = 8;
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null);
+        assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, pageToken);
+        assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        // List table details throws DatabaseNotExistException when the database does not exist
+        final int finalMaxResults = maxResults;
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listTableDetailsPaged(
+                                        "non_existing_db", finalMaxResults, pageToken));
+    }
+
+    @Test
     public void testCreateTable() throws Exception {
         catalog.createDatabase("test_db", false);
         // Create table creates a new table when it does not exist
@@ -390,18 +489,11 @@ public abstract class CatalogTestBase {
         catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
         Table systemTable = catalog.getTable(Identifier.create("test_db", "test_table$snapshots"));
         assertThat(systemTable).isNotNull();
+        Table systemTableCheckWithBranch =
+                catalog.getTable(new Identifier("test_db", "test_table", "main", "snapshots"));
+        assertThat(systemTableCheckWithBranch).isNotNull();
         Table dataTable = catalog.getTable(identifier);
         assertThat(dataTable).isNotNull();
-
-        // Get system table throws Exception when table contains multiple '$' separator
-        assertThatExceptionOfType(IllegalArgumentException.class)
-                .isThrownBy(
-                        () ->
-                                catalog.getTable(
-                                        Identifier.create(
-                                                "test_db", "test_table$snapshots$snapshots")))
-                .withMessage(
-                        "System table can only contain one '$' separator, but this is: test_table$snapshots$snapshots");
 
         // Get system table throws TableNotExistException when data table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -933,7 +1025,14 @@ public abstract class CatalogTestBase {
         Map<String, String> options = new HashMap<>();
         options.put("key1", "v1");
         options.put("key2", "v2");
-        View view = new ViewImpl(identifier, rowType, query, comment, options);
+
+        Map<String, String> dialects = new HashMap<>();
+        if (supportsViewDialects()) {
+            dialects.put("flink", "SELECT * FROM FLINK_TABLE");
+            dialects.put("spark", "SELECT * FROM SPARK_TABLE");
+        }
+        View view =
+                new ViewImpl(identifier, rowType.getFields(), query, dialects, comment, options);
 
         assertThatThrownBy(() -> catalog.createView(identifier, view, false))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
@@ -952,6 +1051,7 @@ public abstract class CatalogTestBase {
         assertThat(catalogView.fullName()).isEqualTo(view.fullName());
         assertThat(catalogView.rowType()).isEqualTo(view.rowType());
         assertThat(catalogView.query()).isEqualTo(view.query());
+        assertThat(catalogView.dialects()).isEqualTo(view.dialects());
         assertThat(catalogView.comment()).isEqualTo(view.comment());
         assertThat(catalogView.options()).containsAllEntriesOf(view.options());
 
@@ -977,6 +1077,110 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testListViewsPaged() throws Exception {
+        if (!supportsView()) {
+            return;
+        }
+
+        // List views returns an empty list when there are no views in the database
+        String databaseName = "views_paged_db";
+        catalog.createDatabase(databaseName, false);
+        PagedList<String> pagedViews = catalog.listViewsPaged(databaseName, null, null);
+        assertThat(pagedViews.getElements()).isEmpty();
+        assertNull(pagedViews.getNextPageToken());
+
+        // List views paged returns a list with the names of all views in the database in all
+        // catalogs except RestCatalog
+        // even if the maxResults or pageToken is not null
+        View view = buildView(databaseName);
+        String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr"};
+        for (String viewName : viewNames) {
+            catalog.createView(Identifier.create(databaseName, viewName), view, false);
+        }
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null);
+        assertPagedViews(pagedViews, viewNames);
+
+        int maxResults = 2;
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, null);
+        assertPagedViews(pagedViews, viewNames);
+
+        String pageToken = "view1";
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, pageToken);
+        assertPagedViews(pagedViews, viewNames);
+
+        maxResults = 8;
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, null);
+        assertPagedViews(pagedViews, viewNames);
+
+        pagedViews = catalog.listViewsPaged(databaseName, maxResults, pageToken);
+        assertPagedViews(pagedViews, viewNames);
+
+        // List views throws DatabaseNotExistException when the database does not exist
+        final int finalMaxResults = maxResults;
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listViewsPaged(
+                                        "non_existing_db", finalMaxResults, pageToken));
+    }
+
+    @Test
+    public void testListViewDetailsPaged() throws Exception {
+        if (!supportsView()) {
+            return;
+        }
+
+        // List views returns an empty list when there are no views in the database
+        String databaseName = "view_details_paged_db";
+        catalog.createDatabase(databaseName, false);
+        PagedList<View> pagedViewDetailsPaged =
+                catalog.listViewDetailsPaged(databaseName, null, null);
+        assertThat(pagedViewDetailsPaged.getElements()).isEmpty();
+        assertNull(pagedViewDetailsPaged.getNextPageToken());
+
+        // List view details paged returns a list with all view in the database in all catalogs
+        // except RestCatalog
+        // even if the maxResults or pageToken is not null
+        View view = buildView(databaseName);
+        String[] viewNames = {"view1", "view2", "view3", "abd", "def", "opr"};
+        for (String viewName : viewNames) {
+            catalog.createView(Identifier.create(databaseName, viewName), view, false);
+        }
+
+        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, null, null);
+        assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
+        assertNull(pagedViewDetailsPaged.getNextPageToken());
+
+        int maxResults = 2;
+        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, null);
+        assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
+        assertNull(pagedViewDetailsPaged.getNextPageToken());
+
+        String pageToken = "view1";
+        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, pageToken);
+        assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
+        assertNull(pagedViewDetailsPaged.getNextPageToken());
+
+        maxResults = 8;
+        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, null);
+        assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
+        assertNull(pagedViewDetailsPaged.getNextPageToken());
+
+        pagedViewDetailsPaged = catalog.listViewDetailsPaged(databaseName, maxResults, pageToken);
+        assertPagedViewDetails(pagedViewDetailsPaged, view, viewNames.length, viewNames);
+        assertNull(pagedViewDetailsPaged.getNextPageToken());
+
+        // List view details throws DatabaseNotExistException when the database does not exist
+        final int finalMaxResults = maxResults;
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listViewDetailsPaged(
+                                        "non_existing_db", finalMaxResults, pageToken));
+    }
+
+    @Test
     public void testFormatTable() throws Exception {
         if (!supportsFormatTable()) {
             return;
@@ -990,7 +1194,7 @@ public abstract class CatalogTestBase {
                 Schema.newBuilder()
                         .column("str", DataTypes.STRING())
                         .column("int", DataTypes.INT())
-                        .option("type", "format-table")
+                        .options(getFormatTableOptions())
                         .option("file.format", "csv")
                         .build();
         catalog.createTable(identifier, schema, false);
@@ -1081,6 +1285,75 @@ public abstract class CatalogTestBase {
                                 catalog.markDonePartitions(
                                         Identifier.create(databaseName, "non_existing_table"),
                                         partitionSpecs));
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.dropPartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        partitionSpecs));
+    }
+
+    @Test
+    public void testListPartitionsPaged() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+        String databaseName = "partitions_paged_db";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102"),
+                        Collections.singletonMap("dt", "20240102"),
+                        Collections.singletonMap("dt", "20260101"),
+                        Collections.singletonMap("dt", "20250104"),
+                        Collections.singletonMap("dt", "20250103"));
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        catalog.createPartitions(identifier, partitionSpecs);
+
+        // List partitions paged returns a list with all partitions of the table in all catalogs
+        // except RestCatalog even
+        // if the maxResults or pageToken is not null
+        PagedList<Partition> pagedPartitions = catalog.listPartitionsPaged(identifier, null, null);
+        Map[] specs = partitionSpecs.toArray(new Map[0]);
+        assertPagedPartitions(pagedPartitions, specs.length, specs);
+
+        int maxResults = 2;
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null);
+        assertPagedPartitions(pagedPartitions, specs.length, specs);
+
+        String pageToken = "dt=20250101";
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken);
+        assertPagedPartitions(pagedPartitions, specs.length, specs);
+
+        maxResults = 8;
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null);
+        assertPagedPartitions(pagedPartitions, specs.length, specs);
+
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken);
+        assertPagedPartitions(pagedPartitions, specs.length, specs);
+
+        // List partitions throws TableNotExistException when the table does not exist
+        final int finalMaxResults = maxResults;
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listPartitionsPaged(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        finalMaxResults,
+                                        pageToken));
     }
 
     @Test
@@ -1138,11 +1411,167 @@ public abstract class CatalogTestBase {
         return false;
     }
 
+    protected boolean supportsViewDialects() {
+        return true;
+    }
+
     protected void checkPartition(Partition expected, Partition actual) {
         assertThat(actual).isEqualTo(expected);
     }
 
     protected boolean supportPartitions() {
         return false;
+    }
+
+    protected boolean supportPagedList() {
+        return false;
+    }
+
+    private void assertPagedTables(PagedList<String> tablePagedList, String... tableNames) {
+        List<String> tables = tablePagedList.getElements();
+        if (supportPagedList()) {
+            assertThat(tables).containsExactly(tableNames);
+        } else {
+            assertThat(tables).containsExactlyInAnyOrder(tableNames);
+        }
+        assertNull(tablePagedList.getNextPageToken());
+    }
+
+    protected void assertPagedTableDetails(
+            PagedList<Table> tableDetailsPagedList, int size, String... tableNames) {
+        List<Table> tableDetails = tableDetailsPagedList.getElements();
+        assertEquals(size, tableDetails.size());
+        if (supportPagedList()) {
+            assertThat(tableDetails.stream().map(Table::name).collect(Collectors.toList()))
+                    .containsExactly(tableNames);
+        } else {
+            assertThat(tableDetails.stream().map(Table::name).collect(Collectors.toList()))
+                    .containsExactlyInAnyOrder(tableNames);
+        }
+        List<Schema> schemas =
+                tableDetails.stream()
+                        .filter(table -> table instanceof FileStoreTable)
+                        .map(table -> (FileStoreTable) table)
+                        .map(FileStoreTable::schema)
+                        .map(TableSchema::toSchema)
+                        .collect(Collectors.toList());
+        assertThat(
+                        schemas.stream()
+                                .map(Schema::fields)
+                                .allMatch(fields -> DEFAULT_TABLE_SCHEMA.fields().equals(fields)))
+                .isTrue();
+        assertThat(
+                        schemas.stream()
+                                .map(Schema::partitionKeys)
+                                .allMatch(
+                                        partitionKeys ->
+                                                DEFAULT_TABLE_SCHEMA
+                                                        .partitionKeys()
+                                                        .equals(partitionKeys)))
+                .isTrue();
+        assertThat(
+                        schemas.stream()
+                                .map(Schema::primaryKeys)
+                                .allMatch(
+                                        primaryKeys ->
+                                                DEFAULT_TABLE_SCHEMA
+                                                        .primaryKeys()
+                                                        .equals(primaryKeys)))
+                .isTrue();
+        assertThat(
+                        schemas.stream()
+                                .map(Schema::options)
+                                .allMatch(
+                                        options ->
+                                                DEFAULT_TABLE_SCHEMA.options().size()
+                                                        <= options.size()))
+                .isTrue(); // output schema has path
+        assertThat(
+                        schemas.stream()
+                                .map(Schema::comment)
+                                .allMatch(
+                                        comment -> DEFAULT_TABLE_SCHEMA.comment().equals(comment)))
+                .isTrue();
+    }
+
+    protected View buildView(String databaseName) {
+        Identifier identifier = new Identifier(databaseName, "my_view");
+        RowType rowType = RowType.builder().field("str", DataTypes.STRING()).build();
+        String query = "SELECT * FROM OTHER_TABLE";
+
+        Map<String, String> dialects = new HashMap<>();
+        if (supportsViewDialects()) {
+            dialects.put("spark", "SELECT * FROM SPARK_TABLE");
+        }
+        return new ViewImpl(
+                identifier, rowType.getFields(), query, dialects, null, new HashMap<>());
+    }
+
+    protected void assertPagedViews(PagedList<String> viewPagedList, String... viewNames) {
+        List<String> views = viewPagedList.getElements();
+        if (supportPagedList()) {
+            assertThat(views).containsExactly(viewNames);
+        } else {
+            assertThat(views).containsExactlyInAnyOrder(viewNames);
+        }
+    }
+
+    protected void assertPagedViewDetails(
+            PagedList<View> viewDetailsPagedList, View view, int size, String... viewNames) {
+        List<View> viewDetails = viewDetailsPagedList.getElements();
+        assertEquals(size, viewDetails.size());
+        if (supportPagedList()) {
+            assertThat(viewDetails.stream().map(View::name).collect(Collectors.toList()))
+                    .containsExactlyInAnyOrder(viewNames);
+        } else {
+            assertThat(viewDetails.stream().map(View::name).collect(Collectors.toList()))
+                    .containsExactlyInAnyOrder(viewNames);
+        }
+        assertThat(
+                        viewDetails.stream()
+                                .map(View::rowType)
+                                .allMatch(rowType -> view.rowType().equals(rowType)))
+                .isTrue();
+        assertThat(
+                        viewDetails.stream()
+                                .map(View::query)
+                                .allMatch(query -> view.query().equals(query)))
+                .isTrue();
+        assertThat(
+                        viewDetails.stream()
+                                .map(View::dialects)
+                                .allMatch(dialects -> view.dialects().equals(dialects)))
+                .isTrue();
+        assertThat(
+                        viewDetails.stream()
+                                .map(View::comment)
+                                .allMatch(comment -> view.comment().equals(comment)))
+                .isTrue();
+        assertThat(
+                        viewDetails.stream()
+                                .map(View::options)
+                                .allMatch(options -> view.options().size() <= options.size()))
+                .isTrue(); // last ddl time
+    }
+
+    @SafeVarargs
+    protected final void assertPagedPartitions(
+            PagedList<Partition> partitionsPagedList,
+            int size,
+            Map<String, String>... partitionSpecs) {
+        List<Partition> partitions = partitionsPagedList.getElements();
+        assertEquals(size, partitions.size());
+        if (supportPagedList()) {
+            assertThat(partitions.stream().map(Partition::spec)).containsExactly(partitionSpecs);
+        } else {
+            assertThat(partitions.stream().map(Partition::spec))
+                    .containsExactlyInAnyOrder(partitionSpecs);
+        }
+    }
+
+    protected Map<String, String> getFormatTableOptions() {
+        Map<String, String> options = new HashMap<>(1);
+        options.put("type", "format-table");
+        return options;
     }
 }

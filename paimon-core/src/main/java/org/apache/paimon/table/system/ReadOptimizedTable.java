@@ -38,13 +38,14 @@ import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalLong;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -68,8 +69,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public OptionalLong latestSnapshotId() {
-        return wrapped.latestSnapshotId();
+    public Optional<Snapshot> latestSnapshot() {
+        return wrapped.latestSnapshot();
     }
 
     @Override
@@ -147,6 +148,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
+                changelogManager(),
                 wrapped.supportStreamingReadOverwrite(),
                 DefaultValueAssigner.create(wrapped.schema()));
     }
@@ -164,6 +166,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public ChangelogManager changelogManager() {
+        return wrapped.changelogManager();
     }
 
     @Override

@@ -93,7 +93,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
     }
 
     public FileStoreCommitImpl newCommit() {
-        return super.newCommit(commitUser);
+        return super.newCommit(commitUser, null);
     }
 
     public void commit(CommitMessage... commitMessages) {
@@ -115,8 +115,8 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
     }
 
     public List<IndexFileMeta> scanDVIndexFiles(BinaryRow partition, int bucket) {
-        Long lastSnapshotId = snapshotManager().latestSnapshotId();
-        return fileHandler.scan(lastSnapshotId, DELETION_VECTORS_INDEX, partition, bucket);
+        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
+        return fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
     }
 
     public UnawareAppendDeletionFileMaintainer createDVIFMaintainer(
@@ -126,10 +126,10 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
     }
 
     public DeletionVectorsMaintainer createOrRestoreDVMaintainer(BinaryRow partition, int bucket) {
-        Long lastSnapshotId = snapshotManager().latestSnapshotId();
+        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
-        return factory.createOrRestore(lastSnapshotId, partition, bucket);
+        return factory.createOrRestore(latestSnapshot, partition, bucket);
     }
 
     public CommitMessageImpl writeDVIndexFiles(

@@ -283,12 +283,20 @@ public class FlinkConnectorOptions {
                     .defaultValue(LookupCacheMode.AUTO)
                     .withDescription("The cache mode of lookup join.");
 
-    public static final ConfigOption<String> LOOKUP_DYNAMIC_PARTITION =
-            ConfigOptions.key("lookup.dynamic-partition")
+    public static final ConfigOption<String> SCAN_PARTITIONS =
+            ConfigOptions.key("scan.partitions")
                     .stringType()
                     .noDefaultValue()
+                    .withFallbackKeys("lookup.dynamic-partition")
                     .withDescription(
-                            "Specific dynamic partition for lookup, supports 'max_pt()' and 'max_two_pt()' currently.");
+                            "Specify the partitions to scan. "
+                                    + "Partitions should be given in the form of key1=value1,key2=value2. "
+                                    + "Partition keys not specified will be filled with the value of "
+                                    + CoreOptions.PARTITION_DEFAULT_NAME.key()
+                                    + ". Multiple partitions should be separated by semicolon (;). "
+                                    + "This option can support normal source tables and lookup join tables. "
+                                    + "For lookup joins, two special values max_pt() and max_two_pt() are also supported, "
+                                    + "specifying the (two) partition(s) with the largest partition value.");
 
     public static final ConfigOption<Duration> LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL =
             ConfigOptions.key("lookup.dynamic-partition.refresh-interval")
@@ -451,6 +459,13 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Bounded mode for Paimon consumer. "
                                     + "By default, Paimon automatically selects bounded mode based on the mode of the Flink job.");
+
+    public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
+            key("postpone.default-bucket-num")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription(
+                            "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

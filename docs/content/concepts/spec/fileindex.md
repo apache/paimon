@@ -36,38 +36,38 @@ multiple columns.
 File index file format. Put all column and offset in the header.
 
 <pre>
-  _____________________________________    _____________________
-｜     magic    ｜version｜head length ｜
-｜-------------------------------------｜
-｜            column number            ｜
-｜-------------------------------------｜
-｜   column 1        ｜ index number   ｜
-｜-------------------------------------｜
-｜  index name 1 ｜start pos ｜length  ｜
-｜-------------------------------------｜
-｜  index name 2 ｜start pos ｜length  ｜
-｜-------------------------------------｜
-｜  index name 3 ｜start pos ｜length  ｜
-｜-------------------------------------｜            HEAD
-｜   column 2        ｜ index number   ｜
-｜-------------------------------------｜
-｜  index name 1 ｜start pos ｜length  ｜
-｜-------------------------------------｜
-｜  index name 2 ｜start pos ｜length  ｜
-｜-------------------------------------｜
-｜  index name 3 ｜start pos ｜length  ｜
-｜-------------------------------------｜
-｜                 ...                 ｜
-｜-------------------------------------｜
-｜                 ...                 ｜
-｜-------------------------------------｜
-｜  redundant length ｜redundant bytes ｜
-｜-------------------------------------｜    ---------------------
-｜                BODY                 ｜
-｜                BODY                 ｜
-｜                BODY                 ｜             BODY
-｜                BODY                 ｜
-｜_____________________________________｜    _____________________
+ ______________________________________    _____________________
+|     magic    ｜version｜head length  |
+|--------------------------------------|
+|            column number             |
+|--------------------------------------|
+|   column 1        ｜ index number    |
+|--------------------------------------|
+|  index name 1 ｜start pos ｜length   |
+|--------------------------------------|
+|  index name 2 ｜start pos ｜length   |
+|--------------------------------------|
+|  index name 3 ｜start pos ｜length   |
+|--------------------------------------|            HEAD
+|   column 2        ｜ index number    |
+|--------------------------------------|
+|  index name 1 ｜start pos ｜length   |
+|--------------------------------------|
+|  index name 2 ｜start pos ｜length   |
+|--------------------------------------|
+|  index name 3 ｜start pos ｜length   |
+|--------------------------------------|
+|                 ...                  |
+|--------------------------------------|
+|                 ...                  |
+|--------------------------------------|
+|  redundant length ｜redundant bytes  |
+|--------------------------------------|    ---------------------
+|                BODY                  |
+|                BODY                  |
+|                BODY                  |             BODY
+|                BODY                  |
+|______________________________________|    _____________________
 *
 magic:                            8 bytes long, value is 1493475289347502L, BIG_ENDIAN
 version:                          4 bytes int, BIG_ENDIAN
@@ -96,14 +96,18 @@ This class use (64-bits) long hash. Store the num hash function (one integer) an
 
 ## Index: Bitmap
 
-Define `'file-index.bitmap.columns'`.
+* `file-index.bitmap.columns`: specify the columns that need bitmap index.
+* `file-index.bitmap.version`: specify the bitmap index format version, default version is 1, latest version is 2.
+* `file-index.bitmap.<column_name>.index-block-size`: to config secondary index block size, default value is 16kb.
 
-Bitmap file index format (V1):
+
+Bitmap file index format (V2):
 
 <pre>
-Bitmap file index format (V1)
+
+Bitmap file index format (V2)
 +-------------------------------------------------+-----------------
-｜ version (1 byte)                               ｜
+｜ version (1 byte) = 2                           ｜
 +-------------------------------------------------+
 ｜ row count (4 bytes int)                        ｜
 +-------------------------------------------------+
@@ -113,21 +117,82 @@ Bitmap file index format (V1)
 +-------------------------------------------------+
 ｜ null value offset (4 bytes if has null value)  ｜       HEAD
 +-------------------------------------------------+
+｜ null bitmap length (4 bytes if has null value) ｜
++-------------------------------------------------+
+｜ bitmap index block number (4 bytes int)        ｜
++-------------------------------------------------+
 ｜ value 1 | offset 1                             ｜
 +-------------------------------------------------+
 ｜ value 2 | offset 2                             ｜
 +-------------------------------------------------+
-｜ value 3 | offset 3                             ｜
+｜ ...                                            ｜
++-------------------------------------------------+
+｜ bitmap body offset (4 bytes int)               ｜
++-------------------------------------------------+-----------------
+｜ bitmap index block 1                           ｜
++-------------------------------------------------+
+｜ bitmap index block 2                           ｜  INDEX BLOCKS
 +-------------------------------------------------+
 ｜ ...                                            ｜
 +-------------------------------------------------+-----------------
 ｜ serialized bitmap 1                            ｜
 +-------------------------------------------------+
 ｜ serialized bitmap 2                            ｜
-+-------------------------------------------------+       BODY
++-------------------------------------------------+  BITMAP BLOCKS
 ｜ serialized bitmap 3                            ｜
 +-------------------------------------------------+
 ｜ ...                                            ｜
++-------------------------------------------------+-----------------
+
+index block format:
++-------------------------------------------------+
+｜ entry number (4 bytes int)                     ｜
++-------------------------------------------------+
+｜ value 1 | offset 1 | length 1                  ｜
++-------------------------------------------------+
+｜ value 2 | offset 2 | length 2                  ｜
++-------------------------------------------------+
+｜ ...                                            ｜
++-------------------------------------------------+
+
+value x:                       var bytes for any data type (as bitmap identifier)
+offset:                        4 bytes int (when it is negative, it represents that there is only one value
+                                 and its position is the inverse of the negative value)
+length:                        4 bytes int
+  
+</pre>
+
+(Legacy) Bitmap file index format (V1):
+
+<pre>
+
+Bitmap file index format (V1)
++-------------------------------------------------+-----------------
+| version (1 byte)                                |
++-------------------------------------------------+
+| row count (4 bytes int)                         |
++-------------------------------------------------+
+| non-null value bitmap number (4 bytes int)      |
++-------------------------------------------------+
+| has null value (1 byte)                         |
++-------------------------------------------------+
+| null value offset (4 bytes if has null value)   |       HEAD
++-------------------------------------------------+
+| value 1 | offset 1                              |
++-------------------------------------------------+
+| value 2 | offset 2                              |
++-------------------------------------------------+
+| value 3 | offset 3                              |
++-------------------------------------------------+
+| ...                                             |
++-------------------------------------------------+-----------------
+| serialized bitmap 1                             |
++-------------------------------------------------+
+| serialized bitmap 2                             |
++-------------------------------------------------+       BODY
+| serialized bitmap 3                             |
++-------------------------------------------------+
+| ...                                             |
 +-------------------------------------------------+-----------------
 *
 value x:                       var bytes for any data type (as bitmap identifier)
@@ -135,11 +200,102 @@ offset:                        4 bytes int (when it is negative, it represents t
                                  and its position is the inverse of the negative value)
 </pre>
 
-Integer are all BIG_ENDIAN.
+Integers are all BIG_ENDIAN.
+Integer are all BIG_ENDIAN. In the paimon version that supports v2, the bitmap index version defaults to v2.
+
+Bitmap only support the following data type:
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 10%">Paimon Data Type</th>
+      <th class="text-left" style="width: 5%">Supported</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><code>TinyIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>SmallIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>IntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>BigIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DateType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TimeType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>LocalZonedTimestampType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TimestampType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>CharType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>VarCharType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>StringType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>BooleanType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DecimalType(precision, scale)</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>FloatType</code></td>
+      <td>Not recommended</td>
+    </tr>
+    <tr>
+      <td><code>DoubleType</code></td>
+      <td>Not recommended</td>
+    </tr>
+    <tr>
+      <td><code>VarBinaryType</code>, <code>BinaryType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>RowType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>MapType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>ArrayType</code></td>
+      <td>false</td>
+    </tr>
+    </tbody>
+</table>
+
 
 ## Index: Bit-Slice Index Bitmap
 
-BSI file index is a numeric range index, used to accelerate range query, it can use with bitmap index.
+BSI file index is a numeric range index, used to accelerate range query, it can be used with bitmap index.
 
 Define `'file-index.bsi.columns'`.
 
@@ -148,17 +304,17 @@ BSI file index format (V1):
 <pre>
 BSI file index format (V1)
 +-------------------------------------------------+
-｜ version (1 byte)                               ｜
+| version (1 byte)                                |
 +-------------------------------------------------+
-｜ row count (4 bytes int)                        ｜
+| row count (4 bytes int)                         |
 +-------------------------------------------------+
-｜ has positive value (1 byte)                    ｜
+| has positive value (1 byte)                     |
 +-------------------------------------------------+
-｜ positive BSI serialized (if has positive value)｜       
+| positive BSI serialized (if has positive value) |       
 +-------------------------------------------------+
-｜ has negative value (1 byte)                    ｜
+| has negative value (1 byte)                     |
 +-------------------------------------------------+
-｜ negative BSI serialized (if has negative value)｜       
+| negative BSI serialized (if has negative value) |       
 +-------------------------------------------------+
 </pre>
 
@@ -166,23 +322,23 @@ BSI serialized format (V1):
 <pre>
 BSI serialized format (V1)
 +-------------------------------------------------+
-｜ version (1 byte)                               ｜
+| version (1 byte)                                |
 +-------------------------------------------------+
-｜ min value (8 bytes long)                       ｜
+| min value (8 bytes long)                        |
 +-------------------------------------------------+
-｜ max value (8 bytes long)                       ｜
+| max value (8 bytes long)                        |
 +-------------------------------------------------+
-｜ serialized existence bitmap                    ｜       
+| serialized existence bitmap                     |       
 +-------------------------------------------------+
-｜ bit slice bitmap count (4 bytes int)           ｜
+| bit slice bitmap count (4 bytes int)            |
 +-------------------------------------------------+
-｜ serialized bit 0 bitmap                        ｜
+| serialized bit 0 bitmap                         |
 +-------------------------------------------------+
-｜ serialized bit 1 bitmap                        ｜
+| serialized bit 1 bitmap                         |
 +-------------------------------------------------+
-｜ serialized bit 2 bitmap                        ｜
+| serialized bit 2 bitmap                         |
 +-------------------------------------------------+
-｜ ...                                            ｜
+| ...                                             |
 +-------------------------------------------------+
 </pre>
 
