@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.SupportsSnapshots;
+import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.SnapshotLoader;
 
 import java.io.IOException;
@@ -42,7 +43,9 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     @Override
     public Optional<Snapshot> load() throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            return ((SupportsSnapshots) catalog).loadSnapshot(identifier);
+            return ((SupportsSnapshots) catalog)
+                    .loadSnapshot(identifier)
+                    .map(TableSnapshot::snapshot);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

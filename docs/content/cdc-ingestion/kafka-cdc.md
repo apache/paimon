@@ -67,6 +67,10 @@ If a message in a Kafka topic is a change event captured from another database u
          <td><a href="https://docs.aws.amazon.com/dms/latest/userguide/Welcome.html">aws-dms-json</a></td>
         <td>True</td>
         </tr>
+        <tr>
+         <td><a href="{{< ref "/cdc-ingestion/debezium-bson" >}}">debezium-bson</a></td>
+        <td>True</td>
+        </tr>
     </tbody>
 </table>
 

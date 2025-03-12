@@ -19,7 +19,6 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -34,12 +33,8 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CommitTableRequest implements RESTRequest {
 
-    private static final String FIELD_IDENTIFIER = "identifier";
     private static final String FIELD_SNAPSHOT = "snapshot";
     private static final String FIELD_STATISTICS = "statistics";
-
-    @JsonProperty(FIELD_IDENTIFIER)
-    private final Identifier identifier;
 
     @JsonProperty(FIELD_SNAPSHOT)
     private final Snapshot snapshot;
@@ -49,17 +44,10 @@ public class CommitTableRequest implements RESTRequest {
 
     @JsonCreator
     public CommitTableRequest(
-            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
             @JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot,
             @JsonProperty(FIELD_STATISTICS) List<Partition> statistics) {
-        this.identifier = identifier;
         this.snapshot = snapshot;
         this.statistics = statistics;
-    }
-
-    @JsonGetter(FIELD_IDENTIFIER)
-    public Identifier getIdentifier() {
-        return identifier;
     }
 
     @JsonGetter(FIELD_SNAPSHOT)

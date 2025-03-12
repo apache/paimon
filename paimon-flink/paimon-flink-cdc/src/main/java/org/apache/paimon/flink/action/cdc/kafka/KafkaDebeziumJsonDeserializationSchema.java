@@ -64,7 +64,14 @@ public class KafkaDebeziumJsonDeserializationSchema
         }
 
         try {
-            return new CdcSourceRecord(objectMapper.readValue(message.value(), JsonNode.class));
+            byte[] key = message.key();
+            JsonNode keyNode = null;
+            if (key != null) {
+                keyNode = objectMapper.readValue(key, JsonNode.class);
+            }
+
+            JsonNode valueNode = objectMapper.readValue(message.value(), JsonNode.class);
+            return new CdcSourceRecord(null, keyNode, valueNode);
         } catch (Exception e) {
             LOG.error("Invalid Json:\n{}", new String(message.value()));
             throw e;

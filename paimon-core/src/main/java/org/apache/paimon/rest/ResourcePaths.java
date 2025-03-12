@@ -48,7 +48,7 @@ public class ResourcePaths {
     private final String prefix;
 
     public ResourcePaths(String prefix) {
-        this.prefix = prefix;
+        this.prefix = encodeString(prefix);
     }
 
     public String databases() {
@@ -81,12 +81,19 @@ public class ResourcePaths {
                 encodeString(objectName));
     }
 
-    public String renameTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "rename");
+    public String renameTable() {
+        return SLASH.join(V1, prefix, TABLES, "rename");
     }
 
-    public String commitTable(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES, "commit");
+    public String commitTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "commit");
     }
 
     public String tableToken(String databaseName, String objectName) {
@@ -181,15 +188,16 @@ public class ResourcePaths {
                 encodeString(branchName));
     }
 
-    public String forwardBranch(String databaseName, String objectName) {
+    public String forwardBranch(String databaseName, String tableName, String branch) {
         return SLASH.join(
                 V1,
                 prefix,
                 DATABASES,
                 encodeString(databaseName),
                 TABLES,
-                encodeString(objectName),
+                encodeString(tableName),
                 BRANCHES,
+                encodeString(branch),
                 "forward");
     }
 
@@ -206,7 +214,7 @@ public class ResourcePaths {
                 V1, prefix, DATABASES, encodeString(databaseName), VIEWS, encodeString(viewName));
     }
 
-    public String renameView(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), VIEWS, "rename");
+    public String renameView() {
+        return SLASH.join(V1, prefix, VIEWS, "rename");
     }
 }

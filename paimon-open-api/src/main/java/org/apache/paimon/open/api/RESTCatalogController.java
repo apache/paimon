@@ -375,11 +375,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/rename")
-    public void renameTable(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @RequestBody RenameTableRequest request) {}
+    @PostMapping("/v1/{prefix}/tables/rename")
+    public void renameTable(@PathVariable String prefix, @RequestBody RenameTableRequest request) {}
 
     @Operation(
             summary = "Commit table",
@@ -396,10 +393,11 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/commit")
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/commit")
     public CommitTableResponse commitTable(
             @PathVariable String prefix,
             @PathVariable String database,
+            @PathVariable String table,
             @RequestBody CommitTableRequest request) {
         return new CommitTableResponse(true);
     }
@@ -616,11 +614,12 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches/forward")
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward")
     public void forwardBranch(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
+            @PathVariable String branch,
             @RequestBody ForwardBranchRequest request) {}
 
     @Operation(
@@ -769,11 +768,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/views/rename")
-    public void renameView(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @RequestBody RenameTableRequest request) {}
+    @PostMapping("/v1/{prefix}/views/rename")
+    public void renameView(@PathVariable String prefix, @RequestBody RenameTableRequest request) {}
 
     @Operation(
             summary = "Drop view",

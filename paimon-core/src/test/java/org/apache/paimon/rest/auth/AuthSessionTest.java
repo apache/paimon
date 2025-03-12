@@ -241,7 +241,7 @@ public class AuthSessionTest {
         parameters.put("k2", "v2");
         String data = "data";
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter(serverUrl, "/path", parameters, "method", "data");
+                new RESTAuthParameter("/path", parameters, "method", "data");
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
         String authorization = header.get(DLF_AUTHORIZATION_HEADER_KEY);
         String[] credentials = authorization.split(",")[0].split(" ")[1].split("/");
@@ -249,14 +249,13 @@ public class AuthSessionTest {
         String date = credentials[1];
         String newAuthorization =
                 DLFAuthSignature.getAuthorization(
-                        new RESTAuthParameter(serverUrl, "/path", parameters, "method", "data"),
+                        new RESTAuthParameter("/path", parameters, "method", "data"),
                         token,
                         "cn-hangzhou",
                         header,
                         dateTime,
                         date);
         assertEquals(newAuthorization, authorization);
-        assertEquals(restAuthParameter.host(), header.get(DLFAuthProvider.DLF_HOST_HEADER_KEY));
         assertEquals(
                 token.getSecurityToken(),
                 header.get(DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY));

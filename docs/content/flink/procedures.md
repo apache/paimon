@@ -157,7 +157,7 @@ All available procedures are listed below.
       </td>
       <td>
          To create a tag based on given snapshot. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>tagName: name of the new tag.</li>
             <li>snapshotId (Long): id of the snapshot which the new tag is based on.</li>
             <li>time_retained: The maximum time retained for newly created tags.</li>
@@ -177,7 +177,7 @@ All available procedures are listed below.
       </td>
       <td>
          To create a tag based on given timestamp. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>tag: name of the new tag.</li>
             <li>timestamp (Long): Find the first snapshot whose commit-time greater than this timestamp.</li>
             <li>time_retained : The maximum time retained for newly created tags.</li>
@@ -200,7 +200,7 @@ All available procedures are listed below.
       </td>
       <td>
          To create a tag based on given watermark timestamp. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>tag: name of the new tag.</li>
             <li>watermark (Long): Find the first snapshot whose watermark greater than the specified watermark.</li>
             <li>time_retained : The maximum time retained for newly created tags.</li>
@@ -222,7 +222,7 @@ All available procedures are listed below.
       </td>
       <td>
          To delete a tag. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>tagName: name of the tag to be deleted. If you specify multiple tags, delimiter is ','.</li>
       </td>
       <td>
@@ -262,7 +262,7 @@ All available procedures are listed below.
       </td>
       <td>
          To expire tags by time. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>older_than: tagCreateTime before which tags will be removed.</li>
       </td>
       <td>
@@ -329,7 +329,7 @@ All available procedures are listed below.
       </td>
       <td>
          To remove the orphan data files and metadata files. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
+            <li>table: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
             <li>olderThan: to avoid deleting newly written files, this procedure only 
                deletes orphan files older than 1 day by default. This argument can modify the interval.
             </li>
@@ -355,8 +355,8 @@ All available procedures are listed below.
       </td>
       <td>
          Procedure to remove unexisting data files from manifest entries. See <a href="https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/RemoveUnexistingFilesAction.html">Java docs</a> for detailed use cases. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
-            <li>dryRun (optional): only check what files will be removed, but not really remove them. Default is false.</li>
+            <li>table: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
+            <li>dry_run (optional): only check what files will be removed, but not really remove them. Default is false.</li>
             <li>parallelism (optional): number of parallelisms to check files in the manifests.</li>
          <br>
          Note that user is on his own risk using this procedure, which may cause data loss when used outside from the use cases listed in Java docs.
@@ -382,7 +382,7 @@ All available procedures are listed below.
       </td>
       <td>
          To reset or delete consumer. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>consumerId: consumer to be reset or deleted.</li>
             <li>nextSnapshotId (Long): the new next snapshot id of the consumer.</li>
       </td>
@@ -403,7 +403,7 @@ All available procedures are listed below.
       </td>
       <td>
          To reset or delete consumer. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>includingConsumers: consumers to be cleared.</li>
             <li>excludingConsumers: consumers which not to be cleared.</li>
       </td>
@@ -429,7 +429,7 @@ All available procedures are listed below.
       </td>
       <td>
          To rollback to a specific version of target table. Argument:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>snapshotId (Long): id of the snapshot that will roll back to.</li>
             <li>tagName: name of the tag that will roll back to.</li>
       </td>
@@ -452,7 +452,7 @@ All available procedures are listed below.
       </td>
       <td>
          To rollback to the snapshot which earlier or equal than timestamp. Argument:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>timestamp (Long): Roll back to the snapshot which earlier or equal than timestamp.</li>
       </td>
       <td>
@@ -474,7 +474,7 @@ All available procedures are listed below.
       </td>
       <td>
          To rollback to the snapshot which earlier or equal than watermark. Argument:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>watermark (Long): Roll back to the snapshot which earlier or equal than watermark.</li>
       </td>
       <td>
@@ -496,7 +496,7 @@ All available procedures are listed below.
       </td>
       <td>
          To clear table with purge files directly. Argument:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
       </td>
       <td>
          -- for Flink 1.18<br/>
@@ -532,10 +532,6 @@ All available procedures are listed below.
    <tr>
       <td>migrate_table</td>
       <td>
-         -- for Flink 1.18<br/>
-         -- migrate hive table to a paimon table.<br/>
-         CALL [catalog.]sys.migrate_table('connector', 'tableIdentifier', 'options'[, &ltparallelism&gt])<br/><br/>
-         -- for Flink 1.19 and later<br/>
          -- migrate hive table to a paimon table.<br/>
          CALL [catalog.]sys.migrate_table(connector => 'connector', source_table => 'tableIdentifier', options => 'options'[, &ltparallelism => parallelism&gt])<br/><br/>
       </td>
@@ -543,39 +539,13 @@ All available procedures are listed below.
          To migrate hive table to a paimon table. Argument:
             <li>connector: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
             <li>source_table: name of the origin table to be migrated. Cannot be empty.</li>
+            <li>target_table: name of the target paimon table to migrate. If not set would keep the same name with origin table</li>
             <li>options: the table options of the paimon table to migrate.</li>
             <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
-      </td>
-      <td>
-         -- for Flink 1.18<br/>
-         CALL sys.migrate_table('hive', 'db01.t1', 'file.format=parquet', 6)
-         -- for Flink 1.19 and later<br/>
-         CALL sys.migrate_table(connector => 'hive', source_table => 'db01.t1', options => 'file.format=parquet', parallelism => 6)
-      </td>
-   </tr>
-   <tr>
-      <td>migrate_file</td>
-      <td>
-         -- for Flink 1.18<br/>
-         -- migrate files from hive table to a paimon table.<br/>
-         CALL [catalog.]sys.migrate_file('connector', 'srcTableIdentifier', 'destTableIdentifier', [, &ltdelete_origin&gt, &ltparallelism&gt])<br/><br/>
-         -- for Flink 1.19 and later<br/>
-         -- migrate hive table to a paimon table.<br/>
-         CALL [catalog.]sys.migrate_file(connector => 'connector', source_table => 'srcTableIdentifier', target_table => 'destTableIdentifier'[, &ltdelete_origin => bool&gt, &ltparallelism => parallelism&gt])<br/><br/>
-      </td>
-      <td>
-         To migrate files from hive table to a paimon table. Argument:
-            <li>connector: the origin table's type to be migrated, such as hive. Cannot be empty.</li>
-            <li>source_table: name of the origin table to migrate. Cannot be empty.</li>
-            <li>target_table: name of the target table to be migrated. Cannot be empty.</li>
             <li>delete_origin: If had set target_table, can set delete_origin to decide whether delete the origin table metadata from hms after migrate. Default is true</li>
-            <li>parallelism: the parallelism for migrate process, default is core numbers of machine.</li>
       </td>
       <td>
-         -- for Flink 1.18<br/>
-         CALL sys.migrate_file('hive', 'default.T', 'default.T2', true, 6)
-         -- for Flink 1.19 and later<br/>
-         CALL sys.migrate_file(connector => 'hive', source_table => 'default.T', target_table => 'default.T2', delete_origin => true, parallelism => 6)
+         CALL sys.migrate_table(connector => 'hive', source_table => 'db01.t1', options => 'file.format=parquet', parallelism => 6)
       </td>
    </tr>
    <tr>
@@ -643,6 +613,7 @@ All available procedures are listed below.
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
             <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
+            <li>max_expires: The maximum of limited expired partitions, it is optional.</li>
       </td>
       <td>
          -- for Flink 1.18<br/><br/>
@@ -682,7 +653,7 @@ All available procedures are listed below.
       </td>
       <td>
          Rewrite the file index for the table. Argument:
-            <li>identifier: &ltdatabaseName&gt.&lttableName&gt.</li>
+            <li>table: &ltdatabaseName&gt.&lttableName&gt.</li>
             <li>partitions : specific partitions.</li>
       </td>
       <td>
@@ -704,7 +675,7 @@ All available procedures are listed below.
       </td>
       <td>
          To create a branch based on given tag, or just create empty branch. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>branchName: name of the new branch.</li>
             <li>tagName: name of the tag which the new branch is based on.</li>
       </td>
@@ -723,7 +694,7 @@ All available procedures are listed below.
       </td>
       <td>
          To delete a branch. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>branchName: name of the branch to be deleted. If you specify multiple branches, delimiter is ','.</li>
       </td>
       <td>
@@ -740,7 +711,7 @@ All available procedures are listed below.
       </td>
       <td>
          To fast_forward a branch to main branch. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>branchName: name of the branch to be merged.</li>
       </td>
       <td>
@@ -754,7 +725,7 @@ All available procedures are listed below.
       </td>
       <td>
          To refresh_object_table a object table. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
       </td>
       <td>
          CALL sys.refresh_object_table('default.T')
@@ -767,7 +738,7 @@ All available procedures are listed below.
       </td>
       <td>
          To compact_manifest the manifests. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
       </td>
       <td>
          CALL sys.compact_manifest(`table` => 'default.T')
@@ -776,13 +747,15 @@ All available procedures are listed below.
    <tr>
       <td>rescale</td>
       <td>
-         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition')
+         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `scan_parallelism` => 'scan_parallelism', `sink_parallelism` => 'sink_parallelism')
       </td>
       <td>
          Rescale one partition of a table. Arguments:
-         <li>identifier: The target table identifier. Cannot be empty.</li>
+         <li>table: The target table identifier. Cannot be empty.</li>
          <li>bucket_num: Resulting bucket number after rescale. The default value of argument bucket_num is the current bucket number of the table. Cannot be empty for postpone bucket tables.</li>
          <li>partition: What partition to rescale. For partitioned table this argument cannot be empty.</li>
+         <li>scan_parallelism: Parallelism of source operator. The default value is the current bucket number of the partition.</li>
+         <li>sink_parallelism: Parallelism of sink operator. The default value is equal to bucket_num.</li>
       </td>
       <td>
          CALL sys.rescale(`table` => 'default.T', `bucket_num` => 16, `partition` => 'dt=20250217,hh=08')

@@ -45,7 +45,7 @@ class MigrateFileProcedureTest extends PaimonHiveTestBase {
           spark.sql(s"INSERT INTO paimon_tbl VALUES ('3', 'c', 'p1'), ('4', 'd', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_file(source_type => 'hive', source_table => '$hiveDbName.hive_tbl', target_table => '$hiveDbName.paimon_tbl')")
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl', target_table => '$hiveDbName.paimon_tbl')")
 
           checkAnswer(
             spark.sql("SELECT * FROM paimon_tbl ORDER BY id"),
@@ -80,7 +80,7 @@ class MigrateFileProcedureTest extends PaimonHiveTestBase {
           spark.sql(s"INSERT INTO paimon_tbl_02 VALUES ('3', 'c', 'p1'), ('4', 'd', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_file(source_type => 'hive', source_table => '$hiveDbName.hive_tbl_02', target_table => '$hiveDbName.paimon_tbl_02', parallelism => 6)")
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl_02', target_table => '$hiveDbName.paimon_tbl_02', parallelism => 6)")
 
           checkAnswer(
             spark.sql("SELECT * FROM paimon_tbl_02 ORDER BY id"),
@@ -115,7 +115,7 @@ class MigrateFileProcedureTest extends PaimonHiveTestBase {
           spark.sql(s"INSERT INTO paimon_tbl VALUES ('3', 'c', 'p1'), ('4', 'd', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_file(source_type => 'hive', source_table => '$hiveDbName.hive_tbl', target_table => '$hiveDbName.paimon_tbl', delete_origin => false)")
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl', target_table => '$hiveDbName.paimon_tbl', delete_origin => false)")
 
           checkAnswer(spark.sql("SELECT * FROM hive_tbl ORDER BY id"), Nil)
 
@@ -153,7 +153,7 @@ class MigrateFileProcedureTest extends PaimonHiveTestBase {
           spark.sql(s"INSERT INTO paimon_tbl VALUES ('3', 'c', 'p1'), ('4', 'd', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_file(source_type => 'hive', source_table => '$hiveDbName.hive_tbl', target_table => '$hiveDbName.paimon_tbl')")
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl', target_table => '$hiveDbName.paimon_tbl')")
 
           checkAnswer(
             spark.sql("SELECT * FROM paimon_tbl ORDER BY id"),
@@ -190,7 +190,7 @@ class MigrateFileProcedureTest extends PaimonHiveTestBase {
           spark.sql(s"INSERT INTO paimon_tbl VALUES ('3', 'c', 'p1'), ('4', 'd', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_file(source_type => 'hive', source_table => '$hiveDbName.hive_tbl', target_table => '$hiveDbName.paimon_tbl', delete_origin => false)")
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl', target_table => '$hiveDbName.paimon_tbl', delete_origin => false)")
 
           checkAnswer(
             spark.sql("SELECT * FROM paimon_tbl ORDER BY id"),
