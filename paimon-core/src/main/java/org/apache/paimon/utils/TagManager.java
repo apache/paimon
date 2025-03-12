@@ -100,7 +100,7 @@ public class TagManager {
     public void createTag(
             Snapshot snapshot,
             String tagName,
-            Duration timeRetained,
+            @Nullable Duration timeRetained,
             List<TagCallback> callbacks,
             boolean ignoreIfExists) {
         checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
@@ -108,38 +108,25 @@ public class TagManager {
             checkArgument(ignoreIfExists, "Tag '%s' already exists.", tagName);
             return;
         }
-        createOrReplaceTag(snapshot, tagName, timeRetained, callbacks);
-    }
 
-    /** Replace a tag from given snapshot and save it in the storage. */
-    public void replaceTag(Snapshot snapshot, String tagName, Duration timeRetained) {
-        checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
-        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
-        createOrReplaceTag(snapshot, tagName, timeRetained, null);
-    }
-
-    private void createOrReplaceTag(
-            Snapshot snapshot,
-            String tagName,
-            @Nullable Duration timeRetained,
-            @Nullable List<TagCallback> callbacks) {
-        // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
-        // will cause older versions (<= 0.7) of readers to be unable to read this tag.
-        // When timeRetained is defined, it is fine, because timeRetained is the new feature.
-        String content =
-                timeRetained != null
-                        ? Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now())
-                                .toJson()
-                        : snapshot.toJson();
+        String content = toTagJsonString(snapshot, timeRetained);
         Path tagPath = tagPath(tagName);
 
         try {
-            fileIO.overwriteFileUtf8(tagPath, content);
-        } catch (IOException e) {
+            fileIO.tryToWriteAtomic(tagPath, content);
+        } catch (Exception e) {
+            // check existence again
+            if (tagExists(tagName)) {
+                checkArgument(
+                        ignoreIfExists,
+                        "Tag '%s' was created before this procedure is trying to create it.",
+                        tagName);
+                return;
+            }
+
             throw new RuntimeException(
                     String.format(
-                            "Exception occurs when committing tag '%s' (path %s). "
-                                    + "Cannot clean up because we can't determine the success.",
+                            "Exception occurs when committing tag '%s' (path %s).",
                             tagName, tagPath),
                     e);
         }
@@ -153,6 +140,35 @@ public class TagManager {
                 }
             }
         }
+    }
+
+    /** Replace a tag from given snapshot and save it in the storage. */
+    public void replaceTag(Snapshot snapshot, String tagName, @Nullable Duration timeRetained) {
+        checkArgument(!StringUtils.isNullOrWhitespaceOnly(tagName), "Tag name shouldn't be blank.");
+        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
+
+        String content = toTagJsonString(snapshot, timeRetained);
+        Path tagPath = tagPath(tagName);
+
+        try {
+            fileIO.overwriteFileUtf8(tagPath, content);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when committing tag '%s' (path %s). "
+                                    + "Cannot clean up because we can't determine the success.",
+                            tagName, tagPath),
+                    e);
+        }
+    }
+
+    private String toTagJsonString(Snapshot snapshot, @Nullable Duration timeRetained) {
+        // When timeRetained is not defined, please do not write the tagCreatorTime field, as this
+        // will cause older versions (<= 0.7) of readers to be unable to read this tag.
+        // When timeRetained is defined, it is fine, because timeRetained is the new feature.
+        return timeRetained != null
+                ? Tag.fromSnapshotAndTagTtl(snapshot, timeRetained, LocalDateTime.now()).toJson()
+                : snapshot.toJson();
     }
 
     public void renameTag(String tagName, String targetTagName) {
