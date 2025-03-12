@@ -197,16 +197,19 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         table = table.copy(map);
 
         int currentSecs = (int) (System.currentTimeMillis() / 1000);
+        // if seconds is too short, this test might file
+        int seconds = 5;
 
         // large file A. It has no delete records and expired records, will be upgraded to maxLevel
         // without rewriting when full compaction
         writeCommit(
-                GenericRow.of(1, 1, currentSecs + 60 * 60), GenericRow.of(1, 2, currentSecs + 3));
+                GenericRow.of(1, 1, currentSecs + 60 * 60),
+                GenericRow.of(1, 2, currentSecs + seconds));
         compact(1);
         assertThat(query())
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, currentSecs + 60 * 60),
-                        GenericRow.of(1, 2, currentSecs + 3));
+                        GenericRow.of(1, 2, currentSecs + seconds));
 
         // large file B. It has no delete records but has expired records
         writeCommit(
@@ -216,7 +219,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         assertThat(query())
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, currentSecs + 60 * 60),
-                        GenericRow.of(1, 2, currentSecs + 3),
+                        GenericRow.of(1, 2, currentSecs + seconds),
                         GenericRow.of(1, 3, currentSecs + 60 * 60),
                         GenericRow.of(1, 4, currentSecs - 60 * 60));
         compact(1);
@@ -227,11 +230,11 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         assertThat(query())
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, currentSecs + 60 * 60),
-                        GenericRow.of(1, 2, currentSecs + 3),
+                        GenericRow.of(1, 2, currentSecs + seconds),
                         GenericRow.of(1, 3, currentSecs + 60 * 60));
 
-        // ensure (1, 2, currentSecs + 3) out of date
-        Thread.sleep(4000);
+        // ensure (1, 2, currentSecs + seconds) out of date
+        Thread.sleep(seconds * 1000 + 2000);
         compact(1);
         assertThat(query())
                 .containsExactlyInAnyOrder(
