@@ -28,6 +28,7 @@ import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -53,6 +54,7 @@ public class LookupDataTableScan extends DataTableStreamScan {
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             boolean supportStreamingReadOverwrite,
             DefaultValueAssigner defaultValueAssigner,
             LookupStreamScanMode lookupScanMode) {
@@ -60,6 +62,7 @@ public class LookupDataTableScan extends DataTableStreamScan {
                 options,
                 snapshotReader,
                 snapshotManager,
+                changelogManager,
                 supportStreamingReadOverwrite,
                 defaultValueAssigner);
         this.startupMode = options.startupMode();

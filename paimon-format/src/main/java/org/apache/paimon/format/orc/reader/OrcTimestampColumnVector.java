@@ -19,6 +19,8 @@
 package org.apache.paimon.format.orc.reader;
 
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
@@ -31,17 +33,28 @@ import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
  */
 public class OrcTimestampColumnVector extends AbstractOrcColumnVector
         implements org.apache.paimon.data.columnar.TimestampColumnVector {
-
+    private final Boolean legacyTimestampLtzType;
+    private final DataType dataType;
     private final TimestampColumnVector vector;
 
-    public OrcTimestampColumnVector(ColumnVector vector, VectorizedRowBatch orcBatch) {
+    public OrcTimestampColumnVector(
+            ColumnVector vector,
+            VectorizedRowBatch orcBatch,
+            DataType dataType,
+            boolean legacyTimestampLtzType) {
         super(vector, orcBatch);
         this.vector = (TimestampColumnVector) vector;
+        this.dataType = dataType;
+        this.legacyTimestampLtzType = legacyTimestampLtzType;
     }
 
     @Override
     public Timestamp getTimestamp(int i, int precision) {
         i = rowMapper(i);
-        return DateTimeUtils.toInternal(vector.time[i], vector.nanos[i] % 1_000_000);
+        if (dataType instanceof TimestampType || legacyTimestampLtzType) {
+            return DateTimeUtils.toInternal(vector.time[i], vector.nanos[i] % 1_000_000);
+        } else {
+            return Timestamp.fromEpochMillis(vector.time[i], vector.nanos[i] % 1_000_000);
+        }
     }
 }

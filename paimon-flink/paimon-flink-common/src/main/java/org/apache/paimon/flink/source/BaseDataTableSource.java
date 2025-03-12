@@ -65,6 +65,7 @@ import java.util.stream.IntStream;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC_THREAD_NUMBER;
@@ -113,13 +114,12 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
             @Nullable Long countPushed) {
         super(table, predicate, projectFields, limit);
+
         this.tableIdentifier = tableIdentifier;
         this.unbounded = unbounded;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
-        this.predicate = predicate;
-        this.projectFields = projectFields;
-        this.limit = limit;
+
         this.watermarkStrategy = watermarkStrategy;
         this.countPushed = countPushed;
     }
@@ -147,6 +147,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             if (logStoreTableFactory == null
                     && options.get(CHANGELOG_PRODUCER) != ChangelogProducer.NONE) {
                 return ChangelogMode.all();
+            }
+
+            if (logStoreTableFactory != null && options.get(LOG_IGNORE_DELETE)) {
+                return ChangelogMode.insertOnly();
             }
 
             // optimization: transaction consistency and all changelog mode avoid the generation of
@@ -198,7 +202,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .sourceBounded(!unbounded)
                         .logSourceProvider(logSourceProvider)
                         .projection(projectFields)
-                        .predicate(predicate)
+                        .predicate(getPredicateWithScanPartitions())
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
@@ -271,7 +275,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     }
 
     protected FileStoreLookupFunction getFileStoreLookupFunction(
-            LookupContext context, Table table, int[] projection, int[] joinKey) {
+            LookupContext context, FileStoreTable table, int[] projection, int[] joinKey) {
         return new FileStoreLookupFunction(table, projection, joinKey, predicate);
     }
 
@@ -325,7 +329,12 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         }
 
         List<Split> splits =
-                table.newReadBuilder().dropStats().withFilter(predicate).newScan().plan().splits();
+                table.newReadBuilder()
+                        .dropStats()
+                        .withFilter(getPredicateWithScanPartitions())
+                        .newScan()
+                        .plan()
+                        .splits();
         long countPushed = 0;
         for (Split s : splits) {
             if (!(s instanceof DataSplit)) {

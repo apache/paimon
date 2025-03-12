@@ -22,7 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -139,7 +139,7 @@ public class Identifier implements Serializable {
     @JsonIgnore
     public String getBranchNameOrDefault() {
         String branch = getBranchName();
-        return branch == null ? BranchManager.DEFAULT_MAIN_BRANCH : branch;
+        return branch == null ? FileSystemBranchManager.DEFAULT_MAIN_BRANCH : branch;
     }
 
     @JsonIgnore

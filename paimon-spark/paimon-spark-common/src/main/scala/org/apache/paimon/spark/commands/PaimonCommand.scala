@@ -127,10 +127,11 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
 
   protected def findTouchedFiles(
       dataset: Dataset[Row],
-      sparkSession: SparkSession): Array[String] = {
+      sparkSession: SparkSession,
+      identifier: String = FILE_PATH_COLUMN): Array[String] = {
     import sparkSession.implicits._
     dataset
-      .select(FILE_PATH_COLUMN)
+      .select(identifier)
       .distinct()
       .as[String]
       .collect()

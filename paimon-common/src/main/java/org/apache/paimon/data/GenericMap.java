@@ -64,6 +64,10 @@ public final class GenericMap implements InternalMap, Serializable {
         return map.get(key);
     }
 
+    public boolean contains(Object key) {
+        return map.containsKey(key);
+    }
+
     @Override
     public int size() {
         return map.size();

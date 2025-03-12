@@ -19,7 +19,6 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
 import org.apache.parquet.io.InputFile;
@@ -30,33 +29,36 @@ import java.io.IOException;
 public class ParquetInputFile implements InputFile {
 
     private final FileIO fileIO;
-    private final FileStatus stat;
+    private final Path path;
+    private final long length;
 
-    public static ParquetInputFile fromPath(FileIO fileIO, Path path) throws IOException {
-        return new ParquetInputFile(fileIO, fileIO.getFileStatus(path));
+    public static ParquetInputFile fromPath(FileIO fileIO, Path path, long length)
+            throws IOException {
+        return new ParquetInputFile(fileIO, path, length);
     }
 
-    private ParquetInputFile(FileIO fileIO, FileStatus stat) {
+    private ParquetInputFile(FileIO fileIO, Path path, long length) {
         this.fileIO = fileIO;
-        this.stat = stat;
+        this.path = path;
+        this.length = length;
     }
 
     public Path getPath() {
-        return stat.getPath();
+        return path;
     }
 
     @Override
     public long getLength() {
-        return stat.getLen();
+        return length;
     }
 
     @Override
     public ParquetInputStream newStream() throws IOException {
-        return new ParquetInputStream(fileIO.newInputStream(stat.getPath()));
+        return new ParquetInputStream(fileIO.newInputStream(path));
     }
 
     @Override
     public String toString() {
-        return stat.getPath().toString();
+        return path.toString();
     }
 }

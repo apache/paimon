@@ -18,12 +18,15 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.view.View;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.List;
@@ -129,6 +132,51 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
+
+    /**
+     * Get paged list names of tables under this database. An empty list is returned if none exists.
+     *
+     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog will return all
+     * tables names like listTables.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @param databaseName Name of the database to list tables.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the names of tables with provided page size in this database and next page
+     *     token
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    PagedList<String> listTablesPaged(
+            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws DatabaseNotExistException;
+
+    /**
+     * Get paged list of table details under this database. An empty list is returned if none
+     * exists.
+     *
+     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog will return all
+     * table details, please use this method carefully for other catalog.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @param databaseName Name of the database to list table details.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the table details with provided page size in this database and next page
+     *     token
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    PagedList<Table> listTableDetailsPaged(
+            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws DatabaseNotExistException;
 
     /**
      * Drop a table.
@@ -275,6 +323,26 @@ public interface Catalog extends AutoCloseable {
      */
     List<Partition> listPartitions(Identifier identifier) throws TableNotExistException;
 
+    /**
+     * Get paged partitioned list of the table.
+     *
+     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog will return all
+     * partitions.
+     *
+     * @param identifier path of the table to list partitions
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the partitions with provided page size(@param maxResults) in this table and
+     *     next page token
+     * @throws TableNotExistException if the table does not exist
+     */
+    PagedList<Partition> listPartitionsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException;
+
     // ======================= view methods ===============================
 
     /**
@@ -324,6 +392,53 @@ public interface Catalog extends AutoCloseable {
      */
     default List<String> listViews(String databaseName) throws DatabaseNotExistException {
         return Collections.emptyList();
+    }
+
+    /**
+     * Get paged list names of views under this database. An empty list is returned if none view
+     * exists.
+     *
+     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog will return all
+     * view names, like listViews.
+     *
+     * @param databaseName Name of the database to list views.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the names of views with provided page size in this database and next page
+     *     token
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    default PagedList<String> listViewsPaged(
+            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws DatabaseNotExistException {
+        return new PagedList<>(listViews(databaseName), null);
+    }
+
+    /**
+     * Get paged list view details under this database. An empty list is returned if none view
+     * exists.
+     *
+     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog which supports
+     * view will return all view details, please use this method carefully for other catalog which
+     * supports view.
+     *
+     * @param databaseName Name of the database to list views.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the view details with provided page size (@param maxResults) in this
+     *     database and next page token
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    default PagedList<View> listViewDetailsPaged(
+            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws DatabaseNotExistException {
+        return new PagedList<>(Collections.emptyList(), null);
     }
 
     /**
@@ -481,6 +596,10 @@ public interface Catalog extends AutoCloseable {
             this.database = database;
         }
 
+        public DatabaseNoPermissionException(String database) {
+            this(database, null);
+        }
+
         public String database() {
             return database;
         }
@@ -538,6 +657,10 @@ public interface Catalog extends AutoCloseable {
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
             super(String.format(MSG, identifier.getFullName()), cause);
             this.identifier = identifier;
+        }
+
+        public TableNoPermissionException(Identifier identifier) {
+            this(identifier, null);
         }
 
         public Identifier identifier() {

@@ -59,7 +59,7 @@ case class PaimonViewResolver(spark: SparkSession)
   }
 
   private def createViewRelation(nameParts: Seq[String], view: View): LogicalPlan = {
-    val parsedPlan = parseViewText(nameParts.toArray.mkString("."), view.query)
+    val parsedPlan = parseViewText(nameParts.toArray.mkString("."), view.query("spark"))
 
     val aliases = SparkTypeUtils.fromPaimonRowType(view.rowType()).fields.zipWithIndex.map {
       case (expected, pos) =>

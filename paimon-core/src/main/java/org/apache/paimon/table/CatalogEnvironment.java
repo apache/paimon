@@ -18,10 +18,15 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogLoader;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.tag.SnapshotLoaderImpl;
+import org.apache.paimon.utils.SnapshotLoader;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -36,21 +41,30 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final Identifier identifier;
     @Nullable private final String uuid;
     @Nullable private final CatalogLoader catalogLoader;
-    @Nullable private final SnapshotCommit.Factory commitFactory;
+    @Nullable private final CatalogLockFactory lockFactory;
+    @Nullable private final CatalogLockContext lockContext;
+    private final boolean supportsSnapshots;
+    private final boolean supportsBranches;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
             @Nullable String uuid,
             @Nullable CatalogLoader catalogLoader,
-            @Nullable SnapshotCommit.Factory commitFactory) {
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            boolean supportsSnapshots,
+            boolean supportsBranches) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
-        this.commitFactory = commitFactory;
+        this.lockFactory = lockFactory;
+        this.lockContext = lockContext;
+        this.supportsSnapshots = supportsSnapshots;
+        this.supportsBranches = supportsBranches;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null);
+        return new CatalogEnvironment(null, null, null, null, null, false, false);
     }
 
     @Nullable
@@ -64,14 +78,6 @@ public class CatalogEnvironment implements Serializable {
     }
 
     @Nullable
-    public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
-        if (commitFactory == null) {
-            return null;
-        }
-        return commitFactory.create(identifier, snapshotManager);
-    }
-
-    @Nullable
     public PartitionHandler partitionHandler() {
         if (catalogLoader == null) {
             return null;
@@ -79,8 +85,41 @@ public class CatalogEnvironment implements Serializable {
         return PartitionHandler.create(catalogLoader.load(), identifier);
     }
 
-    @VisibleForTesting
-    public SnapshotCommit.Factory commitFactory() {
-        return commitFactory;
+    @Nullable
+    public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
+        SnapshotCommit.Factory factory;
+        if (catalogLoader == null || !supportsSnapshots) {
+            factory = new RenamingSnapshotCommit.Factory(lockFactory, lockContext);
+        } else {
+            factory = new CatalogSnapshotCommit.Factory(catalogLoader);
+        }
+        return factory.create(identifier, snapshotManager);
+    }
+
+    @Nullable
+    public SnapshotLoader snapshotLoader() {
+        if (catalogLoader == null || !supportsSnapshots) {
+            return null;
+        }
+        return new SnapshotLoaderImpl(catalogLoader, identifier);
+    }
+
+    @Nullable
+    public CatalogLockFactory lockFactory() {
+        return lockFactory;
+    }
+
+    @Nullable
+    public CatalogLockContext lockContext() {
+        return lockContext;
+    }
+
+    @Nullable
+    public CatalogLoader catalogLoader() {
+        return catalogLoader;
+    }
+
+    public boolean supportsBranches() {
+        return supportsBranches;
     }
 }

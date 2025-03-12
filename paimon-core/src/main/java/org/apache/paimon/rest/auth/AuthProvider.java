@@ -18,26 +18,15 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.RESTCatalogOptions;
-import org.apache.paimon.utils.StringUtils;
-
 import java.util.Map;
 import java.util.Optional;
-
-import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_EXPIRATION_TIME;
-import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER_PATH;
 
 /** Authentication provider. */
 public interface AuthProvider {
 
-    Map<String, String> authHeader();
+    Map<String, String> header(Map<String, String> baseHeader, RESTAuthParameter restAuthParameter);
 
     boolean refresh();
-
-    default boolean supportRefresh() {
-        return false;
-    }
 
     default boolean keepRefreshed() {
         return false;
@@ -51,31 +40,7 @@ public interface AuthProvider {
         return Optional.empty();
     }
 
-    default Optional<Long> expiresInMills() {
+    default Optional<Long> tokenRefreshInMills() {
         return Optional.empty();
-    }
-
-    static AuthProvider create(Options options) {
-        if (options.getOptional(RESTCatalogOptions.TOKEN_PROVIDER_PATH).isPresent()) {
-            if (!options.getOptional(TOKEN_PROVIDER_PATH).isPresent()) {
-                throw new IllegalArgumentException(TOKEN_PROVIDER_PATH.key() + " is required");
-            }
-            String tokenFilePath = options.get(TOKEN_PROVIDER_PATH);
-            if (options.getOptional(TOKEN_EXPIRATION_TIME).isPresent()) {
-                long tokenExpireInMills = options.get(TOKEN_EXPIRATION_TIME).toMillis();
-                return new BearTokenFileAuthProvider(tokenFilePath, tokenExpireInMills);
-
-            } else {
-                return new BearTokenFileAuthProvider(tokenFilePath);
-            }
-        } else {
-            if (options.getOptional(RESTCatalogOptions.TOKEN)
-                    .map(StringUtils::isNullOrWhitespaceOnly)
-                    .orElse(true)) {
-                throw new IllegalArgumentException(
-                        RESTCatalogOptions.TOKEN.key() + " is required and not empty");
-            }
-            return new BearTokenAuthProvider(options.get(RESTCatalogOptions.TOKEN));
-        }
     }
 }

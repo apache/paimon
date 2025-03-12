@@ -58,6 +58,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static java.lang.String.format;
+
 /* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
  * additional information regarding copyright ownership. */
@@ -258,36 +260,50 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     }
 
     public boolean nextBatch() throws IOException {
-        // Primary key table will use the last record, so we can't reset first
-        // TODO: remove usage of the last record by primary key table after batch reset
-        if (rowsReturned >= totalRowCount) {
-            return false;
-        }
-        for (ParquetColumnVector vector : columnVectors) {
-            vector.reset();
-        }
-        columnarBatch.setNumRows(0);
-        checkEndOfRowGroup();
-
-        int num = (int) Math.min(batchSize, totalCountLoadedSoFar - rowsReturned);
-        for (ParquetColumnVector cv : columnVectors) {
-            for (ParquetColumnVector leafCv : cv.getLeaves()) {
-                VectorizedColumnReader columnReader = leafCv.getColumnReader();
-                if (columnReader != null) {
-                    columnReader.readBatch(
-                            num,
-                            leafCv.getColumn().getType(),
-                            leafCv.getValueVector(),
-                            leafCv.getRepetitionLevelVector(),
-                            leafCv.getDefinitionLevelVector());
-                }
+        try {
+            // Primary key table will use the last record, so we can't reset first
+            // TODO: remove usage of the last record by primary key table after batch reset
+            if (rowsReturned >= totalRowCount) {
+                return false;
             }
-            cv.assemble();
+            for (ParquetColumnVector vector : columnVectors) {
+                vector.reset();
+            }
+            columnarBatch.setNumRows(0);
+            checkEndOfRowGroup();
+
+            int num = (int) Math.min(batchSize, totalCountLoadedSoFar - rowsReturned);
+            for (ParquetColumnVector cv : columnVectors) {
+                for (ParquetColumnVector leafCv : cv.getLeaves()) {
+                    VectorizedColumnReader columnReader = leafCv.getColumnReader();
+                    if (columnReader != null) {
+                        columnReader.readBatch(
+                                num,
+                                leafCv.getColumn().getType(),
+                                leafCv.getValueVector(),
+                                leafCv.getRepetitionLevelVector(),
+                                leafCv.getDefinitionLevelVector());
+                    }
+                }
+                cv.assemble();
+            }
+            rowsReturned += num;
+            columnarBatch.setNumRows(num);
+            rowIndexGenerator.populateRowIndex(columnarBatch);
+            return true;
+        } catch (IOException e) {
+            throw new IOException(
+                    format(
+                            "Exception in nextBatch, filePath: %s fileSchema: %s",
+                            filePath, fileSchema),
+                    e);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    format(
+                            "Exception in nextBatch, filePath: %s fileSchema: %s",
+                            filePath, fileSchema),
+                    e);
         }
-        rowsReturned += num;
-        columnarBatch.setNumRows(num);
-        rowIndexGenerator.populateRowIndex(columnarBatch);
-        return true;
     }
 
     private void checkEndOfRowGroup() throws IOException {

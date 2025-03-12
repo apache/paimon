@@ -39,6 +39,8 @@ import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -147,13 +149,7 @@ public class CatalogUtils {
                 table.newReadBuilder().newScan().listPartitionEntries();
         List<Partition> partitions = new ArrayList<>(partitionEntries.size());
         for (PartitionEntry entry : partitionEntries) {
-            partitions.add(
-                    new Partition(
-                            computer.generatePartValues(entry.partition()),
-                            entry.recordCount(),
-                            entry.fileSizeInBytes(),
-                            entry.fileCount(),
-                            entry.lastFileCreationTime()));
+            partitions.add(entry.toPartition(computer));
         }
         return partitions;
     }
@@ -172,10 +168,11 @@ public class CatalogUtils {
     public static Table loadTable(
             Catalog catalog,
             Identifier identifier,
-            Function<Path, FileIO> dataFileIO,
-            Function<Path, FileIO> objectFileIO,
+            Function<Path, FileIO> internalFileIO,
+            Function<Path, FileIO> externalFileIO,
             TableMetadata.Loader metadataLoader,
-            SnapshotCommit.Factory commitFactory)
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext)
             throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
@@ -184,19 +181,28 @@ public class CatalogUtils {
         TableMetadata metadata = metadataLoader.load(identifier);
         TableSchema schema = metadata.schema();
         CoreOptions options = CoreOptions.fromMap(schema.options());
+
+        Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
+
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema);
+            return toFormatTable(identifier, schema, dataFileIO);
         }
 
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
-                        identifier, metadata.uuid(), catalog.catalogLoader(), commitFactory);
+                        identifier,
+                        metadata.uuid(),
+                        catalog.catalogLoader(),
+                        lockFactory,
+                        lockContext,
+                        catalog instanceof SupportsSnapshots,
+                        catalog instanceof SupportsBranches);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
 
         if (options.type() == TableType.OBJECT_TABLE) {
-            table = toObjectTable(objectFileIO, table);
+            table = toObjectTable(externalFileIO, table);
         }
 
         if (identifier.isSystemTable()) {
@@ -249,7 +255,8 @@ public class CatalogUtils {
         return table;
     }
 
-    private static FormatTable toFormatTable(Identifier identifier, TableSchema schema) {
+    private static FormatTable toFormatTable(
+            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -258,6 +265,7 @@ public class CatalogUtils {
                                 CoreOptions.FILE_FORMAT.defaultValue()));
         String location = options.get(CoreOptions.PATH.key());
         return FormatTable.builder()
+                .fileIO(fileIO.apply(new Path(location)))
                 .identifier(identifier)
                 .rowType(schema.logicalRowType())
                 .partitionKeys(schema.partitionKeys())

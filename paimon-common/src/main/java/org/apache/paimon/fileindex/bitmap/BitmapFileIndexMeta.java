@@ -19,6 +19,8 @@
 package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -43,10 +45,15 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
 
+import java.io.BufferedInputStream;
 import java.io.DataInput;
+import java.io.DataInputStream;
 import java.io.DataOutput;
+import java.io.InputStream;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  *
@@ -54,31 +61,31 @@ import java.util.Map;
  * <pre>
  * Bitmap file index format (V1)
  * +-------------------------------------------------+-----------------
- * ｜ version (1 byte)                               ｜
+ * | version (1 byte)                                |
  * +-------------------------------------------------+
- * ｜ row count (4 bytes int)                        ｜
+ * | row count (4 bytes int)                         |
  * +-------------------------------------------------+
- * ｜ non-null value bitmap number (4 bytes int)     ｜
+ * | non-null value bitmap number (4 bytes int)      |
  * +-------------------------------------------------+
- * ｜ has null value (1 byte)                        ｜
+ * | has null value (1 byte)                         |
  * +-------------------------------------------------+
- * ｜ null value offset (4 bytes if has null value)  ｜       HEAD
+ * | null value offset (4 bytes if has null value)   |       HEAD
  * +-------------------------------------------------+
- * ｜ value 1 | offset 1                             ｜
+ * | value 1 | offset 1                              |
  * +-------------------------------------------------+
- * ｜ value 2 | offset 2                             ｜
+ * | value 2 | offset 2                              |
  * +-------------------------------------------------+
- * ｜ value 3 | offset 3                             ｜
+ * | value 3 | offset 3                              |
  * +-------------------------------------------------+
- * ｜ ...                                            ｜
+ * | ...                                             |
  * +-------------------------------------------------+-----------------
- * ｜ serialized bitmap 1                            ｜
+ * | serialized bitmap 1                             |
  * +-------------------------------------------------+
- * ｜ serialized bitmap 2                            ｜
+ * | serialized bitmap 2                             |
  * +-------------------------------------------------+       BODY
- * ｜ serialized bitmap 3                            ｜
+ * | serialized bitmap 3                             |
  * +-------------------------------------------------+
- * ｜ ...                                            ｜
+ * | ...                                             |
  * +-------------------------------------------------+-----------------
  *
  * value x:                       var bytes for any data type (as bitmap identifier)
@@ -88,26 +95,30 @@ import java.util.Map;
  */
 public class BitmapFileIndexMeta {
 
-    private final DataType dataType;
+    protected final DataType dataType;
+    protected final Options options;
+    protected int rowCount;
+    protected int nonNullBitmapNumber;
+    protected boolean hasNullValue;
+    protected int nullValueOffset;
+    protected LinkedHashMap<Object, Integer> bitmapOffsets;
+    protected Map<Object, Integer> bitmapLengths;
+    protected long bodyStart;
 
-    private int rowCount;
-    private int nonNullBitmapNumber;
-    private boolean hasNullValue;
-    private int nullValueOffset;
-    private LinkedHashMap<Object, Integer> bitmapOffsets;
-
-    public BitmapFileIndexMeta(DataType dataType) {
+    public BitmapFileIndexMeta(DataType dataType, Options options) {
         this.dataType = dataType;
+        this.options = options;
     }
 
     public BitmapFileIndexMeta(
             DataType dataType,
+            Options options,
             int rowCount,
             int nonNullBitmapNumber,
             boolean hasNullValue,
             int nullValueOffset,
             LinkedHashMap<Object, Integer> bitmapOffsets) {
-        this(dataType);
+        this(dataType, options);
         this.rowCount = rowCount;
         this.nonNullBitmapNumber = nonNullBitmapNumber;
         this.hasNullValue = hasNullValue;
@@ -119,22 +130,134 @@ public class BitmapFileIndexMeta {
         return rowCount;
     }
 
-    public boolean contains(Object bitmapId) {
-        if (bitmapId == null) {
-            return hasNullValue;
-        }
-        return bitmapOffsets.containsKey(bitmapId);
+    public long getBodyStart() {
+        return bodyStart;
     }
 
-    public int getOffset(Object bitmapId) {
+    /**
+     * Find entry for bitmap.
+     *
+     * @param bitmapId the bitmap identifier to be searched.
+     * @return an {@link Entry} which contains offset and length of bitmap if it is contained in the
+     *     index meta; otherwise `null`.
+     */
+    public Entry findEntry(Object bitmapId) {
+        int length = bitmapLengths == null ? -1 : bitmapLengths.getOrDefault(bitmapId, -1);
         if (bitmapId == null) {
-            return nullValueOffset;
+            if (hasNullValue) {
+                return new Entry(null, nullValueOffset, length);
+            }
+        } else {
+            if (bitmapOffsets.containsKey(bitmapId)) {
+                return new Entry(bitmapId, bitmapOffsets.get(bitmapId), length);
+            }
         }
-        return bitmapOffsets.get(bitmapId);
+        return null;
     }
 
     public void serialize(DataOutput out) throws Exception {
 
+        ThrowableConsumer valueWriter = getValueWriter(out);
+
+        out.writeInt(rowCount);
+        out.writeInt(nonNullBitmapNumber);
+        out.writeBoolean(hasNullValue);
+        if (hasNullValue) {
+            out.writeInt(nullValueOffset);
+        }
+        for (Map.Entry<Object, Integer> entry : bitmapOffsets.entrySet()) {
+            valueWriter.accept(entry.getKey());
+            out.writeInt(entry.getValue());
+        }
+    }
+
+    public void deserialize(SeekableInputStream seekableInputStream) throws Exception {
+        bodyStart = seekableInputStream.getPos();
+        InputStream inputStream = new BufferedInputStream(seekableInputStream);
+        bitmapLengths = new HashMap<>();
+        DataInput in = new DataInputStream(inputStream);
+        ThrowableSupplier valueReader = getValueReader(in);
+        Function<Object, Integer> measure = getSerializeSizeMeasure();
+
+        rowCount = in.readInt();
+        bodyStart += Integer.BYTES;
+
+        nonNullBitmapNumber = in.readInt();
+        bodyStart += Integer.BYTES;
+
+        hasNullValue = in.readBoolean();
+        bodyStart++;
+
+        if (hasNullValue) {
+            nullValueOffset = in.readInt();
+            bodyStart += Integer.BYTES;
+        }
+
+        bitmapOffsets = new LinkedHashMap<>();
+        Object lastValue = null;
+        int lastOffset = nullValueOffset;
+        for (int i = 0; i < nonNullBitmapNumber; i++) {
+            Object value = valueReader.get();
+            int offset = in.readInt();
+            bitmapOffsets.put(value, offset);
+            bodyStart += measure.apply(value) + Integer.BYTES;
+            if (offset >= 0) {
+                if (lastOffset >= 0) {
+                    int length = offset - lastOffset;
+                    bitmapLengths.put(lastValue, length);
+                }
+                lastValue = value;
+                lastOffset = offset;
+            }
+        }
+    }
+
+    protected Function<Object, Integer> getSerializeSizeMeasure() {
+        return dataType.accept(
+                new DataTypeVisitorAdapter<Function<Object, Integer>>() {
+                    @Override
+                    public Function<Object, Integer> visitBinaryString() {
+                        return o -> Integer.BYTES + ((BinaryString) o).getSizeInBytes();
+                    }
+
+                    @Override
+                    public Function<Object, Integer> visitByte() {
+                        return o -> Byte.BYTES;
+                    }
+
+                    @Override
+                    public Function<Object, Integer> visitShort() {
+                        return o -> Short.BYTES;
+                    }
+
+                    @Override
+                    public Function<Object, Integer> visitInt() {
+                        return o -> Integer.BYTES;
+                    }
+
+                    @Override
+                    public Function<Object, Integer> visitLong() {
+                        return o -> Long.BYTES;
+                    }
+
+                    @Override
+                    public Function<Object, Integer> visitFloat() {
+                        return o -> Float.BYTES;
+                    }
+
+                    @Override
+                    public Function<Object, Integer> visitDouble() {
+                        return o -> Double.BYTES;
+                    }
+
+                    @Override
+                    public Function<Object, Integer> visitBoolean() {
+                        return o -> 1;
+                    }
+                });
+    }
+
+    protected ThrowableConsumer getValueWriter(DataOutput out) {
         ThrowableConsumer valueWriter =
                 dataType.accept(
                         new DataTypeVisitorAdapter<ThrowableConsumer>() {
@@ -182,21 +305,10 @@ public class BitmapFileIndexMeta {
                                 return o -> out.writeBoolean((Boolean) o);
                             }
                         });
-
-        out.writeInt(rowCount);
-        out.writeInt(nonNullBitmapNumber);
-        out.writeBoolean(hasNullValue);
-        if (hasNullValue) {
-            out.writeInt(nullValueOffset);
-        }
-        for (Map.Entry<Object, Integer> entry : bitmapOffsets.entrySet()) {
-            valueWriter.accept(entry.getKey());
-            out.writeInt(entry.getValue());
-        }
+        return valueWriter;
     }
 
-    public void deserialize(DataInput in) throws Exception {
-
+    protected ThrowableSupplier getValueReader(DataInput in) {
         ThrowableSupplier valueReader =
                 dataType.accept(
                         new DataTypeVisitorAdapter<ThrowableSupplier>() {
@@ -245,17 +357,7 @@ public class BitmapFileIndexMeta {
                                 return in::readBoolean;
                             }
                         });
-
-        rowCount = in.readInt();
-        nonNullBitmapNumber = in.readInt();
-        hasNullValue = in.readBoolean();
-        if (hasNullValue) {
-            nullValueOffset = in.readInt();
-        }
-        bitmapOffsets = new LinkedHashMap<>();
-        for (int i = 0; i < nonNullBitmapNumber; i++) {
-            bitmapOffsets.put(valueReader.get(), in.readInt());
-        }
+        return valueReader;
     }
 
     /** functional interface. */
@@ -390,6 +492,20 @@ public class BitmapFileIndexMeta {
         @Override
         public final R visit(VariantType rowType) {
             throw new UnsupportedOperationException("Does not support type variant");
+        }
+    }
+
+    /** Bitmap entry. */
+    public static class Entry {
+
+        Object key;
+        int offset;
+        int length;
+
+        public Entry(Object key, int offset, int length) {
+            this.key = key;
+            this.offset = offset;
+            this.length = length;
         }
     }
 }

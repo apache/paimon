@@ -292,6 +292,23 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
+    public void testTagHourlyPeriodFormatterWithoutDashesAndSpaces() {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_PERIOD_FORMATTER, TagPeriodFormatter.WITHOUT_DASHES_AND_SPACES);
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("2023071811");
+
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T13:13:00")));
+        assertThat(tagManager.allTagNames()).contains("2023071811", "2023071812");
+    }
+
+    @Test
     public void testOnlyExpireAutoCreatedTag() {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
@@ -379,6 +396,9 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                         null,
                         null,
                         null,
+                        null,
+                        null,
+                        null,
                         0L,
                         Snapshot.CommitKind.APPEND,
                         1000,
@@ -399,6 +419,9 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                 new Snapshot(
                         5,
                         0L,
+                        null,
+                        null,
+                        null,
                         null,
                         null,
                         null,

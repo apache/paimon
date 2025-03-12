@@ -108,7 +108,7 @@ public class JsonSerdeUtil {
     public static <T extends JsonNode> T getNodeAs(
             JsonNode root, String fieldName, Class<T> clazz) {
         JsonNode node = root.get(fieldName);
-        if (node == null) {
+        if (isNull(node)) {
             return null;
         }
 
@@ -224,7 +224,7 @@ public class JsonSerdeUtil {
             throws JsonProcessingException {
         for (String key : path) {
             jsonNode = jsonNode.get(key);
-            if (jsonNode == null) {
+            if (isNull(jsonNode)) {
                 if (defaultValue != null) {
                     return defaultValue;
                 }
@@ -244,7 +244,7 @@ public class JsonSerdeUtil {
     public static boolean isNodeExists(JsonNode jsonNode, String... path) {
         for (String key : path) {
             jsonNode = jsonNode.get(key);
-            if (jsonNode == null) {
+            if (isNull(jsonNode)) {
                 return false;
             }
         }

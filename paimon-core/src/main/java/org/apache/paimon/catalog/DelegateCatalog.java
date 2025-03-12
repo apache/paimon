@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.PagedList;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -81,6 +82,20 @@ public abstract class DelegateCatalog implements Catalog {
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         return wrapped.listTables(databaseName);
+    }
+
+    @Override
+    public PagedList<String> listTablesPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        return wrapped.listTablesPaged(databaseName, maxResults, pageToken);
+    }
+
+    @Override
+    public PagedList<Table> listTableDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        return wrapped.listTableDetailsPaged(databaseName, maxResults, pageToken);
     }
 
     @Override
@@ -160,6 +175,20 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<String> listViewsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        return wrapped.listViewsPaged(databaseName, maxResults, pageToken);
+    }
+
+    @Override
+    public PagedList<View> listViewDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        return wrapped.listViewDetailsPaged(databaseName, maxResults, pageToken);
+    }
+
+    @Override
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         wrapped.renameView(fromView, toView, ignoreIfNotExists);
@@ -168,6 +197,13 @@ public abstract class DelegateCatalog implements Catalog {
     @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         return wrapped.listPartitions(identifier);
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsPaged(
+            Identifier identifier, Integer maxResults, String pageToken)
+            throws TableNotExistException {
+        return wrapped.listPartitionsPaged(identifier, maxResults, pageToken);
     }
 
     @Override

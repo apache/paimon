@@ -21,7 +21,9 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -81,6 +83,15 @@ public class PartitionEntry {
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
                 Math.max(lastFileCreationTime, entry.lastFileCreationTime));
+    }
+
+    public Partition toPartition(InternalRowPartitionComputer computer) {
+        return new Partition(
+                computer.generatePartValues(partition),
+                recordCount,
+                fileSizeInBytes,
+                fileCount,
+                lastFileCreationTime);
     }
 
     public static PartitionEntry fromManifestEntry(ManifestEntry entry) {

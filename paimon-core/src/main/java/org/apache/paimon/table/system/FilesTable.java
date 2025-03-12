@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
@@ -136,6 +137,11 @@ public class FilesTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("file_path");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return storeTable.fileIO();
     }
 
     @Override

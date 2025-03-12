@@ -48,6 +48,7 @@ Paimon will automatically expand the number of buckets.
 
 - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
 - Option2: `'dynamic-bucket.initial-buckets'`: controls the number of initialized bucket.
+- Option3: `'dynamic-bucket.max-buckets'`: controls the number of max buckets.
 
 {{< hint info >}}
 Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition
@@ -85,6 +86,28 @@ If your upsert does not rely on too old data, you can consider configuring index
   indexes and lead to worse and worse performance.
 
 But please note that this may also cause data duplication.
+
+## Postpone Bucket
+
+Postpone bucket mode is configured by `'bucket' = '-2'`.
+This mode aims to solve the difficulty to determine a fixed number of buckets
+and support different buckets for different partitions.
+
+Currently, only Flink supports this mode.
+
+When writing records into the table,
+all records will first be stored in the `bucket-postpone` directory of each partition
+and are not available to readers.
+
+To move the records into the correct bucket and make them readable,
+you need to run a compaction job.
+See `compact` [procedure]({{< ref "flink/procedures" >}}).
+The bucket number for the partitions compacted for the first time
+is configured by the option `postpone.default-bucket-num`, whose default value is `4`.
+
+Finally, when you feel that the bucket number of some partition is too small,
+you can also run a rescale job.
+See `rescale` [procedure]({{< ref "flink/procedures" >}}).
 
 ## Pick Partition Fields
 

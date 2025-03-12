@@ -101,6 +101,11 @@ public class AggregationFieldsTable implements ReadonlyTable {
     }
 
     @Override
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
+    @Override
     public InnerTableScan newScan() {
         return new SchemasScan();
     }

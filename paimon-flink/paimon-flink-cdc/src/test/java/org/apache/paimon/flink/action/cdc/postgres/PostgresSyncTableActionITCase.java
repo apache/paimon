@@ -423,7 +423,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                                 + "Paimon    , Apache Paimon, Apache Paimon PostgreSQL Test Data, "
                                 + "[98, 121, 116, 101, 115], "
                                 + "{\"a\": \"b\"}, "
-                                + "[\"item1\", \"item2\"]"
+                                + "[item1, item2]"
                                 + "]",
                         "+I["
                                 + "2, 2.2, "

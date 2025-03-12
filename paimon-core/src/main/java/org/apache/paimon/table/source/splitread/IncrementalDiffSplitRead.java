@@ -98,7 +98,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                                 split.bucket(),
                                 split.dataFiles(),
                                 split.deletionFiles().orElse(null),
-                                false),
+                                forceKeepDelete),
                         mergeRead.keyComparator(),
                         mergeRead.createUdsComparator(),
                         mergeRead.mergeSorter(),
@@ -191,6 +191,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
         @Nullable
         @Override
         public KeyValue getResult() {
+            KeyValue toReturn = null;
             if (kvs.size() == 1) {
                 KeyValue kv = kvs.get(0);
                 if (kv.level() == BEFORE_LEVEL) {
@@ -198,17 +199,23 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                         return kv.replaceValueKind(RowKind.DELETE);
                     }
                 } else {
-                    return kv;
+                    toReturn = kv;
                 }
             } else if (kvs.size() == 2) {
                 KeyValue latest = kvs.get(1);
                 if (latest.level() == AFTER_LEVEL) {
-                    if (!valueEquals()) {
-                        return latest;
+                    // Return when the value or rowKind is different. Since before is always add, we
+                    // only need to check if after is not add.
+                    if (!valueEquals() || !latest.isAdd()) {
+                        toReturn = latest;
                     }
                 }
             } else {
                 throw new IllegalArgumentException("Illegal kv number: " + kvs.size());
+            }
+
+            if (toReturn != null && (keepDelete || toReturn.isAdd())) {
+                return toReturn;
             }
 
             return null;

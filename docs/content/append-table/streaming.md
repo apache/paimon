@@ -26,13 +26,13 @@ under the License.
 
 # Streaming
 
-You can streaming write to the Append table in a very flexible way through Flink, or through read the Append table
+You can stream write to the Append table in a very flexible way through Flink, or read the Append table through
 Flink, using it like a queue. The only difference is that its latency is in minutes. Its advantages are very low cost
 and the ability to push down filters and projection.
 
 ## Pre small files merging
 
-Pre means that this compact occurs before committing files to the snapshot.
+"Pre" means that this compact occurs before committing files to the snapshot.
 
 If Flink's checkpoint interval is short (for example, 30 seconds), each snapshot may produce lots of small changelog
 files. Too many files may put a burden on the distributed storage cluster.
@@ -43,9 +43,9 @@ operator, which copies changelog files into large ones.
 
 ## Post small files merging
 
-Post means that this compact occurs after committing files to the snapshot.
+"Post" means that this compact occurs after committing files to the snapshot.
 
-In streaming writing job, without bucket definition, there is no compaction in writer, instead, will use
+In streaming write job, without bucket definition, there is no compaction in writer, instead, will use
 `Compact Coordinator` to scan the small files and pass compaction task to `Compact Worker`. In streaming mode, if you
 run insert sql in flink, the topology will be like this:
 
@@ -55,8 +55,8 @@ Do not worry about backpressure, compaction never backpressure.
 
 If you set `write-only` to true, the `Compact Coordinator` and `Compact Worker` will be removed in the topology.
 
-The auto compaction is only supported in Flink engine streaming mode. You can also start a compaction job in flink by
-flink action in paimon and disable all the other compaction by set `write-only`.
+The auto compaction is only supported in Flink engine streaming mode. You can also start a compaction job in Flink by
+Flink action in Paimon and disable all the other compactions by setting `write-only`.
 
 ## Streaming Query
 
@@ -64,8 +64,8 @@ You can stream the Append table and use it like a Message Queue. As with primary
 for streaming reads:
 1. By default, Streaming read produces the latest snapshot on the table upon first startup, and continue to read the
    latest incremental records.
-2. You can specify `scan.mode` or `scan.snapshot-id` or `scan.timestamp-millis` or `scan.file-creation-time-millis` to
-   streaming read incremental only.
+2. You can specify `scan.mode`, `scan.snapshot-id`, `scan.timestamp-millis` and/or `scan.file-creation-time-millis` to
+   stream read incremental only.
 
 Similar to flink-kafka, order is not guaranteed by default, if your data has some sort of order requirement, you also
 need to consider defining a `bucket-key`, see [Bucketed Append]({{< ref "append-table/bucketed" >}})

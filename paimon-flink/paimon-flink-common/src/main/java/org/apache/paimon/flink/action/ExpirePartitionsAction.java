@@ -57,15 +57,13 @@ public class ExpirePartitionsAction extends TableActionBase {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore<?> fileStore = fileStoreTable.store();
         this.partitionExpire =
-                new PartitionExpire(
+                fileStore.newPartitionExpire(
+                        "",
+                        fileStoreTable,
                         TimeUtils.parseDuration(expirationTime),
                         Duration.ofMillis(0L),
                         createPartitionExpireStrategy(
-                                CoreOptions.fromMap(map), fileStore.partitionType()),
-                        fileStore.newScan(),
-                        fileStore.newCommit(""),
-                        fileStoreTable.catalogEnvironment().partitionHandler(),
-                        fileStore.options().partitionExpireMaxNum());
+                                CoreOptions.fromMap(map), fileStore.partitionType()));
     }
 
     @Override

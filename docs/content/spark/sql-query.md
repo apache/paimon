@@ -42,10 +42,11 @@ Paimon also supports reading some hidden metadata columns, currently supporting 
 - `__paimon_file_path`: the file path of the record.
 - `__paimon_partition`: the partition of the record.
 - `__paimon_bucket`: the bucket of the record.
+- `__paimon_row_index`: the row index of the record.
 
 ```sql
--- read all columns and the corresponding file path, partition, bucket of the record
-SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket FROM t;
+-- read all columns and the corresponding file path, partition, bucket, rowIndex of the record
+SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
 
 ### Batch Time Travel

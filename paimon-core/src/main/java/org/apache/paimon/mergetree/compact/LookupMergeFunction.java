@@ -19,9 +19,6 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
@@ -37,14 +34,9 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     private final MergeFunction<KeyValue> mergeFunction;
     private final LinkedList<KeyValue> candidates = new LinkedList<>();
-    private final InternalRowSerializer keySerializer;
-    private final InternalRowSerializer valueSerializer;
 
-    public LookupMergeFunction(
-            MergeFunction<KeyValue> mergeFunction, RowType keyType, RowType valueType) {
+    public LookupMergeFunction(MergeFunction<KeyValue> mergeFunction) {
         this.mergeFunction = mergeFunction;
-        this.keySerializer = new InternalRowSerializer(keyType);
-        this.valueSerializer = new InternalRowSerializer(valueType);
     }
 
     @Override
@@ -54,15 +46,7 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void add(KeyValue kv) {
-        candidates.add(kv.copy(keySerializer, valueSerializer));
-    }
-
-    public InternalRowSerializer getKeySerializer() {
-        return keySerializer;
-    }
-
-    public InternalRowSerializer getValueSerializer() {
-        return valueSerializer;
+        candidates.add(kv);
     }
 
     @Override
@@ -87,14 +71,18 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         return mergeFunction.getResult();
     }
 
-    public static MergeFunctionFactory<KeyValue> wrap(
-            MergeFunctionFactory<KeyValue> wrapped, RowType keyType, RowType valueType) {
+    @Override
+    public boolean requireCopy() {
+        return true;
+    }
+
+    public static MergeFunctionFactory<KeyValue> wrap(MergeFunctionFactory<KeyValue> wrapped) {
         if (wrapped.create() instanceof FirstRowMergeFunction) {
             // don't wrap first row, it is already OK
             return wrapped;
         }
 
-        return new Factory(wrapped, keyType, valueType);
+        return new Factory(wrapped);
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
@@ -102,20 +90,14 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         private static final long serialVersionUID = 1L;
 
         private final MergeFunctionFactory<KeyValue> wrapped;
-        private final RowType keyType;
-        private final RowType rowType;
 
-        private Factory(MergeFunctionFactory<KeyValue> wrapped, RowType keyType, RowType rowType) {
+        private Factory(MergeFunctionFactory<KeyValue> wrapped) {
             this.wrapped = wrapped;
-            this.keyType = keyType;
-            this.rowType = rowType;
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            RowType valueType =
-                    projection == null ? rowType : Projection.of(projection).project(rowType);
-            return new LookupMergeFunction(wrapped.create(projection), keyType, valueType);
+            return new LookupMergeFunction(wrapped.create(projection));
         }
 
         @Override

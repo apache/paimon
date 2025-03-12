@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.log.LogWriteCallback;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 
@@ -49,6 +50,8 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Objects;
 
+import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
+
 /** A {@link PrepareCommitOperator} to write {@link InternalRow}. Record schema is fixed. */
 public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
 
@@ -57,6 +60,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     @Nullable private final LogSinkFunction logSinkFunction;
     private transient SimpleContext sinkContext;
     @Nullable private transient LogWriteCallback logCallback;
+    private transient boolean logIgnoreDelete;
 
     /** We listen to this ourselves because we don't have an {@link InternalTimerService}. */
     private long currentWatermark = Long.MIN_VALUE;
@@ -97,6 +101,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
             openFunction(logSinkFunction);
             logCallback = new LogWriteCallback();
             logSinkFunction.setWriteCallback(logCallback);
+            logIgnoreDelete = Options.fromMap(table.options()).get(LOG_IGNORE_DELETE);
         }
     }
 
@@ -139,7 +144,9 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
             throw new IOException(e);
         }
 
-        if (record != null && logSinkFunction != null) {
+        if (record != null
+                && logSinkFunction != null
+                && (!logIgnoreDelete || record.row().getRowKind().isAdd())) {
             // write to log store, need to preserve original pk (which includes partition fields)
             SinkRecord logRecord = write.toLogRecord(record);
             logSinkFunction.invoke(logRecord, sinkContext);

@@ -59,6 +59,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
@@ -75,7 +76,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
@@ -106,8 +106,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public OptionalLong latestSnapshotId() {
-        return wrapped.latestSnapshotId();
+    public Optional<Snapshot> latestSnapshot() {
+        return wrapped.latestSnapshot();
     }
 
     @Override
@@ -189,6 +189,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public ChangelogManager changelogManager() {
+        return wrapped.changelogManager();
+    }
+
+    @Override
     public SchemaManager schemaManager() {
         return wrapped.schemaManager();
     }
@@ -253,6 +258,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public SnapshotManager snapshotManager() {
             return wrapped.snapshotManager();
+        }
+
+        @Override
+        public ChangelogManager changelogManager() {
+            return wrapped.changelogManager();
         }
 
         @Override

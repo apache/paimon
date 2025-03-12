@@ -31,10 +31,12 @@ Currently, e2e supports docker environment only. You need to do some preparation
 ### Execution
 1. Build with Flink-versioned profiles, like flink-1.17. The default Flink main version is declared in the parent `pom.xml` by `<test.flink.main.version>` tag.
 
-```Bash
+```bash
 mvn clean install -DskipTests -Pflink-1.17
 ```
+
 2. Run e2e tests
-```Bash
+
+```bash
 mvn test -pl paimon-e2e-tests -Pflink-1.17
 ```

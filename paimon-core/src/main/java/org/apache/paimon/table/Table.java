@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -37,7 +38,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /**
  * A table provides basic abstraction for table type and table scan and table read.
@@ -86,12 +86,15 @@ public interface Table extends Serializable {
 
     // ================= Table Operations ====================
 
+    /** File io of this table. */
+    FileIO fileIO();
+
     /** Copy this table with adding dynamic options. */
     Table copy(Map<String, String> dynamicOptions);
 
-    /** Get the latest snapshot id for this table, or empty if there are no snapshots. */
+    /** Get the latest snapshot for this table, or empty if there are no snapshots. */
     @Experimental
-    OptionalLong latestSnapshotId();
+    Optional<Snapshot> latestSnapshot();
 
     /** Get the {@link Snapshot} from snapshot id. */
     @Experimental

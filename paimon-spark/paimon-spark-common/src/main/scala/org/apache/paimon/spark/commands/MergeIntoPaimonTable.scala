@@ -144,26 +144,38 @@ case class MergeIntoPaimonTable(
       }
     } else {
       val touchedFilePathsSet = mutable.Set.empty[String]
+      val intersectionFilePaths = mutable.Set.empty[String]
+
       def hasUpdate(actions: Seq[MergeAction]): Boolean = {
         actions.exists {
           case _: UpdateAction | _: DeleteAction => true
           case _ => false
         }
       }
-      if (hasUpdate(matchedActions)) {
-        touchedFilePathsSet ++= findTouchedFiles(
-          targetDS.join(sourceDS, toColumn(mergeCondition), "inner"),
-          sparkSession)
-      }
-      if (hasUpdate(notMatchedBySourceActions)) {
-        touchedFilePathsSet ++= findTouchedFiles(
-          targetDS.join(sourceDS, toColumn(mergeCondition), "left_anti"),
-          sparkSession)
+
+      def findTouchedFiles0(joinType: String): Array[String] = {
+        findTouchedFiles(
+          targetDS.alias("_left").join(sourceDS, toColumn(mergeCondition), joinType),
+          sparkSession,
+          "_left." + FILE_PATH_COLUMN)
       }
 
-      val targetFilePaths: Array[String] = findTouchedFiles(targetDS, sparkSession)
+      if (hasUpdate(matchedActions)) {
+        touchedFilePathsSet ++= findTouchedFiles0("inner")
+      } else if (notMatchedActions.nonEmpty) {
+        intersectionFilePaths ++= findTouchedFiles0("inner")
+      }
+
+      if (hasUpdate(notMatchedBySourceActions)) {
+        touchedFilePathsSet ++= findTouchedFiles0("left_anti")
+      }
+
       val touchedFilePaths: Array[String] = touchedFilePathsSet.toArray
-      val unTouchedFilePaths = targetFilePaths.filterNot(touchedFilePaths.contains)
+      val unTouchedFilePaths = if (notMatchedActions.nonEmpty) {
+        intersectionFilePaths.diff(touchedFilePathsSet).toArray
+      } else {
+        Array[String]()
+      }
 
       val (touchedFiles, touchedFileRelation) =
         createNewRelation(touchedFilePaths, dataFilePathToMeta, relation)
@@ -172,9 +184,10 @@ case class MergeIntoPaimonTable(
 
       // Add FILE_TOUCHED_COL to mark the row as coming from the touched file, if the row has not been
       // modified and was from touched file, it should be kept too.
-      val targetDSWithFileTouchedCol = createDataset(sparkSession, touchedFileRelation)
+      val touchedDsWithFileTouchedCol = createDataset(sparkSession, touchedFileRelation)
         .withColumn(FILE_TOUCHED_COL, lit(true))
-        .union(createDataset(sparkSession, unTouchedFileRelation)
+      val targetDSWithFileTouchedCol = touchedDsWithFileTouchedCol.union(
+        createDataset(sparkSession, unTouchedFileRelation)
           .withColumn(FILE_TOUCHED_COL, lit(false)))
 
       val toWriteDS =

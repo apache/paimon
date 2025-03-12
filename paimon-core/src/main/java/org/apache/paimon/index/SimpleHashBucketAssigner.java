@@ -21,8 +21,12 @@ package org.apache.paimon.index;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.utils.Int2ShortHashMap;
+import org.apache.paimon.utils.ListUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -32,14 +36,18 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
     private final int numAssigners;
     private final int assignId;
     private final long targetBucketRowNumber;
+    private final int maxBucketsNum;
+    private int maxBucketId;
 
     private final Map<BinaryRow, SimplePartitionIndex> partitionIndex;
 
-    public SimpleHashBucketAssigner(int numAssigners, int assignId, long targetBucketRowNumber) {
+    public SimpleHashBucketAssigner(
+            int numAssigners, int assignId, long targetBucketRowNumber, int maxBucketsNum) {
         this.numAssigners = numAssigners;
         this.assignId = assignId;
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.partitionIndex = new HashMap<>();
+        this.maxBucketsNum = maxBucketsNum;
     }
 
     @Override
@@ -50,7 +58,11 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
             index = new SimplePartitionIndex();
             this.partitionIndex.put(partition, index);
         }
-        return index.assign(hash);
+        int assigned = index.assign(hash);
+        if (assigned > maxBucketId) {
+            maxBucketId = assigned;
+        }
+        return assigned;
     }
 
     @Override
@@ -68,10 +80,12 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
 
         public final Int2ShortHashMap hash2Bucket = new Int2ShortHashMap();
         private final Map<Integer, Long> bucketInformation;
+        private final List<Integer> bucketList;
         private int currentBucket;
 
         private SimplePartitionIndex() {
-            bucketInformation = new HashMap<>();
+            bucketInformation = new LinkedHashMap<>();
+            bucketList = new ArrayList<>();
             loadNewBucket();
         }
 
@@ -81,9 +95,22 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                 return hash2Bucket.get(hash);
             }
 
-            Long num = bucketInformation.computeIfAbsent(currentBucket, i -> 0L);
+            Long num =
+                    bucketInformation.computeIfAbsent(
+                            currentBucket,
+                            bucket -> {
+                                bucketList.add(bucket);
+                                return 0L;
+                            });
+
             if (num >= targetBucketRowNumber) {
-                loadNewBucket();
+                if (-1 == maxBucketsNum
+                        || bucketInformation.isEmpty()
+                        || maxBucketId < maxBucketsNum - 1) {
+                    loadNewBucket();
+                } else {
+                    currentBucket = ListUtils.pickRandomly(bucketList);
+                }
             }
             bucketInformation.compute(currentBucket, (i, l) -> l == null ? 1L : l + 1);
             hash2Bucket.put(hash, (short) currentBucket);
@@ -93,7 +120,12 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
         private void loadNewBucket() {
             for (int i = 0; i < Short.MAX_VALUE; i++) {
                 if (isMyBucket(i) && !bucketInformation.containsKey(i)) {
-                    currentBucket = i;
+                    // The new bucketId may still be larger than the upper bound
+                    if (-1 == maxBucketsNum || i <= maxBucketsNum - 1) {
+                        currentBucket = i;
+                        return;
+                    }
+                    // No need to enter the next iteration when upper bound exceeded
                     return;
                 }
             }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.deletionvectors.append;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
@@ -53,21 +54,21 @@ public interface AppendDeletionFileMaintainer {
 
     static BucketedAppendDeletionFileMaintainer forBucketedAppend(
             IndexFileHandler indexFileHandler,
-            @Nullable Long snapshotId,
+            @Nullable Snapshot snapshot,
             BinaryRow partition,
             int bucket) {
         // bucket should have only one deletion file, so here we should read old deletion vectors,
         // overwrite the entire deletion file of the bucket when writing deletes.
         DeletionVectorsMaintainer maintainer =
                 new DeletionVectorsMaintainer.Factory(indexFileHandler)
-                        .createOrRestore(snapshotId, partition, bucket);
+                        .createOrRestore(snapshot, partition, bucket);
         return new BucketedAppendDeletionFileMaintainer(partition, bucket, maintainer);
     }
 
     static UnawareAppendDeletionFileMaintainer forUnawareAppend(
-            IndexFileHandler indexFileHandler, @Nullable Long snapshotId, BinaryRow partition) {
+            IndexFileHandler indexFileHandler, @Nullable Snapshot snapshot, BinaryRow partition) {
         Map<String, DeletionFile> deletionFiles =
-                indexFileHandler.scanDVIndex(snapshotId, partition, UNAWARE_BUCKET);
+                indexFileHandler.scanDVIndex(snapshot, partition, UNAWARE_BUCKET);
         return new UnawareAppendDeletionFileMaintainer(indexFileHandler, partition, deletionFiles);
     }
 }

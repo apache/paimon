@@ -40,7 +40,7 @@ public abstract class CompactFutureManager implements CompactManager {
     }
 
     @Override
-    public boolean isCompacting() {
+    public boolean compactNotCompleted() {
         return taskFuture != null;
     }
 

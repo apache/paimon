@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -170,12 +171,20 @@ public class FileStorePathFactory {
         return new ExternalPathProvider(externalPaths, relativeBucketPath(partition, bucket));
     }
 
+    public List<Path> getExternalPaths() {
+        return externalPaths;
+    }
+
     public Path bucketPath(BinaryRow partition, int bucket) {
         return new Path(root, relativeBucketPath(partition, bucket));
     }
 
     public Path relativeBucketPath(BinaryRow partition, int bucket) {
-        Path relativeBucketPath = new Path(BUCKET_PATH_PREFIX + bucket);
+        String bucketName = String.valueOf(bucket);
+        if (bucket == BucketMode.POSTPONE_BUCKET) {
+            bucketName = "postpone";
+        }
+        Path relativeBucketPath = new Path(BUCKET_PATH_PREFIX + bucketName);
         String partitionPath = getPartitionString(partition);
         if (!partitionPath.isEmpty()) {
             relativeBucketPath = new Path(partitionPath, relativeBucketPath);

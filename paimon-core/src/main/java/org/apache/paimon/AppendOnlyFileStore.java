@@ -72,7 +72,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public AppendOnlyFileStoreScan newScan() {
-        return newScan(false);
+        return newScan(ScanType.FOR_READ);
     }
 
     @Override
@@ -108,7 +108,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     partitionType,
                     pathFactory(),
                     snapshotManager(),
-                    newScan(true).withManifestCacheFilter(manifestFilter),
+                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
                     options,
                     dvMaintainerFactory,
                     tableName);
@@ -122,14 +122,15 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     partitionType,
                     pathFactory(),
                     snapshotManager(),
-                    newScan(true).withManifestCacheFilter(manifestFilter),
+                    newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
                     options,
                     dvMaintainerFactory,
                     tableName);
         }
     }
 
-    private AppendOnlyFileStoreScan newScan(boolean forWrite) {
+    @Override
+    protected AppendOnlyFileStoreScan newScan(ScanType scanType) {
         BucketSelectConverter bucketSelectConverter =
                 predicate -> {
                     if (bucketMode() != BucketMode.HASH_FIXED) {
@@ -152,12 +153,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 };
 
         return new AppendOnlyFileStoreScan(
-                newManifestsReader(forWrite),
+                newManifestsReader(scanType == ScanType.FOR_WRITE),
                 bucketSelectConverter,
                 snapshotManager(),
                 schemaManager,
                 schema,
-                manifestFileFactory(forWrite),
+                manifestFileFactory(scanType == ScanType.FOR_WRITE),
                 options.scanManifestParallelism(),
                 options.fileIndexReadEnabled());
     }

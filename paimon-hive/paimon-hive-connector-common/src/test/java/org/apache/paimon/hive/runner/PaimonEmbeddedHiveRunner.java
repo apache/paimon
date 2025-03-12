@@ -40,7 +40,6 @@ import org.junit.Ignore;
 import org.junit.internal.AssumptionViolatedException;
 import org.junit.internal.runners.model.EachTestNotifier;
 import org.junit.rules.ExternalResource;
-import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestRule;
 import org.junit.runner.Description;
 import org.junit.runner.notification.RunNotifier;
@@ -84,7 +83,12 @@ public class PaimonEmbeddedHiveRunner extends BlockJUnit4ClassRunner {
     protected List<TestRule> classRules() {
         // need to load hive runner config before the context is inited
         loadAnnotatesHiveRunnerConfig(getTestClass().getJavaClass());
-        final TemporaryFolder temporaryFolder = new TemporaryFolder();
+        final Path testBaseDir;
+        try {
+            testBaseDir = Files.createTempDirectory(null);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         List<TestRule> rules = super.classRules();
         ExternalResource hiveShell =
                 new ExternalResource() {
@@ -93,7 +97,7 @@ public class PaimonEmbeddedHiveRunner extends BlockJUnit4ClassRunner {
                     @Override
                     protected void before() throws Throwable {
                         PaimonEmbeddedHiveServerContext paimonEmbeddedHiveServerContext =
-                                new PaimonEmbeddedHiveServerContext(temporaryFolder, config);
+                                new PaimonEmbeddedHiveServerContext(testBaseDir, config);
                         innerContainer =
                                 createHiveServerContainer(
                                         getTestClass().getJavaClass(),
@@ -125,7 +129,6 @@ public class PaimonEmbeddedHiveRunner extends BlockJUnit4ClassRunner {
 
         rules.add(minio);
         rules.add(hiveShell);
-        rules.add(temporaryFolder);
         return rules;
     }
 

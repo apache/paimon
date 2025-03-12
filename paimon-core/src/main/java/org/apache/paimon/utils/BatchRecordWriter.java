@@ -24,6 +24,6 @@ import org.apache.paimon.io.BundleRecords;
 /** Write {@link BundleRecords} directly. */
 public interface BatchRecordWriter extends RecordWriter<InternalRow> {
 
-    /** Add a batch elemens to the writer. */
+    /** Add a batch elements to the writer. */
     void writeBundle(BundleRecords record) throws Exception;
 }

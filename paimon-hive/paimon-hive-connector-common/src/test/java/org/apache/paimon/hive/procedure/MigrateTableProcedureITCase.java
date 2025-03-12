@@ -20,7 +20,6 @@ package org.apache.paimon.hive.procedure;
 
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.flink.action.MigrateTableAction;
-import org.apache.paimon.flink.procedure.MigrateFileProcedure;
 import org.apache.paimon.hive.TestHiveMetastore;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -43,7 +42,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.stream.Stream;
 
-/** Tests for {@link MigrateFileProcedure}. */
+/** Tests for {@code MigrateFileProcedure}. */
 public class MigrateTableProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
@@ -61,21 +60,15 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     }
 
     private static Stream<Arguments> testArguments() {
-        return Stream.of(
-                Arguments.of("orc", true),
-                Arguments.of("avro", true),
-                Arguments.of("parquet", true),
-                Arguments.of("orc", false),
-                Arguments.of("avro", false),
-                Arguments.of("parquet", false));
+        return Stream.of(Arguments.of("orc"), Arguments.of("avro"), Arguments.of("parquet"));
     }
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testMigrateProcedure(String format, boolean isNamedArgument) throws Exception {
-        testUpgradeNonPartitionTable(format, isNamedArgument);
+    public void testMigrateProcedure(String format) throws Exception {
+        testUpgradeNonPartitionTable(format);
         resetMetastore();
-        testUpgradePartitionTable(format, isNamedArgument);
+        testUpgradePartitionTable(format);
     }
 
     private void resetMetastore() throws Exception {
@@ -84,7 +77,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
-    public void testUpgradePartitionTable(String format, boolean isNamedArgument) throws Exception {
+    public void testUpgradePartitionTable(String format) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -107,26 +100,17 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
         tEnv.useCatalog("PAIMON");
-        if (isNamedArgument) {
-            tEnv.executeSql(
-                            "CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable', options => 'file.format="
-                                    + format
-                                    + "')")
-                    .await();
-        } else {
-            tEnv.executeSql(
-                            "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
-                                    + format
-                                    + "')")
-                    .await();
-        }
+        tEnv.executeSql(
+                        "CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable', options => 'file.format="
+                                + format
+                                + "')")
+                .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
-    public void testUpgradeNonPartitionTable(String format, boolean isNamedArgument)
-            throws Exception {
+    public void testUpgradeNonPartitionTable(String format) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -147,19 +131,11 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
         tEnv.useCatalog("PAIMON");
-        if (isNamedArgument) {
-            tEnv.executeSql(
-                            "CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable', options => 'file.format="
-                                    + format
-                                    + "')")
-                    .await();
-        } else {
-            tEnv.executeSql(
-                            "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
-                                    + format
-                                    + "')")
-                    .await();
-        }
+        tEnv.executeSql(
+                        "CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable', options => 'file.format="
+                                + format
+                                + "')")
+                .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);

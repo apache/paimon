@@ -40,15 +40,16 @@ import java.util.Map;
 public class ParquetUtil {
 
     /**
-     * Extract stats from specified Parquet files path.
+     * Extract stats from specified Parquet file path.
      *
-     * @param path the path of parquet files to be read
+     * @param path the path of parquet file to be read
+     * @param length the length of parquet file to be read
      * @return result sets as map, key is column name, value is statistics (for example, null count,
      *     minimum value, maximum value)
      */
     public static Pair<Map<String, Statistics<?>>, SimpleStatsExtractor.FileInfo>
-            extractColumnStats(FileIO fileIO, Path path) throws IOException {
-        try (ParquetFileReader reader = getParquetReader(fileIO, path)) {
+            extractColumnStats(FileIO fileIO, Path path, long length) throws IOException {
+        try (ParquetFileReader reader = getParquetReader(fileIO, path, length)) {
             ParquetMetadata parquetMetadata = reader.getFooter();
             List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
             Map<String, Statistics<?>> resultStats = new HashMap<>();
@@ -72,14 +73,16 @@ public class ParquetUtil {
     }
 
     /**
-     * Generate {@link ParquetFileReader} instance to read the Parquet files at the given path.
+     * Generate {@link ParquetFileReader} instance to read the Parquet file at the given path.
      *
-     * @param path the path of parquet files to be read
+     * @param path the path of parquet file to be read
+     * @param length the length of parquet file to be read
      * @return parquet reader, used for reading footer, status, etc.
      */
-    public static ParquetFileReader getParquetReader(FileIO fileIO, Path path) throws IOException {
+    public static ParquetFileReader getParquetReader(FileIO fileIO, Path path, long length)
+            throws IOException {
         return new ParquetFileReader(
-                ParquetInputFile.fromPath(fileIO, path),
+                ParquetInputFile.fromPath(fileIO, path, length),
                 ParquetReadOptions.builder().build(),
                 null);
     }

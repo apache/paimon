@@ -169,7 +169,9 @@ public abstract class KeyValueDataFileWriter
             return null;
         }
 
-        Pair<SimpleColStats[], SimpleColStats[]> keyValueStats = fetchKeyValueStats(fieldStats());
+        long fileSize = outputBytes;
+        Pair<SimpleColStats[], SimpleColStats[]> keyValueStats =
+                fetchKeyValueStats(fieldStats(fileSize));
 
         SimpleStats keyStats = keyStatsConverter.toBinaryAllMode(keyValueStats.getKey());
         Pair<List<String>, SimpleStats> valueStatsPair =
@@ -183,7 +185,7 @@ public abstract class KeyValueDataFileWriter
         String externalPath = isExternalPath ? path.toString() : null;
         return new DataFileMeta(
                 path.getName(),
-                fileIO.getFileSize(path),
+                fileSize,
                 recordCount(),
                 minKey,
                 keySerializer.toBinaryRow(maxKey).copy(),

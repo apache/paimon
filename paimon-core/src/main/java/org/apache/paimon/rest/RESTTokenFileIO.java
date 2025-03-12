@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
@@ -25,6 +26,8 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.IOUtils;
@@ -45,6 +48,12 @@ import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 public class RESTTokenFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
+
+    public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
+            ConfigOptions.key("data-token.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to support data token provided by the REST server.");
 
     private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
@@ -152,7 +161,8 @@ public class RESTTokenFileIO implements FileIO {
 
             CatalogContext context = catalogLoader.context();
             Options options = context.options();
-            options = new Options(RESTUtil.merge(options.toMap(), token.token()));
+            // the original options are not overwritten
+            options = new Options(RESTUtil.merge(token.token(), options.toMap()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             context = CatalogContext.create(options, context.preferIO(), context.fallbackIO());
             try {
@@ -182,7 +192,11 @@ public class RESTTokenFileIO implements FileIO {
     private void refreshToken() {
         GetTableTokenResponse response;
         if (catalogInstance != null) {
-            response = catalogInstance.loadTableToken(identifier);
+            try {
+                response = catalogInstance.loadTableToken(identifier);
+            } catch (Catalog.TableNotExistException e) {
+                throw new RuntimeException(e);
+            }
         } else {
             try (RESTCatalog catalog = catalogLoader.load()) {
                 response = catalog.loadTableToken(identifier);

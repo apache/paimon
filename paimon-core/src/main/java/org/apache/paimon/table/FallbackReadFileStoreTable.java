@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
@@ -41,6 +42,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SegmentsCache;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -101,6 +103,12 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         return new FallbackReadFileStoreTable(switchWrappedToBranch(branchName), fallback);
     }
 
+    @Override
+    public void setManifestCache(SegmentsCache<Path> manifestCache) {
+        super.setManifestCache(manifestCache);
+        fallback.setManifestCache(manifestCache);
+    }
+
     private FileStoreTable switchWrappedToBranch(String branchName) {
         Optional<TableSchema> optionalSchema =
                 wrapped.schemaManager().copyWithBranch(branchName).latest();
@@ -132,8 +140,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         // so we need to convert main branch snapshot id to millisecond,
         // then convert millisecond to fallback branch snapshot id
         String scanSnapshotIdOptionKey = CoreOptions.SCAN_SNAPSHOT_ID.key();
-        if (options.containsKey(scanSnapshotIdOptionKey)) {
-            long id = Long.parseLong(options.get(scanSnapshotIdOptionKey));
+        String scanSnapshotId = options.get(scanSnapshotIdOptionKey);
+        if (scanSnapshotId != null) {
+            long id = Long.parseLong(scanSnapshotId);
             long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
             Snapshot fallbackSnapshot = fallback.snapshotManager().earlierOrEqualTimeMills(millis);
             long fallbackId;
@@ -284,6 +293,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public Scan withMetricsRegistry(MetricRegistry metricRegistry) {
             mainScan.withMetricsRegistry(metricRegistry);
             fallbackScan.withMetricsRegistry(metricRegistry);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan dropStats() {
+            mainScan.dropStats();
+            fallbackScan.dropStats();
             return this;
         }
 

@@ -56,24 +56,28 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
 
     private final RowType rowType;
     private final SimpleColStatsCollector.Factory[] statsCollectors;
+    private final boolean legacyTimestampLtzType;
 
     public OrcSimpleStatsExtractor(
-            RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
+            RowType rowType,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            boolean legacyTimestampLtzType) {
         this.rowType = rowType;
         this.statsCollectors = statsCollectors;
+        this.legacyTimestampLtzType = legacyTimestampLtzType;
         Preconditions.checkArgument(
                 rowType.getFieldCount() == statsCollectors.length,
                 "The stats collector is not aligned to write schema.");
     }
 
     @Override
-    public SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException {
-        return extractWithFileInfo(fileIO, path).getLeft();
+    public SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException {
+        return extractWithFileInfo(fileIO, path, length).getLeft();
     }
 
     @Override
-    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
-            throws IOException {
+    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
+            FileIO fileIO, Path path, long length) throws IOException {
         try (Reader reader =
                 OrcReaderFactory.createReader(new Configuration(false), fileIO, path, null)) {
             long rowCount = reader.getNumberOfRows();
@@ -228,7 +232,6 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
                                 nullCount);
                 break;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 assertStatsClass(field, stats, TimestampColumnStatistics.class);
                 TimestampColumnStatistics timestampStats = (TimestampColumnStatistics) stats;
                 fieldStats =
@@ -236,6 +239,22 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
                                 Timestamp.fromSQLTimestamp(timestampStats.getMinimum()),
                                 Timestamp.fromSQLTimestamp(timestampStats.getMaximum()),
                                 nullCount);
+                break;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                assertStatsClass(field, stats, TimestampColumnStatistics.class);
+                TimestampColumnStatistics timestampLtzStats = (TimestampColumnStatistics) stats;
+                fieldStats =
+                        legacyTimestampLtzType
+                                ? new SimpleColStats(
+                                        Timestamp.fromSQLTimestamp(timestampLtzStats.getMinimum()),
+                                        Timestamp.fromSQLTimestamp(timestampLtzStats.getMaximum()),
+                                        nullCount)
+                                : new SimpleColStats(
+                                        Timestamp.fromInstant(
+                                                timestampLtzStats.getMinimum().toInstant()),
+                                        Timestamp.fromInstant(
+                                                timestampLtzStats.getMaximum().toInstant()),
+                                        nullCount);
                 break;
             default:
                 fieldStats = new SimpleColStats(null, null, nullCount);

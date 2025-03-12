@@ -32,7 +32,6 @@ import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
 import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
 import org.apache.paimon.spark.procedure.MigrateDatabaseProcedure;
-import org.apache.paimon.spark.procedure.MigrateFileProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
@@ -90,7 +89,6 @@ public class SparkProcedures {
         procedureBuilders.put("compact", CompactProcedure::builder);
         procedureBuilders.put("migrate_database", MigrateDatabaseProcedure::builder);
         procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);
-        procedureBuilders.put("migrate_file", MigrateFileProcedure::builder);
         procedureBuilders.put("remove_orphan_files", RemoveOrphanFilesProcedure::builder);
         procedureBuilders.put("remove_unexisting_files", RemoveUnexistingFilesProcedure::builder);
         procedureBuilders.put("expire_snapshots", ExpireSnapshotsProcedure::builder);

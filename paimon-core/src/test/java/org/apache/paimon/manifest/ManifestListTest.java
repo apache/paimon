@@ -53,7 +53,7 @@ public class ManifestListTest {
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList = createManifestList(tempDir.toString());
 
-        String manifestListName = manifestList.write(metas);
+        String manifestListName = manifestList.write(metas).getKey();
         List<ManifestFileMeta> actualMetas = manifestList.read(manifestListName);
         assertThat(actualMetas).isEqualTo(metas);
     }
@@ -80,7 +80,7 @@ public class ManifestListTest {
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList = createManifestList(tempDir.toString());
 
-        String manifestListName = manifestList.write(metas);
+        String manifestListName = manifestList.write(metas).getKey();
         assertThat(manifestListName.startsWith("manifest-list-")).isTrue();
     }
 

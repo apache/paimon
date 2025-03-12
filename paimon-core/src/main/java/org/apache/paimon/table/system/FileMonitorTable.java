@@ -50,6 +50,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
@@ -60,7 +61,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalLong;
+import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
 import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
@@ -98,8 +99,8 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public OptionalLong latestSnapshotId() {
-        return wrapped.latestSnapshotId();
+    public Optional<Snapshot> latestSnapshot() {
+        return wrapped.latestSnapshot();
     }
 
     @Override
@@ -130,6 +131,11 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public ChangelogManager changelogManager() {
+        return wrapped.changelogManager();
     }
 
     @Override

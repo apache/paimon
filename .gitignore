@@ -14,8 +14,13 @@ target
 *.jar
 *.log
 *.pyc
-.DS_Store
 *.ipr
 *.iws
 .java-version
 dependency-reduced-pom.xml
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store

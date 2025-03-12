@@ -30,9 +30,10 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -60,7 +61,11 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.utils.ChangelogManager.CHANGELOG_PREFIX;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
+import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
+import static org.apache.paimon.utils.HintFileUtils.LATEST;
+import static org.apache.paimon.utils.SnapshotManager.SNAPSHOT_PREFIX;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /**
@@ -103,7 +108,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
     protected List<String> validBranches() {
         List<String> branches = table.branchManager().branches();
-        branches.add(BranchManager.DEFAULT_MAIN_BRANCH);
+        branches.add(FileSystemBranchManager.DEFAULT_MAIN_BRANCH);
 
         List<String> abnormalBranches = new ArrayList<>();
         for (String branch : branches) {
@@ -129,10 +134,11 @@ public abstract class OrphanFilesClean implements Serializable {
         for (String branch : branches) {
             FileStoreTable branchTable = table.switchToBranch(branch);
             SnapshotManager snapshotManager = branchTable.snapshotManager();
+            ChangelogManager changelogManager = branchTable.changelogManager();
 
             // specially handle the snapshot directory
             List<Pair<Path, Long>> nonSnapshotFiles =
-                    snapshotManager.tryGetNonSnapshotFiles(this::oldEnough);
+                    tryGetNonSnapshotFiles(snapshotManager.snapshotDirectory(), this::oldEnough);
             nonSnapshotFiles.forEach(
                     nonSnapshotFile ->
                             cleanFile(
@@ -142,7 +148,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
             // specially handle the changelog directory
             List<Pair<Path, Long>> nonChangelogFiles =
-                    snapshotManager.tryGetNonChangelogFiles(this::oldEnough);
+                    tryGetNonChangelogFiles(changelogManager.changelogDirectory(), this::oldEnough);
             nonChangelogFiles.forEach(
                     nonChangelogFile ->
                             cleanFile(
@@ -150,6 +156,57 @@ public abstract class OrphanFilesClean implements Serializable {
                                     deletedFilesConsumer,
                                     deletedFilesLenInBytesConsumer));
         }
+    }
+
+    private List<Pair<Path, Long>> tryGetNonSnapshotFiles(
+            Path snapshotDirectory, Predicate<FileStatus> fileStatusFilter) {
+        return listPathWithFilter(
+                fileIO, snapshotDirectory, fileStatusFilter, nonSnapshotFileFilter());
+    }
+
+    private List<Pair<Path, Long>> tryGetNonChangelogFiles(
+            Path changelogDirectory, Predicate<FileStatus> fileStatusFilter) {
+        return listPathWithFilter(
+                fileIO, changelogDirectory, fileStatusFilter, nonChangelogFileFilter());
+    }
+
+    private static List<Pair<Path, Long>> listPathWithFilter(
+            FileIO fileIO,
+            Path directory,
+            Predicate<FileStatus> fileStatusFilter,
+            Predicate<Path> fileFilter) {
+        try {
+            FileStatus[] statuses = fileIO.listStatus(directory);
+            if (statuses == null) {
+                return Collections.emptyList();
+            }
+
+            return Arrays.stream(statuses)
+                    .filter(fileStatusFilter)
+                    .filter(status -> fileFilter.test(status.getPath()))
+                    .map(status -> Pair.of(status.getPath(), status.getLen()))
+                    .collect(Collectors.toList());
+        } catch (IOException ignored) {
+            return Collections.emptyList();
+        }
+    }
+
+    private static Predicate<Path> nonSnapshotFileFilter() {
+        return path -> {
+            String name = path.getName();
+            return !name.startsWith(SNAPSHOT_PREFIX)
+                    && !name.equals(EARLIEST)
+                    && !name.equals(LATEST);
+        };
+    }
+
+    private static Predicate<Path> nonChangelogFileFilter() {
+        return path -> {
+            String name = path.getName();
+            return !name.startsWith(CHANGELOG_PREFIX)
+                    && !name.equals(EARLIEST)
+                    && !name.equals(LATEST);
+        };
     }
 
     private void cleanFile(
@@ -179,10 +236,11 @@ public abstract class OrphanFilesClean implements Serializable {
     protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
         SnapshotManager snapshotManager = branchTable.snapshotManager();
+        ChangelogManager changelogManager = branchTable.changelogManager();
         TagManager tagManager = branchTable.tagManager();
         Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
         readSnapshots.addAll(tagManager.taggedSnapshots());
-        readSnapshots.addAll(snapshotManager.safelyGetAllChangelogs());
+        readSnapshots.addAll(changelogManager.safelyGetAllChangelogs());
         return readSnapshots;
     }
 

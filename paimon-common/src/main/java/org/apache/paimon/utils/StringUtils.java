@@ -558,4 +558,12 @@ public class StringUtils {
         }
         return true;
     }
+
+    // A null-safe trim method.
+    public static String trim(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.trim();
+    }
 }

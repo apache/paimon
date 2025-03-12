@@ -144,7 +144,7 @@ under the License.
         <dependency>
             <groupId>org.roaringbitmap</groupId>
             <artifactId>RoaringBitmap</artifactId>
-            <version>1.2.1</version>
+            <version>${roaringbitmap.version}</version>
         </dependency>
 
         <dependency>

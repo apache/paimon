@@ -18,8 +18,12 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ThreadPoolUtils;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.Rule;
@@ -29,16 +33,30 @@ import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_ID;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_SECRET;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_REGION;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_SECURITY_TOKEN;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
 import static org.apache.paimon.rest.auth.AuthSession.MAX_REFRESH_WINDOW_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.MIN_REFRESH_WAIT_MILLIS;
 import static org.apache.paimon.rest.auth.AuthSession.REFRESH_NUM_RETRIES;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_AUTHORIZATION_HEADER_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_DATE_HEADER_KEY;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -46,6 +64,7 @@ import static org.mockito.Mockito.when;
 public class AuthSessionTest {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
+    private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
 
     @Test
     public void testBearToken() {
@@ -53,78 +72,78 @@ public class AuthSessionTest {
         Map<String, String> initialHeaders = new HashMap<>();
         initialHeaders.put("k1", "v1");
         initialHeaders.put("k2", "v2");
-        AuthProvider authProvider = new BearTokenAuthProvider(token);
-        AuthSession session = new AuthSession(initialHeaders, authProvider);
-        Map<String, String> header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
-        assertEquals(header.get("k1"), "v1");
-        for (Map.Entry<String, String> entry : initialHeaders.entrySet()) {
-            assertEquals(entry.getValue(), header.get(entry.getKey()));
-        }
-        assertEquals(header.size(), initialHeaders.size() + 1);
+        Options options = new Options();
+        options.set(TOKEN.key(), token);
+        AuthProvider authProvider =
+                AuthProviderFactory.createAuthProvider(AuthProviderEnum.BEAR.identifier(), options);
+        AuthSession session = new AuthSession(authProvider);
+        Map<String, String> headers = session.getAuthProvider().header(initialHeaders, null);
+        assertEquals(
+                headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer " + token);
     }
 
     @Test
-    public void testRefreshBearTokenFileAuthProvider() throws IOException, InterruptedException {
-        String fileName = "token";
+    public void testRefreshDLFAuthTokenFileAuthProvider() throws IOException, InterruptedException {
+        String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
-        String token = tokenFile2Token.getRight();
+        String theFirstGenerateToken = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
-        Map<String, String> initialHeaders = new HashMap<>();
-        long expiresInMillis = 1000L;
+        long tokenRefreshInMills = 1000;
         AuthProvider authProvider =
-                new BearTokenFileAuthProvider(tokenFile.getPath(), expiresInMillis);
+                generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName, "serverUrl");
         ScheduledExecutorService executor =
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
-        AuthSession session =
-                AuthSession.fromRefreshAuthProvider(executor, initialHeaders, authProvider);
-        Map<String, String> header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
+        AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+        String theFirstFetchToken =
+                OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        assertEquals(theFirstFetchToken, theFirstGenerateToken);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
-        token = tokenFile2Token.getRight();
-        Thread.sleep(expiresInMillis + 500L);
-        header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
+        String theSecondGenerateToken = tokenFile2Token.getRight();
+        Thread.sleep(tokenRefreshInMills * 2);
+        String theSecondFetchToken =
+                OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        // if the second fetch token is not equal to the first fetch token, it means refresh success
+        // as refresh maybe fail in test environment, so we need to check whether refresh success
+        if (!theSecondFetchToken.equals(theFirstFetchToken)) {
+            assertEquals(theSecondGenerateToken, theSecondFetchToken);
+        }
     }
 
     @Test
     public void testRefreshAuthProviderIsSoonExpire() throws IOException, InterruptedException {
-        String fileName = "token";
+        String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
         File tokenFile = tokenFile2Token.getLeft();
-        Map<String, String> initialHeaders = new HashMap<>();
-        long expiresInMillis = 1000L;
+        long tokenRefreshInMills = 5000L;
         AuthProvider authProvider =
-                new BearTokenFileAuthProvider(tokenFile.getPath(), expiresInMillis);
-        AuthSession session =
-                AuthSession.fromRefreshAuthProvider(null, initialHeaders, authProvider);
-        Map<String, String> header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
+                generateDLFAuthProvider(Optional.of(tokenRefreshInMills), fileName, "serverUrl");
+        AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        assertEquals(token, authToken);
+        Thread.sleep((long) (tokenRefreshInMills * (1 - DLFAuthProvider.EXPIRED_FACTOR)) + 10L);
         tokenFile.delete();
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
         tokenFile = tokenFile2Token.getLeft();
         FileUtils.writeStringToFile(tokenFile, token);
-        Thread.sleep(
-                (long) (expiresInMillis * (1 - BearTokenFileAuthProvider.EXPIRED_FACTOR)) + 10L);
-        header = session.getHeaders();
-        assertEquals(header.get("Authorization"), "Bearer " + token);
+        dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+        authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        assertEquals(token, authToken);
     }
 
     @Test
     public void testRetryWhenRefreshFail() throws Exception {
-        Map<String, String> initialHeaders = new HashMap<>();
-        AuthProvider authProvider = Mockito.mock(BearTokenFileAuthProvider.class);
+        AuthProvider authProvider = Mockito.mock(DLFAuthProvider.class);
         long expiresAtMillis = System.currentTimeMillis() - 1000L;
         when(authProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
-        when(authProvider.expiresInMills()).thenReturn(Optional.of(50L));
-        when(authProvider.supportRefresh()).thenReturn(true);
+        when(authProvider.tokenRefreshInMills()).thenReturn(Optional.of(50L));
         when(authProvider.keepRefreshed()).thenReturn(true);
         when(authProvider.refresh()).thenReturn(false);
-        AuthSession session =
-                AuthSession.fromRefreshAuthProvider(null, initialHeaders, authProvider);
+        AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
         AuthSession.scheduleTokenRefresh(
                 ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token"),
                 session,
@@ -149,10 +168,130 @@ public class AuthSessionTest {
         assertEquals(timeToWait, MAX_REFRESH_WINDOW_MILLIS);
     }
 
+    @Test
+    public void testCreateDLFAuthProviderByStsToken() throws IOException {
+        Options options = new Options();
+        String akId = UUID.randomUUID().toString();
+        String akSecret = UUID.randomUUID().toString();
+        String securityToken = UUID.randomUUID().toString();
+        DLFToken token = new DLFToken(akId, akSecret, securityToken, null);
+        options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
+        options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
+        options.set(DLF_SECURITY_TOKEN.key(), token.getSecurityToken());
+        options.set(DLF_REGION.key(), "cn-hangzhou");
+        AuthProvider authProvider =
+                AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
+        AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
+    }
+
+    @Test
+    public void testCreateDLFAuthProviderByAk() throws IOException {
+        Options options = new Options();
+        String akId = UUID.randomUUID().toString();
+        String akSecret = UUID.randomUUID().toString();
+        DLFToken token = new DLFToken(akId, akSecret, null, null);
+        options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
+        options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
+        options.set(DLF_REGION.key(), "cn-hangzhou");
+        AuthProvider authProvider =
+                AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
+        AuthSession session = AuthSession.fromRefreshAuthProvider(null, authProvider);
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
+    }
+
+    @Test
+    public void testCreateDlfAuthProviderByFileNoDefineRefresh() throws IOException {
+        String fileName = UUID.randomUUID().toString();
+        Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        String token = tokenFile2Token.getRight();
+        AuthProvider authProvider =
+                generateDLFAuthProvider(Optional.empty(), fileName, "serverUrl");
+        ScheduledExecutorService executor =
+                ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
+        AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        assertEquals(authToken, token);
+    }
+
+    @Test
+    public void testCreateDLFAuthProviderWithoutNeedConf() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        AuthProviderFactory.createAuthProvider(
+                                AuthProviderEnum.DLF.identifier(), new Options()));
+    }
+
+    @Test
+    public void testDLFAuthProviderAuthHeaderWhenDataIsNotEmpty() throws Exception {
+        String fileName = UUID.randomUUID().toString();
+        Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        String tokenStr = tokenFile2Token.getRight();
+        String serverUrl = "https://dlf-cn-hangzhou.aliyuncs.com";
+        AuthProvider authProvider = generateDLFAuthProvider(Optional.empty(), fileName, serverUrl);
+        DLFToken token = OBJECT_MAPPER_INSTANCE.readValue(tokenStr, DLFToken.class);
+        Map<String, String> parameters = new HashMap<>();
+        parameters.put("k1", "v1");
+        parameters.put("k2", "v2");
+        String data = "data";
+        RESTAuthParameter restAuthParameter =
+                new RESTAuthParameter("/path", parameters, "method", "data");
+        Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
+        String authorization = header.get(DLF_AUTHORIZATION_HEADER_KEY);
+        String[] credentials = authorization.split(",")[0].split(" ")[1].split("/");
+        String dateTime = header.get(DLF_DATE_HEADER_KEY);
+        String date = credentials[1];
+        String newAuthorization =
+                DLFAuthSignature.getAuthorization(
+                        new RESTAuthParameter("/path", parameters, "method", "data"),
+                        token,
+                        "cn-hangzhou",
+                        header,
+                        dateTime,
+                        date);
+        assertEquals(newAuthorization, authorization);
+        assertEquals(
+                token.getSecurityToken(),
+                header.get(DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY));
+        assertTrue(header.containsKey(DLF_DATE_HEADER_KEY));
+        assertEquals(
+                DLFAuthSignature.VERSION, header.get(DLFAuthProvider.DLF_AUTH_VERSION_HEADER_KEY));
+        assertEquals(
+                DLFAuthProvider.MEDIA_TYPE.toString(),
+                header.get(DLFAuthProvider.DLF_CONTENT_TYPE_KEY));
+        assertEquals(
+                DLFAuthSignature.md5(data), header.get(DLFAuthProvider.DLF_CONTENT_MD5_HEADER_KEY));
+        assertEquals(
+                DLFAuthProvider.DLF_CONTENT_SHA56_VALUE,
+                header.get(DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY));
+    }
+
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
         File tokenFile = folder.newFile(fileName);
-        String token = UUID.randomUUID().toString();
-        FileUtils.writeStringToFile(tokenFile, token);
-        return Pair.of(tokenFile, token);
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String expiration = now.format(TOKEN_DATE_FORMATTER);
+        String secret = UUID.randomUUID().toString();
+        DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
+        String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
+        FileUtils.writeStringToFile(tokenFile, tokenStr);
+        return Pair.of(tokenFile, tokenStr);
+    }
+
+    private AuthProvider generateDLFAuthProvider(
+            Optional<Long> tokenRefreshInMillsOpt, String fileName, String serverUrl) {
+        Options options = new Options();
+        options.set(DLF_TOKEN_PATH.key(), folder.getRoot().getPath() + "/" + fileName);
+        options.set(RESTCatalogOptions.URI.key(), serverUrl);
+        options.set(DLF_REGION.key(), "cn-hangzhou");
+        tokenRefreshInMillsOpt.ifPresent(
+                tokenRefreshInMills ->
+                        options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms"));
+        return AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
     }
 }

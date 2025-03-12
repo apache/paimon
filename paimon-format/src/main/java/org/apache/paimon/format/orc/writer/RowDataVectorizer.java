@@ -29,18 +29,22 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.format.orc.writer.FieldWriterFactory.WRITER_FACTORY;
-
 /** A {@link Vectorizer} of {@link InternalRow} type element. */
 public class RowDataVectorizer extends Vectorizer<InternalRow> {
 
     private final List<FieldWriter> fieldWriters;
 
     public RowDataVectorizer(TypeDescription schema, DataType[] fieldTypes) {
+        this(schema, fieldTypes, false);
+    }
+
+    public RowDataVectorizer(
+            TypeDescription schema, DataType[] fieldTypes, boolean legacyTimestampLtzType) {
         super(schema);
+        FieldWriterFactory fieldWriterFactory = new FieldWriterFactory(legacyTimestampLtzType);
         this.fieldWriters =
                 Arrays.stream(fieldTypes)
-                        .map(t -> t.accept(WRITER_FACTORY))
+                        .map(t -> t.accept(fieldWriterFactory))
                         .collect(Collectors.toList());
     }
 

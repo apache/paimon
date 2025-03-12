@@ -30,7 +30,6 @@ import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -39,7 +38,7 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
@@ -347,13 +346,9 @@ public class FlinkCatalog extends AbstractCatalog {
                 org.apache.flink.table.api.Schema.newBuilder()
                         .fromRowDataType(fromLogicalToDataType(toLogicalType(view.rowType())))
                         .build();
+        String query = view.query("flink");
         return Optional.of(
-                CatalogView.of(
-                        schema,
-                        view.comment().orElse(null),
-                        view.query(),
-                        view.query(),
-                        view.options()));
+                CatalogView.of(schema, view.comment().orElse(null), query, query, view.options()));
     }
 
     @Override
@@ -455,11 +450,13 @@ public class FlinkCatalog extends AbstractCatalog {
                                         column.getName(),
                                         toDataType(column.getDataType().getLogicalType()),
                                         column.getComment().orElse(null)));
+        String query = table.getOriginalQuery();
         View view =
                 new ViewImpl(
                         identifier,
-                        builder.build(),
-                        table.getOriginalQuery(),
+                        builder.build().getFields(),
+                        query,
+                        Collections.singletonMap("flink", query),
                         table.getComment(),
                         table.getOptions());
         try {
@@ -1547,17 +1544,17 @@ public class FlinkCatalog extends AbstractCatalog {
             Table table = catalog.getTable(toIdentifier(tablePath));
             checkArgument(
                     table instanceof FileStoreTable, "Now only support analyze FileStoreTable.");
-            if (!table.latestSnapshotId().isPresent()) {
+            if (!table.latestSnapshot().isPresent()) {
                 LOG.info("Skipping analyze table because the snapshot is null.");
                 return;
             }
 
-            FileStoreTable storeTable = (FileStoreTable) table;
-            Statistics tableStats = statistics.apply(storeTable);
+            Statistics tableStats = statistics.apply((FileStoreTable) table);
             if (tableStats != null) {
-                String commitUser = storeTable.coreOptions().createCommitUser();
-                try (FileStoreCommit commit = storeTable.store().newCommit(commitUser)) {
-                    commit.commitStatistics(tableStats, BatchWriteBuilder.COMMIT_IDENTIFIER);
+                try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+                    commit.updateStatistics(tableStats);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
             }
         } catch (Catalog.TableNotExistException e) {

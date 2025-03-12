@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
@@ -90,6 +91,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -119,7 +121,7 @@ import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -703,6 +705,7 @@ public class HiveCatalog extends AbstractCatalog {
             throws TableNotExistException {
         return new TableMetadata(
                 loadTableSchema(identifier, table),
+                isExternalTable(table),
                 identifier.getFullName() + "." + table.getCreateTime());
     }
 
@@ -748,7 +751,13 @@ public class HiveCatalog extends AbstractCatalog {
         RowType rowType = HiveTableUtils.createRowType(table);
         Map<String, String> options = new HashMap<>(table.getParameters());
         String comment = options.remove(COMMENT_PROP);
-        return new ViewImpl(identifier, rowType, table.getViewExpandedText(), comment, options);
+        return new ViewImpl(
+                identifier,
+                rowType.getFields(),
+                table.getViewExpandedText(),
+                Collections.emptyMap(),
+                comment,
+                options);
     }
 
     @Override
@@ -845,6 +854,35 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public PagedList<View> listViewDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            return new PagedList<>(Collections.emptyList(), null);
+        }
+        getDatabase(databaseName);
+
+        PagedList<String> pagedViewNames = listViewsPaged(databaseName, maxResults, pageToken);
+        return new PagedList<>(
+                pagedViewNames.getElements().stream()
+                        .map(
+                                viewName -> {
+                                    try {
+                                        return getView(Identifier.create(databaseName, viewName));
+                                    } catch (ViewNotExistException ignored) {
+                                        LOG.warn(
+                                                "view {}.{} does not exist",
+                                                databaseName,
+                                                viewName);
+                                        return null;
+                                    }
+                                })
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()),
+                pagedViewNames.getNextPageToken());
+    }
+
+    @Override
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         try {
@@ -913,7 +951,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
             boolean externalTable = isExternalTable(getHmsTable(identifier));
             clients.execute(
@@ -938,6 +976,11 @@ public class HiveCatalog extends AbstractCatalog {
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
+                }
+                for (Path externalPath : externalPaths) {
+                    if (fileIO.exists(externalPath)) {
+                        fileIO.deleteDirectoryQuietly(externalPath);
+                    }
                 }
             } catch (Exception ee) {
                 LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);

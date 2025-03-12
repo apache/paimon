@@ -53,6 +53,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,7 +92,7 @@ public class FilesTableTest extends TableTestBase {
         Identifier filesTableId =
                 identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + FilesTable.FILES);
         filesTable = (FilesTable) catalog.getTable(filesTableId);
-        snapshotManager = new SnapshotManager(fileIO, tablePath);
+        snapshotManager = newSnapshotManager(fileIO, tablePath);
 
         // snapshot 1: append
         write(table, GenericRow.of(1, 1, 10, 1), GenericRow.of(1, 2, 20, 5));

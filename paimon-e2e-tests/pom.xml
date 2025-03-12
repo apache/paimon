@@ -32,6 +32,7 @@ under the License.
     <name>Paimon : End to End Tests</name>
 
     <properties>
+        <test.java.version>java8</test.java.version>
         <flink.shaded.hadoop.version>2.8.3-10.0</flink.shaded.hadoop.version>
         <flink.cdc.version>3.1.1</flink.cdc.version>
         <flink.sql.connector.hive>flink-sql-connector-hive-2.3.10_${flink.scala.binary.version}</flink.sql.connector.hive>
@@ -248,33 +249,34 @@ under the License.
                     </artifactItems>
                 </configuration>
             </plugin>
-
             <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.1.0</version>
+                <artifactId>maven-antrun-plugin</artifactId>
                 <executions>
                     <execution>
                         <id>FLINK-31695</id>
                         <phase>process-resources</phase>
                         <goals>
-                            <goal>exec</goal>
+                            <goal>run</goal>
                         </goals>
+                        <configuration>
+                            <!--
+                            Due to FLINK-31695, we need to delete conflicting classes from jar file.
+                            Remove this work-around after we make our own e2e docker image,
+                            with both Flink and Hadoop in the same docker.
+                            -->
+                            <target>
+                                <!-- Unzip the jar file to a temporary directory -->
+                                <unzip src="/tmp/paimon-e2e-tests-jars/bundled-hadoop.jar" dest="target/temp"/>
+                                <!-- Delete the conflicting file -->
+                                <delete file="target/temp/org/apache/commons/cli/CommandLine.class"/>
+                                <!-- Repackage the modified content -->
+                                <zip destfile="/tmp/paimon-e2e-tests-jars/bundled-hadoop.jar" basedir="target/temp"/>
+                                <!-- Delete the extracted temporary folder -->
+                                <delete dir="target/temp"/>
+                            </target>
+                        </configuration>
                     </execution>
                 </executions>
-                <configuration>
-                    <!--
-                    Due to FLINK-31695, we need to delete conflicting classes from jar file.
-                    Remove this work-around after we make our own e2e docker image,
-                    with both Flink and Hadoop in the same docker.
-                    -->
-                    <executable>zip</executable>
-                    <arguments>
-                        <argument>-d</argument>
-                        <argument>/tmp/paimon-e2e-tests-jars/bundled-hadoop.jar</argument>
-                        <argument>org/apache/commons/cli/CommandLine.class</argument>
-                    </arguments>
-                </configuration>
             </plugin>
         </plugins>
 
@@ -339,6 +341,16 @@ under the License.
                 <test.flink.version>1.15.3</test.flink.version>
                 <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
                 <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>java11</id>
+            <activation>
+                <jdk>[11,)</jdk>
+            </activation>
+            <properties>
+                <test.java.version>java11</test.java.version>
             </properties>
         </profile>
     </profiles>

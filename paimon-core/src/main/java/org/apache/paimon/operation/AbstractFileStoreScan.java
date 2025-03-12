@@ -78,6 +78,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final TableSchema schema;
 
     private Snapshot specifiedSnapshot = null;
+    private boolean onlyReadRealBuckets = false;
     private Filter<Integer> bucketFilter = null;
     private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
     protected ScanMode scanMode = ScanMode.ALL;
@@ -133,6 +134,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withBucket(int bucket) {
         this.bucketFilter = i -> i == bucket;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan onlyReadRealBuckets() {
+        this.onlyReadRealBuckets = true;
         return this;
     }
 
@@ -497,6 +504,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             }
 
             int bucket = bucketGetter.apply(row);
+            if (onlyReadRealBuckets && bucket < 0) {
+                return false;
+            }
+
             if (bucketFilter != null && !bucketFilter.test(bucket)) {
                 return false;
             }

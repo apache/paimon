@@ -54,16 +54,14 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     private final SimpleStatsEvolutions fieldKeyStatsConverters;
     private final SimpleStatsEvolutions fieldValueStatsConverters;
     private final BucketSelectConverter bucketSelectConverter;
-
-    private Predicate keyFilter;
-    private Predicate valueFilter;
     private final boolean deletionVectorsEnabled;
     private final MergeEngine mergeEngine;
     private final ChangelogProducer changelogProducer;
-
     private final boolean fileIndexReadEnabled;
-    private final Map<Long, Predicate> schemaId2DataFilter = new HashMap<>();
 
+    private Predicate keyFilter;
+    private Predicate valueFilter;
+    private final Map<Long, Predicate> schemaId2DataFilter = new HashMap<>();
     private boolean valueFilterForceEnabled = false;
 
     public KeyValueFileStoreScan(

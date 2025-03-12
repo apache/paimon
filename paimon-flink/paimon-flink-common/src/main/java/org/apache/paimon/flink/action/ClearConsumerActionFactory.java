@@ -60,8 +60,11 @@ public class ClearConsumerActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  clear_consumers --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> [--including_consumers <including_pattern> --excluding_consumers <excluding_pattern>]");
+                "  clear_consumers \\\n"
+                        + "--warehouse <warehouse_path> \\\n"
+                        + "--database <database_name> \\\n"
+                        + "--table <table_name> \\\n"
+                        + "[--including_consumers <including_pattern> --excluding_consumers <excluding_pattern>]");
 
         System.out.println();
         System.out.println("Note:");

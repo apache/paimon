@@ -27,15 +27,15 @@ import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
-import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
+import org.apache.paimon.table.source.snapshot.ChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
-import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.NextSnapshotFetcher;
 import org.apache.paimon.utils.SnapshotManager;
@@ -75,6 +75,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
+            ChangelogManager changelogManager,
             boolean supportStreamingReadOverwrite,
             DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
@@ -83,7 +84,8 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.defaultValueAssigner = defaultValueAssigner;
         this.nextSnapshotProvider =
-                new NextSnapshotFetcher(snapshotManager, options.changelogLifecycleDecoupled());
+                new NextSnapshotFetcher(
+                        snapshotManager, changelogManager, options.changelogLifecycleDecoupled());
     }
 
     @Override
@@ -264,11 +266,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 followUpScanner = new DeltaFollowUpScanner();
                 break;
             case INPUT:
-                followUpScanner = new InputChangelogFollowUpScanner();
-                break;
             case FULL_COMPACTION:
             case LOOKUP:
-                followUpScanner = new CompactionChangelogFollowUpScanner();
+                followUpScanner = new ChangelogFollowUpScanner();
                 break;
             default:
                 throw new UnsupportedOperationException(

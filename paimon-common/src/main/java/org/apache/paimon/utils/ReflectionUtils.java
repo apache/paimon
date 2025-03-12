@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
@@ -63,5 +64,21 @@ public class ReflectionUtils {
             throw new NoSuchMethodException(methodName);
         }
         return method;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static <T> T getPrivateFieldValue(Object obj, String fieldName)
+            throws NoSuchFieldException, IllegalAccessException {
+        Class<?> clazz = obj.getClass();
+        while (clazz != null) {
+            try {
+                Field field = clazz.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return (T) field.get(obj);
+            } catch (NoSuchFieldException e) {
+                clazz = clazz.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(fieldName);
     }
 }

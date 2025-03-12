@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -264,7 +265,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         iterator.close();
 
         SnapshotManager snapshotManager =
-                new SnapshotManager(LocalFileIO.create(), getTableDirectory("T1"));
+                newSnapshotManager(LocalFileIO.create(), getTableDirectory("T1"));
         List<Snapshot> snapshots =
                 new ArrayList<>(ImmutableList.copyOf(snapshotManager.snapshots()));
         snapshots.sort(Comparator.comparingLong(Snapshot::timeMillis));

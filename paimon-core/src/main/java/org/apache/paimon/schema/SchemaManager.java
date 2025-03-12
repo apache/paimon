@@ -35,6 +35,7 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -44,6 +45,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
@@ -269,8 +271,10 @@ public class SchemaManager implements Serializable {
     public TableSchema commitChanges(List<SchemaChange> changes)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
-        SnapshotManager snapshotManager = new SnapshotManager(fileIO, tableRoot, branch);
-        boolean hasSnapshots = (snapshotManager.latestSnapshotId() != null);
+        SnapshotManager snapshotManager =
+                new SnapshotManager(fileIO, tableRoot, branch, null, null);
+        LazyField<Boolean> hasSnapshots =
+                new LazyField<>(() -> snapshotManager.latestSnapshot() != null);
 
         while (true) {
             TableSchema oldTableSchema =
@@ -287,7 +291,7 @@ public class SchemaManager implements Serializable {
             for (SchemaChange change : changes) {
                 if (change instanceof SetOption) {
                     SetOption setOption = (SetOption) change;
-                    if (hasSnapshots) {
+                    if (hasSnapshots.get()) {
                         checkAlterTableOption(
                                 setOption.key(),
                                 oldOptions.get(setOption.key()),
@@ -297,7 +301,7 @@ public class SchemaManager implements Serializable {
                     newOptions.put(setOption.key(), setOption.value());
                 } else if (change instanceof RemoveOption) {
                     RemoveOption removeOption = (RemoveOption) change;
-                    if (hasSnapshots) {
+                    if (hasSnapshots.get()) {
                         checkResetTableOption(removeOption.key());
                     }
                     newOptions.remove(removeOption.key());
@@ -769,7 +773,7 @@ public class SchemaManager implements Serializable {
     }
 
     @VisibleForTesting
-    boolean commit(TableSchema newSchema) throws Exception {
+    public boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
@@ -846,6 +850,10 @@ public class SchemaManager implements Serializable {
             }
             if (newBucket == -1) {
                 throw new UnsupportedOperationException("Cannot change bucket to -1.");
+            }
+            if (oldBucket == BucketMode.POSTPONE_BUCKET) {
+                throw new UnsupportedOperationException(
+                        "Cannot change bucket for postpone bucket tables.");
             }
         }
     }
