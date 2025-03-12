@@ -20,13 +20,13 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.UnawareAppendCompactionTask;
 import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.PaimonSplitScan;
 import org.apache.paimon.spark.SparkUtils;
@@ -85,7 +85,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -173,7 +172,7 @@ public class CompactProcedure extends BaseProcedure {
         checkArgument(
                 partitions == null || where == null,
                 "partitions and where cannot be used together.");
-        String finalWhere = partitions != null ? toWhere(partitions) : where;
+
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
@@ -185,8 +184,8 @@ public class CompactProcedure extends BaseProcedure {
                             table.partitionKeys());
                     DataSourceV2Relation relation = createRelation(tableIdent);
                     Expression condition = null;
-                    if (!StringUtils.isNullOrWhitespaceOnly(finalWhere)) {
-                        condition = ExpressionUtils.resolveFilter(spark(), relation, finalWhere);
+                    if (!StringUtils.isNullOrWhitespaceOnly(where)) {
+                        condition = ExpressionUtils.resolveFilter(spark(), relation, where);
                         checkArgument(
                                 ExpressionUtils.isValidPredicate(
                                         spark(),
@@ -203,6 +202,7 @@ public class CompactProcedure extends BaseProcedure {
                         dynamicOptions.putAll(ParameterUtils.parseCommaSeparatedKeyValues(options));
                     }
                     table = table.copy(dynamicOptions);
+
                     InternalRow internalRow =
                             newInternalRow(
                                     execute(
@@ -212,6 +212,10 @@ public class CompactProcedure extends BaseProcedure {
                                             sortColumns,
                                             relation,
                                             condition,
+                                            partitions == null
+                                                    ? null
+                                                    : ParameterUtils.getPartitions(
+                                                            partitions.split(";")),
                                             partitionIdleTime));
                     return new InternalRow[] {internalRow};
                 });
@@ -233,19 +237,27 @@ public class CompactProcedure extends BaseProcedure {
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable Expression condition,
+            @Nullable List<Map<String, String>> partitions,
             @Nullable Duration partitionIdleTime) {
         BucketMode bucketMode = table.bucketMode();
         OrderType orderType = OrderType.of(sortType);
         boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
-        Predicate filter =
-                condition == null
-                        ? null
-                        : ExpressionUtils.convertConditionToPaimonPredicate(
-                                        condition,
-                                        ((LogicalPlan) relation).output(),
-                                        table.rowType(),
-                                        false)
-                                .getOrElse(null);
+        Predicate filter = null;
+        if (condition != null) {
+            filter =
+                    ExpressionUtils.convertConditionToPaimonPredicate(
+                                    condition,
+                                    ((LogicalPlan) relation).output(),
+                                    table.rowType(),
+                                    false)
+                            .getOrElse(null);
+        } else if (partitions != null) {
+            filter =
+                    PartitionPredicate.createPartitionPredicate(
+                            partitions,
+                            table.rowType(),
+                            table.coreOptions().partitionDefaultName());
+        }
         if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             switch (bucketMode) {
@@ -533,23 +545,6 @@ public class CompactProcedure extends BaseProcedure {
                             sparkParallelism, readParallelism, readParallelism));
         }
         return readParallelism;
-    }
-
-    @VisibleForTesting
-    static String toWhere(String partitions) {
-        List<Map<String, String>> maps = ParameterUtils.getPartitions(partitions.split(";"));
-
-        return maps.stream()
-                .map(
-                        a ->
-                                a.entrySet().stream()
-                                        .map(entry -> entry.getKey() + "=" + entry.getValue())
-                                        .reduce((s0, s1) -> s0 + " AND " + s1))
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .map(a -> "(" + a + ")")
-                .reduce((a, b) -> a + " OR " + b)
-                .orElse(null);
     }
 
     public static ProcedureBuilder builder() {

@@ -575,14 +575,43 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       .isEqualTo(2)
   }
 
-  test("Paimon test: toWhere method in CompactProcedure") {
-    val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
+  test("Paimon Procedure: string type partition") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                 |TBLPROPERTIES (
+                 |'bucket'='1', 'bucket-key'='id',
+                 |'write-only'='true',
+                 |'compaction.min.file-num'='1',
+                 |'compaction.max.file-num'='2')
+                 |PARTITIONED BY (dt, hh)
+                 |""".stripMargin)
 
-    val where = CompactProcedure.toWhere(conditions)
-    val whereExpected =
-      "(f0=0 AND f1=0 AND f2=0) OR (f0=1 AND f1=1 AND f2=1) OR (f0=1 AND f1=2 AND f2=2) OR (f3=3)"
+    val table = loadTable("T")
+    val fileIO = table.fileIO()
 
-    Assertions.assertThat(where).isEqualTo(whereExpected)
+    spark.sql(s"INSERT INTO T VALUES (1, '1', '2024-01-01', 0), (2, '2', '2024-01-01', 1)")
+    spark.sql(s"INSERT INTO T VALUES (3, '3', '2024-01-01', 0), (4, '4', '2024-01-01', 1)")
+    spark.sql(s"INSERT INTO T VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
+    spark.sql(s"INSERT INTO T VALUES (7, '7', '2024-01-02', 0), (8, '8', '2024-01-02', 1)")
+
+    spark.sql("CALL sys.compact(table => 'T', partitions => 'dt=2024-01-01')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    Assertions
+      .assertThat(
+        fileIO.listStatus(new Path(table.location(), "dt=2024-01-01/hh=0/bucket-0")).length)
+      .isEqualTo(3)
+    Assertions
+      .assertThat(
+        fileIO.listStatus(new Path(table.location(), "dt=2024-01-01/hh=1/bucket-0")).length)
+      .isEqualTo(3)
+    Assertions
+      .assertThat(
+        fileIO.listStatus(new Path(table.location(), "dt=2024-01-02/hh=0/bucket-0")).length)
+      .isEqualTo(2)
+    Assertions
+      .assertThat(
+        fileIO.listStatus(new Path(table.location(), "dt=2024-01-02/hh=1/bucket-0")).length)
+      .isEqualTo(2)
   }
 
   test("Paimon Procedure: compact unaware bucket append table with option") {
