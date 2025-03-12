@@ -20,14 +20,10 @@ package org.apache.paimon.spark.sql
 
 import org.apache.spark.SparkConf
 
-/**
- * Test for spark writer with extension disabled.
- */
+/** Test for spark writer with extension disabled. */
 class SparkWriteWithNoExtensionITCase extends SparkWriteITCase {
 
-  /**
-   * Disbale the spark extension.
-   */
+  /** Disable the spark extension. */
   override protected def sparkConf: SparkConf = {
     super.sparkConf.remove("spark.sql.extensions")
   }
