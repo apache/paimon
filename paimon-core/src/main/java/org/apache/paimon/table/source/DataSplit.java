@@ -28,7 +28,11 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.predicate.CompareUtils;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.FunctionWithIOException;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
@@ -43,6 +47,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -139,6 +144,65 @@ public class DataSplit implements Split {
     public long mergedRowCount() {
         checkState(mergedRowCountAvailable());
         return partialMergedRowCount();
+    }
+
+    public boolean valueStatsAvailable() {
+        return rawConvertible
+                && dataDeletionFiles == null
+                && dataFiles.stream()
+                        .allMatch(
+                                f -> {
+                                    SimpleStats stats = f.valueStats();
+                                    return stats != null
+                                            && !stats.minValues().equals(EMPTY_ROW)
+                                            && !stats.maxValues().equals(EMPTY_ROW);
+                                });
+    }
+
+    public Object minValue(DataField dataField) {
+        Object minValue = null;
+        if (valueStatsAvailable()) {
+            for (int i = 0; i < dataFiles().size(); i++) {
+                DataFileMeta dataFile = dataFiles.get(i);
+                Object other =
+                        InternalRowUtils.get(
+                                dataFile.valueStats().minValues(),
+                                dataField.id(),
+                                dataField.type());
+                if (minValue == null) {
+                    minValue = other;
+                } else if (other != null) {
+                    int cmp = CompareUtils.compareLiteral(dataField.type(), minValue, other);
+                    if (cmp > 0) {
+                        minValue = other;
+                    }
+                }
+            }
+        }
+        return minValue;
+    }
+
+    public Object maxValue(DataField dataField) {
+        Object maxValue = null;
+        if (valueStatsAvailable()) {
+            for (int i = 0; i < dataFiles().size(); i++) {
+                DataFileMeta dataFile = dataFiles.get(i);
+                Object other =
+                        InternalRowUtils.get(
+                                dataFile.valueStats().maxValues(),
+                                dataField.id(),
+                                dataField.type());
+                if (maxValue == null) {
+                    maxValue = other;
+                } else if (other != null) {
+                    int cmp = CompareUtils.compareLiteral(dataField.type(), maxValue, other);
+                    if (cmp < 0) {
+                        maxValue = other;
+                    }
+                }
+            }
+        }
+        return maxValue;
     }
 
     /**

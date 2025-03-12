@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateBuilder}
-import org.apache.paimon.spark.aggregate.LocalAggregator
+import org.apache.paimon.spark.aggregate.{AggregatePushDownUtils, LocalAggregator}
 import org.apache.paimon.table.Table
 import org.apache.paimon.table.source.DataSplit
 
@@ -106,29 +106,29 @@ class PaimonScanBuilder(table: Table)
       return false
     }
 
-    val aggregator = new LocalAggregator(table)
-    if (!aggregator.pushAggregation(aggregation)) {
-      return false
-    }
-
     val readBuilder = table.newReadBuilder
     if (pushedPaimonPredicates.nonEmpty) {
       val pushedPartitionPredicate = PredicateBuilder.and(pushedPaimonPredicates.toList.asJava)
       readBuilder.withFilter(pushedPartitionPredicate)
     }
     val dataSplits =
-      readBuilder.dropStats().newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
-    if (!dataSplits.forall(_.mergedRowCountAvailable())) {
-      return false
+      readBuilder.newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
+
+    if (AggregatePushDownUtils.canPushdownAggregation(table, aggregation, dataSplits)) {
+      val aggregator = new LocalAggregator(table)
+      aggregator.initialize(aggregation)
+      dataSplits.foreach(aggregator.update)
+      localScan = Some(
+        PaimonLocalScan(
+          aggregator.result(),
+          aggregator.resultSchema(),
+          table,
+          pushedPaimonPredicates)
+      )
+      true
+    } else {
+      false
     }
-    dataSplits.foreach(aggregator.update)
-    localScan = Some(
-      PaimonLocalScan(
-        aggregator.result(),
-        aggregator.resultSchema(),
-        table,
-        pushedPaimonPredicates))
-    true
   }
 
   override def build(): Scan = {
