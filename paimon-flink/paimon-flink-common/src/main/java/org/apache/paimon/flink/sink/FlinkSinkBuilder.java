@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.OrderType;
+import org.apache.paimon.CoreOptions.PartitionSinkStrategy;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -134,7 +135,7 @@ public class FlinkSinkBuilder {
     }
 
     /** Set sink parallelism. */
-    public FlinkSinkBuilder parallelism(int parallelism) {
+    public FlinkSinkBuilder parallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
         return this;
     }
@@ -303,6 +304,16 @@ public class FlinkSinkBuilder {
         checkArgument(
                 table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
+
+        if (!table.partitionKeys().isEmpty()
+                && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
+            input =
+                    partition(
+                            input,
+                            new RowDataHashPartitionChannelComputer(table.schema()),
+                            parallelism);
+        }
+
         return new RowUnawareBucketSink(table, overwritePartition, logSinkFunction, parallelism)
                 .sinkFrom(input);
     }

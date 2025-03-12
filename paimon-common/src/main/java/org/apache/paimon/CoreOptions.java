@@ -1276,6 +1276,24 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.");
 
+    public static final ConfigOption<PartitionSinkStrategy> PARTITION_SINK_STRATEGY =
+            key("partition.sink-strategy")
+                    .enumType(PartitionSinkStrategy.class)
+                    .defaultValue(PartitionSinkStrategy.NONE)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance."
+                                                    + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
+                                    .list(
+                                            text(
+                                                    "none: Rebalanced or Forward partitioning, this is the default behavior,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism."),
+                                            text(
+                                                    "hash: Hash the partitions value,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."))
+                                    .build());
+
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
                     .booleanType()
@@ -1988,6 +2006,10 @@ public class CoreOptions implements Serializable {
 
     public boolean useWriteBufferForAppend() {
         return options.get(WRITE_BUFFER_FOR_APPEND);
+    }
+
+    public PartitionSinkStrategy partitionSinkStrategy() {
+        return options.get(PARTITION_SINK_STRATEGY);
     }
 
     public int writeMaxWritersToSpill() {
@@ -3331,5 +3353,12 @@ public class CoreOptions implements Serializable {
 
         /** Lookup compaction will use UniversalCompaction strategy to gently compact new files. */
         GENTLE
+    }
+
+    /** Partition strategy for unaware bucket partitioned append only table. */
+    public enum PartitionSinkStrategy {
+        NONE,
+        HASH
+        // TODO : Supports range-partition strategy.
     }
 }

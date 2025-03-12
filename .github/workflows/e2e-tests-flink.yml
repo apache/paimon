@@ -52,7 +52,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Flink
-        run:  mvn -T 2C -B clean install -DskipTests -pl paimon-e2e-tests -am
+        run:  mvn -T 2C -B clean install -DskipTests -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }}
 
       - name: Test Flink
         run: |

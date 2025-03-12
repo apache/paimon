@@ -28,7 +28,6 @@ import javax.crypto.spec.SecretKeySpec;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -39,7 +38,6 @@ import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_MD5_HEADER
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_TYPE_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_DATE_HEADER_KEY;
-import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_HOST_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY;
 
 /** generate authorization for <b>Ali CLoud</b> DLF. */
@@ -51,7 +49,6 @@ public class DLFAuthSignature {
     private static final String PRODUCT = "DlfNext";
     private static final String HMAC_SHA256 = "HmacSHA256";
     private static final String REQUEST_TYPE = "aliyun_v4_request";
-    private static final String ADDITIONAL_HEADERS_KEY = "AdditionalHeaders";
     private static final String SIGNATURE_KEY = "Signature";
     private static final String NEW_LINE = "\n";
     private static final List<String> SIGNED_HEADERS =
@@ -62,9 +59,6 @@ public class DLFAuthSignature {
                     DLF_DATE_HEADER_KEY.toLowerCase(),
                     DLF_AUTH_VERSION_HEADER_KEY.toLowerCase(),
                     DLF_SECURITY_TOKEN_HEADER_KEY.toLowerCase());
-    // must be ordered by alphabetical
-    private static final List<String> ADDITIONAL_HEADERS =
-            Collections.singletonList(DLF_HOST_HEADER_KEY.toLowerCase());
 
     public static String getAuthorization(
             RESTAuthParameter restAuthParameter,
@@ -98,9 +92,6 @@ public class DLFAuthSignature {
                                 region,
                                 PRODUCT,
                                 REQUEST_TYPE),
-                        String.format(
-                                "%s=%s",
-                                ADDITIONAL_HEADERS_KEY, Joiner.on(",").join(ADDITIONAL_HEADERS)),
                         String.format("%s=%s", SIGNATURE_KEY, signature));
     }
 
@@ -123,7 +114,7 @@ public class DLFAuthSignature {
     }
 
     public static String getCanonicalRequest(
-            RESTAuthParameter restAuthParameter, Map<String, String> headers) throws Exception {
+            RESTAuthParameter restAuthParameter, Map<String, String> headers) {
         String canonicalRequest =
                 Joiner.on(NEW_LINE)
                         .join(restAuthParameter.method(), restAuthParameter.resourcePath());
@@ -152,10 +143,6 @@ public class DLFAuthSignature {
                                     canonicalRequest,
                                     String.format("%s:%s", header.getKey(), header.getValue()));
         }
-
-        // Additional Headers + "\n" +
-        String additionalSignedHeaders = Joiner.on(";").join(ADDITIONAL_HEADERS);
-        canonicalRequest = Joiner.on(NEW_LINE).join(canonicalRequest, additionalSignedHeaders);
         String contentSha56 =
                 headers.getOrDefault(
                         DLF_CONTENT_SHA56_HEADER_KEY, DLFAuthProvider.DLF_CONTENT_SHA56_VALUE);
@@ -168,7 +155,7 @@ public class DLFAuthSignature {
         if (headers != null) {
             for (Map.Entry<String, String> header : headers.entrySet()) {
                 String key = header.getKey().toLowerCase();
-                if (SIGNED_HEADERS.contains(key) || ADDITIONAL_HEADERS.contains(key)) {
+                if (SIGNED_HEADERS.contains(key)) {
                     orderMap.put(key, StringUtils.trim(header.getValue()));
                 }
             }

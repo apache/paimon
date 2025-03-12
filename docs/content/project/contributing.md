@@ -31,8 +31,8 @@ the community and contribute to Apache Paimon. There are several ways to interac
 to Paimon including asking questions, filing bug reports, proposing new features, joining discussions on the mailing
 lists, contributing code or documentation, improving website, testing release candidates and writing corresponding blog etc.
 
-<h1>What do you want to do?</h1>
-<p>Contributing to Apache Paimon goes beyond writing code for the project. Below, we list different opportunities to help the project:</p>
+## What do you want to do?
+Contributing to Apache Paimon goes beyond writing code for the project. Below, we list different opportunities to help the project:
 
 <table class="table table-bordered">
   <thead>
