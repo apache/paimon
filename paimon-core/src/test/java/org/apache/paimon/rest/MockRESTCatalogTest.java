@@ -177,7 +177,7 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
 
     @Override
     protected Catalog newRestCatalogWithDataToken() {
-        options.set(RESTCatalogOptions.DATA_TOKEN_ENABLED, true);
+        options.set(RESTTokenFileIO.DATA_TOKEN_ENABLED, true);
         options.set(
                 RESTTestFileIO.DATA_PATH_CONF_KEY,
                 dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));

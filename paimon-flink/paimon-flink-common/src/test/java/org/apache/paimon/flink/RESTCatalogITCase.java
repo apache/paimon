@@ -26,6 +26,7 @@ import org.apache.paimon.rest.RESTCatalogServer;
 import org.apache.paimon.rest.RESTFileIOTestLoader;
 import org.apache.paimon.rest.RESTTestFileIO;
 import org.apache.paimon.rest.RESTToken;
+import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -71,7 +72,7 @@ class RESTCatalogITCase extends CatalogITCaseBase {
                         ImmutableMap.of(
                                 RESTCatalogInternalOptions.PREFIX.key(),
                                 "paimon",
-                                RESTCatalogOptions.DATA_TOKEN_ENABLED.key(),
+                                RESTTokenFileIO.DATA_TOKEN_ENABLED.key(),
                                 "true",
                                 CatalogOptions.WAREHOUSE.key(),
                                 warehouse),
@@ -169,7 +170,7 @@ class RESTCatalogITCase extends CatalogITCaseBase {
         options.put(RESTCatalogOptions.URI.key(), serverUrl);
         options.put(RESTCatalogOptions.TOKEN.key(), initToken);
         options.put(RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.BEAR.identifier());
-        options.put(RESTCatalogOptions.DATA_TOKEN_ENABLED.key(), "true");
+        options.put(RESTTokenFileIO.DATA_TOKEN_ENABLED.key(), "true");
         options.put(
                 RESTTestFileIO.DATA_PATH_CONF_KEY,
                 dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
