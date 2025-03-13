@@ -56,13 +56,9 @@ case class MinEvaluator(dataField: DataField) extends AggFuncEvaluator[Any] {
   private var _result: Any = _
 
   override def update(dataSplit: DataSplit): Unit = {
-    if (_result == null) {
-      _result = dataSplit.minValue(dataField)
-    } else {
-      val other = dataSplit.minValue(dataField)
-      if (CompareUtils.compareLiteral(dataField.`type`(), _result, other) > 0) {
-        _result = other
-      }
+    val other = dataSplit.minValue(dataField)
+    if (_result == null || CompareUtils.compareLiteral(dataField.`type`(), _result, other) > 0) {
+      _result = other;
     }
   }
 
@@ -80,13 +76,9 @@ case class MaxEvaluator(dataField: DataField) extends AggFuncEvaluator[Any] {
   private var _result: Any = _
 
   override def update(dataSplit: DataSplit): Unit = {
-    if (_result == null) {
-      _result = dataSplit.maxValue(dataField)
-    } else {
-      val other = dataSplit.maxValue(dataField)
-      if (CompareUtils.compareLiteral(dataField.`type`(), _result, other) < 0) {
-        _result = other
-      }
+    val other = dataSplit.maxValue(dataField)
+    if (_result == null || CompareUtils.compareLiteral(dataField.`type`(), _result, other) < 0) {
+      _result = other
     }
   }
 

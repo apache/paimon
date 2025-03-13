@@ -28,10 +28,17 @@ import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -82,6 +89,65 @@ public class SplitTest {
         assertThat(split.partialMergedRowCount()).isEqualTo(5700L);
         assertThat(split.mergedRowCountAvailable()).isEqualTo(true);
         assertThat(split.mergedRowCount()).isEqualTo(5700L);
+    }
+
+    @Test
+    public void testSplitMinMaxValue() {
+        Timestamp minTs = Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-01-01T00:00:00"));
+        Timestamp maxTs1 = Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-03-01T00:00:00"));
+        Timestamp maxTs2 = Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-03-12T00:00:00"));
+        BinaryRow min1 = newBinaryRow(new Object[] {10, 123L, 888.0D, minTs});
+        BinaryRow max1 = newBinaryRow(new Object[] {99, 456L, 999.0D, maxTs1});
+        SimpleStats valueStats1 = new SimpleStats(min1, max1, fromLongArray(new Long[] {0L}));
+
+        BinaryRow min2 = newBinaryRow(new Object[] {5, 0L, 777.0D, minTs});
+        BinaryRow max2 = newBinaryRow(new Object[] {90, 789L, 899.0D, maxTs2});
+        SimpleStats valueStats2 = new SimpleStats(min2, max2, fromLongArray(new Long[] {0L}));
+
+        // test null valueStatsCols
+        DataFileMeta d1 = newDataFile(100, valueStats1, null);
+        DataFileMeta d2 = newDataFile(100, valueStats2, null);
+        DataSplit split1 = newDataSplit(true, Arrays.asList(d1, d2), null);
+
+        DataField intField = new DataField(0, "c_int", new IntType());
+        assertThat(split1.minValue(intField)).isEqualTo(5);
+        assertThat(split1.maxValue(intField)).isEqualTo(99);
+
+        DataField longField = new DataField(1, "c_long", new BigIntType());
+        assertThat(split1.minValue(longField)).isEqualTo(0L);
+        assertThat(split1.maxValue(longField)).isEqualTo(789L);
+
+        DataField doubleField = new DataField(2, "c_double", new DoubleType());
+        assertThat(split1.minValue(doubleField)).isEqualTo(777D);
+        assertThat(split1.maxValue(doubleField)).isEqualTo(999D);
+
+        DataField tsField = new DataField(3, "c_ts", new TimestampType());
+        assertThat(split1.minValue(tsField)).isEqualTo(minTs);
+        assertThat(split1.maxValue(tsField)).isEqualTo(maxTs2);
+
+        // test non-null valueStatsCol
+        List<String> valueStatsCols = Arrays.asList("c_int", "c_long", "c_double", "c_ts");
+        DataFileMeta d3 = newDataFile(100, valueStats1, valueStatsCols);
+        DataFileMeta d4 = newDataFile(100, valueStats2, valueStatsCols);
+        DataSplit split2 = newDataSplit(true, Arrays.asList(d3, d4), null);
+
+        // In this case, these fields have different field's id from the above ones.
+        // But the minValue/maxValues should work well due to the valueStatsCol info.
+        DataField intField2 = new DataField(2, "c_int", new IntType());
+        assertThat(split2.minValue(intField2)).isEqualTo(5);
+        assertThat(split2.maxValue(intField2)).isEqualTo(99);
+
+        DataField longField2 = new DataField(4, "c_long", new BigIntType());
+        assertThat(split2.minValue(longField2)).isEqualTo(0L);
+        assertThat(split2.maxValue(longField2)).isEqualTo(789L);
+
+        DataField doubleField2 = new DataField(6, "c_double", new DoubleType());
+        assertThat(split2.minValue(doubleField2)).isEqualTo(777D);
+        assertThat(split2.maxValue(doubleField2)).isEqualTo(999D);
+
+        DataField tsField2 = new DataField(8, "c_ts", new TimestampType());
+        assertThat(split2.minValue(tsField2)).isEqualTo(minTs);
+        assertThat(split2.maxValue(tsField2)).isEqualTo(maxTs2);
     }
 
     @Test
@@ -436,18 +502,23 @@ public class SplitTest {
     }
 
     private DataFileMeta newDataFile(long rowCount) {
+        return newDataFile(rowCount, null, null);
+    }
+
+    private DataFileMeta newDataFile(
+            long rowCount, SimpleStats rowStats, @Nullable List<String> valueStatsCols) {
         return DataFileMeta.forAppend(
                 "my_data_file.parquet",
                 1024 * 1024,
                 rowCount,
-                null,
+                rowStats,
                 0L,
-                rowCount,
+                rowCount - 1,
                 1,
                 Collections.emptyList(),
                 null,
                 null,
-                null,
+                valueStatsCols,
                 null);
     }
 
@@ -466,5 +537,28 @@ public class SplitTest {
             builder.withDataDeletionFiles(deletionFiles);
         }
         return builder.build();
+    }
+
+    private BinaryRow newBinaryRow(Object[] objs) {
+        BinaryRow row = new BinaryRow(objs.length);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.reset();
+        for (int i = 0; i < objs.length; i++) {
+            if (objs[i] instanceof Integer) {
+                writer.writeInt(i, (Integer) objs[i]);
+            } else if (objs[i] instanceof Long) {
+                writer.writeLong(i, (Long) objs[i]);
+            } else if (objs[i] instanceof Float) {
+                writer.writeFloat(i, (Float) objs[i]);
+            } else if (objs[i] instanceof Double) {
+                writer.writeDouble(i, (Double) objs[i]);
+            } else if (objs[i] instanceof Timestamp) {
+                writer.writeTimestamp(i, (Timestamp) objs[i], 5);
+            } else {
+                throw new UnsupportedOperationException("It's not supported.");
+            }
+        }
+        writer.complete();
+        return row;
     }
 }

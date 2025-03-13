@@ -146,16 +146,18 @@ public class DataSplit implements Split {
 
     public Object minValue(DataField dataField) {
         Object minValue = null;
-        for (int i = 0; i < dataFiles().size(); i++) {
-            DataFileMeta dataFile = dataFiles.get(i);
+        for (DataFileMeta dataFile : dataFiles) {
+            int index =
+                    dataFile.valueStatsCols() == null
+                            ? dataField.id()
+                            : dataFile.valueStatsCols().indexOf(dataField.name());
             Object other =
                     InternalRowUtils.get(
-                            dataFile.valueStats().minValues(), dataField.id(), dataField.type());
+                            dataFile.valueStats().minValues(), index, dataField.type());
             if (minValue == null) {
                 minValue = other;
             } else if (other != null) {
-                int cmp = CompareUtils.compareLiteral(dataField.type(), minValue, other);
-                if (cmp > 0) {
+                if (CompareUtils.compareLiteral(dataField.type(), minValue, other) > 0) {
                     minValue = other;
                 }
             }
@@ -165,16 +167,18 @@ public class DataSplit implements Split {
 
     public Object maxValue(DataField dataField) {
         Object maxValue = null;
-        for (int i = 0; i < dataFiles().size(); i++) {
-            DataFileMeta dataFile = dataFiles.get(i);
+        for (DataFileMeta dataFile : dataFiles) {
+            int index =
+                    dataFile.valueStatsCols() == null
+                            ? dataField.id()
+                            : dataFile.valueStatsCols().indexOf(dataField.name());
             Object other =
                     InternalRowUtils.get(
-                            dataFile.valueStats().maxValues(), dataField.id(), dataField.type());
+                            dataFile.valueStats().maxValues(), index, dataField.type());
             if (maxValue == null) {
                 maxValue = other;
             } else if (other != null) {
-                int cmp = CompareUtils.compareLiteral(dataField.type(), maxValue, other);
-                if (cmp < 0) {
+                if (CompareUtils.compareLiteral(dataField.type(), maxValue, other) < 0) {
                     maxValue = other;
                 }
             }
