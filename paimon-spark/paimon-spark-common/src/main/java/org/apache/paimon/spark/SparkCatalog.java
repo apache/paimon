@@ -73,6 +73,7 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
+import static org.apache.paimon.spark.util.OptionUtils.checkRequiredConfigurations;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
 import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
@@ -91,6 +92,8 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
+        checkRequiredConfigurations();
+
         this.catalogName = name;
         CatalogContext catalogContext =
                 CatalogContext.create(

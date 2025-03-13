@@ -30,6 +30,7 @@ import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
 import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
+import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.FileStoreTable
@@ -60,11 +61,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
   private lazy val log = LoggerFactory.getLogger(classOf[PaimonSparkWriter])
 
-  private val extensionKey = "spark.sql.extensions"
-
-  private val paimonSparkExtension =
-    "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions"
-
   @transient private lazy val serializer = new CommitMessageSerializer
 
   val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
@@ -77,14 +73,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
 
-    def paimonExtensionEnabled: Boolean = {
-      val extensions = sparkSession.sessionState.conf.getConfString(extensionKey)
-      if (extensions != null && extensions.contains(paimonSparkExtension)) {
-        true
-      } else {
-        false
-      }
-    }
     val withInitBucketCol = bucketMode match {
       case BUCKET_UNAWARE => data
       case CROSS_PARTITION if !data.schema.fieldNames.contains(ROW_KIND_COL) =>

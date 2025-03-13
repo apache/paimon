@@ -25,6 +25,13 @@ import static org.apache.paimon.options.ConfigOptions.key;
 /** Options for spark connector. */
 public class SparkConnectorOptions {
 
+    public static final ConfigOption<Boolean> REQUIRED_SPARK_CONFS_CHECK_ENABLED =
+            key("requiredSparkConfsCheck.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to verify SparkSession is initialized with required configurations.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()

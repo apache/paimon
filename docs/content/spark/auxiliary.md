@@ -29,6 +29,7 @@ under the License.
 ## Set / Reset
 The SET command sets a property, returns the value of an existing property or returns all SQLConf properties with value and meaning.
 The RESET command resets runtime configurations specific to the current session which were set via the SET command to their default values.
+
 To set dynamic options globally, you need add the `spark.paimon.` prefix. You can also set dynamic table options at this format: 
 `spark.paimon.${catalogName}.${dbName}.${tableName}.${config_key}`. The catalogName/dbName/tableName can be `*`, which means matching all 
 the specific parts. Dynamic table options will override global options if there are conflicts.
@@ -42,9 +43,6 @@ SET spark.paimon.file.block-size=512M;
 
 -- reset conf
 RESET spark.paimon.file.block-size;
-
--- set catalog
-USE paimon;
 
 -- set scan.snapshot-id=1 for the table default.T in any catalogs
 SET spark.paimon.*.default.T.scan.snapshot-id=1;

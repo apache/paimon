@@ -19,9 +19,12 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.options.ConfigOption
+import org.apache.paimon.spark.SparkConnectorOptions
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
+import org.apache.spark.sql.internal.StaticSQLConf
 
 import java.util.{Map => JMap}
 import java.util.regex.Pattern
@@ -32,6 +35,29 @@ object OptionUtils extends SQLConfHelper {
 
   private val PAIMON_OPTION_PREFIX = "spark.paimon."
   private val SPARK_CATALOG_PREFIX = "spark.sql.catalog."
+
+  def paimonExtensionEnabled: Boolean = {
+    conf
+      .getConf(StaticSQLConf.SPARK_SESSION_EXTENSIONS)
+      .getOrElse(Seq.empty)
+      .contains("org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+  }
+
+  def getOptionString(option: ConfigOption[_]): String = {
+    conf.getConfString(s"$PAIMON_OPTION_PREFIX${option.key()}", option.defaultValue().toString)
+  }
+
+  def checkRequiredConfigurations(): Unit = {
+    if (getOptionString(SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED).toBoolean) {
+      if (!paimonExtensionEnabled) {
+        throw new RuntimeException(
+          """
+            |When using Paimon, it is necessary to configure `spark.sql.extensions` and ensure that it includes `org.apache.paimon.spark.extensions.PaimonSparkSessionExtension`.
+            |You can disable this check by configuring `spark.paimon.requiredSparkConfsCheck.enabled` to `false`, but it is strongly discouraged to do so.
+            |""".stripMargin)
+      }
+    }
+  }
 
   def extractCatalogName(): Option[String] = {
     val sparkCatalogTemplate = String.format("%s([^.]*)$", SPARK_CATALOG_PREFIX)

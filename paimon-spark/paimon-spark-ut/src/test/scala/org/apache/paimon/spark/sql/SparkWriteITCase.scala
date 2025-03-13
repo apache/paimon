@@ -20,15 +20,23 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 import org.junit.jupiter.api.Assertions
 
 import java.sql.Timestamp
 import java.time.LocalDateTime
 
-class SparkWriteITCase extends PaimonSparkTestBase {
+class SparkWriteWithNoExtensionITCase extends SparkWriteITCase {
 
-  import testImplicits._
+  /** Disable the spark extension. */
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.remove("spark.sql.extensions")
+    super.sparkConf.set("spark.paimon.requiredSparkConfsCheck.enabled", "false")
+  }
+}
+
+class SparkWriteITCase extends PaimonSparkTestBase {
 
   test("Paimon Write: AllTypes") {
     withTable("AllTypesTable") {
