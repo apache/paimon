@@ -573,12 +573,12 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             throw new TableNotExistException(identifier);
         } catch (NotImplementedException ignored) {
             // not a metastore partitioned table
-            try (BatchTableCommit commit =
-                    getTable(identifier).newBatchWriteBuilder().newCommit()) {
-                commit.truncatePartitions(partitions);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+        }
+
+        try (BatchTableCommit commit = getTable(identifier).newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
