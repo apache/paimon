@@ -28,8 +28,10 @@ import java.io.IOException;
 
 /** Defines HTTP request log interceptor. */
 public class LoggingInterceptor implements Interceptor {
+
     private static final Logger LOG = LoggerFactory.getLogger(LoggingInterceptor.class);
-    public static final String REQUEST_ID_KEY = "x-dlf-request-id";
+
+    public static final String REQUEST_ID_KEY = "x-request-id";
     public static final String DEFAULT_REQUEST_ID = "unknown";
 
     @Override

@@ -290,9 +290,6 @@ public interface Catalog extends AutoCloseable {
      * Alter partitions of the specify table. For non-existent partitions, partitions will be
      * created directly.
      *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
-     *
      * @param identifier path of the table to alter partitions
      * @param partitions partitions to be altered
      * @throws TableNotExistException if the table does not exist
@@ -303,9 +300,6 @@ public interface Catalog extends AutoCloseable {
     /**
      * Mark partitions done of the specify table. For non-existent partitions, partitions will be
      * created directly.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
      *
      * @param identifier path of the table to mark done partitions
      * @param partitions partitions to be marked done
