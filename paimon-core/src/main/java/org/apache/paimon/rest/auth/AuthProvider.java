@@ -43,4 +43,8 @@ public interface AuthProvider {
     default Optional<Long> tokenRefreshInMills() {
         return Optional.empty();
     }
+
+    default String requestIdHeader() {
+        return "request-id";
+    }
 }

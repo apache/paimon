@@ -144,8 +144,11 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     }
 
     public RESTCatalog(CatalogContext context, boolean configRequired) {
-        this.client = new HttpClient(context.options().get(RESTCatalogOptions.URI));
         AuthSession catalogAuth = createAuthSession(context.options(), tokenRefreshExecutor());
+        this.client =
+                new HttpClient(
+                        context.options().get(RESTCatalogOptions.URI),
+                        catalogAuth.requestIdHeader());
         Options options = context.options();
         Map<String, String> baseHeaders = Collections.emptyMap();
         if (configRequired) {

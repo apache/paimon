@@ -56,6 +56,7 @@ public class DLFAuthProvider implements AuthProvider {
             DateTimeFormatter.ofPattern("yyyyMMdd");
     protected static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
     private static final long[] READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS = {1_000, 3_000, 5_000};
+    public static final String REQUEST_ID_HEADER = "x-dlf-request-id";
 
     private final String tokenFilePath;
 
@@ -167,6 +168,11 @@ public class DLFAuthProvider implements AuthProvider {
     @Override
     public Optional<Long> tokenRefreshInMills() {
         return Optional.ofNullable(this.tokenRefreshInMills);
+    }
+
+    @Override
+    public String requestIdHeader() {
+        return REQUEST_ID_HEADER;
     }
 
     protected static DLFToken readToken(String tokenFilePath, int retryTimes) {

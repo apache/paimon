@@ -84,6 +84,10 @@ public class AuthSession {
         return false;
     }
 
+    public String requestIdHeader() {
+        return this.authProvider.requestIdHeader();
+    }
+
     @VisibleForTesting
     static void scheduleTokenRefresh(
             ScheduledExecutorService executor, AuthSession session, long expiresAtMillis) {

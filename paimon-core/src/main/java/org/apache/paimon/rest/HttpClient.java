@@ -34,7 +34,10 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -50,28 +53,33 @@ import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 /** HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
 
+    private static final Logger LOG = LoggerFactory.getLogger(HttpClient.class);
+
     private static final OkHttpClient HTTP_CLIENT =
             new OkHttpClient.Builder()
                     .retryOnConnectionFailure(true)
                     .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
                     .addInterceptor(new ExponentialHttpRetryInterceptor(5))
-                    .addInterceptor(new LoggingInterceptor())
                     .connectTimeout(Duration.ofMinutes(3))
                     .readTimeout(Duration.ofMinutes(3))
                     .build();
 
     private static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
 
+    public static final String DEFAULT_REQUEST_ID = "unknown";
+
     private final String uri;
+    private final String requestIdHeader;
 
     private ErrorHandler errorHandler;
 
-    public HttpClient(String uri) {
+    public HttpClient(String uri, String requestIdHeader) {
         if (uri != null && uri.endsWith("/")) {
             this.uri = uri.substring(0, uri.length() - 1);
         } else {
             this.uri = uri;
         }
+        this.requestIdHeader = requestIdHeader;
         this.errorHandler = DefaultErrorHandler.getInstance();
     }
 
@@ -183,7 +191,7 @@ public class HttpClient implements RESTClient {
     }
 
     private <T extends RESTResponse> T exec(Request request, Class<T> responseType) {
-        try (Response response = HTTP_CLIENT.newCall(request).execute()) {
+        try (Response response = exec(request)) {
             String responseBodyStr = response.body() != null ? response.body().string() : null;
             if (!response.isSuccessful()) {
                 ErrorResponse error;
@@ -213,6 +221,20 @@ public class HttpClient implements RESTClient {
         } catch (Exception e) {
             throw new RESTException(e, "rest exception");
         }
+    }
+
+    private Response exec(Request request) throws IOException {
+        long startTime = System.nanoTime();
+        Response response = HTTP_CLIENT.newCall(request).execute();
+        long durationMs = (System.nanoTime() - startTime) / 1_000_000;
+        String requestId = response.header(requestIdHeader, DEFAULT_REQUEST_ID);
+        LOG.info(
+                "[rest] requestId:{} method:{} url:{} duration:{}ms",
+                requestId,
+                request.method(),
+                request.url(),
+                durationMs);
+        return response;
     }
 
     private static RequestBody buildRequestBody(String body) throws JsonProcessingException {
