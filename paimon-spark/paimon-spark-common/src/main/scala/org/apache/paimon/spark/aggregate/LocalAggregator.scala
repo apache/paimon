@@ -18,10 +18,13 @@
 
 package org.apache.paimon.spark.aggregate
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.schema.SchemaManager
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.data.SparkInternalRow
-import org.apache.paimon.table.Table
+import org.apache.paimon.stats.SimpleStatsEvolutions
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.utils.{InternalRowUtils, ProjectedRow}
 
@@ -34,13 +37,21 @@ import org.apache.spark.sql.types.{DataType, StructField, StructType}
 
 import scala.collection.mutable
 
-class LocalAggregator(table: Table) {
+class LocalAggregator(table: FileStoreTable) {
+  private val rowType = table.rowType()
   private val partitionType = SparkTypeUtils.toPartitionType(table)
   private val groupByEvaluatorMap = new mutable.HashMap[InternalRow, Seq[AggFuncEvaluator[_]]]()
   private var requiredGroupByType: Seq[DataType] = _
   private var requiredGroupByIndexMapping: Seq[Int] = _
   private var aggFuncEvaluatorGetter: () => Seq[AggFuncEvaluator[_]] = _
   private var isInitialized = false
+  private lazy val simpleStatsEvolutions = {
+    val schemaManager = new SchemaManager(
+      table.fileIO(),
+      table.location(),
+      CoreOptions.branch(table.schema().options()))
+    new SimpleStatsEvolutions(sid => schemaManager.schema(sid).fields(), table.schema().id())
+  }
 
   def initialize(aggregation: Aggregation): Unit = {
     aggFuncEvaluatorGetter = () =>
@@ -48,10 +59,16 @@ class LocalAggregator(table: Table) {
         case _: CountStar => new CountStarEvaluator()
         case min: Min if V2ColumnUtils.extractV2Column(min.column).isDefined =>
           val fieldName = V2ColumnUtils.extractV2Column(min.column).get
-          MinEvaluator(table.rowType().getField(fieldName))
+          MinEvaluator(
+            rowType.getFieldIndex(fieldName),
+            rowType.getField(fieldName),
+            simpleStatsEvolutions)
         case max: Max if V2ColumnUtils.extractV2Column(max.column).isDefined =>
           val fieldName = V2ColumnUtils.extractV2Column(max.column).get
-          MaxEvaluator(table.rowType().getField(fieldName))
+          MaxEvaluator(
+            rowType.getFieldIndex(fieldName),
+            rowType.getField(fieldName),
+            simpleStatsEvolutions)
         case _ =>
           throw new UnsupportedOperationException()
       }

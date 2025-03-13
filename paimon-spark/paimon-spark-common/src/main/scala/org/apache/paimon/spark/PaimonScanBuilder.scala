@@ -20,7 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateBuilder}
 import org.apache.paimon.spark.aggregate.{AggregatePushDownUtils, LocalAggregator}
-import org.apache.paimon.table.{DataTable, Table}
+import org.apache.paimon.table.{FileStoreTable, Table}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.PaimonUtils
@@ -101,7 +101,7 @@ class PaimonScanBuilder(table: Table)
       return true
     }
 
-    if (!table.isInstanceOf[DataTable]) {
+    if (!table.isInstanceOf[FileStoreTable]) {
       return false
     }
 
@@ -121,7 +121,7 @@ class PaimonScanBuilder(table: Table)
       readBuilder.dropStats().newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
     }
     if (AggregatePushDownUtils.canPushdownAggregation(table, aggregation, dataSplits.toSeq)) {
-      val aggregator = new LocalAggregator(table)
+      val aggregator = new LocalAggregator(table.asInstanceOf[FileStoreTable])
       aggregator.initialize(aggregation)
       dataSplits.foreach(aggregator.update)
       localScan = Some(

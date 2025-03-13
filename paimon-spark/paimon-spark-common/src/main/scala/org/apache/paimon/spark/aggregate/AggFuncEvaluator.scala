@@ -21,6 +21,7 @@ package org.apache.paimon.spark.aggregate
 import org.apache.paimon.data.BinaryString
 import org.apache.paimon.predicate.CompareUtils
 import org.apache.paimon.spark.SparkTypeUtils
+import org.apache.paimon.stats.SimpleStatsEvolutions
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.DataField
 
@@ -52,11 +53,12 @@ class CountStarEvaluator extends AggFuncEvaluator[Long] {
   override def prettyName: String = "count_star"
 }
 
-case class MinEvaluator(dataField: DataField) extends AggFuncEvaluator[Any] {
+case class MinEvaluator(idx: Int, dataField: DataField, evolutions: SimpleStatsEvolutions)
+  extends AggFuncEvaluator[Any] {
   private var _result: Any = _
 
   override def update(dataSplit: DataSplit): Unit = {
-    val other = dataSplit.minValue(dataField)
+    val other = dataSplit.minValue(idx, dataField, evolutions)
     if (_result == null || CompareUtils.compareLiteral(dataField.`type`(), _result, other) > 0) {
       _result = other;
     }
@@ -72,11 +74,12 @@ case class MinEvaluator(dataField: DataField) extends AggFuncEvaluator[Any] {
   override def prettyName: String = "min"
 }
 
-case class MaxEvaluator(dataField: DataField) extends AggFuncEvaluator[Any] {
+case class MaxEvaluator(idx: Int, dataField: DataField, evolutions: SimpleStatsEvolutions)
+  extends AggFuncEvaluator[Any] {
   private var _result: Any = _
 
   override def update(dataSplit: DataSplit): Unit = {
-    val other = dataSplit.maxValue(dataField)
+    val other = dataSplit.maxValue(idx, dataField, evolutions)
     if (_result == null || CompareUtils.compareLiteral(dataField.`type`(), _result, other) < 0) {
       _result = other
     }

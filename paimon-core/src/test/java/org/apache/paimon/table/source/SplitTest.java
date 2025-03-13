@@ -28,10 +28,13 @@ import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -46,7 +49,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryArray.fromLongArray;
@@ -93,6 +98,8 @@ public class SplitTest {
 
     @Test
     public void testSplitMinMaxValue() {
+        Map<Long, List<DataField>> schemas = new HashMap<>();
+
         Timestamp minTs = Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-01-01T00:00:00"));
         Timestamp maxTs1 = Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-03-01T00:00:00"));
         Timestamp maxTs2 = Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-03-12T00:00:00"));
@@ -104,50 +111,53 @@ public class SplitTest {
         BinaryRow max2 = newBinaryRow(new Object[] {90, 789L, 899.0D, maxTs2});
         SimpleStats valueStats2 = new SimpleStats(min2, max2, fromLongArray(new Long[] {0L}));
 
-        // test null valueStatsCols
+        // test the common case.
         DataFileMeta d1 = newDataFile(100, valueStats1, null);
         DataFileMeta d2 = newDataFile(100, valueStats2, null);
         DataSplit split1 = newDataSplit(true, Arrays.asList(d1, d2), null);
 
         DataField intField = new DataField(0, "c_int", new IntType());
-        assertThat(split1.minValue(intField)).isEqualTo(5);
-        assertThat(split1.maxValue(intField)).isEqualTo(99);
-
         DataField longField = new DataField(1, "c_long", new BigIntType());
-        assertThat(split1.minValue(longField)).isEqualTo(0L);
-        assertThat(split1.maxValue(longField)).isEqualTo(789L);
-
         DataField doubleField = new DataField(2, "c_double", new DoubleType());
-        assertThat(split1.minValue(doubleField)).isEqualTo(777D);
-        assertThat(split1.maxValue(doubleField)).isEqualTo(999D);
-
         DataField tsField = new DataField(3, "c_ts", new TimestampType());
-        assertThat(split1.minValue(tsField)).isEqualTo(minTs);
-        assertThat(split1.maxValue(tsField)).isEqualTo(maxTs2);
+        schemas.put(1L, Arrays.asList(intField, longField, doubleField, tsField));
 
-        // test non-null valueStatsCol
-        List<String> valueStatsCols = Arrays.asList("c_int", "c_long", "c_double", "c_ts");
-        DataFileMeta d3 = newDataFile(100, valueStats1, valueStatsCols);
-        DataFileMeta d4 = newDataFile(100, valueStats2, valueStatsCols);
+        SimpleStatsEvolutions evolutions = new SimpleStatsEvolutions(schemas::get, 1);
+        assertThat(split1.minValue(0, intField, evolutions)).isEqualTo(5);
+        assertThat(split1.maxValue(0, intField, evolutions)).isEqualTo(99);
+        assertThat(split1.minValue(1, longField, evolutions)).isEqualTo(0L);
+        assertThat(split1.maxValue(1, longField, evolutions)).isEqualTo(789L);
+        assertThat(split1.minValue(2, doubleField, evolutions)).isEqualTo(777D);
+        assertThat(split1.maxValue(2, doubleField, evolutions)).isEqualTo(999D);
+        assertThat(split1.minValue(3, tsField, evolutions)).isEqualTo(minTs);
+        assertThat(split1.maxValue(3, tsField, evolutions)).isEqualTo(maxTs2);
+
+        // test the case which provide non-null valueStatsCol and there are different between file
+        // schema and table schema.
+        BinaryRow min3 = newBinaryRow(new Object[] {10, 123L, minTs});
+        BinaryRow max3 = newBinaryRow(new Object[] {99, 456L, maxTs1});
+        SimpleStats valueStats3 = new SimpleStats(min3, max3, fromLongArray(new Long[] {0L}));
+        BinaryRow min4 = newBinaryRow(new Object[] {5, 0L, minTs});
+        BinaryRow max4 = newBinaryRow(new Object[] {90, 789L, maxTs2});
+        SimpleStats valueStats4 = new SimpleStats(min4, max4, fromLongArray(new Long[] {0L}));
+        List<String> valueStatsCols2 = Arrays.asList("c_int", "c_long", "c_ts");
+        DataFileMeta d3 = newDataFile(100, valueStats3, valueStatsCols2);
+        DataFileMeta d4 = newDataFile(100, valueStats4, valueStatsCols2);
         DataSplit split2 = newDataSplit(true, Arrays.asList(d3, d4), null);
 
-        // In this case, these fields have different field's id from the above ones.
-        // But the minValue/maxValues should work well due to the valueStatsCol info.
-        DataField intField2 = new DataField(2, "c_int", new IntType());
-        assertThat(split2.minValue(intField2)).isEqualTo(5);
-        assertThat(split2.maxValue(intField2)).isEqualTo(99);
+        DataField smallField = new DataField(4, "c_small", new SmallIntType());
+        DataField floatField = new DataField(5, "c_float", new FloatType());
+        schemas.put(2L, Arrays.asList(intField, smallField, tsField, floatField));
 
-        DataField longField2 = new DataField(4, "c_long", new BigIntType());
-        assertThat(split2.minValue(longField2)).isEqualTo(0L);
-        assertThat(split2.maxValue(longField2)).isEqualTo(789L);
-
-        DataField doubleField2 = new DataField(6, "c_double", new DoubleType());
-        assertThat(split2.minValue(doubleField2)).isEqualTo(777D);
-        assertThat(split2.maxValue(doubleField2)).isEqualTo(999D);
-
-        DataField tsField2 = new DataField(8, "c_ts", new TimestampType());
-        assertThat(split2.minValue(tsField2)).isEqualTo(minTs);
-        assertThat(split2.maxValue(tsField2)).isEqualTo(maxTs2);
+        evolutions = new SimpleStatsEvolutions(schemas::get, 2);
+        assertThat(split2.minValue(0, intField, evolutions)).isEqualTo(5);
+        assertThat(split2.maxValue(0, intField, evolutions)).isEqualTo(99);
+        assertThat(split2.minValue(1, smallField, evolutions)).isEqualTo(null);
+        assertThat(split2.maxValue(1, smallField, evolutions)).isEqualTo(null);
+        assertThat(split2.minValue(2, tsField, evolutions)).isEqualTo(minTs);
+        assertThat(split2.maxValue(2, tsField, evolutions)).isEqualTo(maxTs2);
+        assertThat(split2.minValue(3, floatField, evolutions)).isEqualTo(null);
+        assertThat(split2.maxValue(3, floatField, evolutions)).isEqualTo(null);
     }
 
     @Test

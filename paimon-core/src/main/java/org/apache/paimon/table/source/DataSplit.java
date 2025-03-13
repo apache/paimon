@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
@@ -29,6 +30,8 @@ import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.predicate.CompareUtils;
+import org.apache.paimon.stats.SimpleStatsEvolution;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.InternalRowUtils;
@@ -144,16 +147,14 @@ public class DataSplit implements Split {
         return partialMergedRowCount();
     }
 
-    public Object minValue(DataField dataField) {
+    public Object minValue(int fieldIndex, DataField dataField, SimpleStatsEvolutions evolutions) {
         Object minValue = null;
         for (DataFileMeta dataFile : dataFiles) {
-            int index =
-                    dataFile.valueStatsCols() == null
-                            ? dataField.id()
-                            : dataFile.valueStatsCols().indexOf(dataField.name());
-            Object other =
-                    InternalRowUtils.get(
-                            dataFile.valueStats().minValues(), index, dataField.type());
+            SimpleStatsEvolution evolution = evolutions.getOrCreate(dataFile.schemaId());
+            InternalRow minValues =
+                    evolution.evolution(
+                            dataFile.valueStats().minValues(), dataFile.valueStatsCols());
+            Object other = InternalRowUtils.get(minValues, fieldIndex, dataField.type());
             if (minValue == null) {
                 minValue = other;
             } else if (other != null) {
@@ -165,16 +166,14 @@ public class DataSplit implements Split {
         return minValue;
     }
 
-    public Object maxValue(DataField dataField) {
+    public Object maxValue(int fieldIndex, DataField dataField, SimpleStatsEvolutions evolutions) {
         Object maxValue = null;
         for (DataFileMeta dataFile : dataFiles) {
-            int index =
-                    dataFile.valueStatsCols() == null
-                            ? dataField.id()
-                            : dataFile.valueStatsCols().indexOf(dataField.name());
-            Object other =
-                    InternalRowUtils.get(
-                            dataFile.valueStats().maxValues(), index, dataField.type());
+            SimpleStatsEvolution evolution = evolutions.getOrCreate(dataFile.schemaId());
+            InternalRow maxValues =
+                    evolution.evolution(
+                            dataFile.valueStats().maxValues(), dataFile.valueStatsCols());
+            Object other = InternalRowUtils.get(maxValues, fieldIndex, dataField.type());
             if (maxValue == null) {
                 maxValue = other;
             } else if (other != null) {
