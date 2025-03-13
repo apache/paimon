@@ -62,6 +62,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -1598,6 +1609,8 @@ components:
           type: array
           items:
             type: string
+        nextPageToken:
+          type: string
     GetDatabaseResponse:
       type: object
       properties:

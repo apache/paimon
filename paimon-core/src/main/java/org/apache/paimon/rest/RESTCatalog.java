@@ -85,7 +85,6 @@ import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -186,13 +185,28 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
 
     @Override
     public List<String> listDatabases() {
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(
+                                resourcePaths.databases(),
+                                queryParams,
+                                ListDatabasesResponse.class,
+                                restAuthFunction));
+    }
+
+    @Override
+    public PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken) {
         ListDatabasesResponse response =
                 client.get(
-                        resourcePaths.databases(), ListDatabasesResponse.class, restAuthFunction);
-        if (response.getDatabases() != null) {
-            return response.getDatabases();
+                        resourcePaths.databases(),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListDatabasesResponse.class,
+                        restAuthFunction);
+        List<String> databases = response.getDatabases();
+        if (databases == null) {
+            return new PagedList<>(emptyList(), null);
         }
-        return ImmutableList.of();
+        return new PagedList<>(databases, response.getNextPageToken());
     }
 
     @Override
