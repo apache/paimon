@@ -45,6 +45,7 @@ import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 import static java.util.Collections.emptyList;
 
@@ -65,6 +66,8 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
 
     private List<DataFileMeta> compacting;
 
+    private final Supplier<List<DataFileMeta>> dataFilesSupplier;
+
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
     public BucketedAppendCompactManager(
@@ -76,6 +79,28 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             long targetFileSize,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
+        this(
+                executor,
+                restored,
+                dvMaintainer,
+                minFileNum,
+                maxFileNum,
+                targetFileSize,
+                rewriter,
+                metricsReporter,
+                null);
+    }
+
+    public BucketedAppendCompactManager(
+            ExecutorService executor,
+            List<DataFileMeta> restored,
+            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            int minFileNum,
+            int maxFileNum,
+            long targetFileSize,
+            CompactRewriter rewriter,
+            @Nullable CompactionMetrics.Reporter metricsReporter,
+            @Nullable Supplier<List<DataFileMeta>> dataFilesSupplier) {
         this.executor = executor;
         this.dvMaintainer = dvMaintainer;
         this.toCompact = new PriorityQueue<>(fileComparator(false));
@@ -85,10 +110,15 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         this.targetFileSize = targetFileSize;
         this.rewriter = rewriter;
         this.metricsReporter = metricsReporter;
+        this.dataFilesSupplier = dataFilesSupplier;
     }
 
     @Override
     public void triggerCompaction(boolean fullCompaction) {
+        if (dataFilesSupplier != null) {
+            refreshToCompact();
+        }
+
         if (fullCompaction) {
             triggerFullCompaction();
         } else {
@@ -118,6 +148,23 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         recordCompactionsQueuedRequest();
         compacting = new ArrayList<>(toCompact);
         toCompact.clear();
+    }
+
+    @VisibleForTesting
+    protected void refreshToCompact() {
+        List<DataFileMeta> latestDataFiles = new ArrayList<>(dataFilesSupplier.get());
+        List<DataFileMeta> currentDataFiles = new ArrayList<>(toCompact);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Current bucket latest snapshot files count {}, toCompact files count {}.",
+                    latestDataFiles.size(),
+                    currentDataFiles.size());
+        }
+
+        // deduplicate files
+        latestDataFiles.removeIf(currentDataFiles::remove);
+        toCompact.addAll(latestDataFiles);
     }
 
     private void recordCompactionsQueuedRequest() {

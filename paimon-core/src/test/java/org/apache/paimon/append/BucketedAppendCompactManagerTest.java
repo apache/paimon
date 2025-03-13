@@ -191,6 +191,39 @@ public class BucketedAppendCompactManagerTest {
                 Collections.singletonList(newFile(2621L, 2630L)));
     }
 
+    @Test
+    public void testToCompactRefresh() {
+        int minFileNum = 4;
+        int maxFileNum = 12;
+        long targetFileSize = 1024;
+
+        List<DataFileMeta> totalFiles =
+                Arrays.asList(
+                        newFile(1L, 1024L),
+                        newFile(1025L, 2049L),
+                        newFile(2050L, 2500L),
+                        newFile(2501L, 4096L),
+                        newFile(4097L, 6000L));
+
+        List<DataFileMeta> toCompact = totalFiles.subList(0, 4);
+        List<DataFileMeta> toRefresh = totalFiles.subList(1, 5);
+
+        BucketedAppendCompactManager manager =
+                new BucketedAppendCompactManager(
+                        null, // not used
+                        toCompact,
+                        null,
+                        minFileNum,
+                        maxFileNum,
+                        targetFileSize,
+                        null, // not used
+                        null,
+                        () -> toRefresh);
+
+        manager.refreshToCompact();
+        assertThat(manager.getToCompact()).containsExactlyElementsOf(totalFiles);
+    }
+
     private void innerTest(
             List<DataFileMeta> toCompactBeforePick,
             boolean expectedPresent,

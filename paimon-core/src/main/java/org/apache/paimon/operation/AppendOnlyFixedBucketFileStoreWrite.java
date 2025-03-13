@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.BucketedAppendCompactManager;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
@@ -28,15 +29,18 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /** {@link AppendOnlyFileStoreWrite} for {@link org.apache.paimon.table.BucketMode#HASH_FIXED}. */
 public class AppendOnlyFixedBucketFileStoreWrite extends AppendOnlyFileStoreWrite {
@@ -85,22 +89,49 @@ public class AppendOnlyFixedBucketFileStoreWrite extends AppendOnlyFileStoreWrit
                     dvMaintainer != null
                             ? f -> dvMaintainer.deletionVectorOf(f).orElse(null)
                             : null;
-            return new BucketedAppendCompactManager(
-                    compactExecutor,
-                    restoredFiles,
-                    dvMaintainer,
-                    options.compactionMinFileNum(),
-                    options.compactionMaxFileNum().orElse(5),
-                    options.targetFileSize(false),
-                    files -> compactRewrite(partition, bucket, dvFactory, files),
-                    compactionMetrics == null
-                            ? null
-                            : compactionMetrics.createReporter(partition, bucket));
+            if (options.compactionForceRefreshFiles()) {
+                Supplier<List<DataFileMeta>> dataFilesSupplier =
+                        () -> scanBucketFiles(snapshotManager.latestSnapshot(), partition, bucket);
+                return new BucketedAppendCompactManager(
+                        compactExecutor,
+                        restoredFiles,
+                        dvMaintainer,
+                        options.compactionMinFileNum(),
+                        options.compactionMaxFileNum().orElse(5),
+                        options.targetFileSize(false),
+                        files -> compactRewrite(partition, bucket, dvFactory, files),
+                        compactionMetrics == null
+                                ? null
+                                : compactionMetrics.createReporter(partition, bucket),
+                        dataFilesSupplier);
+            } else {
+                return new BucketedAppendCompactManager(
+                        compactExecutor,
+                        restoredFiles,
+                        dvMaintainer,
+                        options.compactionMinFileNum(),
+                        options.compactionMaxFileNum().orElse(5),
+                        options.targetFileSize(false),
+                        files -> compactRewrite(partition, bucket, dvFactory, files),
+                        compactionMetrics == null
+                                ? null
+                                : compactionMetrics.createReporter(partition, bucket));
+            }
         }
     }
 
     @Override
     protected Function<WriterContainer<InternalRow>, Boolean> createWriterCleanChecker() {
         return createConflictAwareWriterCleanChecker(commitUser, snapshotManager);
+    }
+
+    private List<DataFileMeta> scanBucketFiles(Snapshot snapshot, BinaryRow partition, int bucket) {
+        List<DataFileMeta> dataFileMetas = new ArrayList<>();
+        List<ManifestEntry> files =
+                scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
+        for (ManifestEntry entry : files) {
+            dataFileMetas.add(entry.file());
+        }
+        return dataFileMetas;
     }
 }

@@ -64,6 +64,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
+    private final Supplier<List<DataFileMeta>> latestL0FilesSupplier;
 
     public MergeTreeCompactManager(
             ExecutorService executor,
@@ -77,6 +78,34 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             @Nullable DeletionVectorsMaintainer dvMaintainer,
             boolean lazyGenDeletionFile,
             boolean needLookup) {
+        this(
+                executor,
+                levels,
+                strategy,
+                keyComparator,
+                compactionFileSize,
+                numSortedRunStopTrigger,
+                rewriter,
+                metricsReporter,
+                dvMaintainer,
+                lazyGenDeletionFile,
+                needLookup,
+                null);
+    }
+
+    public MergeTreeCompactManager(
+            ExecutorService executor,
+            Levels levels,
+            CompactStrategy strategy,
+            Comparator<InternalRow> keyComparator,
+            long compactionFileSize,
+            int numSortedRunStopTrigger,
+            CompactRewriter rewriter,
+            @Nullable CompactionMetrics.Reporter metricsReporter,
+            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            boolean lazyGenDeletionFile,
+            boolean needLookup,
+            @Nullable Supplier<List<DataFileMeta>> latestL0FilesSupplier) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -88,6 +117,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.dvMaintainer = dvMaintainer;
         this.lazyGenDeletionFile = lazyGenDeletionFile;
         this.needLookup = needLookup;
+        this.latestL0FilesSupplier = latestL0FilesSupplier;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
@@ -116,6 +146,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Override
     public void triggerCompaction(boolean fullCompaction) {
+        if (latestL0FilesSupplier != null) {
+            refreshL0Files();
+        }
         Optional<CompactUnit> optionalUnit;
         List<LevelSortedRun> runs = levels.levelSortedRuns();
         if (fullCompaction) {
@@ -176,6 +209,21 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                     }
                     submitCompaction(unit, dropDelete);
                 });
+    }
+
+    @VisibleForTesting
+    protected void refreshL0Files() {
+        List<DataFileMeta> latestL0Files = latestL0FilesSupplier.get();
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Latest snapshot L0 files count {}, current level L0 files count {}.",
+                    latestL0Files.size(),
+                    levels.level0().size());
+        }
+
+        // Rely on Levels.addLevel0File to support deduplicate add
+        latestL0Files.forEach(this::addNewFile);
     }
 
     @VisibleForTesting
