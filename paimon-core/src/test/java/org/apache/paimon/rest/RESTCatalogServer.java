@@ -508,14 +508,18 @@ public class RESTCatalogServer {
                                 new ErrorResponse(
                                         null, null, e.getCause().getCause().getMessage(), 400);
                         return mockResponse(response, 400);
-                    } else if (e instanceof UnsupportedOperationException) {
+                    } else if (e instanceof UnsupportedOperationException
+                            || e.getCause() instanceof UnsupportedOperationException) {
                         response = new ErrorResponse(null, null, e.getMessage(), 501);
                         return mockResponse(response, 501);
-                    } else if (e instanceof IllegalStateException) {
+                    } else if (e instanceof IllegalStateException
+                            || e.getCause() instanceof IllegalStateException) {
                         response = new ErrorResponse(null, null, e.getMessage(), 500);
                         return mockResponse(response, 500);
                     }
-                    return new MockResponse().setResponseCode(500);
+                    return new MockResponse()
+                            .setResponseCode(500)
+                            .setBody(e.getCause().getMessage());
                 }
             }
         };
