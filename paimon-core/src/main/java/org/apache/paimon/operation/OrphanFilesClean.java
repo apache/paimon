@@ -132,30 +132,39 @@ public abstract class OrphanFilesClean implements Serializable {
             Consumer<Path> deletedFilesConsumer,
             Consumer<Long> deletedFilesLenInBytesConsumer) {
         for (String branch : branches) {
-            FileStoreTable branchTable = table.switchToBranch(branch);
-            SnapshotManager snapshotManager = branchTable.snapshotManager();
-            ChangelogManager changelogManager = branchTable.changelogManager();
-
-            // specially handle the snapshot directory
-            List<Pair<Path, Long>> nonSnapshotFiles =
-                    tryGetNonSnapshotFiles(snapshotManager.snapshotDirectory(), this::oldEnough);
-            nonSnapshotFiles.forEach(
-                    nonSnapshotFile ->
-                            cleanFile(
-                                    nonSnapshotFile,
-                                    deletedFilesConsumer,
-                                    deletedFilesLenInBytesConsumer));
-
-            // specially handle the changelog directory
-            List<Pair<Path, Long>> nonChangelogFiles =
-                    tryGetNonChangelogFiles(changelogManager.changelogDirectory(), this::oldEnough);
-            nonChangelogFiles.forEach(
-                    nonChangelogFile ->
-                            cleanFile(
-                                    nonChangelogFile,
-                                    deletedFilesConsumer,
-                                    deletedFilesLenInBytesConsumer));
+            cleanBranchSnapshotDir(branch, deletedFilesConsumer, deletedFilesLenInBytesConsumer);
         }
+    }
+
+    protected void cleanBranchSnapshotDir(
+            String branch,
+            Consumer<Path> deletedFilesConsumer,
+            Consumer<Long> deletedFilesLenInBytesConsumer) {
+        LOG.info("Start to clean snapshot directory of branch {}.", branch);
+        FileStoreTable branchTable = table.switchToBranch(branch);
+        SnapshotManager snapshotManager = branchTable.snapshotManager();
+        ChangelogManager changelogManager = branchTable.changelogManager();
+
+        // specially handle the snapshot directory
+        List<Pair<Path, Long>> nonSnapshotFiles =
+                tryGetNonSnapshotFiles(snapshotManager.snapshotDirectory(), this::oldEnough);
+        nonSnapshotFiles.forEach(
+                nonSnapshotFile ->
+                        cleanFile(
+                                nonSnapshotFile,
+                                deletedFilesConsumer,
+                                deletedFilesLenInBytesConsumer));
+
+        // specially handle the changelog directory
+        List<Pair<Path, Long>> nonChangelogFiles =
+                tryGetNonChangelogFiles(changelogManager.changelogDirectory(), this::oldEnough);
+        nonChangelogFiles.forEach(
+                nonChangelogFile ->
+                        cleanFile(
+                                nonChangelogFile,
+                                deletedFilesConsumer,
+                                deletedFilesLenInBytesConsumer));
+        LOG.info("End to clean snapshot directory of branch {}.", branch);
     }
 
     private List<Pair<Path, Long>> tryGetNonSnapshotFiles(
@@ -322,6 +331,8 @@ public abstract class OrphanFilesClean implements Serializable {
 
     /** List directories that contains data files and manifest files. */
     protected List<Path> listPaimonFileDirs() {
+        LOG.info("Start: listing paimon file directories for table [{}]", table.fullName());
+        long start = System.currentTimeMillis();
         FileStorePathFactory pathFactory = table.store().pathFactory();
 
         List<Path> paimonFileDirs = new ArrayList<>();
@@ -339,6 +350,10 @@ public abstract class OrphanFilesClean implements Serializable {
                 paimonFileDirs.addAll(listFileDirs(new Path(externalPath), partitionKeysNum));
             }
         }
+        LOG.info(
+                "End list paimon file directories for table [{}] spend [{}] ms",
+                table,
+                System.currentTimeMillis() - start);
         return paimonFileDirs;
     }
 

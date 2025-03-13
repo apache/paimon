@@ -31,9 +31,9 @@ import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
@@ -48,6 +48,8 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -69,6 +71,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Flink {@link OrphanFilesClean}, it will submit a job for a table. */
 public class FlinkOrphanFilesClean extends OrphanFilesClean {
+
+    protected static final Logger LOG = LoggerFactory.getLogger(FlinkOrphanFilesClean.class);
 
     @Nullable protected final Integer parallelism;
 
@@ -93,17 +97,45 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         // Flink 1.17 introduced this config, use string to keep compatibility
         flinkConf.setString("execution.batch.adaptive.auto-parallelism.enabled", "false");
         env.configure(flinkConf);
-
+        LOG.info("Starting orphan files clean for table {}", table.name());
+        long start = System.currentTimeMillis();
         List<String> branches = validBranches();
+        LOG.info(
+                "End orphan files validBranches: spend [{}] ms",
+                System.currentTimeMillis() - start);
 
         // snapshot and changelog files are the root of everything, so they are handled specially
         // here, and subsequently, we will not count their orphan files.
-        AtomicLong deletedFilesCountInLocal = new AtomicLong(0);
-        AtomicLong deletedFilesLenInBytesInLocal = new AtomicLong(0);
-        cleanSnapshotDir(
-                branches,
-                path -> deletedFilesCountInLocal.incrementAndGet(),
-                deletedFilesLenInBytesInLocal::addAndGet);
+        DataStream<CleanOrphanFilesResult> branchSnapshotDirDeleted =
+                env.fromCollection(branches)
+                        .process(
+                                new ProcessFunction<String, Tuple2<Long, Long>>() {
+                                    @Override
+                                    public void processElement(
+                                            String branch,
+                                            ProcessFunction<String, Tuple2<Long, Long>>.Context ctx,
+                                            Collector<Tuple2<Long, Long>> out)
+                                            throws Exception {
+                                        AtomicLong deletedFilesCount = new AtomicLong(0);
+                                        AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
+                                        cleanBranchSnapshotDir(
+                                                branch,
+                                                path -> deletedFilesCount.incrementAndGet(),
+                                                deletedFilesLenInBytes::addAndGet);
+                                        out.collect(
+                                                new Tuple2<>(
+                                                        deletedFilesCount.get(),
+                                                        deletedFilesLenInBytes.get()));
+                                    }
+                                })
+                        .keyBy(tuple -> 1)
+                        .reduce(
+                                (ReduceFunction<Tuple2<Long, Long>>)
+                                        (value1, value2) ->
+                                                new Tuple2<>(
+                                                        value1.f0 + value2.f0,
+                                                        value1.f1 + value2.f1))
+                        .map(tuple -> new CleanOrphanFilesResult(tuple.f0, tuple.f1));
 
         // branch and manifest file
         final OutputTag<Tuple2<String, String>> manifestOutputTag =
@@ -202,26 +234,25 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                 });
 
         usedFiles = usedFiles.union(usedManifestFiles);
-
-        List<String> fileDirs =
-                listPaimonFileDirs().stream()
-                        .map(Path::toUri)
-                        .map(Object::toString)
-                        .collect(Collectors.toList());
-        DataStream<Pair<String, Long>> candidates =
-                env.fromCollection(fileDirs)
+        DataStream<Tuple2<String, Long>> candidates =
+                env.fromCollection(
+                                listPaimonFileDirs().stream()
+                                        .map(Path::toUri)
+                                        .map(Object::toString)
+                                        .collect(Collectors.toList()))
                         .process(
-                                new ProcessFunction<String, Pair<String, Long>>() {
+                                new ProcessFunction<String, Tuple2<String, Long>>() {
                                     @Override
                                     public void processElement(
                                             String dir,
-                                            ProcessFunction<String, Pair<String, Long>>.Context ctx,
-                                            Collector<Pair<String, Long>> out) {
+                                            ProcessFunction<String, Tuple2<String, Long>>.Context
+                                                    ctx,
+                                            Collector<Tuple2<String, Long>> out) {
                                         for (FileStatus fileStatus :
                                                 tryBestListingDirs(new Path(dir))) {
                                             if (oldEnough(fileStatus)) {
                                                 out.collect(
-                                                        Pair.of(
+                                                        new Tuple2(
                                                                 fileStatus
                                                                         .getPath()
                                                                         .toUri()
@@ -236,13 +267,12 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 usedFiles
                         .keyBy(f -> f)
                         .connect(
-                                candidates.keyBy(
-                                        pathAndSize -> new Path(pathAndSize.getKey()).getName()))
+                                candidates.keyBy(pathAndSize -> new Path(pathAndSize.f0).getName()))
                         .transform(
                                 "files_join",
                                 TypeInformation.of(CleanOrphanFilesResult.class),
                                 new BoundedTwoInputOperator<
-                                        String, Pair<String, Long>, CleanOrphanFilesResult>() {
+                                        String, Tuple2<String, Long>, CleanOrphanFilesResult>() {
 
                                     private boolean buildEnd;
                                     private long emittedFilesCount;
@@ -288,28 +318,20 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
                                     @Override
                                     public void processElement2(
-                                            StreamRecord<Pair<String, Long>> element) {
+                                            StreamRecord<Tuple2<String, Long>> element) {
                                         checkState(buildEnd, "Should build ended.");
-                                        Pair<String, Long> fileInfo = element.getValue();
-                                        String value = fileInfo.getLeft();
+                                        Tuple2<String, Long> fileInfo = element.getValue();
+                                        String value = fileInfo.f0;
                                         Path path = new Path(value);
                                         if (!used.contains(path.getName())) {
                                             emittedFilesCount++;
-                                            emittedFilesLen += fileInfo.getRight();
+                                            emittedFilesLen += fileInfo.f1;
                                             cleanFile(path);
                                             LOG.info("Dry clean: {}", path);
                                         }
                                     }
                                 });
-
-        if (deletedFilesCountInLocal.get() != 0 || deletedFilesLenInBytesInLocal.get() != 0) {
-            deleted =
-                    deleted.union(
-                            env.fromElements(
-                                    new CleanOrphanFilesResult(
-                                            deletedFilesCountInLocal.get(),
-                                            deletedFilesLenInBytesInLocal.get())));
-        }
+        deleted = deleted.union(branchSnapshotDirDeleted);
 
         return deleted;
     }
