@@ -2241,21 +2241,42 @@ public class CoreOptions implements Serializable {
 
     public Pair<String, String> incrementalBetween() {
         String str = options.get(INCREMENTAL_BETWEEN);
-        if (str == null) {
-            str = options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
-            if (str == null) {
-                return null;
-            }
-        }
-
         String[] split = str.split(",");
         if (split.length != 2) {
             throw new IllegalArgumentException(
-                    "The incremental-between or incremental-between-timestamp  must specific start(exclusive) and end snapshot or timestamp,"
+                    "The incremental-between must specific start(exclusive) and end snapshot,"
                             + " for example, 'incremental-between'='5,10' means changes between snapshot 5 and snapshot 10. But is: "
                             + str);
         }
         return Pair.of(split[0], split[1]);
+    }
+
+    public Pair<Long, Long> incrementalBetweenTimestamp() {
+        String str = options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
+        String[] split = str.split(",");
+        if (split.length != 2) {
+            throw new IllegalArgumentException(
+                    "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
+                            + str);
+        }
+
+        try {
+            return Pair.of(Long.parseLong(split[0]), Long.parseLong(split[1]));
+        } catch (NumberFormatException nfe) {
+            try {
+                long startTimestamp =
+                        DateTimeUtils.parseTimestampData(split[0], 3, TimeZone.getDefault())
+                                .getMillisecond();
+                long endTimestamp =
+                        DateTimeUtils.parseTimestampData(split[1], 3, TimeZone.getDefault())
+                                .getMillisecond();
+                return Pair.of(startTimestamp, endTimestamp);
+            } catch (Exception e) {
+                throw new IllegalArgumentException(
+                        "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
+                                + str);
+            }
+        }
     }
 
     public IncrementalBetweenScanMode incrementalBetweenScanMode() {
