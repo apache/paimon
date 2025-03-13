@@ -40,10 +40,10 @@ public class LoggingInterceptor implements Interceptor {
         long durationMs = (System.nanoTime() - startTime) / 1_000_000;
         String requestId = response.header(REQUEST_ID_KEY, DEFAULT_REQUEST_ID);
         LOG.info(
-                "method:{} url:{} requestId:{} duration:{}ms",
+                "[rest] requestId:{} method:{} url:{} duration:{}ms",
+                requestId,
                 request.method(),
                 request.url(),
-                requestId,
                 durationMs);
         return response;
     }
