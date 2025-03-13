@@ -52,6 +52,22 @@ public interface Catalog extends AutoCloseable {
     List<String> listDatabases();
 
     /**
+     * Get paged list names of all databases in this catalog.
+     *
+     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog will return all
+     * databases names like listDatabases.
+     *
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the names of databases with provided page size in this catalog and next
+     *     page token
+     */
+    PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken);
+
+    /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
      * properties)}.
      */
