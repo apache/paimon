@@ -39,14 +39,12 @@ public class LoggingInterceptor implements Interceptor {
         Response response = chain.proceed(request);
         long durationMs = (System.nanoTime() - startTime) / 1_000_000;
         String requestId = response.header(REQUEST_ID_KEY, DEFAULT_REQUEST_ID);
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "method:{} url:{} requestId:{} duration:{}ms",
-                    request.method(),
-                    request.url(),
-                    requestId,
-                    durationMs);
-        }
+        LOG.info(
+                "method:{} url:{} requestId:{} duration:{}ms",
+                request.method(),
+                request.url(),
+                requestId,
+                durationMs);
         return response;
     }
 }
