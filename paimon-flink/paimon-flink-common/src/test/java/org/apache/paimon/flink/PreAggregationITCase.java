@@ -2135,9 +2135,7 @@ public class PreAggregationITCase {
         }
     }
 
-    /**
-     * ITCase for testing the aggregation merge engine with not exist aggregation function.
-     **/
+    /** ITCase for testing the aggregation merge engine with not exist aggregation function. */
     public static class NotExistAggregationFunctionITCase extends CatalogITCaseBase {
 
         @Override
