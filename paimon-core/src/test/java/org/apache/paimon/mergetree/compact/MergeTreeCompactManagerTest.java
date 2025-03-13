@@ -227,6 +227,46 @@ public class MergeTreeCompactManagerTest {
         assertThat(defaultManager.compactNotCompleted()).isFalse();
     }
 
+    @Test
+    public void testRefreshL0Files() {
+        List<LevelMinMax> inputs =
+                Arrays.asList(
+                        new LevelMinMax(0, 1, 3),
+                        new LevelMinMax(0, 2, 4),
+                        new LevelMinMax(0, 3, 5),
+                        new LevelMinMax(1, 1, 5),
+                        new LevelMinMax(1, 6, 7));
+        List<DataFileMeta> files = new ArrayList<>();
+
+        for (int i = 0; i < inputs.size(); i++) {
+            LevelMinMax minMax = inputs.get(i);
+            files.add(minMax.toFile(i));
+        }
+
+        List<DataFileMeta> currentFiles = Arrays.asList(files.get(0), files.get(3), files.get(4));
+        List<DataFileMeta> latestL0Files = Arrays.asList(files.get(0), files.get(1), files.get(2));
+
+        Levels levels = new Levels(comparator, currentFiles, 3);
+        MergeTreeCompactManager compactManager =
+                new MergeTreeCompactManager(
+                        service,
+                        levels,
+                        testStrategy(),
+                        comparator,
+                        2,
+                        Integer.MAX_VALUE,
+                        new TestRewriter(true),
+                        null,
+                        null,
+                        false,
+                        false,
+                        () -> latestL0Files);
+
+        assertThat(compactManager.allFiles()).containsExactlyInAnyOrderElementsOf(currentFiles);
+        compactManager.refreshL0Files();
+        assertThat(compactManager.allFiles()).containsExactlyInAnyOrderElementsOf(files);
+    }
+
     private void innerTest(List<LevelMinMax> inputs, List<LevelMinMax> expected)
             throws ExecutionException, InterruptedException {
         innerTest(inputs, expected, testStrategy(), true);
