@@ -35,6 +35,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
+import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple7;
@@ -249,7 +250,18 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                         partitionKeysNum,
                         table.store().options().dataFileExternalPaths()));
         DataStream<Tuple2<String, Long>> candidates =
-                env.fromCollection(tablePaths)
+                env.fromCollection(
+                                tablePaths,
+                                TypeInformation.of(
+                                        new TypeHint<
+                                                Tuple7<
+                                                        String,
+                                                        String,
+                                                        String,
+                                                        String,
+                                                        String,
+                                                        Integer,
+                                                        String>>() {}))
                         .process(
                                 new ProcessFunction<
                                         Tuple7<
