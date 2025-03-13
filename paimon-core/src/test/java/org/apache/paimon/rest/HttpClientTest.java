@@ -231,7 +231,7 @@ public class HttpClientTest {
                         .addInterceptor(new ExponentialHttpRetryInterceptor(5))
                         .addInterceptor(loggingInterceptor)
                         .connectTimeout(Duration.ofMinutes(3))
-                        .readTimeout(Duration.ofMinutes(3))
+                        .readTimeout(Duration.ofMinutes(2))
                         .build();
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 429);
