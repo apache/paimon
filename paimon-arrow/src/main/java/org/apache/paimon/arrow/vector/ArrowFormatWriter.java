@@ -24,6 +24,7 @@ import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.util.OversizedAllocationException;
@@ -40,11 +41,16 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     private final int batchSize;
 
-    private final RootAllocator allocator;
+    private final BufferAllocator allocator;
     private int rowId;
 
     public ArrowFormatWriter(RowType rowType, int writeBatchSize, boolean caseSensitive) {
-        allocator = new RootAllocator();
+        this(rowType, writeBatchSize, caseSensitive, new RootAllocator());
+    }
+
+    public ArrowFormatWriter(
+            RowType rowType, int writeBatchSize, boolean caseSensitive, BufferAllocator allocator) {
+        this.allocator = allocator;
 
         vectorSchemaRoot = ArrowUtils.createVectorSchemaRoot(rowType, allocator, caseSensitive);
 
@@ -105,7 +111,7 @@ public class ArrowFormatWriter implements AutoCloseable {
         return vectorSchemaRoot;
     }
 
-    public RootAllocator getAllocator() {
+    public BufferAllocator getAllocator() {
         return allocator;
     }
 }
