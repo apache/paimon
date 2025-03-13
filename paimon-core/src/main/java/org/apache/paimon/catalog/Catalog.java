@@ -65,7 +65,7 @@ public interface Catalog extends AutoCloseable {
      * @return a list of the names of databases with provided page size in this catalog and next
      *     page token
      */
-    PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken);
+    PagedList<String> listDatabasesPaged(@Nullable Integer maxResults, @Nullable String pageToken);
 
     /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
