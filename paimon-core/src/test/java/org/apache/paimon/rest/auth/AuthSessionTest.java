@@ -18,14 +18,12 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ThreadPoolUtils;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-
-import org.apache.commons.io.FileUtils;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
