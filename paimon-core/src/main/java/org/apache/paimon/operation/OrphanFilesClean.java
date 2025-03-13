@@ -331,19 +331,35 @@ public abstract class OrphanFilesClean implements Serializable {
 
     /** List directories that contains data files and manifest files. */
     protected List<Path> listPaimonFileDirs() {
-        LOG.info("Start: listing paimon file directories for table [{}]", table.fullName());
-        long start = System.currentTimeMillis();
         FileStorePathFactory pathFactory = table.store().pathFactory();
+        return listPaimonFileDirs(
+                table.fullName(),
+                pathFactory.manifestPath().toString(),
+                pathFactory.indexPath().toString(),
+                pathFactory.statisticsPath().toString(),
+                pathFactory.dataFilePath().toString(),
+                partitionKeysNum,
+                table.store().options().dataFileExternalPaths());
+    }
 
+    protected List<Path> listPaimonFileDirs(
+            String tableName,
+            String manifestPath,
+            String indexPath,
+            String statisticsPath,
+            String dataFilePath,
+            int partitionKeysNum,
+            String dataFileExternalPaths) {
+        LOG.info("Start: listing paimon file directories for table [{}]", tableName);
+        long start = System.currentTimeMillis();
         List<Path> paimonFileDirs = new ArrayList<>();
 
-        paimonFileDirs.add(pathFactory.manifestPath());
-        paimonFileDirs.add(pathFactory.indexPath());
-        paimonFileDirs.add(pathFactory.statisticsPath());
-        paimonFileDirs.addAll(listFileDirs(pathFactory.dataFilePath(), partitionKeysNum));
+        paimonFileDirs.add(new Path(manifestPath));
+        paimonFileDirs.add(new Path(indexPath));
+        paimonFileDirs.add(new Path(statisticsPath));
+        paimonFileDirs.addAll(listFileDirs(new Path(dataFilePath), partitionKeysNum));
 
         // add external data paths
-        String dataFileExternalPaths = table.store().options().dataFileExternalPaths();
         if (dataFileExternalPaths != null) {
             String[] externalPathArr = dataFileExternalPaths.split(",");
             for (String externalPath : externalPathArr) {
@@ -352,7 +368,7 @@ public abstract class OrphanFilesClean implements Serializable {
         }
         LOG.info(
                 "End list paimon file directories for table [{}] spend [{}] ms",
-                table,
+                tableName,
                 System.currentTimeMillis() - start);
         return paimonFileDirs;
     }

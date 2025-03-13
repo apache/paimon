@@ -31,11 +31,13 @@ import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple7;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -234,18 +236,61 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                 });
 
         usedFiles = usedFiles.union(usedManifestFiles);
+        List<Tuple7<String, String, String, String, String, Integer, String>> tablePaths =
+                new ArrayList<>();
+        FileStorePathFactory pathFactory = table.store().pathFactory();
+        tablePaths.add(
+                new Tuple7<>(
+                        table.fullName(),
+                        pathFactory.manifestPath().toString(),
+                        pathFactory.indexPath().toString(),
+                        pathFactory.statisticsPath().toString(),
+                        pathFactory.dataFilePath().toString(),
+                        partitionKeysNum,
+                        table.store().options().dataFileExternalPaths()));
         DataStream<Tuple2<String, Long>> candidates =
-                env.fromData(table)
+                env.fromCollection(tablePaths)
                         .process(
-                                new ProcessFunction<FileStoreTable, List<String>>() {
+                                new ProcessFunction<
+                                        Tuple7<
+                                                String,
+                                                String,
+                                                String,
+                                                String,
+                                                String,
+                                                Integer,
+                                                String>,
+                                        List<String>>() {
                                     @Override
                                     public void processElement(
-                                            FileStoreTable table,
-                                            ProcessFunction<FileStoreTable, List<String>>.Context
+                                            Tuple7<
+                                                            String,
+                                                            String,
+                                                            String,
+                                                            String,
+                                                            String,
+                                                            Integer,
+                                                            String>
+                                                    paths,
+                                            ProcessFunction<
+                                                                    Tuple7<
+                                                                            String,
+                                                                            String,
+                                                                            String,
+                                                                            String,
+                                                                            String,
+                                                                            Integer,
+                                                                            String>,
+                                                                    List<String>>
+                                                            .Context
                                                     ctx,
                                             Collector<List<String>> out) {
                                         out.collect(
-                                                listPaimonFileDirs().stream()
+                                                listPaimonFileDirs(
+                                                                paths.f0, paths.f1, paths.f2,
+                                                                paths.f3, paths.f4, paths.f5,
+                                                                paths.f6)
+                                                        .stream()
                                                         .map(Path::toUri)
                                                         .map(Object::toString)
                                                         .collect(Collectors.toList()));
