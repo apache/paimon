@@ -21,6 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
 import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.{DataFrame, Row}
 
@@ -130,6 +131,12 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
             checkAnswer(
               sql(
                 s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1', '$t3') ORDER BY id"),
+              Seq(Row(2), Row(3), Row(4)))
+            val t1String = DateTimeUtils.formatLocalDateTime(DateTimeUtils.toLocalDateTime(t1), 3)
+            val t3String = DateTimeUtils.formatLocalDateTime(DateTimeUtils.toLocalDateTime(t3), 3)
+            checkAnswer(
+              sql(
+                s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1String', '$t3String') ORDER BY id"),
               Seq(Row(2), Row(3), Row(4)))
           }
         }

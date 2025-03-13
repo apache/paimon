@@ -267,10 +267,7 @@ public interface Catalog extends AutoCloseable {
     // ======================= partition methods ===============================
 
     /**
-     * Create partitions of the specify table.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
+     * Create partitions of the specify table. Ignore existing partitions.
      *
      * @param identifier path of the table to create partitions
      * @param partitions partitions to be created
@@ -280,7 +277,7 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
-     * Drop partitions of the specify table.
+     * Drop partitions of the specify table. Ignore non-existent partitions.
      *
      * @param identifier path of the table to drop partitions
      * @param partitions partitions to be deleted
@@ -290,10 +287,8 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
-     * Alter partitions of the specify table.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
+     * Alter partitions of the specify table. For non-existent partitions, partitions will be
+     * created directly.
      *
      * @param identifier path of the table to alter partitions
      * @param partitions partitions to be altered
@@ -303,10 +298,8 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
-     * Mark partitions done of the specify table.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
+     * Mark partitions done of the specify table. For non-existent partitions, partitions will be
+     * created directly.
      *
      * @param identifier path of the table to mark done partitions
      * @param partitions partitions to be marked done

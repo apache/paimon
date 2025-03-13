@@ -93,6 +93,7 @@ SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
 
 -- incremental between snapshot time mills
 SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp' = '1692169000000,1692169900000') */;
+SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp' = '2025-03-12 00:00:00,2025-03-12 00:08:00') */;
 ```
 
 By default, will scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.

@@ -180,16 +180,12 @@ Paimon supports ingest data into Paimon tables with schema evolution.
 Here is an example to use `RichCdcSinkBuilder` API:
 
 ```java
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.cdc.RichCdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcSinkBuilder;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataTypes;
 

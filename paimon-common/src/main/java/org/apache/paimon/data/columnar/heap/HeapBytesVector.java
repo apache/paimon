@@ -102,7 +102,16 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
     private void reserveBytes(int newCapacity) {
         if (newCapacity > buffer.length) {
             int newBytesCapacity = newCapacity * 2;
-            buffer = Arrays.copyOf(buffer, newBytesCapacity);
+            try {
+                buffer = Arrays.copyOf(buffer, newBytesCapacity);
+            } catch (NegativeArraySizeException e) {
+                throw new RuntimeException(
+                        String.format(
+                                "The new claimed capacity %s is too large, will overflow the INTEGER.MAX after multiply by 2. "
+                                        + "Try reduce `read.batch-size` to avoid this exception.",
+                                newCapacity),
+                        e);
+            }
         }
     }
 

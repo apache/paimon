@@ -30,10 +30,15 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -193,36 +198,57 @@ public class ArrowFormatWriterTest {
     @Test
     public void testCWriter() {
         try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true)) {
-            List<InternalRow> list = new ArrayList<>();
-            List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
-
-            for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
-                fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
-            }
-            for (int i = 0; i < 1000; i++) {
-                list.add(GenericRow.of(randomRowValues(null)));
-            }
-
-            list.forEach(writer::write);
-
-            writer.flush();
-            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
-
-            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE, true);
-            Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
-
-            Iterator<InternalRow> iterator = rows.iterator();
-            for (int i = 0; i < 1000; i++) {
-                InternalRow actual = iterator.next();
-                InternalRow expectec = list.get(i);
-
-                for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
-                            .isEqualTo(fieldGetter.getFieldOrNull(expectec));
-                }
-            }
-            writer.release();
+            writeAndCheck(writer);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWriteWithExternalAllocator(boolean allocationFailed) {
+        long maxAllocation = allocationFailed ? 1024L : Long.MAX_VALUE;
+        try (RootAllocator rootAllocator = new RootAllocator();
+                BufferAllocator allocator =
+                        rootAllocator.newChildAllocator("paimonWriter", 0, maxAllocation);
+                ArrowFormatCWriter writer =
+                        new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true, allocator)) {
+            writeAndCheck(writer);
+        } catch (OutOfMemoryException e) {
+            if (!allocationFailed) {
+                throw e;
+            }
+        }
+    }
+
+    private void writeAndCheck(ArrowFormatCWriter writer) {
+        List<InternalRow> list = new ArrayList<>();
+        List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+
+        for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
+            fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
+        }
+        for (int i = 0; i < 1000; i++) {
+            list.add(GenericRow.of(randomRowValues(null)));
+        }
+
+        list.forEach(writer::write);
+
+        writer.flush();
+        VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+        ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE, true);
+        Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+
+        Iterator<InternalRow> iterator = rows.iterator();
+        for (int i = 0; i < 1000; i++) {
+            InternalRow actual = iterator.next();
+            InternalRow expectec = list.get(i);
+
+            for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+                Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                        .isEqualTo(fieldGetter.getFieldOrNull(expectec));
+            }
+        }
+        writer.release();
     }
 
     private Object[] randomRowValues(boolean[] nullable) {

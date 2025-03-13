@@ -24,7 +24,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
-import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 
 /**
@@ -38,8 +38,17 @@ public class ArrowFormatCWriter implements AutoCloseable {
     private final ArrowFormatWriter realWriter;
 
     public ArrowFormatCWriter(RowType rowType, int writeBatchSize, boolean caseSensitive) {
-        this.realWriter = new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive);
-        RootAllocator allocator = realWriter.getAllocator();
+        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive));
+    }
+
+    public ArrowFormatCWriter(
+            RowType rowType, int writeBatchSize, boolean caseSensitive, BufferAllocator allocator) {
+        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, allocator));
+    }
+
+    private ArrowFormatCWriter(ArrowFormatWriter arrowFormatWriter) {
+        this.realWriter = arrowFormatWriter;
+        BufferAllocator allocator = realWriter.getAllocator();
         array = ArrowArray.allocateNew(allocator);
         schema = ArrowSchema.allocateNew(allocator);
     }
@@ -79,7 +88,7 @@ public class ArrowFormatCWriter implements AutoCloseable {
         return realWriter.getVectorSchemaRoot();
     }
 
-    public RootAllocator getAllocator() {
+    public BufferAllocator getAllocator() {
         return realWriter.getAllocator();
     }
 }

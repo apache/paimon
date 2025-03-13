@@ -293,11 +293,11 @@ abstract class AbstractDataTableScan implements DataTableScan {
                 return new IncrementalStartingScanner(snapshotManager, startId, endId, scanMode);
             }
         } else if (conf.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)) {
-            Pair<String, String> incrementalBetween = options.incrementalBetween();
+            Pair<Long, Long> incrementalBetween = options.incrementalBetweenTimestamp();
             return new IncrementalTimeStampStartingScanner(
                     snapshotManager,
-                    Long.parseLong(incrementalBetween.getLeft()),
-                    Long.parseLong(incrementalBetween.getRight()),
+                    incrementalBetween.getLeft(),
+                    incrementalBetween.getRight(),
                     scanMode);
         } else if (conf.contains(CoreOptions.INCREMENTAL_TO_AUTO_TAG)) {
             String endTag = options.incrementalToAutoTag();

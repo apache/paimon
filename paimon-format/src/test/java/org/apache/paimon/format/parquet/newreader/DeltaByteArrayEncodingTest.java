@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -91,6 +92,18 @@ public class DeltaByteArrayEncodingTest {
         assertEquals(10, writableColumnVector.getInt(0));
         assertEquals(0, writableColumnVector.getInt(1));
         assertEquals(7, writableColumnVector.getInt(2));
+    }
+
+    @Test
+    public void testNegativeSize() {
+        HeapBytesVector heapBytesVector = new HeapBytesVector(32);
+        assertThrows(
+                RuntimeException.class,
+                () -> heapBytesVector.putByteArray(1, null, 0, Integer.MAX_VALUE - 1),
+                String.format(
+                        "The new claimed capacity %s is too large, will overflow the INTEGER.MAX after multiply by 2. "
+                                + "Try reduce `read.batch-size` to avoid this exception.",
+                        Integer.MAX_VALUE - 1));
     }
 
     private void assertReadWrite(
