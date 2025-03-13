@@ -58,6 +58,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -237,18 +238,17 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                 });
 
         usedFiles = usedFiles.union(usedManifestFiles);
-        List<Tuple7<String, String, String, String, String, Integer, String>> tablePaths =
-                new ArrayList<>();
         FileStorePathFactory pathFactory = table.store().pathFactory();
-        tablePaths.add(
-                new Tuple7<>(
-                        table.fullName(),
-                        pathFactory.manifestPath().toString(),
-                        pathFactory.indexPath().toString(),
-                        pathFactory.statisticsPath().toString(),
-                        pathFactory.dataFilePath().toString(),
-                        partitionKeysNum,
-                        table.store().options().dataFileExternalPaths()));
+        List<Tuple7<String, String, String, String, String, Integer, String>> tablePaths =
+                Arrays.asList(
+                        new Tuple7<>(
+                                table.fullName(),
+                                pathFactory.manifestPath().toString(),
+                                pathFactory.indexPath().toString(),
+                                pathFactory.statisticsPath().toString(),
+                                pathFactory.dataFilePath().toString(),
+                                partitionKeysNum,
+                                table.store().options().dataFileExternalPaths()));
         DataStream<Tuple2<String, Long>> candidates =
                 env.fromCollection(
                                 tablePaths,
