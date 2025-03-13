@@ -36,6 +36,9 @@ import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.time.Duration;
@@ -46,6 +49,8 @@ import java.util.function.Function;
 
 /** A factory to create {@link RecordReader} expires records by time. */
 public class RecordLevelExpire {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RecordLevelExpire.class);
 
     private final int expireTime;
     private final Function<InternalRow, Optional<Integer>> fieldGetter;
@@ -81,6 +86,11 @@ public class RecordLevelExpire {
         DataType dataType = rowType.getField(timeFieldName).type();
         Function<InternalRow, Optional<Integer>> fieldGetter =
                 createFieldGetter(dataType, fieldIndex);
+
+        LOG.info(
+                "Create RecordExpire. expireTime is {}s,timeField is {}",
+                (int) expireTime.getSeconds(),
+                timeFieldName);
         return new RecordLevelExpire(
                 (int) expireTime.getSeconds(), fieldGetter, schema, schemaManager);
     }
@@ -123,10 +133,22 @@ public class RecordLevelExpire {
         }
 
         int currentTime = (int) (System.currentTimeMillis() / 1000);
-        return fieldGetter
-                .apply(minValues)
-                .map(minValue -> currentTime - expireTime > minValue)
-                .orElse(false);
+        Optional<Integer> minTime = fieldGetter.apply(minValues);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "expire time is {}, currentTime is {}, file min time for time field is {}. "
+                            + "file name is {}, file level is {}, file schema id is {}, file valueStatsCols is {}",
+                    expireTime,
+                    currentTime,
+                    minTime.isPresent() ? minTime.get() : "empty",
+                    file.fileName(),
+                    file.level(),
+                    file.schemaId(),
+                    file.valueStatsCols());
+        }
+
+        return minTime.map(minValue -> currentTime - expireTime > minValue).orElse(false);
     }
 
     public FileReaderFactory<KeyValue> wrap(FileReaderFactory<KeyValue> readerFactory) {

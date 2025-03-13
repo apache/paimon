@@ -126,6 +126,9 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
     @Test
     public void testIsExpireFile() throws Exception {
         CoreOptions coreOptions = table.coreOptions();
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        table = table.copy(dynamicOptions);
 
         // common case
         int currentSecs = (int) (System.currentTimeMillis() / 1000);
@@ -169,11 +172,10 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         assertThat(recordLevelExpire.isExpireFile(files2.get(1))).isFalse();
 
         // metadata.stats-dense-store = true
-        Map<String, String> addedOptions = new HashMap<>();
-        addedOptions.put(CoreOptions.METADATA_STATS_DENSE_STORE.key(), "true");
-        addedOptions.put(CoreOptions.METADATA_STATS_MODE.key(), "none");
-        addedOptions.put("fields.col1.stats-mode", "full");
-        table = table.copy(addedOptions);
+        dynamicOptions.put(CoreOptions.METADATA_STATS_DENSE_STORE.key(), "true");
+        dynamicOptions.put(CoreOptions.METADATA_STATS_MODE.key(), "none");
+        dynamicOptions.put("fields.col1.stats-mode", "full");
+        table = table.copy(dynamicOptions);
 
         writeCommit(
                 GenericRow.of(1, 9, 9, currentSecs + 60 * 60),
@@ -186,8 +188,46 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
                 RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
         List<DataSplit> splits3 = table.newSnapshotReader().read().dataSplits();
         List<DataFileMeta> files3 = splits3.get(0).dataFiles();
+        assertThat(recordLevelExpire.isExpireFile(files3.get(0))).isTrue();
+        assertThat(recordLevelExpire.isExpireFile(files3.get(1))).isFalse();
         assertThat(recordLevelExpire.isExpireFile(files3.get(2))).isFalse();
         assertThat(recordLevelExpire.isExpireFile(files3.get(3))).isTrue();
+
+        // schema evolution again, change the valueCols
+        table.schemaManager()
+                .commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.addColumn(
+                                        "col2",
+                                        DataTypes.INT(),
+                                        null,
+                                        SchemaChange.Move.after("col2", "pk"))));
+        refreshTable();
+
+        // new files has no stats for record-level.time-field
+        dynamicOptions.put("fields.col1.stats-mode", "none");
+        dynamicOptions.put("fields.col2.stats-mode", "full");
+        table = table.copy(dynamicOptions);
+
+        writeCommit(
+                GenericRow.of(1, 13, 13, 13, currentSecs + 60 * 60),
+                GenericRow.of(1, 14, 14, 14, currentSecs + 30 * 60));
+        writeCommit(
+                GenericRow.of(1, 15, 15, 15, currentSecs + 60 * 60),
+                GenericRow.of(1, 16, 16, 16, currentSecs - 30 * 60));
+
+        recordLevelExpire =
+                RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
+        List<DataSplit> splits4 = table.newSnapshotReader().read().dataSplits();
+        List<DataFileMeta> files4 = splits4.get(0).dataFiles();
+        // old files with record-level.time-field stats
+        assertThat(recordLevelExpire.isExpireFile(files4.get(0))).isTrue();
+        assertThat(recordLevelExpire.isExpireFile(files4.get(1))).isFalse();
+        assertThat(recordLevelExpire.isExpireFile(files4.get(2))).isFalse();
+        assertThat(recordLevelExpire.isExpireFile(files4.get(3))).isTrue();
+        // new files without record-level.time-field stats, cannot expire records
+        assertThat(recordLevelExpire.isExpireFile(files4.get(4))).isFalse();
+        assertThat(recordLevelExpire.isExpireFile(files4.get(5))).isFalse();
     }
 
     @Test
