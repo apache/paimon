@@ -235,29 +235,44 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
         usedFiles = usedFiles.union(usedManifestFiles);
         DataStream<Tuple2<String, Long>> candidates =
-                env.fromCollection(
-                                listPaimonFileDirs().stream()
-                                        .map(Path::toUri)
-                                        .map(Object::toString)
-                                        .collect(Collectors.toList()))
+                env.fromData(table)
                         .process(
-                                new ProcessFunction<String, Tuple2<String, Long>>() {
+                                new ProcessFunction<FileStoreTable, List<String>>() {
                                     @Override
                                     public void processElement(
-                                            String dir,
-                                            ProcessFunction<String, Tuple2<String, Long>>.Context
+                                            FileStoreTable table,
+                                            ProcessFunction<FileStoreTable, List<String>>.Context
+                                                    ctx,
+                                            Collector<List<String>> out) {
+                                        out.collect(
+                                                listPaimonFileDirs().stream()
+                                                        .map(Path::toUri)
+                                                        .map(Object::toString)
+                                                        .collect(Collectors.toList()));
+                                    }
+                                })
+                        .rebalance()
+                        .process(
+                                new ProcessFunction<List<String>, Tuple2<String, Long>>() {
+                                    @Override
+                                    public void processElement(
+                                            List<String> dirs,
+                                            ProcessFunction<List<String>, Tuple2<String, Long>>
+                                                            .Context
                                                     ctx,
                                             Collector<Tuple2<String, Long>> out) {
-                                        for (FileStatus fileStatus :
-                                                tryBestListingDirs(new Path(dir))) {
-                                            if (oldEnough(fileStatus)) {
-                                                out.collect(
-                                                        new Tuple2(
-                                                                fileStatus
-                                                                        .getPath()
-                                                                        .toUri()
-                                                                        .toString(),
-                                                                fileStatus.getLen()));
+                                        for (String dir : dirs) {
+                                            for (FileStatus fileStatus :
+                                                    tryBestListingDirs(new Path(dir))) {
+                                                if (oldEnough(fileStatus)) {
+                                                    out.collect(
+                                                            new Tuple2(
+                                                                    fileStatus
+                                                                            .getPath()
+                                                                            .toUri()
+                                                                            .toString(),
+                                                                    fileStatus.getLen()));
+                                                }
                                             }
                                         }
                                     }
