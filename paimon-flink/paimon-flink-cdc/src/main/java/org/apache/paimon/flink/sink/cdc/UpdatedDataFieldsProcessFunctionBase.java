@@ -170,6 +170,11 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     : ConvertAction.IGNORE;
         }
 
+        // object can always be converted to string
+        if (oldIdx < 0 && newIdx >= 0) {
+            return ConvertAction.CONVERT;
+        }
+
         oldIdx = BINARY_TYPES.indexOf(oldType.getTypeRoot());
         newIdx = BINARY_TYPES.indexOf(newType.getTypeRoot());
         if (oldIdx >= 0 && newIdx >= 0) {
