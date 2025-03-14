@@ -84,7 +84,7 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
                 "CALL paimon.sys.create_branch(table => 'test.T', branch => 'test_branch', tag => 'test_tag')"),
               Row(true) :: Nil)
             val table = loadTable("T")
-            val branchManager = table.branchManager().asInstanceOf[FileSystemBranchManager]
+            val branchManager = table.branchManager()
             assert(branchManager.branchExists("test_branch"))
 
             // query from branch
