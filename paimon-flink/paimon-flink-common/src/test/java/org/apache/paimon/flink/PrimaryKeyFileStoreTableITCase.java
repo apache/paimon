@@ -90,6 +90,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     private String createCatalogSql(String catalogName, String warehouse) {
+
+        return createCatalogSql(catalogName, warehouse, "");
+    }
+
+    private String createCatalogSql(String catalogName, String warehouse, String catalogOptions) {
         String defaultPropertyString = "";
         if (!tableDefaultProperties.isEmpty()) {
             defaultPropertyString = ", ";
@@ -104,8 +109,8 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         }
 
         return String.format(
-                "CREATE CATALOG `%s` WITH ( 'type' = 'paimon', 'warehouse' = '%s' %s )",
-                catalogName, warehouse, defaultPropertyString);
+                "CREATE CATALOG `%s` WITH ( 'type' = 'paimon', 'warehouse' = '%s' %s, %s )",
+                catalogName, warehouse, defaultPropertyString, catalogOptions);
     }
 
     private CloseableIterator<Row> collect(TableResult result) {
@@ -627,6 +632,31 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 .rootCause()
                 .hasMessageContaining(
                         "The next expected snapshot is too big! Most possible cause might be the table had been recreated.");
+    }
+
+    @Test
+    public void testDeleteFallbackBranch() {
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
+        bEnv.executeSql(
+                createCatalogSql("testCatalog", path + "/warehouse", "'cache-enabled' = 'true'"));
+        bEnv.executeSql("USE CATALOG testCatalog");
+        bEnv.executeSql(
+                "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) "
+                        + "WITH ("
+                        + "    'bucket' = '2'\n"
+                        + "    ,'continuous.discovery-interval' = '1s'\n"
+                        + ")");
+        bEnv.executeSql("CALL sys.create_branch('default.t', 'branch1')");
+        bEnv.executeSql("ALTER TABLE t SET ('scan.fallback-branch' = 'branch1')");
+        // branch1 is fallback branch, can not be deleted
+        assertThatCode(() -> bEnv.executeSql("CALL sys.delete_branch('default.t', 'branch1')"))
+                .rootCause()
+                .hasMessageContaining("can not delete the fallback branch.");
+
+        // reset scan.fallback-branch
+        bEnv.executeSql("ALTER TABLE t RESET ('scan.fallback-branch')");
+        bEnv.executeSql("CALL sys.delete_branch('default.t', 'branch1')");
     }
 
     @Test
