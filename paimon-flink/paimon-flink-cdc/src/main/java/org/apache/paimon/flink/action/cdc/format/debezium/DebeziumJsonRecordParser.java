@@ -22,9 +22,9 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
@@ -181,9 +181,9 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(JsonNode record, CdcSchema.Builder schemaBuilder) {
         if (!hasSchema) {
-            return super.extractRowData(record, rowTypeBuilder);
+            return super.extractRowData(record, schemaBuilder);
         }
 
         Map<String, Object> recordMap =
@@ -205,13 +205,13 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
                             ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
 
-            rowTypeBuilder.field(
+            schemaBuilder.column(
                     fieldName,
                     DebeziumSchemaUtils.toDataType(
                             debeziumType, className, parameters.get(fieldName)));
         }
 
-        evalComputedColumns(resultMap, rowTypeBuilder);
+        evalComputedColumns(resultMap, schemaBuilder);
 
         return resultMap;
     }

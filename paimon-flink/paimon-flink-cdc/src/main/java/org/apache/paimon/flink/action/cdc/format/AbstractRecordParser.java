@@ -22,11 +22,10 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.util.Collector;
@@ -71,20 +70,7 @@ public abstract class AbstractRecordParser
             }
 
             Optional<RichCdcMultiplexRecord> recordOpt = extractRecords().stream().findFirst();
-            if (!recordOpt.isPresent()) {
-                return null;
-            }
-
-            Schema.Builder builder = Schema.newBuilder();
-            recordOpt
-                    .get()
-                    .fields()
-                    .forEach(
-                            field ->
-                                    builder.column(
-                                            field.name(), field.type(), field.description()));
-            builder.primaryKey(extractPrimaryKeys());
-            return builder.build();
+            return recordOpt.map(RichCdcMultiplexRecord::buildSchema).orElse(null);
         } catch (Exception e) {
             logInvalidSourceRecord(record);
             throw e;
@@ -114,24 +100,24 @@ public abstract class AbstractRecordParser
 
     /** generate values for computed columns. */
     protected void evalComputedColumns(
-            Map<String, String> rowData, RowType.Builder rowTypeBuilder) {
+            Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
         computedColumns.forEach(
                 computedColumn -> {
                     rowData.put(
                             computedColumn.columnName(),
                             computedColumn.eval(rowData.get(computedColumn.fieldReference())));
-                    rowTypeBuilder.field(computedColumn.columnName(), computedColumn.columnType());
+                    schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
                 });
     }
 
     /** Handle case sensitivity here. */
     protected RichCdcMultiplexRecord createRecord(
-            RowKind rowKind, Map<String, String> data, List<DataField> paimonFields) {
+            RowKind rowKind, Map<String, String> data, CdcSchema.Builder schemaBuilder) {
+        schemaBuilder.primaryKey(extractPrimaryKeys());
         return new RichCdcMultiplexRecord(
                 getDatabaseName(),
                 getTableName(),
-                paimonFields,
-                extractPrimaryKeys(),
+                schemaBuilder.build(),
                 new CdcRecord(rowKind, data));
     }
 

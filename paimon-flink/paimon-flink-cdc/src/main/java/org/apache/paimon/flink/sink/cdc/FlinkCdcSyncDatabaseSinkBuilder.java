@@ -222,8 +222,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
             DataStream<Void> schemaChangeProcessFunction =
                     SingleOutputStreamOperatorUtils.getSideOutput(
                                     parsed,
-                                    CdcMultiTableParsingProcessFunction
-                                            .createUpdatedDataFieldsOutputTag(table.name()))
+                                    CdcMultiTableParsingProcessFunction.createSchameChangeOutputTag(
+                                            table.name()))
                             .process(
                                     new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(table.fileIO(), table.location()),

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -35,7 +36,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -53,123 +53,128 @@ import java.util.List;
 /** Used to test schema evolution related logic. */
 public class SchemaEvolutionTest extends TableTestBase {
 
-    private static List<List<DataField>> prepareData() {
-        List<DataField> upField1 =
-                Arrays.asList(
-                        new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new IntType(), "test description."),
-                        new DataField(2, "col_2", new IntType(), "test description."),
-                        new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
-                        new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
-                        new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
-                        new DataField(6, "col_6", new DecimalType(), "Someone's desc."),
-                        new DataField(7, "col_7", new VarCharType(), "Someone's desc."),
-                        new DataField(8, "col_8", new VarCharType(), "Someone's desc."),
-                        new DataField(9, "col_9", new VarCharType(), "Someone's desc."),
-                        new DataField(10, "col_10", new VarCharType(), "Someone's desc."),
-                        new DataField(11, "col_11", new VarCharType(), "Someone's desc."),
-                        new DataField(12, "col_12", new DoubleType(), "Someone's desc."),
-                        new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
-                        new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
-                        new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
-                        new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
-                        new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
-                        new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
-                        new DataField(19, "col_19", new VarCharType(), "Someone's desc."),
-                        new DataField(20, "col_20", new VarCharType(), "Someone's desc."));
-        List<DataField> upField2 =
-                Arrays.asList(
-                        new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new BigIntType(), "test description."),
-                        new DataField(2, "col_2", new IntType(), "test description."),
-                        new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
-                        new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
-                        new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
-                        new DataField(6, "col_6", new DecimalType(), "Someone's desc."),
-                        new DataField(7, "col_7", new VarCharType(), "Someone's desc."),
-                        new DataField(8, "col_8", new VarCharType(), "Someone's desc."),
-                        new DataField(9, "col_9", new VarCharType(), "Someone's desc."),
-                        new DataField(10, "col_10", new VarCharType(), "Someone's desc."),
-                        new DataField(11, "col_11", new VarCharType(), "Someone's desc."),
-                        new DataField(12, "col_12", new DoubleType(), "Someone's desc."),
-                        new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
-                        new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
-                        new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
-                        new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
-                        new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
-                        new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
-                        new DataField(19, "col_19", new VarCharType(), "Someone's desc."),
-                        new DataField(20, "col_20", new VarCharType(), "Someone's desc."));
-        List<DataField> upField3 =
-                Arrays.asList(
-                        new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new BigIntType(), "test description."),
-                        new DataField(2, "col_2", new IntType(), "test description 2."),
-                        new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
-                        new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
-                        new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
-                        new DataField(6, "col_6", new DecimalType(), "Someone's desc."),
-                        new DataField(7, "col_7", new VarCharType(), "Someone's desc."),
-                        new DataField(8, "col_8", new VarCharType(), "Someone's desc."),
-                        new DataField(9, "col_9", new VarCharType(), "Someone's desc."),
-                        new DataField(10, "col_10", new VarCharType(), "Someone's desc."),
-                        new DataField(11, "col_11", new VarCharType(), "Someone's desc."),
-                        new DataField(12, "col_12", new DoubleType(), "Someone's desc."),
-                        new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
-                        new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
-                        new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
-                        new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
-                        new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
-                        new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
-                        new DataField(19, "col_19", new VarCharType(), "Someone's desc."),
-                        new DataField(20, "col_20", new VarCharType(), "Someone's desc."));
-        List<DataField> upField4 =
-                Arrays.asList(
-                        new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new BigIntType(), "test description."),
-                        new DataField(2, "col_2", new IntType(), "test description."),
-                        new DataField(3, "col_3_1", new VarCharType(), "Someone's desc."),
-                        new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
-                        new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
-                        new DataField(6, "col_6", new DecimalType(), "Someone's desc."),
-                        new DataField(7, "col_7", new VarCharType(), "Someone's desc."),
-                        new DataField(8, "col_8", new VarCharType(), "Someone's desc."),
-                        new DataField(9, "col_9", new VarCharType(), "Someone's desc."),
-                        new DataField(10, "col_10", new VarCharType(), "Someone's desc."),
-                        new DataField(11, "col_11", new VarCharType(), "Someone's desc."),
-                        new DataField(12, "col_12", new DoubleType(), "Someone's desc."),
-                        new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
-                        new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
-                        new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
-                        new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
-                        new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
-                        new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
-                        new DataField(19, "col_19", new VarCharType(), "Someone's desc."),
-                        new DataField(20, "col_20", new VarCharType(), "Someone's desc."));
-        List<DataField> upField5 =
-                Arrays.asList(
-                        new DataField(0, "col_0", new VarCharType(), "test description."),
-                        new DataField(1, "col_1", new BigIntType(), "test description."),
-                        new DataField(2, "col_2_1", new BigIntType(), "test description 2."),
-                        new DataField(3, "col_3", new VarCharType(), "Someone's desc."),
-                        new DataField(4, "col_4", new VarCharType(), "Someone's desc."),
-                        new DataField(5, "col_5", new VarCharType(), "Someone's desc."),
-                        new DataField(6, "col_6", new DecimalType(), "Someone's desc."),
-                        new DataField(7, "col_7", new VarCharType(), "Someone's desc."),
-                        new DataField(8, "col_8", new VarCharType(), "Someone's desc."),
-                        new DataField(9, "col_9", new VarCharType(), "Someone's desc."),
-                        new DataField(10, "col_10", new VarCharType(), "Someone's desc."),
-                        new DataField(11, "col_11", new VarCharType(), "Someone's desc."),
-                        new DataField(12, "col_12", new DoubleType(), "Someone's desc."),
-                        new DataField(13, "col_13", new VarCharType(), "Someone's desc."),
-                        new DataField(14, "col_14", new VarCharType(), "Someone's desc."),
-                        new DataField(15, "col_15", new VarCharType(), "Someone's desc."),
-                        new DataField(16, "col_16", new VarCharType(), "Someone's desc."),
-                        new DataField(17, "col_17", new VarCharType(), "Someone's desc."),
-                        new DataField(18, "col_18", new VarCharType(), "Someone's desc."),
-                        new DataField(19, "col_19", new VarCharType(), "Someone's desc."),
-                        new DataField(20, "col_20", new VarCharType(), "Someone's desc."));
-        return Arrays.asList(upField1, upField2, upField3, upField4, upField5);
+    private static List<CdcSchema> prepareData() {
+        CdcSchema upSchema1 =
+                CdcSchema.newBuilder()
+                        .column("col_0", new VarCharType(), "test description.")
+                        .column("col_1", new IntType(), "test description.")
+                        .column("col_2", new IntType(), "test description.")
+                        .column("col_3", new VarCharType(), "Someone's desc.")
+                        .column("col_4", new VarCharType(), "Someone's desc.")
+                        .column("col_5", new VarCharType(), "Someone's desc.")
+                        .column("col_6", new DecimalType(), "Someone's desc.")
+                        .column("col_7", new VarCharType(), "Someone's desc.")
+                        .column("col_8", new VarCharType(), "Someone's desc.")
+                        .column("col_9", new VarCharType(), "Someone's desc.")
+                        .column("col_10", new VarCharType(), "Someone's desc.")
+                        .column("col_11", new VarCharType(), "Someone's desc.")
+                        .column("col_12", new DoubleType(), "Someone's desc.")
+                        .column("col_13", new VarCharType(), "Someone's desc.")
+                        .column("col_14", new VarCharType(), "Someone's desc.")
+                        .column("col_15", new VarCharType(), "Someone's desc.")
+                        .column("col_16", new VarCharType(), "Someone's desc.")
+                        .column("col_17", new VarCharType(), "Someone's desc.")
+                        .column("col_18", new VarCharType(), "Someone's desc.")
+                        .column("col_19", new VarCharType(), "Someone's desc.")
+                        .column("col_20", new VarCharType(), "Someone's desc.")
+                        .build();
+        CdcSchema upSchema2 =
+                CdcSchema.newBuilder()
+                        .column("col_0", new VarCharType(), "test description.")
+                        .column("col_1", new BigIntType(), "test description.")
+                        .column("col_2", new IntType(), "test description.")
+                        .column("col_3", new VarCharType(), "Someone's desc.")
+                        .column("col_4", new VarCharType(), "Someone's desc.")
+                        .column("col_5", new VarCharType(), "Someone's desc.")
+                        .column("col_6", new DecimalType(), "Someone's desc.")
+                        .column("col_7", new VarCharType(), "Someone's desc.")
+                        .column("col_8", new VarCharType(), "Someone's desc.")
+                        .column("col_9", new VarCharType(), "Someone's desc.")
+                        .column("col_10", new VarCharType(), "Someone's desc.")
+                        .column("col_11", new VarCharType(), "Someone's desc.")
+                        .column("col_12", new DoubleType(), "Someone's desc.")
+                        .column("col_13", new VarCharType(), "Someone's desc.")
+                        .column("col_14", new VarCharType(), "Someone's desc.")
+                        .column("col_15", new VarCharType(), "Someone's desc.")
+                        .column("col_16", new VarCharType(), "Someone's desc.")
+                        .column("col_17", new VarCharType(), "Someone's desc.")
+                        .column("col_18", new VarCharType(), "Someone's desc.")
+                        .column("col_19", new VarCharType(), "Someone's desc.")
+                        .column("col_20", new VarCharType(), "Someone's desc.")
+                        .build();
+        CdcSchema upSchema3 =
+                CdcSchema.newBuilder()
+                        .column("col_0", new VarCharType(), "test description.")
+                        .column("col_1", new BigIntType(), "test description.")
+                        .column("col_2", new IntType(), "test description 2.")
+                        .column("col_3", new VarCharType(), "Someone's desc.")
+                        .column("col_4", new VarCharType(), "Someone's desc.")
+                        .column("col_5", new VarCharType(), "Someone's desc.")
+                        .column("col_6", new DecimalType(), "Someone's desc.")
+                        .column("col_7", new VarCharType(), "Someone's desc.")
+                        .column("col_8", new VarCharType(), "Someone's desc.")
+                        .column("col_9", new VarCharType(), "Someone's desc.")
+                        .column("col_10", new VarCharType(), "Someone's desc.")
+                        .column("col_11", new VarCharType(), "Someone's desc.")
+                        .column("col_12", new DoubleType(), "Someone's desc.")
+                        .column("col_13", new VarCharType(), "Someone's desc.")
+                        .column("col_14", new VarCharType(), "Someone's desc.")
+                        .column("col_15", new VarCharType(), "Someone's desc.")
+                        .column("col_16", new VarCharType(), "Someone's desc.")
+                        .column("col_17", new VarCharType(), "Someone's desc.")
+                        .column("col_18", new VarCharType(), "Someone's desc.")
+                        .column("col_19", new VarCharType(), "Someone's desc.")
+                        .column("col_20", new VarCharType(), "Someone's desc.")
+                        .build();
+        CdcSchema upSchema4 =
+                CdcSchema.newBuilder()
+                        .column("col_0", new VarCharType(), "test description.")
+                        .column("col_1", new BigIntType(), "test description.")
+                        .column("col_2", new IntType(), "test description.")
+                        .column("col_3_1", new VarCharType(), "Someone's desc.")
+                        .column("col_4", new VarCharType(), "Someone's desc.")
+                        .column("col_5", new VarCharType(), "Someone's desc.")
+                        .column("col_6", new DecimalType(), "Someone's desc.")
+                        .column("col_7", new VarCharType(), "Someone's desc.")
+                        .column("col_8", new VarCharType(), "Someone's desc.")
+                        .column("col_9", new VarCharType(), "Someone's desc.")
+                        .column("col_10", new VarCharType(), "Someone's desc.")
+                        .column("col_11", new VarCharType(), "Someone's desc.")
+                        .column("col_12", new DoubleType(), "Someone's desc.")
+                        .column("col_13", new VarCharType(), "Someone's desc.")
+                        .column("col_14", new VarCharType(), "Someone's desc.")
+                        .column("col_15", new VarCharType(), "Someone's desc.")
+                        .column("col_16", new VarCharType(), "Someone's desc.")
+                        .column("col_17", new VarCharType(), "Someone's desc.")
+                        .column("col_18", new VarCharType(), "Someone's desc.")
+                        .column("col_19", new VarCharType(), "Someone's desc.")
+                        .column("col_20", new VarCharType(), "Someone's desc.")
+                        .build();
+        CdcSchema upSchema5 =
+                CdcSchema.newBuilder()
+                        .column("col_0", new VarCharType(), "test description.")
+                        .column("col_1", new BigIntType(), "test description.")
+                        .column("col_2_1", new BigIntType(), "test description 2.")
+                        .column("col_3", new VarCharType(), "Someone's desc.")
+                        .column("col_4", new VarCharType(), "Someone's desc.")
+                        .column("col_5", new VarCharType(), "Someone's desc.")
+                        .column("col_6", new DecimalType(), "Someone's desc.")
+                        .column("col_7", new VarCharType(), "Someone's desc.")
+                        .column("col_8", new VarCharType(), "Someone's desc.")
+                        .column("col_9", new VarCharType(), "Someone's desc.")
+                        .column("col_10", new VarCharType(), "Someone's desc.")
+                        .column("col_11", new VarCharType(), "Someone's desc.")
+                        .column("col_12", new DoubleType(), "Someone's desc.")
+                        .column("col_13", new VarCharType(), "Someone's desc.")
+                        .column("col_14", new VarCharType(), "Someone's desc.")
+                        .column("col_15", new VarCharType(), "Someone's desc.")
+                        .column("col_16", new VarCharType(), "Someone's desc.")
+                        .column("col_17", new VarCharType(), "Someone's desc.")
+                        .column("col_18", new VarCharType(), "Someone's desc.")
+                        .column("col_19", new VarCharType(), "Someone's desc.")
+                        .column("col_20", new VarCharType(), "Someone's desc.")
+                        .build();
+        return Arrays.asList(upSchema1, upSchema2, upSchema3, upSchema4, upSchema5);
     }
 
     private FileStoreTable table;
@@ -199,7 +204,7 @@ public class SchemaEvolutionTest extends TableTestBase {
     @Test
     public void testSchemaEvolution() throws Exception {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        DataStream<List<DataField>> upDataFieldStream = env.fromCollection(prepareData());
+        DataStream<CdcSchema> upDataFieldStream = env.fromCollection(prepareData());
         Options options = new Options();
         options.set("warehouse", tempPath.toString());
         final CatalogLoader catalogLoader = () -> FlinkCatalogFactory.createPaimonCatalog(options);

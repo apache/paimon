@@ -40,7 +40,6 @@ import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,20 +55,19 @@ public class CdcRecordSerializeITCase {
     public void testCdcRecordKryoSerialize() throws Exception {
         KryoSerializer<RichCdcMultiplexRecord> kr =
                 createFlinkKryoSerializer(RichCdcMultiplexRecord.class);
-        RowType.Builder rowType = RowType.builder();
-        rowType.field("id", new BigIntType());
-        rowType.field("name", new VarCharType());
-        rowType.field("pt", new VarCharType());
-        // this is an unmodifiable list.
-        List<DataField> fields = rowType.build().getFields();
-        List<String> primaryKeys = Collections.singletonList("id");
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
+        schemaBuilder.column("id", new BigIntType());
+        schemaBuilder.column("name", new VarCharType());
+        schemaBuilder.column("pt", new VarCharType());
+        schemaBuilder.primaryKey("id");
+        CdcSchema schema = schemaBuilder.build();
         Map<String, String> recordData = new HashMap<>();
         recordData.put("id", "1");
         recordData.put("name", "HunterXHunter");
         recordData.put("pt", "2024-06-28");
         CdcRecord cdcRecord = new CdcRecord(RowKind.INSERT, recordData);
         RichCdcMultiplexRecord serializeRecord =
-                new RichCdcMultiplexRecord("default", "T", fields, primaryKeys, cdcRecord);
+                new RichCdcMultiplexRecord("default", "T", schema, cdcRecord);
 
         TestOutputView outputView = new TestOutputView();
         kr.serialize(serializeRecord, outputView);
@@ -77,8 +75,7 @@ public class CdcRecordSerializeITCase {
         assertThat(deserializeRecord.toRichCdcRecord().toCdcRecord()).isEqualTo(cdcRecord);
         assertThat(deserializeRecord.databaseName()).isEqualTo("default");
         assertThat(deserializeRecord.tableName()).isEqualTo("T");
-        assertThat(deserializeRecord.primaryKeys()).isEqualTo(primaryKeys);
-        assertThat(deserializeRecord.fields()).isEqualTo(fields);
+        assertThat(deserializeRecord.cdcSchema()).isEqualTo(schema);
     }
 
     @Test

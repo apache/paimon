@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.types.DataField;
-
 import java.io.Serializable;
 import java.util.List;
 
@@ -29,20 +27,20 @@ public class TestCdcEvent implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final String tableName;
-    private final List<DataField> updatedDataFields;
+    private final CdcSchema cdcSchema;
     private final List<CdcRecord> records;
     private final int keyHash;
 
-    public TestCdcEvent(String tableName, List<DataField> updatedDataFields) {
+    public TestCdcEvent(String tableName, CdcSchema updatedSchema) {
         this.tableName = tableName;
-        this.updatedDataFields = updatedDataFields;
+        this.cdcSchema = updatedSchema;
         this.records = null;
         this.keyHash = 0;
     }
 
     public TestCdcEvent(String tableName, List<CdcRecord> records, int keyHash) {
         this.tableName = tableName;
-        this.updatedDataFields = null;
+        this.cdcSchema = null;
         this.records = records;
         this.keyHash = keyHash;
     }
@@ -51,8 +49,8 @@ public class TestCdcEvent implements Serializable {
         return tableName;
     }
 
-    public List<DataField> updatedDataFields() {
-        return updatedDataFields;
+    public CdcSchema cdcSchema() {
+        return cdcSchema;
     }
 
     public List<CdcRecord> records() {
@@ -67,7 +65,6 @@ public class TestCdcEvent implements Serializable {
     @Override
     public String toString() {
         return String.format(
-                "{tableName = %s, updatedDataFields = %s, records = %s}",
-                tableName, updatedDataFields, records);
+                "{tableName = %s, schema = %s, records = %s}", tableName, cdcSchema, records);
     }
 }

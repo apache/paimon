@@ -18,23 +18,19 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.types.DataField;
-
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
- * {@link CdcRecord} and send them to different side outputs according to table name.
+ * A {@link ProcessFunction} to parse CDC change event to either a {@link CdcSchema} or {@link
+ * CdcRecord} and send them to different side outputs according to table name.
  *
  * <p>This {@link ProcessFunction} can handle records for different tables at the same time.
  *
@@ -45,7 +41,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private final EventParser.Factory<T> parserFactory;
 
     private transient EventParser<T> parser;
-    private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
+    private transient Map<String, OutputTag<CdcSchema>> schemaChangeOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
 
     public CdcMultiTableParsingProcessFunction(EventParser.Factory<T> parserFactory) {
@@ -64,7 +60,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
      */
     public void open(Configuration parameters) throws Exception {
         parser = parserFactory.create();
-        updatedDataFieldsOutputTags = new HashMap<>();
+        schemaChangeOutputTags = new HashMap<>();
         recordOutputTags = new HashMap<>();
     }
 
@@ -72,22 +68,22 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     public void processElement(T raw, Context context, Collector<Void> collector) throws Exception {
         parser.setRawEvent(raw);
         String tableName = parser.parseTableName();
-        List<DataField> schemaChange = parser.parseSchemaChange();
-        if (!schemaChange.isEmpty()) {
+        CdcSchema schemaChange = parser.parseSchemaChange();
+        if (schemaChange != null) {
             context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);
         }
         parser.parseRecords()
                 .forEach(record -> context.output(getRecordOutputTag(tableName), record));
     }
 
-    private OutputTag<List<DataField>> getUpdatedDataFieldsOutputTag(String tableName) {
-        return updatedDataFieldsOutputTags.computeIfAbsent(
-                tableName, CdcMultiTableParsingProcessFunction::createUpdatedDataFieldsOutputTag);
+    private OutputTag<CdcSchema> getUpdatedDataFieldsOutputTag(String tableName) {
+        return schemaChangeOutputTags.computeIfAbsent(
+                tableName, CdcMultiTableParsingProcessFunction::createSchameChangeOutputTag);
     }
 
-    public static OutputTag<List<DataField>> createUpdatedDataFieldsOutputTag(String tableName) {
+    public static OutputTag<CdcSchema> createSchameChangeOutputTag(String tableName) {
         return new OutputTag<>(
-                "new-data-field-list-" + tableName, new ListTypeInfo<>(DataField.class));
+                "table-schema-change-" + tableName, TypeInformation.of(CdcSchema.class));
     }
 
     private OutputTag<CdcRecord> getRecordOutputTag(String tableName) {

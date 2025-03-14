@@ -112,7 +112,7 @@ public class TestTable {
                     fieldNames.add(newName);
                     isBigInt.add(false);
                 }
-                events.add(new TestCdcEvent(tableName, currentDataFieldList(fieldNames, isBigInt)));
+                events.add(new TestCdcEvent(tableName, currentSchema(fieldNames, isBigInt)));
             } else {
                 Map<String, String> data = new HashMap<>();
                 int key = random.nextInt(numKeys);
@@ -158,23 +158,22 @@ public class TestTable {
         }
     }
 
-    private List<DataField> currentDataFieldList(List<String> fieldNames, List<Boolean> isBigInt) {
-        List<DataField> fields = new ArrayList<>();
+    private CdcSchema currentSchema(List<String> fieldNames, List<Boolean> isBigInt) {
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
 
         // pt
-        fields.add(initialRowType.getFields().get(0));
+        DataField ptField = initialRowType.getFields().get(0);
+        schemaBuilder.column(ptField.name(), ptField.type(), ptField.description());
         // k
-        fields.add(initialRowType.getFields().get(1));
+        DataField pkField = initialRowType.getFields().get(1);
+        schemaBuilder.column(pkField.name(), pkField.type(), pkField.description());
 
         for (int i = 0; i < fieldNames.size(); i++) {
-            fields.add(
-                    new DataField(
-                            2 + i,
-                            fieldNames.get(i),
-                            isBigInt.get(i) ? DataTypes.BIGINT() : DataTypes.INT()));
+            schemaBuilder.column(
+                    fieldNames.get(i), isBigInt.get(i) ? DataTypes.BIGINT() : DataTypes.INT());
         }
 
-        return fields;
+        return schemaBuilder.build();
     }
 
     public RowType initialRowType() {

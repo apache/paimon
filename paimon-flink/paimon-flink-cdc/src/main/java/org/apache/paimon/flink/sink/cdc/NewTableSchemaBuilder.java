@@ -59,13 +59,7 @@ public class NewTableSchemaBuilder implements Serializable {
     }
 
     public Optional<Schema> build(RichCdcMultiplexRecord record) {
-        Schema sourceSchema =
-                new Schema(
-                        record.fields(),
-                        Collections.emptyList(),
-                        record.primaryKeys(),
-                        Collections.emptyMap(),
-                        null);
+        Schema sourceSchema = record.buildSchema();
         List<String> specifiedPartitionKeys = new ArrayList<>();
 
         List<String> partitionKeyMultipleList = partitionKeyMultiple.get(record.tableName());

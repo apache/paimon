@@ -25,7 +25,6 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -34,19 +33,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * A {@link ProcessFunction} to handle schema changes. New schema is represented by a list of {@link
- * DataField}s.
+ * A {@link ProcessFunction} to handle schema changes. New schema is represented by a {@link
+ * CdcSchema}.
  *
  * <p>NOTE: To avoid concurrent schema changes, the parallelism of this {@link ProcessFunction} must
  * be 1.
  */
 public class MultiTableUpdatedDataFieldsProcessFunction
-        extends UpdatedDataFieldsProcessFunctionBase<Tuple2<Identifier, List<DataField>>, Void> {
+        extends UpdatedDataFieldsProcessFunctionBase<Tuple2<Identifier, CdcSchema>, Void> {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(MultiTableUpdatedDataFieldsProcessFunction.class);
@@ -60,11 +58,9 @@ public class MultiTableUpdatedDataFieldsProcessFunction
 
     @Override
     public void processElement(
-            Tuple2<Identifier, List<DataField>> updatedDataFields,
-            Context context,
-            Collector<Void> collector)
+            Tuple2<Identifier, CdcSchema> updatedSchema, Context context, Collector<Void> collector)
             throws Exception {
-        Identifier tableId = updatedDataFields.f0;
+        Identifier tableId = updatedSchema.f0;
         SchemaManager schemaManager =
                 schemaManagers.computeIfAbsent(
                         tableId,
@@ -82,7 +78,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
             LOG.error("Failed to get schema manager for table " + tableId);
         } else {
             for (SchemaChange schemaChange :
-                    extractSchemaChanges(schemaManager, updatedDataFields.f1)) {
+                    extractSchemaChanges(schemaManager, updatedSchema.f1)) {
                 applySchemaChange(schemaManager, schemaChange, tableId);
             }
         }

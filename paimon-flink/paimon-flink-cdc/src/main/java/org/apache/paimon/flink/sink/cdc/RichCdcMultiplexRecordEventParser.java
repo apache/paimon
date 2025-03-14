@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataField;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,10 +111,8 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     }
 
     @Override
-    public List<DataField> parseSchemaChange() {
-        return shouldSynchronizeCurrentTable
-                ? currentParser.parseSchemaChange()
-                : Collections.emptyList();
+    public CdcSchema parseSchemaChange() {
+        return shouldSynchronizeCurrentTable ? currentParser.parseSchemaChange() : null;
     }
 
     @Override
@@ -205,7 +202,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
 
     private boolean shouldCreateCurrentTable() {
         return shouldSynchronizeCurrentTable
-                && !record.fields().isEmpty()
+                && !record.cdcSchema().fields().isEmpty()
                 && createdTables.add(parseTableName());
     }
 }

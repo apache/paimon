@@ -24,12 +24,11 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -62,7 +61,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -123,7 +121,7 @@ public class PostgresRecordParser
         extractRecords().forEach(out::collect);
     }
 
-    private List<DataField> extractFields(DebeziumEvent.Field schema) {
+    private CdcSchema extractSchema(DebeziumEvent.Field schema) {
         Map<String, DebeziumEvent.Field> afterFields = schema.afterFields();
         Preconditions.checkArgument(
                 !afterFields.isEmpty(),
@@ -131,7 +129,7 @@ public class PostgresRecordParser
                         + "Please make sure that `includeSchema` is true "
                         + "in the JsonDebeziumDeserializationSchema you created");
 
-        RowType.Builder rowType = RowType.builder();
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
         afterFields.forEach(
                 (key, value) -> {
                     DataType dataType = extractFieldType(value);
@@ -139,9 +137,9 @@ public class PostgresRecordParser
                             dataType.copy(
                                     typeMapping.containsMode(TO_NULLABLE) || value.optional());
 
-                    rowType.field(key, dataType);
+                    schemaBuilder.column(key, dataType);
                 });
-        return rowType.build().getFields();
+        return schemaBuilder.build();
     }
 
     /**
@@ -217,13 +215,12 @@ public class PostgresRecordParser
 
         Map<String, String> after = extractRow(root.payload().after());
         if (!after.isEmpty()) {
-            List<DataField> fields = extractFields(root.schema());
+            CdcSchema schema = extractSchema(root.schema());
             records.add(
                     new RichCdcMultiplexRecord(
                             databaseName,
                             currentTable,
-                            fields,
-                            Collections.emptyList(),
+                            schema,
                             new CdcRecord(RowKind.INSERT, after)));
         }
 
@@ -365,10 +362,6 @@ public class PostgresRecordParser
 
     protected RichCdcMultiplexRecord createRecord(RowKind rowKind, Map<String, String> data) {
         return new RichCdcMultiplexRecord(
-                databaseName,
-                currentTable,
-                Collections.emptyList(),
-                Collections.emptyList(),
-                new CdcRecord(rowKind, data));
+                databaseName, currentTable, null, new CdcRecord(rowKind, data));
     }
 }

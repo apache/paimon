@@ -21,10 +21,10 @@ package org.apache.paimon.flink.action.cdc.format;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -76,13 +76,13 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
     protected abstract String dataField();
 
     // use STRING type in default when we cannot get origin data types (most cases)
-    protected void fillDefaultTypes(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected void fillDefaultTypes(JsonNode record, CdcSchema.Builder schemaBuilder) {
         record.fieldNames()
-                .forEachRemaining(name -> rowTypeBuilder.field(name, DataTypes.STRING()));
+                .forEachRemaining(name -> schemaBuilder.column(name, DataTypes.STRING()));
     }
 
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
-        fillDefaultTypes(record, rowTypeBuilder);
+    protected Map<String, String> extractRowData(JsonNode record, CdcSchema.Builder schemaBuilder) {
+        fillDefaultTypes(record, schemaBuilder);
         Map<String, Object> recordMap =
                 convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData =
@@ -103,7 +103,7 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
                                             }
                                             return Objects.toString(entry.getValue());
                                         }));
-        evalComputedColumns(rowData, rowTypeBuilder);
+        evalComputedColumns(rowData, schemaBuilder);
         return rowData;
     }
 
@@ -121,9 +121,9 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
 
     protected void processRecord(
             JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
-        RowType.Builder rowTypeBuilder = RowType.builder();
-        Map<String, String> rowData = this.extractRowData(jsonNode, rowTypeBuilder);
-        records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
+        Map<String, String> rowData = this.extractRowData(jsonNode, schemaBuilder);
+        records.add(createRecord(rowKind, rowData, schemaBuilder));
     }
 
     protected JsonNode mergeOldRecord(JsonNode data, JsonNode oldNode) {

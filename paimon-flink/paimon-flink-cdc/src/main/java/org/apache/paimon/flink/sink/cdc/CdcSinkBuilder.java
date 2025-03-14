@@ -112,7 +112,7 @@ public class CdcSinkBuilder<T> {
 
         DataStream<Void> schemaChangeProcessFunction =
                 SingleOutputStreamOperatorUtils.getSideOutput(
-                                parsed, CdcParsingProcessFunction.NEW_DATA_FIELD_LIST_OUTPUT_TAG)
+                                parsed, CdcParsingProcessFunction.SCHEMA_CHANGE_OUTPUT_TAG)
                         .process(
                                 new UpdatedDataFieldsProcessFunction(
                                         new SchemaManager(dataTable.fileIO(), dataTable.location()),
