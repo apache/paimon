@@ -130,6 +130,9 @@ public class MySqlTypeUtils {
     private static final String GEOMETRYCOLLECTION = "GEOMETRYCOLLECTION";
     private static final String UNKNOWN = "UNKNOWN";
 
+    // Special types for AliyunJson format
+    private static final String LONG = "LONG";
+
     // This length is from JDBC.
     // It returns the number of characters when converting this timestamp to string.
     // The base length of a timestamp is 19, for example "2023-03-23 17:20:00".
@@ -221,6 +224,7 @@ public class MySqlTypeUtils {
             case MEDIUMINT_UNSIGNED:
             case MEDIUMINT_UNSIGNED_ZEROFILL:
             case BIGINT:
+            case LONG:
                 return DataTypes.BIGINT();
             case BIGINT_UNSIGNED:
             case BIGINT_UNSIGNED_ZEROFILL:
