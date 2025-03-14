@@ -172,7 +172,7 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
             Map<String, String> data = records.get(0).toRichCdcRecord().toCdcRecord().data();
             String createTime = data.get("etl_create_time");
             String updateTime = data.get("etl_update_time");
-            Assert.assertNull(createTime);
+            Assert.assertNotNull(createTime);
 
             updateTime =
                     BinaryStringUtils.toTimestamp(BinaryString.fromString(updateTime), 6)
@@ -211,7 +211,7 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
             Map<String, String> data = records.get(0).toRichCdcRecord().toCdcRecord().data();
             String createTime = data.get("etl_create_time");
             String updateTime = data.get("etl_update_time");
-            Assert.assertNull(createTime);
+            Assert.assertNotNull(createTime);
 
             updateTime =
                     BinaryStringUtils.toTimestamp(BinaryString.fromString(updateTime), 6)
