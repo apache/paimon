@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.fs.local.LocalFileIOLoader;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.api.common.JobStatus;
@@ -107,10 +108,15 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                                     e.getKey(), e.getValue()))
                             .collect(Collectors.joining(", "));
         }
+        if (!StringUtils.isNullOrWhitespaceOnly(catalogOptions)) {
+            return String.format(
+                    "CREATE CATALOG `%s` WITH ( 'type' = 'paimon', 'warehouse' = '%s' %s, %s )",
+                    catalogName, warehouse, defaultPropertyString, catalogOptions);
+        }
 
         return String.format(
-                "CREATE CATALOG `%s` WITH ( 'type' = 'paimon', 'warehouse' = '%s' %s, %s )",
-                catalogName, warehouse, defaultPropertyString, catalogOptions);
+                "CREATE CATALOG `%s` WITH ( 'type' = 'paimon', 'warehouse' = '%s' %s )",
+                catalogName, warehouse, defaultPropertyString);
     }
 
     private CloseableIterator<Row> collect(TableResult result) {
@@ -638,7 +644,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     public void testDeleteFallbackBranch() {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         bEnv.executeSql(
-                createCatalogSql("testCatalog", path + "/warehouse", "'cache-enabled' = 'true'"));
+                createCatalogSql("testCatalog", path + "/warehouse", "'cache-enabled' = 'false'"));
         bEnv.executeSql("USE CATALOG testCatalog");
         bEnv.executeSql(
                 "CREATE TABLE t ( pt INT, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED ) "
