@@ -247,6 +247,34 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110, 46, 108, 111, 110, 103], 9.00000000009]");
         waitForResult(expected, table, rowType, primaryKeys);
 
+        statement.executeUpdate("ALTER TABLE schema_evolution_1 MODIFY COLUMN v3 VARCHAR(40)");
+        statement.executeUpdate(
+                "INSERT INTO schema_evolution_1 VALUES (1, 10, 'ten', 100000000000, '10.01', NULL, NULL)");
+        rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(20),
+                            DataTypes.BIGINT(),
+                            DataTypes.VARCHAR(40),
+                            DataTypes.VARBINARY(20),
+                            DataTypes.DOUBLE()
+                        },
+                        new String[] {"pt", "_id", "v1", "v2", "v3", "v4", "v5"});
+        expected =
+                Arrays.asList(
+                        "+I[1, 1, one, NULL, NULL, NULL, NULL]",
+                        "+I[1, 2, second, NULL, NULL, NULL, NULL]",
+                        "+I[2, 3, three, 30000000000, NULL, NULL, NULL]",
+                        "+I[2, 4, four, NULL, NULL, [102, 111, 117, 114, 46, 98, 105, 110, 46, 108, 111, 110, 103], 4.00000000004]",
+                        "+I[1, 6, six, 60, NULL, NULL, NULL]",
+                        "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
+                        "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
+                        "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110, 46, 108, 111, 110, 103], 9.00000000009]",
+                        "+I[1, 10, ten, 100000000000, 10.01, NULL, NULL]");
+        waitForResult(expected, table, rowType, primaryKeys);
+
         // test that catalog loader works
         assertThat(getFileStoreTable().options()).containsEntry("alter-table-test", "true");
     }
