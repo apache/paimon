@@ -132,6 +132,7 @@ public class MySqlTypeUtils {
 
     // Special types for AliyunJson format
     private static final String LONG = "LONG";
+    private static final String STRING = "STRING";
 
     // This length is from JDBC.
     // It returns the number of characters when converting this timestamp to string.
@@ -307,6 +308,7 @@ public class MySqlTypeUtils {
             case MULTILINESTRING:
             case MULTIPOLYGON:
             case GEOMETRYCOLLECTION:
+            case STRING:
                 return DataTypes.STRING();
                 // MySQL BINARY and VARBINARY are stored as bytes in JSON. We convert them to
                 // DataTypes.VARBINARY to retain the length information
