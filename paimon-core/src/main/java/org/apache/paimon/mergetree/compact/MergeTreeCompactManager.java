@@ -27,6 +27,7 @@ import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
@@ -65,6 +66,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
 
+    @Nullable private final RecordLevelExpire recordLevelExpire;
+
     public MergeTreeCompactManager(
             ExecutorService executor,
             Levels levels,
@@ -76,7 +79,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             @Nullable CompactionMetrics.Reporter metricsReporter,
             @Nullable DeletionVectorsMaintainer dvMaintainer,
             boolean lazyGenDeletionFile,
-            boolean needLookup) {
+            boolean needLookup,
+            @Nullable RecordLevelExpire recordLevelExpire) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -87,6 +91,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.metricsReporter = metricsReporter;
         this.dvMaintainer = dvMaintainer;
         this.lazyGenDeletionFile = lazyGenDeletionFile;
+        this.recordLevelExpire = recordLevelExpire;
         this.needLookup = needLookup;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
@@ -128,7 +133,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                         "Trigger forced full compaction. Picking from the following runs\n{}",
                         runs);
             }
-            optionalUnit = CompactStrategy.pickFullCompaction(levels.numberOfLevels(), runs);
+            optionalUnit =
+                    CompactStrategy.pickFullCompaction(
+                            levels.numberOfLevels(), runs, recordLevelExpire);
         } else {
             if (taskFuture != null) {
                 return;
@@ -201,7 +208,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                         dropDelete,
                         levels.maxLevel(),
                         metricsReporter,
-                        compactDfSupplier);
+                        compactDfSupplier,
+                        recordLevelExpire);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Pick these files (name, level, size) for compaction: {}",
