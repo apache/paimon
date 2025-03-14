@@ -290,6 +290,12 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
+    public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
+        super.fastForward(identifier, branch);
+        invalidateTable(identifier);
+    }
+
+    @Override
     public void invalidateTable(Identifier identifier) {
         tableCache.invalidate(identifier);
         if (partitionCache != null) {

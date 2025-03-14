@@ -27,7 +27,6 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.catalog.SupportsBranches;
 import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
@@ -121,7 +120,7 @@ import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
-public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches {
+public class RESTCatalog implements Catalog, SupportsSnapshots {
 
     private static final Logger LOG = LoggerFactory.getLogger(RESTCatalog.class);
 

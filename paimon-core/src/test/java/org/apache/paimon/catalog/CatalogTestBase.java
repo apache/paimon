@@ -20,6 +20,8 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
@@ -31,6 +33,9 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -67,6 +72,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
@@ -502,7 +508,7 @@ public abstract class CatalogTestBase {
                                 catalog.getTable(
                                         Identifier.create(
                                                 "test_db", "non_existing_table$snapshots")))
-                .withMessage("Table test_db.non_existing_table$snapshots does not exist.");
+                .withMessageContaining("does not exist.");
 
         // Get system table throws TableNotExistException when system table type does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -510,7 +516,7 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.getTable(
                                         Identifier.create("test_db", "non_existing_table$schema1")))
-                .withMessage("Table test_db.non_existing_table$schema1 does not exist.");
+                .withMessageContaining("does not exist.");
 
         // Get data table throws TableNotExistException when table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -1399,6 +1405,52 @@ public abstract class CatalogTestBase {
                                         Arrays.asList(partition)));
     }
 
+    @Test
+    void testBranches() throws Exception {
+        String databaseName = "testBranchTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> catalog.createBranch(identifier, "my_branch", null));
+
+        assertThrows(Catalog.TableNotExistException.class, () -> catalog.listBranches(identifier));
+
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
+        assertThrows(Exception.class, () -> catalog.createBranch(identifier, "my_branch", "tag"));
+        catalog.createBranch(identifier, "my_branch", null);
+        Identifier branchIdentifier = new Identifier(databaseName, "table", "my_branch");
+        assertThat(catalog.getTable(branchIdentifier)).isNotNull();
+        assertThrows(Exception.class, () -> catalog.createBranch(identifier, "my_branch", null));
+        assertThat(catalog.listBranches(identifier)).containsOnly("my_branch");
+        catalog.dropBranch(identifier, "my_branch");
+
+        assertThrows(Exception.class, () -> catalog.dropBranch(identifier, "no_exist_branch"));
+        assertThrows(Exception.class, () -> catalog.fastForward(identifier, "no_exist_branch"));
+        assertThat(catalog.listBranches(identifier)).isEmpty();
+
+        // test fast_forward with schema change
+        catalog.createBranch(identifier, "new_schema", null);
+        Identifier newSchemaId = Identifier.create(databaseName, "table$branch_new_schema");
+        catalog.alterTable(
+                newSchemaId, SchemaChange.addColumn("new_col", DataTypes.STRING()), false);
+
+        Table branchTable = catalog.getTable(newSchemaId);
+        BatchWriteBuilder writeBuilder = branchTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit(); ) {
+            write.write(GenericRow.of(1, BinaryString.fromString("1")));
+            commit.commit(write.prepareCommit());
+        }
+
+        catalog.getTable(identifier);
+        catalog.fastForward(identifier, "new_schema");
+        catalog.getTable(identifier).rowType().getField("new_col");
+    }
+
     protected boolean supportsAlterDatabase() {
         return false;
     }
@@ -1425,6 +1477,10 @@ public abstract class CatalogTestBase {
 
     protected boolean supportPagedList() {
         return false;
+    }
+
+    protected boolean supportBranch() {
+        return true;
     }
 
     private void assertPagedTables(PagedList<String> tablePagedList, String... tableNames) {

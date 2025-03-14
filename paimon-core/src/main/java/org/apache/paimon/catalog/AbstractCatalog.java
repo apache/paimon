@@ -37,9 +37,13 @@ import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.FileSystemBranchManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -454,6 +458,56 @@ public abstract class AbstractCatalog implements Catalog {
                 this::loadTableMetadata,
                 lockFactory().orElse(null),
                 lockContext().orElse(null));
+    }
+
+    @Override
+    public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
+        BranchManager branchManager = fileSystemBranchManager(identifier);
+        if (fromTag == null) {
+            branchManager.createBranch(branch);
+        } else {
+            branchManager.createBranch(branch, fromTag);
+        }
+    }
+
+    @Override
+    public void dropBranch(Identifier identifier, String branch) throws BranchNotExistException {
+        try {
+            fileSystemBranchManager(identifier).dropBranch(branch);
+        } catch (TableNotExistException e) {
+            throw new BranchNotExistException(identifier, branch, e);
+        }
+    }
+
+    @Override
+    public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
+        try {
+            fileSystemBranchManager(identifier).fastForward(branch);
+        } catch (TableNotExistException e) {
+            throw new BranchNotExistException(identifier, branch, e);
+        }
+    }
+
+    @Override
+    public List<String> listBranches(Identifier identifier) throws TableNotExistException {
+        return fileSystemBranchManager(identifier).branches();
+    }
+
+    private BranchManager fileSystemBranchManager(Identifier identifier)
+            throws TableNotExistException {
+        Table originTable = getTable(identifier);
+        if (!(originTable instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException(
+                    "Unsupported table type: " + originTable.getClass());
+        }
+        FileStoreTable table = (FileStoreTable) originTable;
+        return new FileSystemBranchManager(
+                table.fileIO(),
+                table.location(),
+                table.snapshotManager(),
+                table.tagManager(),
+                table.schemaManager());
     }
 
     /**

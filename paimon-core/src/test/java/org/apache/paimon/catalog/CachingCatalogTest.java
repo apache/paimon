@@ -88,6 +88,7 @@ class CachingCatalogTest extends CatalogTestBase {
         catalog = new FileSystemCatalog(fileIO, new Path(warehouse));
         ticker = new FakeTicker();
         catalog.createDatabase("db", false);
+        catalog = new CachingCatalog(catalog, new Options());
     }
 
     @Override
@@ -178,7 +179,8 @@ class CachingCatalogTest extends CatalogTestBase {
     @Test
     public void testTableExpiresAfterInterval() throws Exception {
         TestableCachingCatalog catalog =
-                new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
+                new TestableCachingCatalog(
+                        ((CachingCatalog) this.catalog).wrapped, EXPIRATION_TTL, ticker);
 
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);

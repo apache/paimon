@@ -44,7 +44,6 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final CatalogLockFactory lockFactory;
     @Nullable private final CatalogLockContext lockContext;
     private final boolean supportsSnapshots;
-    private final boolean supportsBranches;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
@@ -52,19 +51,17 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogLoader catalogLoader,
             @Nullable CatalogLockFactory lockFactory,
             @Nullable CatalogLockContext lockContext,
-            boolean supportsSnapshots,
-            boolean supportsBranches) {
+            boolean supportsSnapshots) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
         this.lockFactory = lockFactory;
         this.lockContext = lockContext;
         this.supportsSnapshots = supportsSnapshots;
-        this.supportsBranches = supportsBranches;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null, null, false, false);
+        return new CatalogEnvironment(null, null, null, null, null, false);
     }
 
     @Nullable
@@ -117,9 +114,5 @@ public class CatalogEnvironment implements Serializable {
     @Nullable
     public CatalogLoader catalogLoader() {
         return catalogLoader;
-    }
-
-    public boolean supportsBranches() {
-        return supportsBranches;
     }
 }

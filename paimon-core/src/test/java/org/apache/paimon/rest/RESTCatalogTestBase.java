@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.catalog.SupportsBranches;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
@@ -869,43 +868,6 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         // read
         List<String> result = batchRead(tableTestWrite);
         assertThat(result).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
-    }
-
-    @Test
-    void testBranches() throws Exception {
-        String databaseName = "testBranchTable";
-        catalog.dropDatabase(databaseName, true, true);
-        catalog.createDatabase(databaseName, true);
-        Identifier identifier = Identifier.create(databaseName, "table");
-
-        assertThrows(
-                Catalog.TableNotExistException.class,
-                () -> restCatalog.createBranch(identifier, "my_branch", null));
-
-        assertThrows(
-                Catalog.TableNotExistException.class, () -> restCatalog.listBranches(identifier));
-
-        catalog.createTable(
-                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
-        assertThrows(
-                SupportsBranches.TagNotExistException.class,
-                () -> restCatalog.createBranch(identifier, "my_branch", "tag"));
-        restCatalog.createBranch(identifier, "my_branch", null);
-        Identifier branchIdentifier = new Identifier(databaseName, "table", "my_branch");
-        assertThat(restCatalog.getTable(branchIdentifier)).isNotNull();
-        assertThrows(
-                SupportsBranches.BranchAlreadyExistException.class,
-                () -> restCatalog.createBranch(identifier, "my_branch", null));
-        assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
-        restCatalog.dropBranch(identifier, "my_branch");
-
-        assertThrows(
-                SupportsBranches.BranchNotExistException.class,
-                () -> restCatalog.dropBranch(identifier, "no_exist_branch"));
-        assertThrows(
-                SupportsBranches.BranchNotExistException.class,
-                () -> restCatalog.fastForward(identifier, "no_exist_branch"));
-        assertThat(restCatalog.listBranches(identifier)).isEmpty();
     }
 
     @Test

@@ -25,6 +25,8 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.view.View;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Map;
 
@@ -209,6 +211,27 @@ public abstract class DelegateCatalog implements Catalog {
             Identifier identifier, Integer maxResults, String pageToken)
             throws TableNotExistException {
         return wrapped.listPartitionsPaged(identifier, maxResults, pageToken);
+    }
+
+    @Override
+    public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
+        wrapped.createBranch(identifier, branch, fromTag);
+    }
+
+    @Override
+    public void dropBranch(Identifier identifier, String branch) throws BranchNotExistException {
+        wrapped.dropBranch(identifier, branch);
+    }
+
+    @Override
+    public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
+        wrapped.fastForward(identifier, branch);
+    }
+
+    @Override
+    public List<String> listBranches(Identifier identifier) throws TableNotExistException {
+        return wrapped.listBranches(identifier);
     }
 
     @Override

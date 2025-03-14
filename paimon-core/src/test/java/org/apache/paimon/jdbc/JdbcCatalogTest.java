@@ -121,4 +121,9 @@ public class JdbcCatalogTest extends CatalogTestBase {
     protected boolean supportsAlterDatabase() {
         return true;
     }
+
+    @Override
+    protected boolean supportBranch() {
+        return false;
+    }
 }

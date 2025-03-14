@@ -195,8 +195,7 @@ public class CatalogUtils {
                         catalog.catalogLoader(),
                         lockFactory,
                         lockContext,
-                        catalog instanceof SupportsSnapshots,
-                        catalog instanceof SupportsBranches);
+                        catalog instanceof SupportsSnapshots);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
