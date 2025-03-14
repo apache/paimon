@@ -30,7 +30,6 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -43,6 +42,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /** Test for AliyunJsonRecordParser. */
 public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
@@ -62,16 +64,19 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
         URL url;
         try {
             url = AliyunJsonRecordParserTest.class.getClassLoader().getResource(insertRes);
+            assert url != null;
             Files.readAllLines(Paths.get(url.toURI())).stream()
                     .filter(this::isRecordLine)
                     .forEach(e -> insertList.add(e));
 
             url = AliyunJsonRecordParserTest.class.getClassLoader().getResource(updateRes);
+            assert url != null;
             Files.readAllLines(Paths.get(url.toURI())).stream()
                     .filter(this::isRecordLine)
                     .forEach(e -> updateList.add(e));
 
             url = AliyunJsonRecordParserTest.class.getClassLoader().getResource(deleteRes);
+            assert url != null;
             Files.readAllLines(Paths.get(url.toURI())).stream()
                     .filter(this::isRecordLine)
                     .forEach(e -> deleteList.add(e));
@@ -90,22 +95,23 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
             JsonNode rootNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(rootNode);
             Schema schema = parser.buildSchema(cdcRecord);
-            Assert.assertEquals(schema.primaryKeys(), Arrays.asList("id"));
+            assert schema != null;
+            assertEquals(schema.primaryKeys(), Arrays.asList("id"));
 
             List<RichCdcMultiplexRecord> records = parser.extractRecords();
-            Assert.assertEquals(records.size(), 1);
+            assertEquals(records.size(), 1);
 
             CdcRecord result = records.get(0).toRichCdcRecord().toCdcRecord();
-            Assert.assertEquals(result.kind(), RowKind.INSERT);
+            assertEquals(result.kind(), RowKind.INSERT);
 
             String dbName = parser.getDatabaseName();
-            Assert.assertEquals(dbName, "bigdata_test");
+            assertEquals(dbName, "bigdata_test");
 
             String tableName = parser.getTableName();
-            Assert.assertEquals(tableName, "sync_test_table");
+            assertEquals(tableName, "sync_test_table");
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
-            Assert.assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+            assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
         }
     }
 
@@ -118,22 +124,23 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
             JsonNode jsonNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(jsonNode);
             Schema schema = parser.buildSchema(cdcRecord);
-            Assert.assertEquals(schema.primaryKeys(), Arrays.asList("id"));
+            assert schema != null;
+            assertEquals(schema.primaryKeys(), Arrays.asList("id"));
 
             List<RichCdcMultiplexRecord> records = parser.extractRecords();
-            Assert.assertEquals(records.size(), 1);
+            assertEquals(records.size(), 1);
 
             CdcRecord result = records.get(0).toRichCdcRecord().toCdcRecord();
-            Assert.assertEquals(result.kind(), RowKind.UPDATE_AFTER);
+            assertEquals(result.kind(), RowKind.UPDATE_AFTER);
 
             String dbName = parser.getDatabaseName();
-            Assert.assertEquals(dbName, "bigdata_test");
+            assertEquals(dbName, "bigdata_test");
 
             String tableName = parser.getTableName();
-            Assert.assertEquals(tableName, "sync_test_table");
+            assertEquals(tableName, "sync_test_table");
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
-            Assert.assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+            assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
         }
     }
 
@@ -142,26 +149,27 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
         AliyunRecordParser parser =
                 new AliyunRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
         for (String json : deleteList) {
-            // 将json解析为JsonNode对象
+            // Parses the json into a JsonNode object.
             JsonNode jsonNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(jsonNode);
             Schema schema = parser.buildSchema(cdcRecord);
-            Assert.assertEquals(schema.primaryKeys(), Arrays.asList("id"));
+            assert schema != null;
+            assertEquals(schema.primaryKeys(), Arrays.asList("id"));
 
             List<RichCdcMultiplexRecord> records = parser.extractRecords();
-            Assert.assertEquals(records.size(), 1);
+            assertEquals(records.size(), 1);
 
             CdcRecord result = records.get(0).toRichCdcRecord().toCdcRecord();
-            Assert.assertEquals(result.kind(), RowKind.DELETE);
+            assertEquals(result.kind(), RowKind.DELETE);
 
             String dbName = parser.getDatabaseName();
-            Assert.assertEquals(dbName, "bigdata_test");
+            assertEquals(dbName, "bigdata_test");
 
             String tableName = parser.getTableName();
-            Assert.assertEquals(tableName, "sync_test_table");
+            assertEquals(tableName, "sync_test_table");
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
-            Assert.assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+            assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
         }
     }
 }

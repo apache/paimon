@@ -29,7 +29,6 @@ import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -39,6 +38,10 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 /** IT cases for {@link IcebergHiveMetadataCommitter}. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -88,7 +91,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         + "( 'type' = 'iceberg', 'catalog-type' = 'hive', 'uri' = '', 'warehouse' = '"
                         + path
                         + "', 'cache-enabled' = 'false' )");
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(Row.of("pear", 2, 1), Row.of("dog", 2, 2)),
                 collect(
                         tEnv.executeSql(
@@ -98,7 +101,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         "INSERT INTO my_paimon.test_db.t VALUES "
                                 + "(1, 1, 'cherry'), (2, 2, 'elephant')")
                 .await();
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(
                         Row.of(1, 1, "cherry"),
                         Row.of(1, 2, "pear"),
@@ -108,11 +111,11 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
 
         // test drop partition
         tEnv.executeSql("ALTER TABLE my_paimon.test_db.t DROP PARTITION (pt = 1)").await();
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(Row.of(2, 1, "cat"), Row.of(2, 2, "elephant")),
                 collect(tEnv.executeSql("SELECT * FROM my_iceberg.test_db.t ORDER BY pt, id")));
 
-        Assert.assertTrue(
+        assertTrue(
                 hiveShell
                         .executeQuery("DESC DATABASE EXTENDED test_db")
                         .toString()
@@ -131,7 +134,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                                 + "(1, 1, 'apple'), (1, 2, 'pear'), (2, 1, 'cat'), (2, 2, 'dog')")
                 .await();
 
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(Row.of("pear", 2, 1), Row.of("dog", 2, 2)),
                 collect(
                         tEnv.executeSql(
@@ -141,7 +144,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         "INSERT INTO my_paimon.test_db.t1 VALUES "
                                 + "(1, 1, 'cherry'), (2, 2, 'elephant')")
                 .await();
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(
                         Row.of(1, 1, "cherry"),
                         Row.of(1, 2, "pear"),
@@ -151,7 +154,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         tEnv.executeSql(
                                 "SELECT * FROM my_iceberg.test_db_iceberg.t1_iceberg ORDER BY pt, id")));
 
-        Assert.assertTrue(
+        assertTrue(
                 hiveShell
                         .executeQuery("DESC DATABASE EXTENDED test_db_iceberg")
                         .toString()
@@ -182,7 +185,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         + "( 'type' = 'iceberg', 'catalog-type' = 'hive', 'uri' = '', 'warehouse' = '"
                         + path
                         + "', 'cache-enabled' = 'false' )");
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(Row.of("pear", 2, 1), Row.of("dog", 2, 2)),
                 collect(
                         tEnv.executeSql(
@@ -192,7 +195,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         "INSERT INTO my_paimon.test_db.t VALUES "
                                 + "(1, 3, 'cherry'), (2, 3, 'elephant')")
                 .await();
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(
                         Row.of("pear", 2, 1),
                         Row.of("cherry", 3, 1),
@@ -204,7 +207,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
 
         // test drop partition
         tEnv.executeSql("ALTER TABLE my_paimon.test_db.t DROP PARTITION (pt = 2)").await();
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(Row.of("pear", 2, 1), Row.of("cherry", 3, 1)),
                 collect(
                         tEnv.executeSql(
@@ -220,7 +223,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                                 + "(1, 1, 'apple'), (1, 2, 'pear'), (2, 1, 'cat'), (2, 2, 'dog')")
                 .await();
 
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(Row.of("pear", 2, 1), Row.of("dog", 2, 2)),
                 collect(
                         tEnv.executeSql(
@@ -230,7 +233,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                         "INSERT INTO my_paimon.test_db.t1 VALUES "
                                 + "(1, 3, 'cherry'), (2, 3, 'elephant')")
                 .await();
-        Assert.assertEquals(
+        assertEquals(
                 Arrays.asList(
                         Row.of("pear", 2, 1),
                         Row.of("cherry", 3, 1),
@@ -260,7 +263,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                                 + "'file.format' = 'avro', "
                                 + "'metadata.iceberg.hive-client-class' = '%s')",
                         createFailHiveMetaStoreClient()));
-        Assert.assertThrows(
+        assertThrows(
                 Exception.class,
                 () ->
                         tEnv.executeSql(

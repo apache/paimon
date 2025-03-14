@@ -33,10 +33,11 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for Dynamic Bucket Table. */
 public class DynamicBucketTableTest extends TableTestBase {
@@ -56,10 +57,10 @@ public class DynamicBucketTableTest extends TableTestBase {
                                 .createWriterContainer(BinaryRow.EMPTY_ROW, 0, true)
                                 .indexMaintainer;
 
-        Assertions.assertThat(indexMaintainer.isEmpty()).isTrue();
+        assertThat(indexMaintainer.isEmpty()).isTrue();
         Pair<InternalRow, Integer> rowWithBucket = data(0);
         batchTableWrite.write(rowWithBucket.getKey(), rowWithBucket.getValue());
-        Assertions.assertThat(
+        assertThat(
                         ((CommitMessageImpl) batchTableWrite.prepareCommit().get(0))
                                 .indexIncrement()
                                 .newIndexFiles()

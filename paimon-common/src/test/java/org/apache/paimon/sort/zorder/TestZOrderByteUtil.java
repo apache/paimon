@@ -18,7 +18,6 @@
 
 package org.apache.paimon.sort.zorder;
 
-import org.junit.Assert;
 import org.junit.Test;
 import org.testcontainers.shaded.com.google.common.primitives.UnsignedBytes;
 
@@ -28,6 +27,8 @@ import java.util.Random;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
 import static org.apache.paimon.utils.RandomUtil.randomString;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -108,7 +109,7 @@ public class TestZOrderByteUtil {
 
             String stringResult = interleaveStrings(testStrings);
 
-            Assert.assertEquals(
+            assertEquals(
                     "String interleave didn't match byte interleave",
                     stringResult,
                     byteResultAsString);
@@ -135,7 +136,7 @@ public class TestZOrderByteUtil {
 
             String stringResult = interleaveStrings(testStrings);
 
-            Assert.assertEquals(
+            assertEquals(
                     "String interleave didn't match byte interleave",
                     stringResult,
                     byteResultAsString);
@@ -147,7 +148,7 @@ public class TestZOrderByteUtil {
         byte[][] test = new byte[4][10];
         byte[] expected = new byte[40];
 
-        Assert.assertArrayEquals(
+        assertArrayEquals(
                 "Should combine empty arrays", expected, ZOrderByteUtils.interleaveBits(test, 40));
     }
 
@@ -160,7 +161,7 @@ public class TestZOrderByteUtil {
         test[3] = new byte[] {IIIIIIII, IIIIIIII, IIIIIIII};
         byte[] expected = new byte[] {IIIIIIII, IIIIIIII, IIIIIIII, IIIIIIII, IIIIIIII, IIIIIIII};
 
-        Assert.assertArrayEquals(
+        assertArrayEquals(
                 "Should combine full arrays", expected, ZOrderByteUtils.interleaveBits(test, 6));
     }
 
@@ -176,7 +177,7 @@ public class TestZOrderByteUtil {
                     OOOOOOOO, OOOOOOOO, OOOOOOOO, OOOOIIII, IOIOIOIO, IOIOIOIO, OIOIOIOI, OIOIOIOI,
                     OOOOIIII
                 };
-        Assert.assertArrayEquals(
+        assertArrayEquals(
                 "Should combine mixed byte arrays",
                 expected,
                 ZOrderByteUtils.interleaveBits(test, 9));
@@ -196,7 +197,7 @@ public class TestZOrderByteUtil {
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
 
-            Assert.assertEquals(
+            assertEquals(
                     String.format(
                             "Ordering of ints should match ordering of bytes, %s ~ %s -> %s != %s ~ %s -> %s ",
                             aInt,
@@ -224,7 +225,7 @@ public class TestZOrderByteUtil {
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
 
-            Assert.assertEquals(
+            assertEquals(
                     String.format(
                             "Ordering of longs should match ordering of bytes, %s ~ %s -> %s != %s ~ %s -> %s ",
                             aLong,
@@ -252,7 +253,7 @@ public class TestZOrderByteUtil {
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
 
-            Assert.assertEquals(
+            assertEquals(
                     String.format(
                             "Ordering of longs should match ordering of bytes, %s ~ %s -> %s != %s ~ %s -> %s ",
                             aShort,
@@ -280,7 +281,7 @@ public class TestZOrderByteUtil {
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
 
-            Assert.assertEquals(
+            assertEquals(
                     String.format(
                             "Ordering of longs should match ordering of bytes, %s ~ %s -> %s != %s ~ %s -> %s ",
                             aByte,
@@ -308,7 +309,7 @@ public class TestZOrderByteUtil {
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
 
-            Assert.assertEquals(
+            assertEquals(
                     String.format(
                             "Ordering of floats should match ordering of bytes, %s ~ %s -> %s != %s ~ %s -> %s ",
                             aFloat,
@@ -336,7 +337,7 @@ public class TestZOrderByteUtil {
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
 
-            Assert.assertEquals(
+            assertEquals(
                     String.format(
                             "Ordering of doubles should match ordering of bytes, %s ~ %s -> %s != %s ~ %s -> %s ",
                             aDouble,
@@ -364,7 +365,7 @@ public class TestZOrderByteUtil {
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
 
-            Assert.assertEquals(
+            assertEquals(
                     String.format(
                             "Ordering of strings should match ordering of bytes, %s ~ %s -> %s != %s ~ %s -> %s ",
                             aString,
@@ -395,7 +396,7 @@ public class TestZOrderByteUtil {
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
 
-            Assert.assertEquals(
+            assertEquals(
                     String.format(
                             "Ordering of strings should match ordering of bytes, %s ~ %s -> %s != %s ~ %s -> %s ",
                             aBytesRaw,

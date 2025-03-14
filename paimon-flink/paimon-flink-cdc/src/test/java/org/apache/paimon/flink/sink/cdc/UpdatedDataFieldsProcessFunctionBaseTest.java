@@ -25,8 +25,9 @@ import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
-import org.junit.Assert;
 import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
 
 /** IT cases for {@link UpdatedDataFieldsProcessFunctionBaseTest}. */
 public class UpdatedDataFieldsProcessFunctionBaseTest {
@@ -40,13 +41,11 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
         convertAction =
                 UpdatedDataFieldsProcessFunctionBase.canConvert(oldVarchar, biggerLengthVarchar);
-        Assert.assertEquals(
-                UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
+        assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
         convertAction =
                 UpdatedDataFieldsProcessFunctionBase.canConvert(oldVarchar, smallerLengthVarchar);
 
-        Assert.assertEquals(
-                UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
+        assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
     }
 
     @Test
@@ -57,12 +56,10 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
 
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
         convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, bigintType);
-        Assert.assertEquals(
-                UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
+        assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
         convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, smallintType);
 
-        Assert.assertEquals(
-                UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
+        assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
     }
 
     @Test
@@ -73,12 +70,10 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
 
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
         convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, biggerRangeType);
-        Assert.assertEquals(
-                UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
+        assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
         convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, smallerRangeType);
 
-        Assert.assertEquals(
-                UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
+        assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
     }
 
     @Test
@@ -90,12 +85,10 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
         convertAction =
                 UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, biggerLengthTimestamp);
-        Assert.assertEquals(
-                UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
+        assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
         convertAction =
                 UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, smallerLengthTimestamp);
 
-        Assert.assertEquals(
-                UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
+        assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
     }
 }

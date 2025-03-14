@@ -29,7 +29,6 @@ import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.types.DataTypes;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -37,6 +36,7 @@ import java.util.Arrays;
 
 import static org.apache.paimon.memory.MemorySegmentPool.DEFAULT_PAGE_SIZE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for {@link InMemoryBuffer}. */
 public class InMemoryBufferTest {
@@ -163,7 +163,7 @@ public class InMemoryBufferTest {
         owner1.reset();
 
         for (int i = 0; i < 100; i++) {
-            Assertions.assertThatCode(owner2::put).doesNotThrowAnyException();
+            assertThatCode(owner2::put).doesNotThrowAnyException();
         }
     }
 
