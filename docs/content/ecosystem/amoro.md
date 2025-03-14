@@ -1,9 +1,9 @@
 ---
-title: "Action Jars"
-weight: 98
+title: "Amoro"
+weight: 6
 type: docs
 aliases:
-- /flink/procedures.html
+- /ecosystem/amoro.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

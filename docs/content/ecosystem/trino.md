@@ -3,7 +3,7 @@ title: "Trino"
 weight: 5
 type: docs
 aliases:
-- /engines/trino.html
+- /ecosystem/trino.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
