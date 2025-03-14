@@ -34,6 +34,7 @@ import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINISHED;
@@ -46,14 +47,17 @@ public class CombinedUnawareStreamingSource
         extends CombinedCompactorSource<MultiTableUnawareAppendCompactionTask> {
 
     private final long monitorInterval;
+    private final Map<String, String> tableOptions;
 
     public CombinedUnawareStreamingSource(
             CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
+            Map<String, String> tableOptions,
             long monitorInterval) {
         super(catalogLoader, includingPattern, excludingPattern, databasePattern, true);
+        this.tableOptions = tableOptions;
         this.monitorInterval = monitorInterval;
     }
 
@@ -76,7 +80,8 @@ public class CombinedUnawareStreamingSource
                             includingPattern,
                             excludingPattern,
                             databasePattern,
-                            isStreaming);
+                            isStreaming,
+                            tableOptions);
         }
 
         @Override
@@ -108,6 +113,7 @@ public class CombinedUnawareStreamingSource
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
+            Map<String, String> tableOptions,
             long monitorInterval) {
 
         CombinedUnawareStreamingSource source =
@@ -116,6 +122,7 @@ public class CombinedUnawareStreamingSource
                         includingPattern,
                         excludingPattern,
                         databasePattern,
+                        tableOptions,
                         monitorInterval);
         MultiTableCompactionTaskTypeInfo compactionTaskTypeInfo =
                 new MultiTableCompactionTaskTypeInfo();

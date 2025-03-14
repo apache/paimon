@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactTable;
@@ -59,18 +60,22 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
 
     protected boolean isStreaming;
 
+    protected final Map<String, String> tableOptions;
+
     public MultiTableScanBase(
             CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
-            boolean isStreaming) {
+            boolean isStreaming,
+            Map<String, String> tableOptions) {
         catalog = catalogLoader.load();
 
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
         this.databasePattern = databasePattern;
         this.isStreaming = isStreaming;
+        this.tableOptions = tableOptions;
     }
 
     protected void updateTableMap()
@@ -93,7 +98,7 @@ public abstract class MultiTableScanBase<T> implements AutoCloseable {
                             continue;
                         }
 
-                        FileStoreTable fileStoreTable = (FileStoreTable) table;
+                        FileStoreTable fileStoreTable = ((FileStoreTable) table).copy(tableOptions);
                         addScanTable(fileStoreTable, identifier);
                     }
                 }

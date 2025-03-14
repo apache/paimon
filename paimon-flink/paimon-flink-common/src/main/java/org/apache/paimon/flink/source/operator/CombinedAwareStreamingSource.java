@@ -40,6 +40,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINISHED;
@@ -49,14 +50,17 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
 public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2<Split, String>> {
 
     private final long monitorInterval;
+    private final Map<String, String> tableOptions;
 
     public CombinedAwareStreamingSource(
             CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
+            Map<String, String> tableOptions,
             long monitorInterval) {
         super(catalogLoader, includingPattern, excludingPattern, databasePattern, true);
+        this.tableOptions = tableOptions;
         this.monitorInterval = monitorInterval;
     }
 
@@ -78,7 +82,8 @@ public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2
                             includingPattern,
                             excludingPattern,
                             databasePattern,
-                            isStreaming);
+                            isStreaming,
+                            tableOptions);
         }
 
         @Override
@@ -111,6 +116,7 @@ public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
+            Map<String, String> tableOptions,
             long monitorInterval) {
 
         CombinedAwareStreamingSource source =
@@ -119,6 +125,7 @@ public class CombinedAwareStreamingSource extends CombinedCompactorSource<Tuple2
                         includingPattern,
                         excludingPattern,
                         databasePattern,
+                        tableOptions,
                         monitorInterval);
         TupleTypeInfo<Tuple2<Split, String>> tupleTypeInfo =
                 new TupleTypeInfo<>(
