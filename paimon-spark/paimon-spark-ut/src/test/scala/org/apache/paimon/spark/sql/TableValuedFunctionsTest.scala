@@ -327,6 +327,39 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
     }
   }
 
+  test("Table Valued Functions: incremental query with delete after compact2") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT) USING paimon
+            |TBLPROPERTIES ('primary-key'='id', 'bucket' = '1', 'write-only' = 'true')
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES 1")
+      sql("DELETE FROM t WHERE id = 1")
+      sql("CALL sys.create_tag('t', 'tag1')")
+      sql("SELECT * FROM `t$audit_log` VERSION AS OF 'tag1'").show()
+
+      sql("CALL sys.compact(table => 'T')")
+      sql("INSERT INTO t VALUES 1")
+      sql("DELETE FROM t WHERE id = 1")
+      sql("CALL sys.create_tag('t', 'tag2')")
+      sql("SELECT * FROM `t$audit_log` VERSION AS OF 'tag2'").show()
+
+      //         tag1                    tag2
+      // l0      f(+I 1),f(-D I)         f(+I 1),f(-D I)
+      checkAnswer(
+        sql("SELECT level FROM `t$files` VERSION AS OF 'tag1' ORDER BY level"),
+        Seq(Row(0), Row(0)))
+      checkAnswer(
+        sql("SELECT level FROM `t$files` VERSION AS OF 'tag2' ORDER BY level"),
+        Seq(Row(0), Row(0)))
+
+      checkAnswer(
+        sql("SELECT * FROM paimon_incremental_query('`t$audit_log`', 'tag1', 'tag2') ORDER BY id"),
+        Seq())
+    }
+  }
+
   private def incrementalDF(tableIdent: String, start: Int, end: Int): DataFrame = {
     spark.read
       .format("paimon")
