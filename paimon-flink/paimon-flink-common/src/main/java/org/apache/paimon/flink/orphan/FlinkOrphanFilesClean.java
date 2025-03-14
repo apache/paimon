@@ -272,7 +272,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 String,
                                                 Integer,
                                                 String>,
-                                        List<String>>() {
+                                        Tuple2<String, Long>>() {
                                     @Override
                                     public void processElement(
                                             Tuple7<
@@ -293,11 +293,11 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                                             String,
                                                                             Integer,
                                                                             String>,
-                                                                    List<String>>
+                                                                    Tuple2<String, Long>>
                                                             .Context
                                                     ctx,
-                                            Collector<List<String>> out) {
-                                        out.collect(
+                                            Collector<Tuple2<String, Long>> out) {
+                                        List<String> dirs =
                                                 listPaimonFileDirs(
                                                                 paths.f0, paths.f1, paths.f2,
                                                                 paths.f3, paths.f4, paths.f5,
@@ -305,19 +305,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                         .stream()
                                                         .map(Path::toUri)
                                                         .map(Object::toString)
-                                                        .collect(Collectors.toList()));
-                                    }
-                                })
-                        .rebalance()
-                        .process(
-                                new ProcessFunction<List<String>, Tuple2<String, Long>>() {
-                                    @Override
-                                    public void processElement(
-                                            List<String> dirs,
-                                            ProcessFunction<List<String>, Tuple2<String, Long>>
-                                                            .Context
-                                                    ctx,
-                                            Collector<Tuple2<String, Long>> out) {
+                                                        .collect(Collectors.toList());
                                         for (String dir : dirs) {
                                             for (FileStatus fileStatus :
                                                     tryBestListingDirs(new Path(dir))) {
