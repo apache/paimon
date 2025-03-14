@@ -18,7 +18,7 @@
 
 package org.apache.paimon.rest.auth;
 
-/** AuthProviderEnum. */
+/** DLFTokenLoaderEnum. */
 public enum DLFTokenLoaderEnum {
     LOCAL_FILE("local_file");
 
