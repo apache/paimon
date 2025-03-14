@@ -22,17 +22,17 @@ import org.apache.paimon.options.Options;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 
-/** Factory for {@link STSLocalFileDLFTokenLoader}. */
-public class STSLocalFileDLFTokenLoaderFactory implements DLFTokenLoaderFactory {
+/** Factory for {@link DLFLocalFileTokenLoader}. */
+public class DLFLocalFileTokenLoaderFactory implements DLFTokenLoaderFactory {
 
     @Override
     public String identifier() {
-        return DLFTokenLoaderEnum.LOCAL_FILE.identifier();
+        return "local_file";
     }
 
     @Override
     public DLFTokenLoader create(Options options) {
         String tokenFilePath = options.get(DLF_TOKEN_PATH);
-        return new STSLocalFileDLFTokenLoader(tokenFilePath);
+        return new DLFLocalFileTokenLoader(tokenFilePath);
     }
 }

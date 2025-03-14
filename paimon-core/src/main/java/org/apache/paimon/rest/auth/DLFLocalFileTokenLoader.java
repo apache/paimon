@@ -28,13 +28,13 @@ import java.io.UncheckedIOException;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** DLF Token Loader for local file. */
-public class STSLocalFileDLFTokenLoader implements DLFTokenLoader {
+public class DLFLocalFileTokenLoader implements DLFTokenLoader {
 
     private static final long[] READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS = {1_000, 3_000, 5_000};
 
     private final String tokenFilePath;
 
-    public STSLocalFileDLFTokenLoader(String tokenFilePath) {
+    public DLFLocalFileTokenLoader(String tokenFilePath) {
         this.tokenFilePath = tokenFilePath;
     }
 

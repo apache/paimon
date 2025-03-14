@@ -30,7 +30,6 @@ import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.DLFAuthProvider;
 import org.apache.paimon.rest.auth.DLFTokenLoader;
-import org.apache.paimon.rest.auth.DLFTokenLoaderEnum;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
@@ -135,7 +134,7 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         generateTokenAndWriteToFile(tokenPath);
         DLFTokenLoader tokenLoader =
                 DLFTokenLoaderFactory.createDLFTokenLoader(
-                        DLFTokenLoaderEnum.LOCAL_FILE.identifier(),
+                        "local_file",
                         new Options(
                                 ImmutableMap.of(
                                         RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));

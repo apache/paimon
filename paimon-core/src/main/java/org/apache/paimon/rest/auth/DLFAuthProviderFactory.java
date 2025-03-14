@@ -48,8 +48,7 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
             return DLFAuthProvider.buildRefreshToken(dlfTokenLoader, tokenRefreshInMills, region);
         } else if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
             DLFTokenLoader dlfTokenLoader =
-                    DLFTokenLoaderFactory.createDLFTokenLoader(
-                            DLFTokenLoaderEnum.LOCAL_FILE.identifier(), options);
+                    DLFTokenLoaderFactory.createDLFTokenLoader("local_file", options);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
             return DLFAuthProvider.buildRefreshToken(dlfTokenLoader, tokenRefreshInMills, region);
         } else if (options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_ID).isPresent()
