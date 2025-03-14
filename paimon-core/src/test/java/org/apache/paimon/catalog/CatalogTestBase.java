@@ -1407,6 +1407,10 @@ public abstract class CatalogTestBase {
 
     @Test
     void testBranches() throws Exception {
+        if (!supportBranch()) {
+            return;
+        }
+
         String databaseName = "testBranchTable";
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
@@ -1448,7 +1452,7 @@ public abstract class CatalogTestBase {
 
         catalog.getTable(identifier);
         catalog.fastForward(identifier, "new_schema");
-        catalog.getTable(identifier).rowType().getField("new_col");
+        assertThat(catalog.getTable(identifier).rowType().getFieldNames()).contains("new_col");
     }
 
     protected boolean supportsAlterDatabase() {
