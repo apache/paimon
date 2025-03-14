@@ -325,7 +325,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
 
         // test alter non-string to string
-        statement.executeUpdate("ALTER TABLE schema_evolution_multiple MODIFY v7 VARCHAR(10)");
+        statement.executeUpdate("ALTER TABLE schema_evolution_multiple MODIFY v7 VARCHAR(20)");
         statement.executeUpdate(
                 "INSERT INTO schema_evolution_multiple VALUES "
                         + "(3, 'three', 3000000000000, 'string_3', 30, 30.5, 30.003, 'test_3', 'three hundred')");
@@ -340,7 +340,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.DOUBLE(),
                             DataTypes.DECIMAL(5, 3),
                             DataTypes.VARCHAR(10),
-                            DataTypes.VARCHAR(10),
+                            DataTypes.VARCHAR(20),
                         },
                         new String[] {
                             "_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *(", "v7"
