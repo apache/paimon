@@ -28,7 +28,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.execution.JobClient;
 
@@ -234,22 +233,28 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[105, hammer, 14oz carpenter's hammer, 0.875, 24]");
         waitForResult(expected, table, rowType, primaryKeys);
 
-        // column type covert exception (int64 -> string)
+        // column type covert (int64 -> string)
         writeRecordsToKafka(
                 topic, "kafka/%s/table/schema/%s/%s-data-5.txt", format, sourceDir, format);
 
-        while (true) {
-            JobStatus status = jobClient.getJobStatus().get();
-            if (status != JobStatus.RUNNING) {
-                assertThatThrownBy(() -> jobClient.getJobExecutionResult().get())
-                        .satisfies(
-                                anyCauseMatches(
-                                        UnsupportedOperationException.class,
-                                        "Cannot convert field age from type BIGINT to STRING of Paimon table"));
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.DOUBLE(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight", "age"});
+        expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.14, NULL]",
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, 18]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, 24]",
+                        "+I[105, hammer, 14oz carpenter's hammer, 0.875, 24]",
+                        "+I[106, hammer, 12oz carpenter's hammer, 0.75, 24]");
+        waitForResult(expected, table, rowType, primaryKeys);
     }
 
     public void testNotSupportFormat(String format) throws Exception {
