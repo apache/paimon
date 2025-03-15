@@ -215,6 +215,7 @@ public class CompactDatabaseAction extends ActionBase {
                                         .get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL)
                                         .toMillis())
                         .withPartitionIdleTime(partitionIdleTime);
+        sourceBuilder.withTableOptions(tableOptions.toMap());
 
         Integer parallelism =
                 tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM) == null

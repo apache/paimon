@@ -51,8 +51,15 @@ public class MultiAwareBucketTableScan extends MultiTableScanBase<Tuple2<Split, 
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
-            boolean isStreaming) {
-        super(catalogLoader, includingPattern, excludingPattern, databasePattern, isStreaming);
+            boolean isStreaming,
+            Map<String, String> tableOptions) {
+        super(
+                catalogLoader,
+                includingPattern,
+                excludingPattern,
+                databasePattern,
+                isStreaming,
+                tableOptions);
         tablesMap = new HashMap<>();
         scansMap = new HashMap<>();
     }

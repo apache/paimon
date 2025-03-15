@@ -45,8 +45,15 @@ public class MultiUnawareBucketTableScan
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
-            boolean isStreaming) {
-        super(catalogLoader, includingPattern, excludingPattern, databasePattern, isStreaming);
+            boolean isStreaming,
+            Map<String, String> tableOptions) {
+        super(
+                catalogLoader,
+                includingPattern,
+                excludingPattern,
+                databasePattern,
+                isStreaming,
+                tableOptions);
         tablesMap = new HashMap<>();
     }
 

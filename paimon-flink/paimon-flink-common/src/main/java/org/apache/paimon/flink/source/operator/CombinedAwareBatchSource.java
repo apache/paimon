@@ -43,6 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.FINISHED;
@@ -52,13 +53,16 @@ import static org.apache.paimon.flink.compact.MultiTableScanBase.ScanResult.IS_E
 public class CombinedAwareBatchSource extends CombinedCompactorSource<Tuple2<Split, String>> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CombinedAwareBatchSource.class);
+    private final Map<String, String> tableOptions;
 
     public CombinedAwareBatchSource(
             CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
-            Pattern databasePattern) {
+            Pattern databasePattern,
+            Map<String, String> tableOptions) {
         super(catalogLoader, includingPattern, excludingPattern, databasePattern, false);
+        this.tableOptions = tableOptions;
     }
 
     @Override
@@ -79,7 +83,8 @@ public class CombinedAwareBatchSource extends CombinedCompactorSource<Tuple2<Spl
                             includingPattern,
                             excludingPattern,
                             databasePattern,
-                            isStreaming);
+                            isStreaming,
+                            tableOptions);
         }
 
         @Override
@@ -116,10 +121,15 @@ public class CombinedAwareBatchSource extends CombinedCompactorSource<Tuple2<Spl
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
+            Map<String, String> tableOptions,
             Duration partitionIdleTime) {
         CombinedAwareBatchSource source =
                 new CombinedAwareBatchSource(
-                        catalogLoader, includingPattern, excludingPattern, databasePattern);
+                        catalogLoader,
+                        includingPattern,
+                        excludingPattern,
+                        databasePattern,
+                        tableOptions);
         TupleTypeInfo<Tuple2<Split, String>> tupleTypeInfo =
                 new TupleTypeInfo<>(
                         new JavaTypeInfo<>(Split.class), BasicTypeInfo.STRING_TYPE_INFO);

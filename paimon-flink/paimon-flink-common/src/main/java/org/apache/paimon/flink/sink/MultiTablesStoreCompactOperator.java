@@ -226,6 +226,7 @@ public class MultiTablesStoreCompactOperator
             while (true) {
                 try {
                     table = (FileStoreTable) catalog.getTable(tableId);
+                    table = table.copy(options.toMap());
                     HashMap<String, String> dynamicOptions =
                             new HashMap<String, String>() {
                                 {
