@@ -474,6 +474,8 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
             }
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException(e.getMessage());
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         } catch (BadRequestException e) {
