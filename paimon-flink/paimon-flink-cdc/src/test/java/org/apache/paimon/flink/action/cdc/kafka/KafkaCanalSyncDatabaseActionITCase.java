@@ -28,8 +28,6 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -52,8 +50,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
-    private static final Logger LOG =
-            LoggerFactory.getLogger(KafkaCanalSyncDatabaseActionITCase.class);
 
     @Test
     @Timeout(60)
@@ -685,7 +681,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         new String[] {"k", "v1", "etl_create_time", "etl_update_time"});
 
         // INSERT
-        LOG.info("audit insert");
         waitForResult(
                 true,
                 Collections.singletonList(
@@ -704,7 +699,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Thread.sleep(1000);
 
         // UPDATE1
-        LOG.info("audit update1");
         writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-2.txt");
         waitForResult(
                 true,
@@ -725,7 +719,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Thread.sleep(1000);
 
         // UPDATE2
-        LOG.info("audit update2");
         writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-3.txt");
         waitForResult(
                 true,

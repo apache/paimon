@@ -102,7 +102,7 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
         AliyunRecordParser parser =
                 new AliyunRecordParser(TypeMapping.defaultMapping(), computedColumns);
         for (String json : insertList) {
-            // 将json解析为JsonNode对象
+
             JsonNode rootNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(rootNode);
             Schema schema = parser.buildSchema(cdcRecord);
@@ -146,7 +146,7 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
         AliyunRecordParser parser =
                 new AliyunRecordParser(TypeMapping.defaultMapping(), computedColumns);
         for (String json : updateList) {
-            // 将json解析为JsonNode对象
+
             JsonNode jsonNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(jsonNode);
             Schema schema = parser.buildSchema(cdcRecord);
@@ -185,7 +185,7 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
         AliyunRecordParser parser =
                 new AliyunRecordParser(TypeMapping.defaultMapping(), computedColumns);
         for (String json : deleteList) {
-            // 将json解析为JsonNode对象
+
             JsonNode jsonNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(jsonNode);
             Schema schema = parser.buildSchema(cdcRecord);
