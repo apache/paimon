@@ -16,39 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.util
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.types.RowKind
+import org.apache.spark.SparkConf
 
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.types.StructType
+/** Test for spark writer with extension disabled. */
+class SparkWriteWithNoExtensionITCase extends SparkWriteITCase {
 
-object SparkRowUtils {
-
-  def getRowKind(row: Row, rowkindColIdx: Int): RowKind = {
-    if (rowkindColIdx != -1) {
-      RowKind.fromByteValue(row.getByte(rowkindColIdx))
-    } else {
-      RowKind.INSERT
-    }
+  /** Disable the spark extension. */
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.remove("spark.sql.extensions")
   }
-
-  def getRowKind(row: InternalRow, rowkindColIdx: Int): RowKind = {
-    if (rowkindColIdx != -1) {
-      RowKind.fromByteValue(row.getByte(rowkindColIdx))
-    } else {
-      RowKind.INSERT
-    }
-  }
-
-  def getFieldIndex(schema: StructType, colName: String): Int = {
-    try {
-      schema.fieldIndex(colName)
-    } catch {
-      case _: IllegalArgumentException =>
-        -1
-    }
-  }
-
 }

@@ -21,26 +21,34 @@ package org.apache.paimon.spark
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer}
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{RowKind, RowType}
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.{PaimonUtils, Row}
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 
-class SparkTableWrite(writeBuilder: BatchWriteBuilder, rowType: RowType, rowKindColIdx: Int)
+class SparkTableWrite(
+    writeBuilder: BatchWriteBuilder,
+    rowType: RowType,
+    inputSchema: StructType,
+    rowKindColIdx: Int)
   extends AutoCloseable {
 
   val ioManager: IOManager = SparkUtils.createIOManager
   val write: BatchTableWrite =
     writeBuilder.newWrite().withIOManager(ioManager).asInstanceOf[BatchTableWrite]
 
-  def write(row: Row): Unit = {
+  val wrapper = new SparkInternalRowWrapper(rowKindColIdx, inputSchema, rowType.getFieldCount)
+
+  def write(row: InternalRow): Unit = {
     write.write(toPaimonRow(row))
   }
 
-  def write(row: Row, bucket: Int): Unit = {
+  def write(row: InternalRow, bucket: Int): Unit = {
     write.write(toPaimonRow(row), bucket)
   }
 
@@ -67,8 +75,8 @@ class SparkTableWrite(writeBuilder: BatchWriteBuilder, rowType: RowType, rowKind
     ioManager.close()
   }
 
-  private def toPaimonRow(row: Row) =
-    new SparkRow(rowType, row, SparkRowUtils.getRowKind(row, rowKindColIdx))
+  private def toPaimonRow(row: InternalRow) =
+    wrapper.replace(row)
 
   private def reportOutputMetrics(bytesWritten: Long, recordsWritten: Long): Unit = {
     val taskContext = TaskContext.get
