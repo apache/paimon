@@ -648,7 +648,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(120)
     public void testExpressionNow() throws Exception {
-        final String topic = "specify-keys";
+        final String topic = "expression-now";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-1.txt");
 
