@@ -138,8 +138,6 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
 
             Assert.assertTrue(createTime.matches(dateTimeRegex));
             Assert.assertTrue(updateTime.matches(dateTimeRegex));
-
-            log.info("createTime: {}, updateTime: {}", createTime, updateTime);
         }
     }
 
