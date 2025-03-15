@@ -491,6 +491,22 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testSafelyGetAllChangelogsAndIgnoreEmpty() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        ChangelogManager changelogManager =
+                newChangelogManager(localFileIO, new Path(tempDir.toString()));
+        long millis = 1L;
+        int size = 5;
+        for (long i = 1; i <= size; i++) {
+            Changelog changelog = createChangelogWithMillis(i, millis + i * 1000);
+            localFileIO.tryToWriteAtomic(
+                    changelogManager.longLivedChangelogPath(i), changelog.toJson());
+        }
+        localFileIO.tryToWriteAtomic(changelogManager.longLivedChangelogPath(size + 1), "");
+        assertThat(changelogManager.safelyGetAllChangelogsAndIgnoreEmpty().size()).isEqualTo(size);
+    }
+
+    @Test
     public void testCommitChangelogWhenSameChangelogCommitTwice() throws IOException {
         FileIO localFileIO = LocalFileIO.create();
         ChangelogManager snapshotManager =

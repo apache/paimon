@@ -22,15 +22,18 @@ import org.apache.paimon.fs.Path;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.List;
 
 /** The result of OrphanFilesClean. */
-public class CleanOrphanFilesResult {
+public class CleanOrphanFilesResult implements Serializable {
+    private static final long serialVersionUID = 1L;
 
-    private final long deletedFileCount;
-    private final long deletedFileTotalLenInBytes;
+    public long deletedFileCount;
+    public long deletedFileTotalLenInBytes;
+    @Nullable public List<Path> deletedFilesPath;
 
-    @Nullable private final List<Path> deletedFilesPath;
+    public CleanOrphanFilesResult() {}
 
     public CleanOrphanFilesResult(long deletedFileCount, long deletedFileTotalLenInBytes) {
         this(deletedFileCount, deletedFileTotalLenInBytes, null);
@@ -56,5 +59,17 @@ public class CleanOrphanFilesResult {
     @Nullable
     public List<Path> getDeletedFilesPath() {
         return deletedFilesPath;
+    }
+
+    public void setDeletedFilesPath(@Nullable List<Path> deletedFilesPath) {
+        this.deletedFilesPath = deletedFilesPath;
+    }
+
+    public void setDeletedFileTotalLenInBytes(long deletedFileTotalLenInBytes) {
+        this.deletedFileTotalLenInBytes = deletedFileTotalLenInBytes;
+    }
+
+    public void setDeletedFileCount(long deletedFileCount) {
+        this.deletedFileCount = deletedFileCount;
     }
 }
