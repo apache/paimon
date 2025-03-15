@@ -64,6 +64,30 @@ public class SimpleStatsEvolution {
         this.emptyNullCounts = new GenericArray(new Object[fieldNames.size()]);
     }
 
+    public InternalRow evolution(InternalRow row, @Nullable List<String> denseFields) {
+        InternalRow result = row;
+
+        if (denseFields != null && denseFields.isEmpty()) {
+            result = emptyValues;
+        } else if (denseFields != null) {
+            int[] denseIndexMapping =
+                    indexMappings.computeIfAbsent(
+                            denseFields,
+                            k -> fieldNames.stream().mapToInt(denseFields::indexOf).toArray());
+            result = ProjectedRow.from(denseIndexMapping).replaceRow(result);
+        }
+
+        if (indexMapping != null) {
+            result = ProjectedRow.from(indexMapping).replaceRow(result);
+        }
+
+        if (castFieldGetters != null) {
+            result = CastedRow.from(castFieldGetters).replaceRow(result);
+        }
+
+        return result;
+    }
+
     public Result evolution(
             SimpleStats stats, @Nullable Long rowCount, @Nullable List<String> denseFields) {
         InternalRow minValues = stats.minValues();
