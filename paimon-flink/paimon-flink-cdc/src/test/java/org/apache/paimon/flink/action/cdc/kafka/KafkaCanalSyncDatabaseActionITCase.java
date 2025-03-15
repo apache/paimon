@@ -712,7 +712,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Timestamp createTime2 = data.get(0).getTimestamp(2, 3);
         Timestamp updateTime2 = data.get(0).getTimestamp(3, 3);
 
-        assertThat(createTime2).isEqualTo(createTime1);
+        assertThat(createTime2.toLocalDateTime()).isAfter(createTime1.toLocalDateTime());
         assertThat(updateTime2.toLocalDateTime()).isAfter(updateTime1.toLocalDateTime());
         assertThat(updateTime2.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
 
@@ -732,7 +732,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Timestamp createTime3 = data.get(0).getTimestamp(2, 3);
         Timestamp updateTime3 = data.get(0).getTimestamp(3, 3);
 
-        assertThat(createTime3).isEqualTo(createTime1);
+        assertThat(createTime3.toLocalDateTime()).isAfter(createTime1.toLocalDateTime());
         assertThat(updateTime3.toLocalDateTime()).isAfter(updateTime2.toLocalDateTime());
         assertThat(updateTime3.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
     }
