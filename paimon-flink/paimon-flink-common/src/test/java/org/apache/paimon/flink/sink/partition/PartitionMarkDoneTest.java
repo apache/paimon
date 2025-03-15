@@ -38,13 +38,16 @@ import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.OperatorStateStore;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static java.util.Collections.emptyList;
@@ -64,6 +67,107 @@ class PartitionMarkDoneTest extends TableTestBase {
     @Test
     public void testNotTriggerByCompaction() throws Exception {
         innerTest(false);
+    }
+
+    @Test
+    public void testWaterMarkPartitionMarkDone() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .column("c", DataTypes.INT())
+                        .partitionKeys("a")
+                        .primaryKey("a", "b")
+                        .option(PARTITION_MARK_DONE_WHEN_END_INPUT.key(), "true")
+                        .option(PARTITION_MARK_DONE_ACTION.key(), "success-file")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        PartitionMarkDone markDone =
+                PartitionMarkDone.create(
+                                getClass().getClassLoader(),
+                                false,
+                                false,
+                                new MockOperatorStateStore(),
+                                table)
+                        .get();
+
+        ManifestCommittable committable1 = new ManifestCommittable(1L, 1672534861123L);
+        committable1.addFileCommittable(
+                new CommitMessageImpl(
+                        BinaryRow.singleColumn(0),
+                        0,
+                        new DataIncrement(
+                                singletonList(DataFileTestUtils.newFile()),
+                                emptyList(),
+                                emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()),
+                        new IndexIncrement(emptyList())));
+        committable1.addFileCommittable(
+                new CommitMessageImpl(
+                        BinaryRow.singleColumn(1),
+                        0,
+                        new DataIncrement(
+                                singletonList(DataFileTestUtils.newFile()),
+                                emptyList(),
+                                emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()),
+                        new IndexIncrement(emptyList())));
+
+        ManifestCommittable committable2 = new ManifestCommittable(2L, 1678765870000L);
+        committable2.addFileCommittable(
+                new CommitMessageImpl(
+                        BinaryRow.singleColumn(1),
+                        0,
+                        new DataIncrement(
+                                singletonList(DataFileTestUtils.newFile()),
+                                emptyList(),
+                                emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()),
+                        new IndexIncrement(emptyList())));
+        committable2.addFileCommittable(
+                new CommitMessageImpl(
+                        BinaryRow.singleColumn(2),
+                        0,
+                        new DataIncrement(
+                                singletonList(DataFileTestUtils.newFile()),
+                                emptyList(),
+                                emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()),
+                        new IndexIncrement(emptyList())));
+
+        // skip committable3 because it has no watermark
+        ManifestCommittable committable3 = new ManifestCommittable(3L);
+        committable3.addFileCommittable(
+                new CommitMessageImpl(
+                        BinaryRow.singleColumn(0),
+                        0,
+                        new DataIncrement(
+                                singletonList(DataFileTestUtils.newFile()),
+                                emptyList(),
+                                emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()),
+                        new IndexIncrement(emptyList())));
+        committable3.addFileCommittable(
+                new CommitMessageImpl(
+                        BinaryRow.singleColumn(2),
+                        0,
+                        new DataIncrement(
+                                singletonList(DataFileTestUtils.newFile()),
+                                emptyList(),
+                                emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()),
+                        new IndexIncrement(emptyList())));
+
+        Tuple2<Map<BinaryRow, Long>, Boolean> extractedWatermarks =
+                markDone.extractPartitionWatermarks(
+                        Arrays.asList(committable1, committable2, committable3));
+
+        assertThat(extractedWatermarks.f0).containsEntry(BinaryRow.singleColumn(0), 1672534861123L);
+        assertThat(extractedWatermarks.f0).containsEntry(BinaryRow.singleColumn(1), 1678765870000L);
+        assertThat(extractedWatermarks.f0).containsEntry(BinaryRow.singleColumn(2), 1678765870000L);
+        assertThat(extractedWatermarks.f1).isEqualTo(false);
     }
 
     private void innerTest(boolean deletionVectors) throws Exception {

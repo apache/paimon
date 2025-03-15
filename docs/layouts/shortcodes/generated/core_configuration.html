@@ -714,6 +714,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Mark done action will reports the partition to the remote http server, this can only be used by http-report partition mark done action.</td>
         </tr>
         <tr>
+            <td><h5>partition.mark-done-mode</h5></td>
+            <td style="word-wrap: break-word;">process-time</td>
+            <td><p>Enum</p></td>
+            <td>How to trigger partition mark done action.<br /><br />Possible values:<ul><li>"process-time": Based on the time of the machine, mark the partition done once the processing time passes period time plus delay.</li><li>"watermark": Based on the watermark of the input, mark the partition done once the watermark passes period time plus delay.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>partition.sink-strategy</h5></td>
             <td style="word-wrap: break-word;">NONE</td>
             <td><p>Enum</p></td>

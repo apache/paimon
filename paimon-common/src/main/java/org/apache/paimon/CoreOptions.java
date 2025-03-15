@@ -1220,6 +1220,12 @@ public class CoreOptions implements Serializable {
                             "Parameter string for the constructor of class #. "
                                     + "Callback class should parse the parameter by itself.");
 
+    public static final ConfigOption<PartitionMarkDoneMode> PARTITION_MARK_DONE_MODE =
+            key("partition.mark-done-mode")
+                    .enumType(PartitionMarkDoneMode.class)
+                    .defaultValue(PartitionMarkDoneMode.PROCESS_TIME)
+                    .withDescription("How to trigger partition mark done action.");
+
     public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION =
             key("partition.mark-done-action")
                     .stringType()
@@ -2401,6 +2407,10 @@ public class CoreOptions implements Serializable {
                 .collect(Collectors.toCollection(HashSet::new));
     }
 
+    public PartitionMarkDoneMode partitionMarkDoneMode() {
+        return options.get(PARTITION_MARK_DONE_MODE);
+    }
+
     public String consumerId() {
         String consumerId = options.get(CONSUMER_ID);
         if (consumerId != null && consumerId.isEmpty()) {
@@ -3038,6 +3048,34 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         SortEngine(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The mode for partition mark done. */
+    public enum PartitionMarkDoneMode implements DescribedEnum {
+        PROCESS_TIME(
+                "process-time",
+                "Based on the time of the machine, mark the partition done once the processing time passes period time plus delay."),
+        WATERMARK(
+                "watermark",
+                "Based on the watermark of the input, mark the partition done once the watermark passes period time plus delay.");
+
+        private final String value;
+        private final String description;
+
+        PartitionMarkDoneMode(String value, String description) {
             this.value = value;
             this.description = description;
         }
