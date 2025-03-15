@@ -732,7 +732,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testEmptyTableIncrementalBetweenTimestamp() {
-        assertThat(sql("SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
+        assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();
     }
 }
