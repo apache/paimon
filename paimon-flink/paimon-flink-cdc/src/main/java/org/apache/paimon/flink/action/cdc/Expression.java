@@ -619,12 +619,12 @@ public interface Expression extends Serializable {
 
         @Override
         public DataType outputType() {
-            return DataTypes.TIMESTAMP();
+            return DataTypes.TIMESTAMP(3);
         }
 
         @Override
         public String eval(String input) {
-            return java.sql.Timestamp.valueOf(LocalDateTime.now()).toString();
+            return DateTimeUtils.formatLocalDateTime(LocalDateTime.now(), 3);
         }
     }
 }

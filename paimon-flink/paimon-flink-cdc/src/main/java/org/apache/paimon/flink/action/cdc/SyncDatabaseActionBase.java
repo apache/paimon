@@ -28,7 +28,6 @@ import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.SpecialFields;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -62,7 +61,6 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected String includingTables = ".*";
     protected List<String> partitionKeys = new ArrayList<>();
     protected List<String> primaryKeys = new ArrayList<>();
-    protected List<String> computedColumnArgs = new ArrayList<>();
     protected List<ComputedColumn> computedColumns = new ArrayList<>();
     @Nullable protected String excludingTables;
     protected String includingDbs = ".*";
@@ -177,7 +175,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     }
 
     public SyncDatabaseActionBase withComputedColumnArgs(List<String> computedColumnArgs) {
-        this.computedColumnArgs = computedColumnArgs;
+        this.computedColumns = buildComputedColumns(computedColumnArgs, Collections.emptyList());
         return this;
     }
 
@@ -269,12 +267,5 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
                                 includingTables,
                                 excludingTables))
                 .build();
-    }
-
-    @Override
-    protected void beforeBuildingSourceSink() throws Exception {
-        computedColumns =
-                buildComputedColumns(
-                        computedColumnArgs, Collections.singletonList(SpecialFields.VALUE_KIND));
     }
 }

@@ -153,13 +153,6 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                     if (sameName && sameType) {
                         cnt++;
                     }
-
-                    LOG.info("actual: field: " + field.name() + " " + field.type());
-                    LOG.info(
-                            "expected:rowType: "
-                                    + rowType.getFieldNames().get(i)
-                                    + " "
-                                    + rowType.getFieldTypes().get(i));
                 }
                 if (cnt == rowType.getFieldCount()) {
                     break;
@@ -182,27 +175,17 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                             rowType);
             List<String> sortedActual = new ArrayList<>(result);
             Collections.sort(sortedActual);
-
-            LOG.info("actual: " + sortedActual);
-            LOG.info("expected: " + sortedExpected);
-
-            if (withRegx) {
-                if (isRegxMatchList(sortedActual, sortedExpected)) {
-                    break;
-                }
-            } else if (sortedExpected.equals(sortedActual)) {
+            if (withRegx && isRegxMatchList(sortedActual, sortedExpected)
+                    || sortedExpected.equals(sortedActual)) {
                 break;
             }
-            LOG.warn("actual: " + sortedActual);
-            LOG.warn("expected: " + sortedExpected);
+            LOG.info("actual: " + sortedActual);
+            LOG.info("expected: " + sortedExpected);
             Thread.sleep(1000);
         }
     }
 
     private boolean isRegxMatchList(List<String> actual, List<String> expected) {
-        if (actual == null && expected == null) {
-            return true;
-        }
         if (actual.size() != expected.size()) {
             return false;
         }

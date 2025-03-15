@@ -103,7 +103,6 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
                                             }
                                             return Objects.toString(entry.getValue());
                                         }));
-
         evalComputedColumns(rowData, rowTypeBuilder);
         return rowData;
     }

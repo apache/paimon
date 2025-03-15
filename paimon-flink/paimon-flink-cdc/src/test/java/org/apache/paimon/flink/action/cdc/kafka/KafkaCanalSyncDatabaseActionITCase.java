@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -652,7 +651,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(120)
-    public void testAuditTime() throws Exception {
+    public void testExpressionNow() throws Exception {
         final String topic = "specify-keys";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-1.txt");
@@ -680,8 +679,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.VARCHAR(10),
-                            DataTypes.TIMESTAMP(),
-                            DataTypes.TIMESTAMP()
+                            DataTypes.TIMESTAMP(3),
+                            DataTypes.TIMESTAMP(3)
                         },
                         new String[] {"k", "v1", "etl_create_time", "etl_update_time"});
 
@@ -693,22 +692,14 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         "\\+I\\[1, A, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
                 table1,
                 rowType1,
-                Arrays.asList("k"));
+                Collections.singletonList("k"));
 
         List<InternalRow> data = getData("t1");
         Timestamp createTime1 = data.get(0).getTimestamp(2, 3);
         Timestamp updateTime1 = data.get(0).getTimestamp(3, 3);
 
-        assertThat(
-                createTime1
-                                .toLocalDateTime()
-                                .until(Timestamp.now().toLocalDateTime(), ChronoUnit.SECONDS)
-                        < 60);
-        assertThat(
-                updateTime1
-                                .toLocalDateTime()
-                                .until(Timestamp.now().toLocalDateTime(), ChronoUnit.SECONDS)
-                        < 60);
+        assertThat(createTime1.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
+        assertThat(updateTime1.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
 
         Thread.sleep(1000);
 
@@ -721,19 +712,15 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         "\\+I\\[1, B, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
                 table1,
                 rowType1,
-                Arrays.asList("k"));
+                Collections.singletonList("k"));
 
         data = getData("t1");
         Timestamp createTime2 = data.get(0).getTimestamp(2, 3);
         Timestamp updateTime2 = data.get(0).getTimestamp(3, 3);
 
-        assertThat(createTime2.equals(createTime1));
-        assertThat(updateTime2.toLocalDateTime().isAfter(updateTime1.toLocalDateTime()));
-        assertThat(
-                updateTime2
-                                .toLocalDateTime()
-                                .until(Timestamp.now().toLocalDateTime(), ChronoUnit.SECONDS)
-                        < 60);
+        assertThat(createTime2).isEqualTo(createTime1);
+        assertThat(updateTime2.toLocalDateTime()).isAfter(updateTime1.toLocalDateTime());
+        assertThat(updateTime2.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
 
         Thread.sleep(1000);
 
@@ -746,35 +733,15 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         "\\+I\\[1, C, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
                 table1,
                 rowType1,
-                Arrays.asList("k"));
+                Collections.singletonList("k"));
 
         data = getData("t1");
         Timestamp createTime3 = data.get(0).getTimestamp(2, 3);
         Timestamp updateTime3 = data.get(0).getTimestamp(3, 3);
 
-        assertThat(createTime3.equals(createTime1));
-        assertThat(updateTime3.toLocalDateTime().isAfter(updateTime2.toLocalDateTime()));
-        assertThat(
-                updateTime3
-                                .toLocalDateTime()
-                                .until(Timestamp.now().toLocalDateTime(), ChronoUnit.SECONDS)
-                        < 60);
-
-        Thread.sleep(1000);
-
-        // DELETE
-        LOG.info("audit delete");
-        data = getAuditLogData("t1");
-        Timestamp createTime4 = data.get(0).getTimestamp(3, 3);
-        Timestamp updateTime4 = data.get(0).getTimestamp(4, 3);
-
-        assertThat(createTime4.equals(createTime1));
-        assertThat(updateTime4.toLocalDateTime().isAfter(updateTime3.toLocalDateTime()));
-        assertThat(
-                updateTime3
-                                .toLocalDateTime()
-                                .until(Timestamp.now().toLocalDateTime(), ChronoUnit.SECONDS)
-                        < 60);
+        assertThat(createTime3).isEqualTo(createTime1);
+        assertThat(updateTime3.toLocalDateTime()).isAfter(updateTime2.toLocalDateTime());
+        assertThat(updateTime3.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
     }
 
     @Test
