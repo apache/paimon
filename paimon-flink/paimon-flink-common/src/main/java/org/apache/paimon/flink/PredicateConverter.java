@@ -111,6 +111,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     .map(builder::indexOf)
                     .map(builder::isNotNull)
                     .orElseThrow(UnsupportedExpression::new);
+        } else if (func == BuiltInFunctionDefinitions.BETWEEN) {
+            FieldReferenceExpression fieldRefExpr =
+                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            return builder.between(
+                    builder.indexOf(fieldRefExpr.getName()), children.get(1), children.get(2));
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
             FieldReferenceExpression fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
