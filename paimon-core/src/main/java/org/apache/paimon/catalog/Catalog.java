@@ -52,6 +52,22 @@ public interface Catalog extends AutoCloseable {
     List<String> listDatabases();
 
     /**
+     * Get paged list names of all databases in this catalog.
+     *
+     * <p>NOTE: Currently only RestCatalog will return pagedList data, other catalog will return all
+     * databases names like listDatabases.
+     *
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the names of databases with provided page size in this catalog and next
+     *     page token
+     */
+    PagedList<String> listDatabasesPaged(@Nullable Integer maxResults, @Nullable String pageToken);
+
+    /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
      * properties)}.
      */
@@ -267,10 +283,7 @@ public interface Catalog extends AutoCloseable {
     // ======================= partition methods ===============================
 
     /**
-     * Create partitions of the specify table.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
+     * Create partitions of the specify table. Ignore existing partitions.
      *
      * @param identifier path of the table to create partitions
      * @param partitions partitions to be created
@@ -280,7 +293,7 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
-     * Drop partitions of the specify table.
+     * Drop partitions of the specify table. Ignore non-existent partitions.
      *
      * @param identifier path of the table to drop partitions
      * @param partitions partitions to be deleted
@@ -290,10 +303,8 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
-     * Alter partitions of the specify table.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
+     * Alter partitions of the specify table. For non-existent partitions, partitions will be
+     * created directly.
      *
      * @param identifier path of the table to alter partitions
      * @param partitions partitions to be altered
@@ -303,10 +314,8 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
-     * Mark partitions done of the specify table.
-     *
-     * <p>Only catalog with metastore can support this method, and only table with
-     * 'metastore.partitioned-table' can support this method.
+     * Mark partitions done of the specify table. For non-existent partitions, partitions will be
+     * created directly.
      *
      * @param identifier path of the table to mark done partitions
      * @param partitions partitions to be marked done

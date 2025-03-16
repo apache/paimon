@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.table.TableSnapshot;
 
 import java.util.List;
 import java.util.Optional;
@@ -46,5 +47,6 @@ public interface SupportsSnapshots extends Catalog {
      * @return The requested snapshot of the table
      * @throws Catalog.TableNotExistException if the target does not exist
      */
-    Optional<Snapshot> loadSnapshot(Identifier identifier) throws Catalog.TableNotExistException;
+    Optional<TableSnapshot> loadSnapshot(Identifier identifier)
+            throws Catalog.TableNotExistException;
 }

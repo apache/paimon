@@ -1194,7 +1194,7 @@ public abstract class CatalogTestBase {
                 Schema.newBuilder()
                         .column("str", DataTypes.STRING())
                         .column("int", DataTypes.INT())
-                        .option("type", "format-table")
+                        .options(getFormatTableOptions())
                         .option("file.format", "csv")
                         .build();
         catalog.createTable(identifier, schema, false);
@@ -1567,5 +1567,11 @@ public abstract class CatalogTestBase {
             assertThat(partitions.stream().map(Partition::spec))
                     .containsExactlyInAnyOrder(partitionSpecs);
         }
+    }
+
+    protected Map<String, String> getFormatTableOptions() {
+        Map<String, String> options = new HashMap<>(1);
+        options.put("type", "format-table");
+        return options;
     }
 }

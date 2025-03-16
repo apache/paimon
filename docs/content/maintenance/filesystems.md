@@ -109,7 +109,7 @@ The Hadoop configuration has to have an entry for the required file system imple
 
 For Alluxio support add the following entry into the core-site.xml file:
 
-```shell
+```xml
 <property>
   <name>fs.alluxio.impl</name>
   <value>alluxio.hadoop.FileSystem</value>

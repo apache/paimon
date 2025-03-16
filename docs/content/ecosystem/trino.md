@@ -3,7 +3,7 @@ title: "Trino"
 weight: 5
 type: docs
 aliases:
-- /engines/trino.html
+- /ecosystem/trino.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -49,7 +49,7 @@ You can also manually build a bundled jar from the source code. However, there a
 
 Then,you can build bundled jar with the following command:
 
-```
+```bash
 mvn clean install -DskipTests
 ```
 
@@ -60,7 +60,7 @@ and the default Hadoop dependency typically supports both Hadoop 2 and Hadoop 3.
 If you encounter an unsupported scenario, you can specify the corresponding Apache Hadoop version.
 
 For example, if you want to use Hadoop 3.3.5-1, you can use the following command to build the jar:
-```
+```bash
 mvn clean install -DskipTests -Dhadoop.apache.version=3.3.5-1
 ```
 
@@ -77,7 +77,7 @@ tar -zxf paimon-trino-<trino-version>-{{< version >}}-plugin.tar.gz -C ${TRINO_H
 
 Catalogs are registered by creating a catalog properties file in the etc/catalog directory. For example, create etc/catalog/paimon.properties with the following contents to mount the paimon connector as the paimon catalog:
 
-```
+```properties
 connector.name=paimon
 warehouse=file:/tmp/warehouse
 ```
@@ -91,7 +91,7 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 If you are using a Hadoop filesystem, you can still use trino-hdfs and trino-hive to config it.
 For example, if you use oss as a storage, you can write in `paimon.properties` according to [Trino Reference](https://trino.io/docs/current/connector/hive.html#hdfs-configuration):
 
-```
+```properties
 hive.config.resources=/path/to/core-site.xml
 ```
 
@@ -101,7 +101,7 @@ Then, config core-site.xml according to [Jindo Reference](https://github.com/ali
 
 You can configure kerberos keytab file when using KERBEROS authentication in the properties.
 
-```
+```properties
 security.kerberos.login.principal=hadoop-user
 security.kerberos.login.keytab=/etc/trino/hdfs.keytab
 ```
@@ -110,13 +110,13 @@ Keytab files must be distributed to every node in the cluster that runs Trino.
 
 ## Create Schema
 
-```
+```sql
 CREATE SCHEMA paimon.test_db;
 ```
 
 ## Create Table
 
-```
+```sql
 CREATE TABLE paimon.test_db.orders (
     order_key bigint,
     orders_tatus varchar,
@@ -130,12 +130,12 @@ WITH (
     bucket = '2',
     bucket_key = 'order_key',
     changelog_producer = 'input'
-)
+);
 ```
 
 ## Add Column
 
-```
+```sql
 CREATE TABLE paimon.test_db.orders (
     order_key bigint,
     orders_tatus varchar,
@@ -149,15 +149,15 @@ WITH (
     bucket = '2',
     bucket_key = 'order_key',
     changelog_producer = 'input'
-)
+);
 
 ALTER TABLE paimon.test_db.orders ADD COLUMN shipping_address varchar;
 ```
 
 ## Query
 
-```
-SELECT * FROM paimon.test_db.orders
+```sql
+SELECT * FROM paimon.test_db.orders;
 ```
 
 ## Query with Time Traveling
@@ -182,7 +182,7 @@ instead of snapshot 1.
 
 ## Insert
 
-```
+```sql
 INSERT INTO paimon.test_db.orders VALUES (.....);
 ```
 

@@ -133,6 +133,11 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken) {
+        return new PagedList<>(listDatabases(), null);
+    }
+
+    @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
         checkNotSystemDatabase(name);

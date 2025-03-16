@@ -35,7 +35,6 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -56,6 +55,7 @@ public class HttpClient implements RESTClient {
                     .retryOnConnectionFailure(true)
                     .connectionSpecs(Arrays.asList(MODERN_TLS, COMPATIBLE_TLS, CLEARTEXT))
                     .addInterceptor(new ExponentialHttpRetryInterceptor(5))
+                    .addInterceptor(new LoggingInterceptor())
                     .connectTimeout(Duration.ofMinutes(3))
                     .readTimeout(Duration.ofMinutes(3))
                     .build();
@@ -83,7 +83,7 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
-        Map<String, String> authHeaders = getHeaders(uri, path, "GET", "", restAuthFunction);
+        Map<String, String> authHeaders = getHeaders(path, "GET", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(uri, path, null))
@@ -100,7 +100,7 @@ public class HttpClient implements RESTClient {
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
         Map<String, String> authHeaders =
-                getHeaders(uri, path, queryParams, "GET", "", restAuthFunction);
+                getHeaders(path, queryParams, "GET", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(uri, path, queryParams))
@@ -124,8 +124,7 @@ public class HttpClient implements RESTClient {
             RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
-            Map<String, String> authHeaders =
-                    getHeaders(uri, path, "POST", bodyStr, restAuthFunction);
+            Map<String, String> authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
@@ -141,7 +140,7 @@ public class HttpClient implements RESTClient {
 
     @Override
     public <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction) {
-        Map<String, String> authHeaders = getHeaders(uri, path, "DELETE", "", restAuthFunction);
+        Map<String, String> authHeaders = getHeaders(path, "DELETE", "", restAuthFunction);
         Request request =
                 new Request.Builder()
                         .url(getRequestUrl(uri, path, null))
@@ -156,8 +155,7 @@ public class HttpClient implements RESTClient {
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
         try {
             String bodyStr = OBJECT_MAPPER.writeValueAsString(body);
-            Map<String, String> authHeaders =
-                    getHeaders(uri, path, "DELETE", bodyStr, restAuthFunction);
+            Map<String, String> authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
             RequestBody requestBody = buildRequestBody(bodyStr);
             Request request =
                     new Request.Builder()
@@ -222,24 +220,22 @@ public class HttpClient implements RESTClient {
     }
 
     private static Map<String, String> getHeaders(
-            String uri,
             String path,
             String method,
             String data,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
 
-        return getHeaders(uri, path, Collections.emptyMap(), method, data, headerFunction);
+        return getHeaders(path, Collections.emptyMap(), method, data, headerFunction);
     }
 
     private static Map<String, String> getHeaders(
-            String uri,
             String path,
             Map<String, String> queryParams,
             String method,
             String data,
             Function<RESTAuthParameter, Map<String, String>> headerFunction) {
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter(URI.create(uri).getHost(), path, queryParams, method, data);
+                new RESTAuthParameter(path, queryParams, method, data);
         return headerFunction.apply(restAuthParameter);
     }
 

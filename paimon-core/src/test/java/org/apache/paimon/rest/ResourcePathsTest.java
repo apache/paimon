@@ -33,5 +33,10 @@ public class ResourcePathsTest {
         assertEquals(
                 "/v1/paimon/databases/test_db/tables/test_table%24snapshot",
                 resourcePaths.table(database, objectName));
+
+        resourcePaths = new ResourcePaths("paimon/aaaa");
+        assertEquals(
+                "/v1/paimon%2Faaaa/databases/test_db/tables/test_table%24snapshot",
+                resourcePaths.table(database, objectName));
     }
 }

@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -28,6 +27,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.PartitionStatisticsReporter;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
@@ -145,8 +145,7 @@ public class ReportPartStatsListener implements PartitionListener {
 
         CoreOptions coreOptions = table.coreOptions();
         Options options = coreOptions.toConfiguration();
-        if (options.get(FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis()
-                <= 0) {
+        if (options.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis() <= 0) {
             return Optional.empty();
         }
 
@@ -177,7 +176,7 @@ public class ReportPartStatsListener implements PartitionListener {
                         new PartitionStatisticsReporter(table, partitionHandler),
                         stateStore,
                         isRestored,
-                        options.get(FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC)
+                        options.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC)
                                 .toMillis()));
     }
 

@@ -62,6 +62,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -410,7 +421,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/rename:
+  /v1/{prefix}/tables/rename:
     post:
       tags:
         - table
@@ -449,7 +460,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/commit:
+  /v1/{prefix}/databases/{database}/tables/{table}/commit:
     post:
       tags:
         - table
@@ -462,6 +473,11 @@ paths:
           schema:
             type: string
         - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
           in: path
           required: true
           schema:
@@ -617,7 +633,7 @@ paths:
     post:
       tags:
         - partition
-      summary: Create partitions
+      summary: Create partitions, ignore existing partitions
       operationId: createPartitions
       parameters:
         - name: prefix
@@ -655,7 +671,7 @@ paths:
     post:
       tags:
         - partition
-      summary: Drop partitions
+      summary: Drop partitions, ignore non-existent partitions
       operationId: dropPartitions
       parameters:
         - name: prefix
@@ -693,7 +709,7 @@ paths:
     post:
       tags:
         - partition
-      summary: Alter partitions
+      summary: Alter partitions, for non-existent partitions, partitions will be created directly
       operationId: alterPartitions
       parameters:
         - name: prefix
@@ -731,7 +747,7 @@ paths:
     post:
       tags:
         - partition
-      summary: MarkDone partitions
+      summary: MarkDone partitions, for non-existent partitions, partitions will be created directly
       operationId: markDonePartitions
       parameters:
         - name: prefix
@@ -877,7 +893,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/branches/forward:
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
     post:
       tags:
         - branch
@@ -895,6 +911,11 @@ paths:
           schema:
             type: string
         - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
           in: path
           required: true
           schema:
@@ -1096,7 +1117,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/views/rename:
+  /v1/{prefix}/views/rename:
     post:
       tags:
         - view
@@ -1104,11 +1125,6 @@ paths:
       operationId: renameView
       parameters:
         - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
           in: path
           required: true
           schema:
@@ -1516,6 +1532,23 @@ components:
           format: int64
         statistics:
           type: string
+    TableSnapshot:
+      type: object
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+        recordCount:
+          type: integer
+          format: int64
+        fileSizeInBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        lastFileCreationTime:
+          type: integer
+          format: int64
     CommitTableResponse:
       type: object
       properties:
@@ -1535,7 +1568,7 @@ components:
       type: object
       properties:
         snapshot:
-          $ref: '#/components/schemas/Snapshot'
+          $ref: '#/components/schemas/TableSnapshot'
     AlterDatabaseRequest:
       type: object
       properties:
@@ -1576,6 +1609,8 @@ components:
           type: array
           items:
             type: string
+        nextPageToken:
+          type: string
     GetDatabaseResponse:
       type: object
       properties:

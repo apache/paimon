@@ -3,7 +3,7 @@ title: "Hive"
 weight: 4
 type: docs
 aliases:
-- /engines/hive.html
+- /ecosystem/hive.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

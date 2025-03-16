@@ -46,7 +46,11 @@ public class IncrementalTimeStampStartingScanner extends AbstractStartingScanner
 
     @Override
     public Result scan(SnapshotReader reader) {
-        Snapshot earliestSnapshot = snapshotManager.snapshot(snapshotManager.earliestSnapshotId());
+        Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
+        if (earliestSnapshot == null) {
+            return new NoSnapshot();
+        }
+
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         if (startTimestamp > latestSnapshot.timeMillis()
                 || endTimestamp < earliestSnapshot.timeMillis()) {

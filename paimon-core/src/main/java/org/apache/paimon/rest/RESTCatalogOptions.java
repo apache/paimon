@@ -80,9 +80,9 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog auth DLF security token");
 
-    public static final ConfigOption<Boolean> DATA_TOKEN_ENABLED =
-            ConfigOptions.key("data-token.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to support data token provided by the REST server.");
+    public static final ConfigOption<String> DLF_TOKEN_LOADER =
+            ConfigOptions.key("dlf.token-loader")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF token loader.");
 }

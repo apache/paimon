@@ -18,13 +18,16 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
@@ -47,6 +50,8 @@ import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.File;
 import java.time.Duration;
@@ -58,6 +63,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
+import static org.apache.paimon.CoreOptions.PARTITION_SINK_STRATEGY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -402,6 +408,76 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
         tEnv.executeSql("INSERT INTO append_table SELECT id, 'test' FROM S").await();
         assertThat(batchSql("SELECT * FROM append_table"))
                 .containsExactlyInAnyOrder(Row.of(1, "test"), Row.of(2, "test"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.PartitionSinkStrategy.class)
+    public void testPartitionStrategyForPartitionedTable(CoreOptions.PartitionSinkStrategy strategy)
+            throws Catalog.TableNotExistException {
+
+        int partitionNums = 5;
+        int largerSinkParallelism = 7;
+        int lessSinkParallelism = 3;
+        int hashStrategyResultFileCount = 1;
+        // sink parallelism is greater than the number of partitions write in a batch, there are 2
+        // task will be no data.
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS partition_strategy_table_larger ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'%s' = '%s',"
+                        + "'sink.parallelism' = '7')",
+                PARTITION_SINK_STRATEGY.key(), strategy);
+
+        // sink parallelism is less than the number of partitions write in a batch, there are 2 task
+        // will write data to 2 partition.
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS partition_strategy_table_less ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'%s' = '%s',"
+                        + "'sink.parallelism' = '3')",
+                PARTITION_SINK_STRATEGY.key(), strategy);
+
+        StringBuilder values = new StringBuilder();
+        // 5 partition in a batch write.
+        for (int i = 1; i <= 30; i++) {
+            for (int j = 1; j <= partitionNums; j++) {
+                values.append(String.format("(%s, 'HXH', '2025030%s'),", j, j));
+            }
+        }
+
+        batchSql(
+                "INSERT INTO partition_strategy_table_larger VALUES "
+                        + values.substring(0, values.length() - 1));
+        batchSql(
+                "INSERT INTO partition_strategy_table_less VALUES "
+                        + values.substring(0, values.length() - 1));
+
+        assertThat(batchSql("SELECT * FROM partition_strategy_table_larger").size()).isEqualTo(150);
+        assertThat(batchSql("SELECT * FROM partition_strategy_table_less").size()).isEqualTo(150);
+
+        FileStoreTable fileStoreTableLarger = paimonTable("partition_strategy_table_larger");
+        List<PartitionEntry> partitionEntriesLarger =
+                fileStoreTableLarger.newReadBuilder().newScan().listPartitionEntries();
+        assertThat(partitionEntriesLarger.size()).isEqualTo(partitionNums);
+        int fileCountLarger =
+                strategy == CoreOptions.PartitionSinkStrategy.HASH
+                        ? hashStrategyResultFileCount
+                        : largerSinkParallelism;
+        partitionEntriesLarger.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLarger));
+
+        FileStoreTable fileStoreTableLess = paimonTable("partition_strategy_table_less");
+        List<PartitionEntry> partitionEntriesLess =
+                fileStoreTableLess.newReadBuilder().newScan().listPartitionEntries();
+        assertThat(partitionEntriesLess.size()).isEqualTo(partitionNums);
+        int fileCountLess =
+                strategy == CoreOptions.PartitionSinkStrategy.HASH
+                        ? hashStrategyResultFileCount
+                        : lessSinkParallelism;
+        partitionEntriesLess.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLess));
     }
 
     private static class TestStatelessWriterSource extends AbstractNonCoordinatedSource<Integer> {

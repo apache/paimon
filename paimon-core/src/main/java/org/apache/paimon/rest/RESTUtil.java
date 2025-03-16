@@ -52,9 +52,15 @@ public class RESTUtil {
     }
 
     public static Map<String, String> merge(
-            Map<String, String> target, Map<String, String> updates) {
+            Map<String, String> targets, Map<String, String> updates) {
+        if (targets == null) {
+            targets = Maps.newHashMap();
+        }
+        if (updates == null) {
+            updates = Maps.newHashMap();
+        }
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-        for (Map.Entry<String, String> entry : target.entrySet()) {
+        for (Map.Entry<String, String> entry : targets.entrySet()) {
             if (!updates.containsKey(entry.getKey())) {
                 builder.put(entry.getKey(), entry.getValue());
             }

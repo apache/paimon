@@ -729,4 +729,10 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'pt=b;pt=c') */ ON Q.id = P.id ORDER BY Q.id, P.v";
         assertThat(sql(query)).containsExactly(Row.of(1, 11), Row.of(1, 12), Row.of(2, 22));
     }
+
+    @Test
+    public void testEmptyTableIncrementalBetweenTimestamp() {
+        assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
+                .isEmpty();
+    }
 }
