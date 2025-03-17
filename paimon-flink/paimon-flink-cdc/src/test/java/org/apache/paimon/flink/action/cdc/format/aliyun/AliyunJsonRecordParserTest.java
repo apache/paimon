@@ -18,7 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.format.aliyun;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.ComputedColumnUtils;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaActionITCaseBase;
 import org.apache.paimon.flink.action.cdc.watermark.MessageQueueCdcTimestampExtractor;
@@ -26,6 +29,7 @@ import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.BinaryStringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +46,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -53,14 +58,20 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
     private static List<String> insertList = new ArrayList<>();
     private static List<String> updateList = new ArrayList<>();
     private static List<String> deleteList = new ArrayList<>();
+    private static List<ComputedColumn> computedColumns = new ArrayList<>();
 
     private static ObjectMapper objMapper = new ObjectMapper();
+
+    String dateTimeRegex = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}";
 
     @Before
     public void setup() {
         String insertRes = "kafka/aliyun/table/event/event-insert.txt";
         String updateRes = "kafka/aliyun/table/event/event-update-in-one.txt";
         String deleteRes = "kafka/aliyun/table/event/event-delete.txt";
+
+        String[] computedColumnArgs = {"etl_create_time=now()", "etl_update_time=now()"};
+
         URL url;
         try {
             url = AliyunJsonRecordParserTest.class.getClassLoader().getResource(insertRes);
@@ -81,6 +92,10 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
                     .filter(this::isRecordLine)
                     .forEach(e -> deleteList.add(e));
 
+            computedColumns =
+                    ComputedColumnUtils.buildComputedColumns(
+                            Arrays.asList(computedColumnArgs), Collections.emptyList());
+
         } catch (Exception e) {
             log.error("Fail to init aliyun-json cases", e);
         }
@@ -88,10 +103,11 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
 
     @Test
     public void extractInsertRecord() throws Exception {
+
         AliyunRecordParser parser =
-                new AliyunRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
+                new AliyunRecordParser(TypeMapping.defaultMapping(), computedColumns);
         for (String json : insertList) {
-            // 将json解析为JsonNode对象
+
             JsonNode rootNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(rootNode);
             Schema schema = parser.buildSchema(cdcRecord);
@@ -111,16 +127,33 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
             assertEquals(tableName, "sync_test_table");
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
+
             assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+
+            Map<String, String> data = records.get(0).toRichCdcRecord().toCdcRecord().data();
+            String createTime = data.get("etl_create_time");
+            String updateTime = data.get("etl_update_time");
+
+            // Mock the real timestamp string which retrieved from store and convert through paimon
+            // Timestamp
+            createTime =
+                    BinaryStringUtils.toTimestamp(BinaryString.fromString(createTime), 6)
+                            .toString();
+            updateTime =
+                    BinaryStringUtils.toTimestamp(BinaryString.fromString(updateTime), 6)
+                            .toString();
+
+            assertTrue(createTime.matches(dateTimeRegex));
+            assertTrue(updateTime.matches(dateTimeRegex));
         }
     }
 
     @Test
     public void extractUpdateRecord() throws Exception {
         AliyunRecordParser parser =
-                new AliyunRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
+                new AliyunRecordParser(TypeMapping.defaultMapping(), computedColumns);
         for (String json : updateList) {
-            // 将json解析为JsonNode对象
+
             JsonNode jsonNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(jsonNode);
             Schema schema = parser.buildSchema(cdcRecord);
@@ -140,16 +173,27 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
             assertEquals(tableName, "sync_test_table");
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
+
             assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+
+            Map<String, String> data = records.get(0).toRichCdcRecord().toCdcRecord().data();
+            String createTime = data.get("etl_create_time");
+            String updateTime = data.get("etl_update_time");
+            Assert.assertNotNull(createTime);
+
+            updateTime =
+                    BinaryStringUtils.toTimestamp(BinaryString.fromString(updateTime), 6)
+                            .toString();
+
+            assertTrue(updateTime.matches(dateTimeRegex));
         }
     }
 
     @Test
     public void extractDeleteRecord() throws Exception {
         AliyunRecordParser parser =
-                new AliyunRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
+                new AliyunRecordParser(TypeMapping.defaultMapping(), computedColumns);
         for (String json : deleteList) {
-            // Parses the json into a JsonNode object.
             JsonNode jsonNode = objMapper.readValue(json, JsonNode.class);
             CdcSourceRecord cdcRecord = new CdcSourceRecord(jsonNode);
             Schema schema = parser.buildSchema(cdcRecord);
@@ -170,6 +214,17 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
             assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+
+            Map<String, String> data = records.get(0).toRichCdcRecord().toCdcRecord().data();
+            String createTime = data.get("etl_create_time");
+            String updateTime = data.get("etl_update_time");
+            Assert.assertNotNull(createTime);
+
+            updateTime =
+                    BinaryStringUtils.toTimestamp(BinaryString.fromString(updateTime), 6)
+                            .toString();
+
+            assertTrue(updateTime.matches(dateTimeRegex));
         }
     }
 }

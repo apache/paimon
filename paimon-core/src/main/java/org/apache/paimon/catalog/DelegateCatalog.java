@@ -57,6 +57,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken) {
+        return wrapped.listDatabasesPaged(maxResults, pageToken);
+    }
+
+    @Override
     public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
         wrapped.createDatabase(name, ignoreIfExists, properties);

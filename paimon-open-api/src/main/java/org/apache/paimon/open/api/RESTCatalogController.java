@@ -117,8 +117,11 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping("/v1/{prefix}/databases")
-    public ListDatabasesResponse listDatabases(@PathVariable String prefix) {
-        return new ListDatabasesResponse(ImmutableList.of("account"));
+    public ListDatabasesResponse listDatabases(
+            @PathVariable String prefix,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        return new ListDatabasesResponse(ImmutableList.of("account"), null);
     }
 
     @Operation(

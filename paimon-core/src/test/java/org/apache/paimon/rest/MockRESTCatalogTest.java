@@ -29,6 +29,8 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.DLFAuthProvider;
+import org.apache.paimon.rest.auth.DLFTokenLoader;
+import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -130,8 +132,14 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         String region = "cn-hangzhou";
         String tokenPath = dataPath + UUID.randomUUID();
         generateTokenAndWriteToFile(tokenPath);
+        DLFTokenLoader tokenLoader =
+                DLFTokenLoaderFactory.createDLFTokenLoader(
+                        "local_file",
+                        new Options(
+                                ImmutableMap.of(
+                                        RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
         DLFAuthProvider authProvider =
-                DLFAuthProvider.buildRefreshToken(tokenPath, 1000_000L, region);
+                DLFAuthProvider.buildRefreshToken(tokenLoader, 1000_000L, region);
         restCatalogServer =
                 new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
         restCatalogServer.start();

@@ -30,19 +30,25 @@ under the License.
             <td><h5>metadata.iceberg.compaction.max.file-num</h5></td>
             <td style="word-wrap: break-word;">50</td>
             <td>Integer</td>
-            <td>If number of small Iceberg metadata files exceeds this limit, always trigger metadata compaction regardless of their total size.</td>
+            <td>If number of small Iceberg manifest metadata files exceeds this limit, always trigger manifest metadata compaction regardless of their total size.</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.compaction.min.file-num</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>
-            <td>Minimum number of Iceberg metadata files to trigger metadata compaction.</td>
+            <td>Minimum number of Iceberg manifest metadata files to trigger manifest metadata compaction.</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.database</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Metastore database name for Iceberg Catalog. Set this as an iceberg database alias if using a centralized Catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.delete-after-commit.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to delete old metadata files after each table commit</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.glue.skip-archive</h5></td>
@@ -79,6 +85,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Should use the legacy manifest version to generate Iceberg's 1.4 manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.previous-versions-max</h5></td>
+            <td style="word-wrap: break-word;">0</td>
+            <td>Integer</td>
+            <td>The number of old metadata files to keep after each table commit</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.storage</h5></td>

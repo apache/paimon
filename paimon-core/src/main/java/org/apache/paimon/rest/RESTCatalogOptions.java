@@ -79,4 +79,10 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth DLF security token");
+
+    public static final ConfigOption<String> DLF_TOKEN_LOADER =
+            ConfigOptions.key("dlf.token-loader")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF token loader.");
 }

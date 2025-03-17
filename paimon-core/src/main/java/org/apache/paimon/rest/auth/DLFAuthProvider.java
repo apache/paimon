@@ -18,14 +18,8 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.utils.FileIOUtils;
-
 import okhttp3.MediaType;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -33,8 +27,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-
-import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Auth provider for <b>Ali CLoud</b> DLF. */
 public class DLFAuthProvider implements AuthProvider {
@@ -55,9 +47,8 @@ public class DLFAuthProvider implements AuthProvider {
     public static final DateTimeFormatter AUTH_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyyMMdd");
     protected static final MediaType MEDIA_TYPE = MediaType.parse("application/json");
-    private static final long[] READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS = {1_000, 3_000, 5_000};
 
-    private final String tokenFilePath;
+    private final DLFTokenLoader tokenLoader;
 
     protected DLFToken token;
     private final boolean keepRefreshed;
@@ -66,11 +57,11 @@ public class DLFAuthProvider implements AuthProvider {
     private final String region;
 
     public static DLFAuthProvider buildRefreshToken(
-            String tokenFilePath, Long tokenRefreshInMills, String region) {
-        DLFToken token = readToken(tokenFilePath, 0);
+            DLFTokenLoader tokenLoader, Long tokenRefreshInMills, String region) {
+        DLFToken token = tokenLoader.loadToken();
         Long expiresAtMillis = getExpirationInMills(token.getExpiration());
         return new DLFAuthProvider(
-                tokenFilePath, token, true, expiresAtMillis, tokenRefreshInMills, region);
+                tokenLoader, token, true, expiresAtMillis, tokenRefreshInMills, region);
     }
 
     public static DLFAuthProvider buildAKToken(
@@ -80,13 +71,13 @@ public class DLFAuthProvider implements AuthProvider {
     }
 
     public DLFAuthProvider(
-            String tokenFilePath,
+            DLFTokenLoader tokenLoader,
             DLFToken token,
             boolean keepRefreshed,
             Long expiresAtMillis,
             Long tokenRefreshInMills,
             String region) {
-        this.tokenFilePath = tokenFilePath;
+        this.tokenLoader = tokenLoader;
         this.token = token;
         this.keepRefreshed = keepRefreshed;
         this.expiresAtMillis = expiresAtMillis;
@@ -135,7 +126,7 @@ public class DLFAuthProvider implements AuthProvider {
     @Override
     public boolean refresh() {
         long start = System.currentTimeMillis();
-        DLFToken newToken = readToken(tokenFilePath, 0);
+        DLFToken newToken = tokenLoader.loadToken();
         if (newToken == null) {
             return false;
         }
@@ -167,25 +158,6 @@ public class DLFAuthProvider implements AuthProvider {
     @Override
     public Optional<Long> tokenRefreshInMills() {
         return Optional.ofNullable(this.tokenRefreshInMills);
-    }
-
-    protected static DLFToken readToken(String tokenFilePath, int retryTimes) {
-        try {
-            File tokenFile = new File(tokenFilePath);
-            if (tokenFile.exists()) {
-                String tokenStr = FileIOUtils.readFileUtf8(tokenFile);
-                return OBJECT_MAPPER.readValue(tokenStr, DLFToken.class);
-            } else if (retryTimes < READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS.length - 1) {
-                Thread.sleep(READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS[retryTimes]);
-                return readToken(tokenFilePath, retryTimes + 1);
-            } else {
-                throw new FileNotFoundException(tokenFilePath);
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private static Long getExpirationInMills(String dateStr) {
