@@ -19,10 +19,8 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;

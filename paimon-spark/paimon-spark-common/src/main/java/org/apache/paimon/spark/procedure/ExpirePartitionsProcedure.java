@@ -86,22 +86,22 @@ public class ExpirePartitionsProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     Map<String, String> dynamicOptions =
-                    ProcedureUtils.fillInPartitionOptions(
-                            expireStrategy,
-                            timestampFormatter,
-                            timestampPattern,
-                            expirationTime,
-                            maxExpires,
-                            options);
-            table = table.copy(dynamicOptions);
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-            FileStore fileStore = fileStoreTable.store();
+                            ProcedureUtils.fillInPartitionOptions(
+                                    expireStrategy,
+                                    timestampFormatter,
+                                    timestampPattern,
+                                    expirationTime,
+                                    maxExpires,
+                                    options);
+                    table = table.copy(dynamicOptions);
+                    FileStoreTable fileStoreTable = (FileStoreTable) table;
+                    FileStore fileStore = fileStoreTable.store();
 
-            PartitionExpire partitionExpire =
-                    fileStore.newPartitionExpire("", fileStoreTable);
-            Preconditions.checkNotNull(
-                    partitionExpire,
-                    "Both the partition expiration time and partition field can not be null.");
+                    PartitionExpire partitionExpire =
+                            fileStore.newPartitionExpire("", fileStoreTable);
+                    Preconditions.checkNotNull(
+                            partitionExpire,
+                            "Both the partition expiration time and partition field can not be null.");
                     List<Map<String, String>> expired = partitionExpire.expire(Long.MAX_VALUE);
                     return expired == null || expired.isEmpty()
                             ? new InternalRow[] {

@@ -20,10 +20,6 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.utils.ParameterUtils;
-import org.apache.paimon.utils.StringUtils;
-import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -80,11 +76,10 @@ public class CompactManifestProcedure extends BaseProcedure {
         String options = args.isNullAt(1) ? null : args.getString(1);
 
         Table table = loadSparkTable(tableIdent).getTable();
-
         HashMap<String, String> dynamicOptions = new HashMap<>();
         ProcedureUtils.putAllOptions(dynamicOptions, options);
         table = table.copy(dynamicOptions);
-        
+
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.compactManifests();
         } catch (Exception e) {
