@@ -133,7 +133,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                             + " does not exist in table. This is unexpected.");
             DataType oldType = schema.fields().get(idx).type();
             DataType newType = updateColumnType.newDataType();
-            switch (canConvert(oldType, newType)) {
+            switch (canConvert(oldType, newType, typeMapping)) {
                 case CONVERT:
                     catalog.alterTable(identifier, schemaChange, false);
                     break;
@@ -157,7 +157,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         }
     }
 
-    public static ConvertAction canConvert(DataType oldType, DataType newType) {
+    public static ConvertAction canConvert(
+            DataType oldType, DataType newType, TypeMapping typeMapping) {
         if (oldType.equalsIgnoreNullable(newType)) {
             return ConvertAction.CONVERT;
         }
@@ -171,7 +172,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         }
 
         // object can always be converted to string
-        if (oldIdx < 0 && newIdx >= 0) {
+        if ((oldIdx < 0 && newIdx >= 0)
+                && typeMapping.containsMode(
+                        TypeMapping.TypeMappingMode.ALLOW_NON_STRING_TO_STRING)) {
             return ConvertAction.CONVERT;
         }
 
@@ -277,8 +280,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     }
 
     /**
-     * Return type of {@link UpdatedDataFieldsProcessFunction#canConvert(DataType, DataType)}. This
-     * enum indicates the action to perform.
+     * Return type of {@link UpdatedDataFieldsProcessFunction#canConvert}. This enum indicates the
+     * action to perform.
      */
     public enum ConvertAction {
 
