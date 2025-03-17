@@ -34,6 +34,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.auth.AuthSession;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
@@ -44,15 +45,12 @@ import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
-import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -79,7 +77,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
-import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
@@ -89,8 +86,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -122,8 +117,6 @@ import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
 public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches {
-
-    private static final Logger LOG = LoggerFactory.getLogger(RESTCatalog.class);
 
     public static final String HEADER_PREFIX = "header.";
     public static final String MAX_RESULTS = "maxResults";
@@ -388,7 +381,7 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
 
     @Override
     public boolean commitSnapshot(
-            Identifier identifier, Snapshot snapshot, List<Partition> statistics)
+            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
             throws TableNotExistException {
         CommitTableRequest request = new CommitTableRequest(snapshot, statistics);
         CommitTableResponse response;
@@ -557,63 +550,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     }
 
     @Override
-    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        try {
-            CreatePartitionsRequest request = new CreatePartitionsRequest(partitions);
-            client.post(
-                    resourcePaths.partitions(
-                            identifier.getDatabaseName(), identifier.getObjectName()),
-                    request,
-                    restAuthFunction);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (NotImplementedException ignored) {
-            // not a metastore partitioned table
-        }
-    }
-
-    @Override
-    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        try {
-            DropPartitionsRequest request = new DropPartitionsRequest(partitions);
-            client.post(
-                    resourcePaths.dropPartitions(
-                            identifier.getDatabaseName(), identifier.getObjectName()),
-                    request,
-                    restAuthFunction);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (NotImplementedException ignored) {
-            // not a metastore partitioned table
-        }
-
-        try (BatchTableCommit commit = getTable(identifier).newBatchWriteBuilder().newCommit()) {
-            commit.truncatePartitions(partitions);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void alterPartitions(Identifier identifier, List<Partition> partitions)
-            throws TableNotExistException {
-        try {
-            AlterPartitionsRequest request = new AlterPartitionsRequest(partitions);
-            client.post(
-                    resourcePaths.alterPartitions(
-                            identifier.getDatabaseName(), identifier.getObjectName()),
-                    request,
-                    restAuthFunction);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (NotImplementedException ignored) {
-            // not a metastore partitioned table
-        }
-    }
-
-    @Override
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         try {
@@ -634,14 +570,14 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         try {
             return listDataFromPageApi(
-                    queryParams -> {
-                        return client.get(
-                                resourcePaths.partitions(
-                                        identifier.getDatabaseName(), identifier.getObjectName()),
-                                queryParams,
-                                ListPartitionsResponse.class,
-                                restAuthFunction);
-                    });
+                    queryParams ->
+                            client.get(
+                                    resourcePaths.partitions(
+                                            identifier.getDatabaseName(),
+                                            identifier.getObjectName()),
+                                    queryParams,
+                                    ListPartitionsResponse.class,
+                                    restAuthFunction));
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -649,6 +585,33 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
         } catch (NotImplementedException e) {
             // not a metastore partitioned table
             return listPartitionsFromFileSystem(getTable(identifier));
+        }
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            ListPartitionsResponse response =
+                    client.get(
+                            resourcePaths.partitions(
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
+                            buildPagedQueryParams(maxResults, pageToken),
+                            ListPartitionsResponse.class,
+                            restAuthFunction);
+            List<Partition> partitions = response.getPartitions();
+            if (partitions == null) {
+                return new PagedList<>(emptyList(), null);
+            }
+            return new PagedList<>(partitions, response.getNextPageToken());
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            // not a metastore partitioned table
+            return new PagedList<>(listPartitionsFromFileSystem(getTable(identifier)), null);
         }
     }
 
@@ -724,33 +687,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
-        }
-    }
-
-    @Override
-    public PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
-            throws TableNotExistException {
-        try {
-            ListPartitionsResponse response =
-                    client.get(
-                            resourcePaths.partitions(
-                                    identifier.getDatabaseName(), identifier.getObjectName()),
-                            buildPagedQueryParams(maxResults, pageToken),
-                            ListPartitionsResponse.class,
-                            restAuthFunction);
-            List<Partition> partitions = response.getPartitions();
-            if (partitions == null) {
-                return new PagedList<>(emptyList(), null);
-            }
-            return new PagedList<>(partitions, response.getNextPageToken());
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        } catch (NotImplementedException e) {
-            // not a metastore partitioned table
-            return new PagedList<>(listPartitionsFromFileSystem(getTable(identifier)), null);
         }
     }
 

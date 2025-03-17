@@ -41,8 +41,8 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.operation.metrics.CommitStats;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
@@ -1149,9 +1149,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private boolean commitSnapshotImpl(Snapshot newSnapshot, List<PartitionEntry> deltaStatistics) {
         try {
-            List<Partition> statistics = new ArrayList<>(deltaStatistics.size());
+            List<PartitionStatistics> statistics = new ArrayList<>(deltaStatistics.size());
             for (PartitionEntry entry : deltaStatistics) {
-                statistics.add(entry.toPartition(partitionComputer));
+                statistics.add(entry.toPartitionStatistics(partitionComputer));
             }
             return snapshotCommit.commit(newSnapshot, branchName, statistics);
         } catch (Throwable e) {

@@ -50,7 +50,7 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.GetPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -115,6 +115,7 @@ import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
+
     private static final Logger LOG = LoggerFactory.getLogger(RESTCatalogServer.class);
 
     public static final int DEFAULT_MAX_RESULTS = 100;
@@ -1343,9 +1344,9 @@ public class RESTCatalogServer {
 
     private MockResponse dropPartitionsHandle(Identifier identifier, String data)
             throws Catalog.TableNotExistException, JsonProcessingException {
-        DropPartitionsRequest dropPartitionsRequest =
-                OBJECT_MAPPER.readValue(data, DropPartitionsRequest.class);
-        List<Map<String, String>> partitionSpecs = dropPartitionsRequest.getPartitionSpecs();
+        GetPartitionsRequest getPartitionsRequest =
+                OBJECT_MAPPER.readValue(data, GetPartitionsRequest.class);
+        List<Map<String, String>> partitionSpecs = getPartitionsRequest.getPartitionSpecs();
         if (tableMetadataStore.containsKey(identifier.getFullName())) {
             List<Partition> existPartitions = tablePartitionsStore.get(identifier.getFullName());
             partitionSpecs.forEach(
@@ -1439,7 +1440,7 @@ public class RESTCatalogServer {
 
     private Partition spec2Partition(Map<String, String> spec) {
         // todo: need update
-        return new Partition(spec, 123, 456, 789, 123);
+        return new Partition(spec, 123, 456, 789, 123, false);
     }
 
     private FileStoreTable getFileTable(Identifier identifier)

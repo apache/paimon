@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -83,7 +83,7 @@ public class PartitionStatisticsReporterTest {
         BatchTableCommit committer = table.newBatchWriteBuilder().newCommit();
         committer.commit(messages);
         AtomicBoolean closed = new AtomicBoolean(false);
-        Map<String, Partition> partitionParams = Maps.newHashMap();
+        Map<String, PartitionStatistics> partitionParams = Maps.newHashMap();
 
         PartitionHandler partitionHandler =
                 new PartitionHandler() {
@@ -104,7 +104,7 @@ public class PartitionStatisticsReporterTest {
                     }
 
                     @Override
-                    public void alterPartitions(List<Partition> partitions) {
+                    public void alterPartitions(List<PartitionStatistics> partitions) {
                         partitions.forEach(
                                 partition -> {
                                     partitionParams.put(

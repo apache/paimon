@@ -29,6 +29,7 @@ import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.SupportsPartitionModification;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
@@ -38,6 +39,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -45,6 +47,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -127,7 +130,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
-public class HiveCatalog extends AbstractCatalog {
+public class HiveCatalog extends AbstractCatalog implements SupportsPartitionModification {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
@@ -429,7 +432,12 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
         if (!tagToPart) {
-            super.dropPartitions(identifier, partitions);
+            org.apache.paimon.table.Table table = getTable(identifier);
+            try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+                commit.truncatePartitions(partitions);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
@@ -449,13 +457,12 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void alterPartitions(
-            Identifier identifier, List<org.apache.paimon.partition.Partition> partitions)
+    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {
         TableSchema tableSchema = this.loadTableSchema(identifier);
         if (!tableSchema.partitionKeys().isEmpty()
                 && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
-            for (org.apache.paimon.partition.Partition partition : partitions) {
+            for (PartitionStatistics partition : partitions) {
                 Map<String, String> spec = partition.spec();
                 List<String> partitionValues =
                         tableSchema.partitionKeys().stream()
@@ -561,7 +568,8 @@ public class HiveCatalog extends AbstractCatalog {
                                             recordCount,
                                             fileSizeInBytes,
                                             fileCount,
-                                            lastFileCreationTime);
+                                            lastFileCreationTime,
+                                            false);
                                 })
                         .collect(Collectors.toList());
             } catch (Exception e) {

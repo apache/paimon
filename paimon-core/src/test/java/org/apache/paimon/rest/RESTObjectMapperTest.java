@@ -25,7 +25,7 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.GetPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -219,10 +219,10 @@ public class RESTObjectMapperTest {
 
     @Test
     public void dropPartitionRequestParseTest() throws JsonProcessingException {
-        DropPartitionsRequest request = MockRESTMessage.dropPartitionsRequest();
+        GetPartitionsRequest request = MockRESTMessage.dropPartitionsRequest();
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        DropPartitionsRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, DropPartitionsRequest.class);
+        GetPartitionsRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, GetPartitionsRequest.class);
         assertEquals(parseData.getPartitionSpecs().size(), parseData.getPartitionSpecs().size());
     }
 

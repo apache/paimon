@@ -19,7 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.List;
@@ -36,7 +36,7 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
     }
 
     @Override
-    public boolean commit(Snapshot snapshot, String branch, List<Partition> statistics)
+    public boolean commit(Snapshot snapshot, String branch, List<PartitionStatistics> statistics)
             throws Exception {
         Identifier newIdentifier =
                 new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);

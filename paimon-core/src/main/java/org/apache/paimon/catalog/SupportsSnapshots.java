@@ -19,7 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.table.TableSnapshot;
 
 import java.util.List;
@@ -37,7 +37,8 @@ public interface SupportsSnapshots extends Catalog {
      * @return Success or not
      * @throws Catalog.TableNotExistException if the target does not exist
      */
-    boolean commitSnapshot(Identifier identifier, Snapshot snapshot, List<Partition> statistics)
+    boolean commitSnapshot(
+            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException;
 
     /**

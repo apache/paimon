@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
@@ -87,6 +88,16 @@ public class PartitionEntry {
 
     public Partition toPartition(InternalRowPartitionComputer computer) {
         return new Partition(
+                computer.generatePartValues(partition),
+                recordCount,
+                fileSizeInBytes,
+                fileCount,
+                lastFileCreationTime,
+                false);
+    }
+
+    public PartitionStatistics toPartitionStatistics(InternalRowPartitionComputer computer) {
+        return new PartitionStatistics(
                 computer.generatePartValues(partition),
                 recordCount,
                 fileSizeInBytes,

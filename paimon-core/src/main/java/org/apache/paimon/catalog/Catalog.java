@@ -283,37 +283,6 @@ public interface Catalog extends AutoCloseable {
     // ======================= partition methods ===============================
 
     /**
-     * Create partitions of the specify table. Ignore existing partitions.
-     *
-     * @param identifier path of the table to create partitions
-     * @param partitions partitions to be created
-     * @throws TableNotExistException if the table does not exist
-     */
-    void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException;
-
-    /**
-     * Drop partitions of the specify table. Ignore non-existent partitions.
-     *
-     * @param identifier path of the table to drop partitions
-     * @param partitions partitions to be deleted
-     * @throws TableNotExistException if the table does not exist
-     */
-    void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException;
-
-    /**
-     * Alter partitions of the specify table. For non-existent partitions, partitions will be
-     * created directly.
-     *
-     * @param identifier path of the table to alter partitions
-     * @param partitions partitions to be altered
-     * @throws TableNotExistException if the table does not exist
-     */
-    void alterPartitions(Identifier identifier, List<Partition> partitions)
-            throws TableNotExistException;
-
-    /**
      * Mark partitions done of the specify table. For non-existent partitions, partitions will be
      * created directly.
      *

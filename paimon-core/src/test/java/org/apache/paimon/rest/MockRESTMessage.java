@@ -27,7 +27,7 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.GetPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -144,14 +144,14 @@ public class MockRESTMessage {
         return new CreatePartitionsRequest(ImmutableList.of(Collections.singletonMap("pt", "1")));
     }
 
-    public static DropPartitionsRequest dropPartitionsRequest() {
-        return new DropPartitionsRequest(ImmutableList.of(Collections.singletonMap("pt", "1")));
+    public static GetPartitionsRequest dropPartitionsRequest() {
+        return new GetPartitionsRequest(ImmutableList.of(Collections.singletonMap("pt", "1")));
     }
 
     public static ListPartitionsResponse listPartitionsResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
-        Partition partition = new Partition(spec, 1, 1, 1, 1);
+        Partition partition = new Partition(spec, 1, 1, 1, 1, false);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
@@ -269,7 +269,7 @@ public class MockRESTMessage {
     }
 
     private static Partition partition() {
-        return new Partition(Collections.singletonMap("pt", "1"), 1, 1, 1, 1);
+        return new Partition(Collections.singletonMap("pt", "1"), 1, 1, 1, 1, false);
     }
 
     private static Schema schema(Map<String, String> options) {

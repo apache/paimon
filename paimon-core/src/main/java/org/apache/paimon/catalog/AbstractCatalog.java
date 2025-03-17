@@ -34,7 +34,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.object.ObjectTable;
-import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
 
@@ -161,26 +160,6 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected abstract Database getDatabaseImpl(String name) throws DatabaseNotExistException;
-
-    @Override
-    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {}
-
-    @Override
-    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        checkNotSystemTable(identifier, "dropPartition");
-        Table table = getTable(identifier);
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.truncatePartitions(partitions);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void alterPartitions(Identifier identifier, List<Partition> partitions)
-            throws TableNotExistException {}
 
     @Override
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)

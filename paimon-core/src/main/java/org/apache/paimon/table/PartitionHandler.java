@@ -20,7 +20,9 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.catalog.SupportsPartitionModification;
+import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.table.sink.BatchTableCommit;
 
 import java.util.List;
 import java.util.Map;
@@ -33,30 +35,46 @@ public interface PartitionHandler extends AutoCloseable {
 
     void dropPartitions(List<Map<String, String>> partitions) throws Catalog.TableNotExistException;
 
-    void alterPartitions(List<Partition> partitions) throws Catalog.TableNotExistException;
+    void alterPartitions(List<PartitionStatistics> partitions)
+            throws Catalog.TableNotExistException;
 
     void markDonePartitions(List<Map<String, String>> partitions)
             throws Catalog.TableNotExistException;
 
-    static PartitionHandler create(Catalog catalog, Identifier identifier) {
+    static PartitionHandler create(Catalog catalog, Table table, Identifier identifier) {
         return new PartitionHandler() {
 
             @Override
             public void createPartitions(List<Map<String, String>> partitions)
                     throws Catalog.TableNotExistException {
-                catalog.createPartitions(identifier, partitions);
+                if (catalog instanceof SupportsPartitionModification) {
+                    ((SupportsPartitionModification) catalog)
+                            .createPartitions(identifier, partitions);
+                }
             }
 
             @Override
             public void dropPartitions(List<Map<String, String>> partitions)
                     throws Catalog.TableNotExistException {
-                catalog.dropPartitions(identifier, partitions);
+                if (catalog instanceof SupportsPartitionModification) {
+                    ((SupportsPartitionModification) catalog)
+                            .dropPartitions(identifier, partitions);
+                } else {
+                    try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+                        commit.truncatePartitions(partitions);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }
             }
 
             @Override
-            public void alterPartitions(List<Partition> partitions)
+            public void alterPartitions(List<PartitionStatistics> partitions)
                     throws Catalog.TableNotExistException {
-                catalog.alterPartitions(identifier, partitions);
+                if (catalog instanceof SupportsPartitionModification) {
+                    ((SupportsPartitionModification) catalog)
+                            .alterPartitions(identifier, partitions);
+                }
             }
 
             @Override
