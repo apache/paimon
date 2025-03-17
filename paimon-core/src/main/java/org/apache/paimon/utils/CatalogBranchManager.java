@@ -31,10 +31,15 @@ public class CatalogBranchManager implements BranchManager {
 
     private final CatalogLoader catalogLoader;
     private final Identifier identifier;
+    private final FileSystemBranchManager branchManager;
 
-    public CatalogBranchManager(CatalogLoader catalogLoader, Identifier identifier) {
+    public CatalogBranchManager(
+            CatalogLoader catalogLoader,
+            Identifier identifier,
+            FileSystemBranchManager branchManager) {
         this.catalogLoader = catalogLoader;
         this.identifier = identifier;
+        this.branchManager = branchManager;
     }
 
     private void executePost(ThrowingConsumer<Catalog, Exception> func) {
@@ -48,6 +53,8 @@ public class CatalogBranchManager implements BranchManager {
     private <T> T executeGet(FunctionWithException<Catalog, T, Exception> func) {
         try (Catalog catalog = catalogLoader.load()) {
             return func.apply(catalog);
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -55,26 +62,50 @@ public class CatalogBranchManager implements BranchManager {
 
     @Override
     public void createBranch(String branchName) {
-        executePost(catalog -> catalog.createBranch(identifier, branchName, null));
+        try {
+            executePost(catalog -> catalog.createBranch(identifier, branchName, null));
+        } catch (UnsupportedOperationException e) {
+            branchManager.dropBranch(branchName);
+        }
     }
 
     @Override
     public void createBranch(String branchName, @Nullable String tagName) {
-        executePost(catalog -> catalog.createBranch(identifier, branchName, tagName));
+        try {
+            executePost(catalog -> catalog.createBranch(identifier, branchName, tagName));
+        } catch (UnsupportedOperationException e) {
+            if (tagName == null) {
+                branchManager.createBranch(branchName);
+            } else {
+                branchManager.createBranch(branchName, tagName);
+            }
+        }
     }
 
     @Override
     public void dropBranch(String branchName) {
-        executePost(catalog -> catalog.dropBranch(identifier, branchName));
+        try {
+            executePost(catalog -> catalog.dropBranch(identifier, branchName));
+        } catch (UnsupportedOperationException e) {
+            branchManager.dropBranch(branchName);
+        }
     }
 
     @Override
     public void fastForward(String branchName) {
-        executePost(catalog -> catalog.fastForward(identifier, branchName));
+        try {
+            executePost(catalog -> catalog.fastForward(identifier, branchName));
+        } catch (UnsupportedOperationException e) {
+            branchManager.fastForward(branchName);
+        }
     }
 
     @Override
     public List<String> branches() {
-        return executeGet(catalog -> catalog.listBranches(identifier));
+        try {
+            return executeGet(catalog -> catalog.listBranches(identifier));
+        } catch (UnsupportedOperationException e) {
+            return branchManager.branches();
+        }
     }
 }

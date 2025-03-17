@@ -25,7 +25,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
-import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for snapshots. */

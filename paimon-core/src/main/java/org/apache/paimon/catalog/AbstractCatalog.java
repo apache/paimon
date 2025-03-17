@@ -39,7 +39,6 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileSystemBranchManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,7 +66,7 @@ import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSyste
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
-import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
@@ -441,53 +440,25 @@ public abstract class AbstractCatalog implements Catalog {
                 lockContext().orElse(null));
     }
 
-    private FileSystemBranchManager fileSystemBranchManager(Identifier identifier)
-            throws TableNotExistException {
-        FileStoreTable table = (FileStoreTable) getTable(identifier);
-        return new FileSystemBranchManager(
-                table.fileIO(),
-                table.location(),
-                table.snapshotManager(),
-                table.tagManager(),
-                table.schemaManager());
-    }
-
     @Override
     public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
-        FileSystemBranchManager branchManager = fileSystemBranchManager(identifier);
-        if (fromTag == null) {
-            branchManager.createBranch(branch);
-        } else {
-            branchManager.createBranch(branch, fromTag);
-        }
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public void dropBranch(Identifier identifier, String branch) throws BranchNotExistException {
-        FileSystemBranchManager branchManager;
-        try {
-            branchManager = fileSystemBranchManager(identifier);
-        } catch (TableNotExistException e) {
-            throw new BranchNotExistException(identifier, branch);
-        }
-        branchManager.dropBranch(branch);
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
-        FileSystemBranchManager branchManager;
-        try {
-            branchManager = fileSystemBranchManager(identifier);
-        } catch (TableNotExistException e) {
-            throw new BranchNotExistException(identifier, branch);
-        }
-        branchManager.fastForward(branch);
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public List<String> listBranches(Identifier identifier) throws TableNotExistException {
-        return fileSystemBranchManager(identifier).branches();
+        throw new UnsupportedOperationException();
     }
 
     @Override
