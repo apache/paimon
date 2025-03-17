@@ -118,7 +118,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     private UnawareBucketCompactor compactor(Identifier tableId) {
         try {
             return new UnawareBucketCompactor(
-                    (FileStoreTable) catalog.getTable(tableId),
+                    (FileStoreTable) catalog.getTable(tableId).copy(options.toMap()),
                     commitUser,
                     this::workerExecutor,
                     getMetricGroup());
