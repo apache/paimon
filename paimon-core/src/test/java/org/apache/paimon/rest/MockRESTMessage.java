@@ -21,13 +21,10 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
-import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.GetPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -140,14 +137,6 @@ public class MockRESTMessage {
         return new AlterTableRequest(getChanges());
     }
 
-    public static CreatePartitionsRequest createPartitionRequest() {
-        return new CreatePartitionsRequest(ImmutableList.of(Collections.singletonMap("pt", "1")));
-    }
-
-    public static GetPartitionsRequest dropPartitionsRequest() {
-        return new GetPartitionsRequest(ImmutableList.of(Collections.singletonMap("pt", "1")));
-    }
-
     public static ListPartitionsResponse listPartitionsResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
@@ -231,10 +220,6 @@ public class MockRESTMessage {
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
         return new GetTableResponse(UUID.randomUUID().toString(), "", false, 1, schema(options));
-    }
-
-    public static AlterPartitionsRequest alterPartitionsRequest() {
-        return new AlterPartitionsRequest(ImmutableList.of(partition()));
     }
 
     public static CreateViewRequest createViewRequest(String name) {

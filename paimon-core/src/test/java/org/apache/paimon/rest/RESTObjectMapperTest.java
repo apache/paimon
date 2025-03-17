@@ -19,13 +19,10 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
-import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.GetPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -42,8 +39,6 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import org.junit.Test;
 
@@ -209,24 +204,6 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void createPartitionRequestParseTest() throws JsonProcessingException {
-        CreatePartitionsRequest request = MockRESTMessage.createPartitionRequest();
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        CreatePartitionsRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, CreatePartitionsRequest.class);
-        assertEquals(parseData.getPartitionSpecs().size(), parseData.getPartitionSpecs().size());
-    }
-
-    @Test
-    public void dropPartitionRequestParseTest() throws JsonProcessingException {
-        GetPartitionsRequest request = MockRESTMessage.dropPartitionsRequest();
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        GetPartitionsRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, GetPartitionsRequest.class);
-        assertEquals(parseData.getPartitionSpecs().size(), parseData.getPartitionSpecs().size());
-    }
-
-    @Test
     public void listPartitionsResponseParseTest() throws Exception {
         ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
@@ -235,15 +212,6 @@ public class RESTObjectMapperTest {
         assertEquals(
                 response.getPartitions().get(0).fileCount(),
                 parseData.getPartitions().get(0).fileCount());
-    }
-
-    @Test
-    public void alterPartitionsRequestParseTest() throws Exception {
-        AlterPartitionsRequest request = MockRESTMessage.alterPartitionsRequest();
-        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
-        AlterPartitionsRequest parseData =
-                OBJECT_MAPPER.readValue(requestStr, AlterPartitionsRequest.class);
-        assertEquals(request.getPartitions(), parseData.getPartitions());
     }
 
     @Test
