@@ -24,7 +24,8 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{DataTable, FileStoreTable, KnownSplitsTable, Table}
 import org.apache.paimon.utils.StringUtils
 
-import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}
+import org.apache.spark.sql.PaimonUtils
+import org.apache.spark.sql.connector.catalog._
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
@@ -47,7 +48,9 @@ case class SparkTable(table: Table)
 
   override def name: String = table.fullName
 
-  override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
+  override lazy val schema: StructType = PaimonUtils.structTypeWithMetadata(
+    SparkTypeUtils.fromPaimonRowType(table.rowType),
+    table.options().asScala.toMap)
 
   override def partitioning: Array[Transform] = {
     table.partitionKeys().asScala.map(p => Expressions.identity(StringUtils.quote(p))).toArray
