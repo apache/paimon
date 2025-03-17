@@ -32,7 +32,7 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.FileSystemBranchManager;
+import org.apache.paimon.utils.BranchManager;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,7 +86,7 @@ public class OptionsTableTest extends TableTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier(tableName));
         table.createBranch("b1");
         // verify that branch file exist
-        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
+        BranchManager branchManager = table.branchManager();
         assertThat(branchManager.branchExists("b1")).isTrue();
         SchemaManager schemaManagerBranch = schemaManager.copyWithBranch("b1");
         Map<String, String> newOptions = new HashMap<>();
