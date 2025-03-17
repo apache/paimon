@@ -39,7 +39,7 @@ public interface PartitionHandler extends AutoCloseable {
     void markDonePartitions(List<Map<String, String>> partitions)
             throws Catalog.TableNotExistException;
 
-    static PartitionHandler create(Catalog catalog, Table table, Identifier identifier) {
+    static PartitionHandler create(Catalog catalog, Identifier identifier) {
         return new PartitionHandler() {
 
             @Override

@@ -34,8 +34,6 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
-import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
-
 /** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
 
@@ -80,17 +78,7 @@ public class CatalogEnvironment implements Serializable {
             return null;
         }
         Catalog catalog = catalogLoader.load();
-        Table table;
-        try {
-            table = catalog.getTable(identifier);
-            if (!Boolean.parseBoolean(
-                    table.options().getOrDefault(METASTORE_PARTITIONED_TABLE.key(), "FALSE"))) {
-                return null;
-            }
-        } catch (Catalog.TableNotExistException e) {
-            throw new RuntimeException(e);
-        }
-        return PartitionHandler.create(catalog, table, identifier);
+        return PartitionHandler.create(catalog, identifier);
     }
 
     @Nullable

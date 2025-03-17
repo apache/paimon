@@ -430,7 +430,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
         if (!tagToPart) {
-            dropPartitions(identifier, partitions);
+            super.dropPartitions(identifier, partitions);
         }
     }
 
