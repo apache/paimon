@@ -46,7 +46,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -431,12 +430,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
         if (!tagToPart) {
-            org.apache.paimon.table.Table table = getTable(identifier);
-            try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-                commit.truncatePartitions(partitions);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            dropPartitions(identifier, partitions);
         }
     }
 
