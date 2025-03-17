@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -258,7 +259,12 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_multiple");
 
-        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withTypeMappingModes(
+                                TypeMapping.TypeMappingMode.ALLOW_NON_STRING_TO_STRING
+                                        .configString())
+                        .build();
         runActionWithDefaultEnv(action);
 
         checkTableSchema(

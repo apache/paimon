@@ -122,7 +122,8 @@ public class JdbcSchemaUtils {
             DataField dataField = currentFields.get(newField.name());
             if (Objects.nonNull(dataField)) {
                 DataType oldType = dataField.type();
-                switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newField.type())) {
+                switch (UpdatedDataFieldsProcessFunction.canConvert(
+                        oldType, newField.type(), TypeMapping.defaultMapping())) {
                     case CONVERT:
                         currentFields.put(newField.name(), newField);
                         break;
