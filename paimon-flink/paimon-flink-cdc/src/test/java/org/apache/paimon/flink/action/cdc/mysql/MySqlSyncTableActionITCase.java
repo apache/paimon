@@ -333,6 +333,34 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, one, 10, string_1, NULL, NULL, NULL, NULL, NULL]",
                         "+I[2, long_string_two, 2000000000000, string_2, 20, 20.5, 20.002, test_2, 200]");
         waitForResult(expected, table, rowType, primaryKeys);
+
+        // test alter non-string to string
+        statement.executeUpdate("ALTER TABLE schema_evolution_multiple MODIFY v7 VARCHAR(20)");
+        statement.executeUpdate(
+                "INSERT INTO schema_evolution_multiple VALUES "
+                        + "(3, 'three', 3000000000000, 'string_3', 30, 30.5, 30.003, 'test_3', 'three hundred')");
+        rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(20),
+                            DataTypes.BIGINT(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.INT(),
+                            DataTypes.DOUBLE(),
+                            DataTypes.DECIMAL(5, 3),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.VARCHAR(20),
+                        },
+                        new String[] {
+                            "_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *(", "v7"
+                        });
+        expected =
+                Arrays.asList(
+                        "+I[1, one, 10, string_1, NULL, NULL, NULL, NULL, NULL]",
+                        "+I[2, long_string_two, 2000000000000, string_2, 20, 20.5, 20.002, test_2, 200]",
+                        "+I[3, three, 3000000000000, string_3, 30, 30.5, 30.003, test_3, three hundred]");
+        waitForResult(expected, table, rowType, primaryKeys);
     }
 
     @Test

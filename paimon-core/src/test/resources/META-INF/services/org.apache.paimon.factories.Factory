@@ -14,3 +14,4 @@
 # limitations under the License.
 
 org.apache.paimon.mergetree.compact.aggregate.TestCustomAggFactory
+org.apache.paimon.rest.auth.CustomTestDLFTokenLoaderFactory

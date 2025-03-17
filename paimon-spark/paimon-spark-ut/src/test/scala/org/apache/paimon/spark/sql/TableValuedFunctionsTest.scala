@@ -21,6 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
 import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.{DataFrame, Row}
 
@@ -130,6 +131,12 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
             checkAnswer(
               sql(
                 s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1', '$t3') ORDER BY id"),
+              Seq(Row(2), Row(3), Row(4)))
+            val t1String = DateTimeUtils.formatLocalDateTime(DateTimeUtils.toLocalDateTime(t1), 3)
+            val t3String = DateTimeUtils.formatLocalDateTime(DateTimeUtils.toLocalDateTime(t3), 3)
+            checkAnswer(
+              sql(
+                s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1String', '$t3String') ORDER BY id"),
               Seq(Row(2), Row(3), Row(4)))
           }
         }
@@ -253,13 +260,13 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
             |""".stripMargin)
 
       sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id FROM range (1, 100001)")
-      sql("CALL sys.compact(table => 'T')")
+      sql("CALL sys.compact(table => 't')")
       sql("INSERT INTO t VALUES 100001")
       sql("INSERT INTO t VALUES 100002")
       sql("CALL sys.create_tag('t', 'tag1')")
 
       sql(
-        "CALL sys.compact(table => 'T', compact_strategy => 'minor', options => 'num-sorted-run.compaction-trigger=2')")
+        "CALL sys.compact(table => 't', compact_strategy => 'minor', options => 'num-sorted-run.compaction-trigger=2')")
       sql("DELETE FROM t WHERE id = 999")
       sql("CALL sys.create_tag('t', 'tag2')")
 
@@ -296,7 +303,7 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       sql("INSERT INTO t VALUES 2")
       sql("CALL sys.create_tag('t', 'tag1')")
 
-      sql("CALL sys.compact(table => 'T')")
+      sql("CALL sys.compact(table => 't')")
       sql("DELETE FROM t WHERE id = 1")
       sql("CALL sys.create_tag('t', 'tag2')")
 
@@ -317,6 +324,37 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       checkAnswer(
         sql("SELECT * FROM paimon_incremental_query('`t$audit_log`', 'tag1', 'tag2') ORDER BY id"),
         Seq(Row("-D", 1)))
+    }
+  }
+
+  test("Table Valued Functions: incremental query with delete after compact2") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT) USING paimon
+            |TBLPROPERTIES ('primary-key'='id', 'bucket' = '1', 'write-only' = 'true')
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES 1")
+      sql("DELETE FROM t WHERE id = 1")
+      sql("CALL sys.create_tag('t', 'tag1')")
+
+      sql("CALL sys.compact(table => 't')")
+      sql("INSERT INTO t VALUES 1")
+      sql("DELETE FROM t WHERE id = 1")
+      sql("CALL sys.create_tag('t', 'tag2')")
+
+      //         tag1                    tag2
+      // l0      f(+I 1),f(-D 1)         f(+I 1),f(-D 1)
+      checkAnswer(
+        sql("SELECT level FROM `t$files` VERSION AS OF 'tag1' ORDER BY level"),
+        Seq(Row(0), Row(0)))
+      checkAnswer(
+        sql("SELECT level FROM `t$files` VERSION AS OF 'tag2' ORDER BY level"),
+        Seq(Row(0), Row(0)))
+
+      checkAnswer(
+        sql("SELECT * FROM paimon_incremental_query('`t$audit_log`', 'tag1', 'tag2') ORDER BY id"),
+        Seq())
     }
   }
 

@@ -62,6 +62,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -622,7 +633,7 @@ paths:
     post:
       tags:
         - partition
-      summary: Create partitions
+      summary: Create partitions, ignore existing partitions
       operationId: createPartitions
       parameters:
         - name: prefix
@@ -660,7 +671,7 @@ paths:
     post:
       tags:
         - partition
-      summary: Drop partitions
+      summary: Drop partitions, ignore non-existent partitions
       operationId: dropPartitions
       parameters:
         - name: prefix
@@ -698,7 +709,7 @@ paths:
     post:
       tags:
         - partition
-      summary: Alter partitions
+      summary: Alter partitions, for non-existent partitions, partitions will be created directly
       operationId: alterPartitions
       parameters:
         - name: prefix
@@ -736,7 +747,7 @@ paths:
     post:
       tags:
         - partition
-      summary: MarkDone partitions
+      summary: MarkDone partitions, for non-existent partitions, partitions will be created directly
       operationId: markDonePartitions
       parameters:
         - name: prefix
@@ -1598,6 +1609,8 @@ components:
           type: array
           items:
             type: string
+        nextPageToken:
+          type: string
     GetDatabaseResponse:
       type: object
       properties:
