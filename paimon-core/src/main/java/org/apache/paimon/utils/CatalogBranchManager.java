@@ -65,7 +65,7 @@ public class CatalogBranchManager implements BranchManager {
         try {
             executePost(catalog -> catalog.createBranch(identifier, branchName, null));
         } catch (UnsupportedOperationException e) {
-            branchManager.dropBranch(branchName);
+            branchManager.createBranch(branchName);
         }
     }
 
@@ -74,11 +74,7 @@ public class CatalogBranchManager implements BranchManager {
         try {
             executePost(catalog -> catalog.createBranch(identifier, branchName, tagName));
         } catch (UnsupportedOperationException e) {
-            if (tagName == null) {
-                branchManager.createBranch(branchName);
-            } else {
-                branchManager.createBranch(branchName, tagName);
-            }
+            branchManager.createBranch(branchName, tagName);
         }
     }
 
