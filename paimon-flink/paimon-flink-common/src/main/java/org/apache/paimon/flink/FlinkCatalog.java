@@ -1438,8 +1438,9 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             Identifier identifier = toIdentifier(tablePath);
-            catalog.dropPartitions(
-                    identifier, Collections.singletonList(partitionSpec.getPartitionSpec()));
+            List<Map<String, String>> partitions =
+                    Collections.singletonList(partitionSpec.getPartitionSpec());
+            catalog.dropPartitions(identifier, partitions);
         } catch (Catalog.TableNotExistException e) {
             throw new CatalogException(e);
         }

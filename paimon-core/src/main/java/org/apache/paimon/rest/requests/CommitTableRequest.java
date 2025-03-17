@@ -19,7 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -40,12 +40,12 @@ public class CommitTableRequest implements RESTRequest {
     private final Snapshot snapshot;
 
     @JsonProperty(FIELD_STATISTICS)
-    private final List<Partition> statistics;
+    private final List<PartitionStatistics> statistics;
 
     @JsonCreator
     public CommitTableRequest(
             @JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot,
-            @JsonProperty(FIELD_STATISTICS) List<Partition> statistics) {
+            @JsonProperty(FIELD_STATISTICS) List<PartitionStatistics> statistics) {
         this.snapshot = snapshot;
         this.statistics = statistics;
     }
@@ -56,7 +56,7 @@ public class CommitTableRequest implements RESTRequest {
     }
 
     @JsonGetter(FIELD_STATISTICS)
-    public List<Partition> getStatistics() {
+    public List<PartitionStatistics> getStatistics() {
         return statistics;
     }
 }

@@ -25,40 +25,20 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * Statistics of a partition, fields inside may be negative, indicating that some data has been
- * removed.
- */
+/** Represent a partition, including statistics and done flag. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @Public
-public class Partition implements Serializable {
+public class Partition extends PartitionStatistics {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
-    public static final String FIELD_SPEC = "spec";
-    public static final String FIELD_RECORD_COUNT = "recordCount";
-    public static final String FIELD_FILE_SIZE_IN_BYTES = "fileSizeInBytes";
-    public static final String FIELD_FILE_COUNT = "fileCount";
-    public static final String FIELD_LAST_FILE_CREATION_TIME = "lastFileCreationTime";
+    public static final String FIELD_DONE = "done";
 
-    @JsonProperty(FIELD_SPEC)
-    private final Map<String, String> spec;
-
-    @JsonProperty(FIELD_RECORD_COUNT)
-    private final long recordCount;
-
-    @JsonProperty(FIELD_FILE_SIZE_IN_BYTES)
-    private final long fileSizeInBytes;
-
-    @JsonProperty(FIELD_FILE_COUNT)
-    private final long fileCount;
-
-    @JsonProperty(FIELD_LAST_FILE_CREATION_TIME)
-    private final long lastFileCreationTime;
+    @JsonProperty(FIELD_DONE)
+    private final boolean done;
 
     @JsonCreator
     public Partition(
@@ -66,58 +46,32 @@ public class Partition implements Serializable {
             @JsonProperty(FIELD_RECORD_COUNT) long recordCount,
             @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) long fileSizeInBytes,
             @JsonProperty(FIELD_FILE_COUNT) long fileCount,
-            @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime) {
-        this.spec = spec;
-        this.recordCount = recordCount;
-        this.fileSizeInBytes = fileSizeInBytes;
-        this.fileCount = fileCount;
-        this.lastFileCreationTime = lastFileCreationTime;
+            @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime,
+            @JsonProperty(FIELD_DONE) boolean done) {
+        super(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+        this.done = done;
     }
 
-    @JsonGetter(FIELD_SPEC)
-    public Map<String, String> spec() {
-        return spec;
-    }
-
-    @JsonGetter(FIELD_RECORD_COUNT)
-    public long recordCount() {
-        return recordCount;
-    }
-
-    @JsonGetter(FIELD_FILE_SIZE_IN_BYTES)
-    public long fileSizeInBytes() {
-        return fileSizeInBytes;
-    }
-
-    @JsonGetter(FIELD_FILE_COUNT)
-    public long fileCount() {
-        return fileCount;
-    }
-
-    @JsonGetter(FIELD_LAST_FILE_CREATION_TIME)
-    public long lastFileCreationTime() {
-        return lastFileCreationTime;
+    @JsonGetter(FIELD_DONE)
+    public boolean done() {
+        return done;
     }
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        Partition that = (Partition) o;
-        return recordCount == that.recordCount
-                && fileSizeInBytes == that.fileSizeInBytes
-                && fileCount == that.fileCount
-                && lastFileCreationTime == that.lastFileCreationTime
-                && Objects.equals(spec, that.spec);
+        if (!super.equals(o)) {
+            return false;
+        }
+        Partition partition = (Partition) o;
+        return done == partition.done;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+        return Objects.hash(super.hashCode(), done);
     }
 
     @Override
@@ -133,6 +87,8 @@ public class Partition implements Serializable {
                 + fileCount
                 + ", lastFileCreationTime="
                 + lastFileCreationTime
+                + ", done="
+                + done
                 + '}';
     }
 }

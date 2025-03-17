@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -281,7 +282,7 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
-    public void alterPartitions(Identifier identifier, List<Partition> partitions)
+    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {
         wrapped.alterPartitions(identifier, partitions);
         if (partitionCache != null) {

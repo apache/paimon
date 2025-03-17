@@ -20,7 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 
 import java.util.List;
 import java.util.Map;
@@ -33,7 +33,8 @@ public interface PartitionHandler extends AutoCloseable {
 
     void dropPartitions(List<Map<String, String>> partitions) throws Catalog.TableNotExistException;
 
-    void alterPartitions(List<Partition> partitions) throws Catalog.TableNotExistException;
+    void alterPartitions(List<PartitionStatistics> partitions)
+            throws Catalog.TableNotExistException;
 
     void markDonePartitions(List<Map<String, String>> partitions)
             throws Catalog.TableNotExistException;
@@ -54,7 +55,7 @@ public interface PartitionHandler extends AutoCloseable {
             }
 
             @Override
-            public void alterPartitions(List<Partition> partitions)
+            public void alterPartitions(List<PartitionStatistics> partitions)
                     throws Catalog.TableNotExistException {
                 catalog.alterPartitions(identifier, partitions);
             }

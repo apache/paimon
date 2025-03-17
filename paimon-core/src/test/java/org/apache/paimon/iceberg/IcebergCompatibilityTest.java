@@ -233,8 +233,7 @@ public class IcebergCompatibilityTest {
                 Map<String, String> partition = new HashMap<>();
                 partition.put("pt1", "20250304");
                 partition.put("pt2", "16");
-                paimonCatalog.dropPartitions(
-                        paimonIdentifier, Collections.singletonList(partition));
+                commit.truncatePartitions(Collections.singletonList(partition));
 
                 assertThat(getIcebergResult())
                         .containsExactlyInAnyOrder(
@@ -243,8 +242,7 @@ public class IcebergCompatibilityTest {
                 // delete the first-level partition
                 Map<String, String> partition = new HashMap<>();
                 partition.put("pt1", "20250304");
-                paimonCatalog.dropPartitions(
-                        paimonIdentifier, Collections.singletonList(partition));
+                commit.truncatePartitions(Collections.singletonList(partition));
 
                 assertThat(getIcebergResult())
                         .containsExactlyInAnyOrder("Record(20250305, 15, 1, 1)");

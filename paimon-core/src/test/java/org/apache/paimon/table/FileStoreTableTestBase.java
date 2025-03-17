@@ -66,7 +66,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileSystemBranchManager;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -1177,7 +1177,7 @@ public abstract class FileStoreTableTestBase {
         table.createBranch("test-branch", "test-tag");
 
         // verify that branch file exist
-        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
+        BranchManager branchManager = table.branchManager();
         assertThat(branchManager.branchExists("test-branch")).isTrue();
 
         // verify test-tag in test-branch is equal to snapshot 2
@@ -1261,7 +1261,7 @@ public abstract class FileStoreTableTestBase {
         table.deleteBranch("branch1");
 
         // verify that branch file not exist
-        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
+        BranchManager branchManager = table.branchManager();
         assertThat(branchManager.branchExists("branch1")).isFalse();
 
         assertThatThrownBy(() -> table.deleteBranch("branch1"))
@@ -1943,7 +1943,7 @@ public abstract class FileStoreTableTestBase {
         table.createBranch(BRANCH_NAME, "tag1");
 
         // verify that branch1 file exist
-        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
+        BranchManager branchManager = table.branchManager();
         assertThat(branchManager.branchExists(BRANCH_NAME)).isTrue();
 
         // Verify branch1 and the main branch have the same data

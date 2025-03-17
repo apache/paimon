@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.actions.AddDonePartitionAction;
 import org.apache.paimon.table.PartitionHandler;
 
@@ -64,7 +64,7 @@ class AddDonePartitionActionTest {
                             throws Catalog.TableNotExistException {}
 
                     @Override
-                    public void alterPartitions(List<Partition> partitions)
+                    public void alterPartitions(List<PartitionStatistics> partitions)
                             throws Catalog.TableNotExistException {}
 
                     @Override

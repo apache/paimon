@@ -21,7 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.source.DataSplit;
@@ -82,8 +82,9 @@ public class PartitionStatisticsReporter implements Closeable {
                 }
             }
 
-            Partition partitionStats =
-                    new Partition(partitionSpec, fileCount, totalSize, rowCount, modifyTimeMillis);
+            PartitionStatistics partitionStats =
+                    new PartitionStatistics(
+                            partitionSpec, fileCount, totalSize, rowCount, modifyTimeMillis);
             LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
             partitionHandler.alterPartitions(Collections.singletonList(partitionStats));
         }

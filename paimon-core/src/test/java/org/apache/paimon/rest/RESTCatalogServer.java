@@ -28,8 +28,6 @@ import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
-import org.apache.paimon.catalog.SupportsBranches;
-import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -42,15 +40,12 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
-import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -115,6 +110,7 @@ import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
+
     private static final Logger LOG = LoggerFactory.getLogger(RESTCatalogServer.class);
 
     public static final int DEFAULT_MAX_RESULTS = 100;
@@ -306,16 +302,6 @@ public class RESTCatalogServer {
                                         && "tables".equals(resources[1])
                                         && resources[3].startsWith("partitions");
 
-                        boolean isDropPartitions =
-                                resources.length == 5
-                                        && "tables".equals(resources[1])
-                                        && "partitions".equals(resources[3])
-                                        && "drop".equals(resources[4]);
-                        boolean isAlterPartitions =
-                                resources.length == 5
-                                        && "tables".equals(resources[1])
-                                        && "partitions".equals(resources[3])
-                                        && "alter".equals(resources[4]);
                         boolean isMarkDonePartitions =
                                 resources.length == 5
                                         && "tables".equals(resources[1])
@@ -343,10 +329,7 @@ public class RESTCatalogServer {
                             }
                         }
                         // validate partition
-                        if (isPartitions
-                                || isDropPartitions
-                                || isAlterPartitions
-                                || isMarkDonePartitions) {
+                        if (isPartitions || isMarkDonePartitions) {
                             String tableName = RESTUtil.decodeString(resources[2]);
                             Optional<MockResponse> error =
                                     checkTablePartitioned(
@@ -355,11 +338,7 @@ public class RESTCatalogServer {
                                 return error.get();
                             }
                         }
-                        if (isDropPartitions) {
-                            return dropPartitionsHandle(identifier, restAuthParameter.data());
-                        } else if (isAlterPartitions) {
-                            return alterPartitionsHandle(identifier, restAuthParameter.data());
-                        } else if (isMarkDonePartitions) {
+                        if (isMarkDonePartitions) {
                             MarkDonePartitionsRequest markDonePartitionsRequest =
                                     OBJECT_MAPPER.readValue(data, MarkDonePartitionsRequest.class);
                             catalog.markDonePartitions(
@@ -960,15 +939,6 @@ public class RESTCatalogServer {
                     }
                 }
                 return generateFinalListPartitionsResponse(parameters, partitions);
-            case "POST":
-                CreatePartitionsRequest requestBody =
-                        OBJECT_MAPPER.readValue(data, CreatePartitionsRequest.class);
-                tablePartitionsStore.put(
-                        tableIdentifier.getFullName(),
-                        requestBody.getPartitionSpecs().stream()
-                                .map(partition -> spec2Partition(partition))
-                                .collect(Collectors.toList()));
-                return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
         }
@@ -1341,67 +1311,6 @@ public class RESTCatalogServer {
         }
     }
 
-    private MockResponse dropPartitionsHandle(Identifier identifier, String data)
-            throws Catalog.TableNotExistException, JsonProcessingException {
-        DropPartitionsRequest dropPartitionsRequest =
-                OBJECT_MAPPER.readValue(data, DropPartitionsRequest.class);
-        List<Map<String, String>> partitionSpecs = dropPartitionsRequest.getPartitionSpecs();
-        if (tableMetadataStore.containsKey(identifier.getFullName())) {
-            List<Partition> existPartitions = tablePartitionsStore.get(identifier.getFullName());
-            partitionSpecs.forEach(
-                    partition -> {
-                        for (Map.Entry<String, String> entry : partition.entrySet()) {
-                            existPartitions.stream()
-                                    .filter(
-                                            p ->
-                                                    p.spec().containsKey(entry.getKey())
-                                                            && p.spec()
-                                                                    .get(entry.getKey())
-                                                                    .equals(entry.getValue()))
-                                    .findFirst()
-                                    .ifPresent(
-                                            existPartition ->
-                                                    existPartitions.remove(existPartition));
-                        }
-                    });
-            return new MockResponse().setResponseCode(200);
-
-        } else {
-            throw new Catalog.TableNotExistException(identifier);
-        }
-    }
-
-    private MockResponse alterPartitionsHandle(Identifier identifier, String data)
-            throws Catalog.TableNotExistException, JsonProcessingException {
-        if (tableMetadataStore.containsKey(identifier.getFullName())) {
-            AlterPartitionsRequest alterPartitionsRequest =
-                    OBJECT_MAPPER.readValue(data, AlterPartitionsRequest.class);
-            List<Partition> partitions = alterPartitionsRequest.getPartitions();
-            List<Partition> existPartitions = tablePartitionsStore.get(identifier.getFullName());
-            partitions.forEach(
-                    partition -> {
-                        for (Map.Entry<String, String> entry : partition.spec().entrySet()) {
-                            existPartitions.stream()
-                                    .filter(
-                                            p ->
-                                                    p.spec().containsKey(entry.getKey())
-                                                            && p.spec()
-                                                                    .get(entry.getKey())
-                                                                    .equals(entry.getValue()))
-                                    .findFirst()
-                                    .ifPresent(
-                                            existPartition ->
-                                                    existPartitions.remove(existPartition));
-                        }
-                    });
-            existPartitions.addAll(partitions);
-            tablePartitionsStore.put(identifier.getFullName(), existPartitions);
-            return new MockResponse().setResponseCode(200);
-        } else {
-            throw new Catalog.TableNotExistException(identifier);
-        }
-    }
-
     private MockResponse mockResponse(RESTResponse response, int httpCode) {
         try {
             return new MockResponse()
@@ -1439,7 +1348,7 @@ public class RESTCatalogServer {
 
     private Partition spec2Partition(Map<String, String> spec) {
         // todo: need update
-        return new Partition(spec, 123, 456, 789, 123);
+        return new Partition(spec, 123, 456, 789, 123, false);
     }
 
     private FileStoreTable getFileTable(Identifier identifier)
@@ -1453,9 +1362,7 @@ public class RESTCatalogServer {
                             tableMetadata.uuid(),
                             catalog.catalogLoader(),
                             catalog.lockFactory().orElse(null),
-                            catalog.lockContext().orElse(null),
-                            catalog instanceof SupportsSnapshots,
-                            catalog instanceof SupportsBranches);
+                            catalog.lockContext().orElse(null));
             Path path = new Path(schema.options().get(PATH.key()));
             FileIO dataFileIO = catalog.fileIO();
             FileStoreTable table =

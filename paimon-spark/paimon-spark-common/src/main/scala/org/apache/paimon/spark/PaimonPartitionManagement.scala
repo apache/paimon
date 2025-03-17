@@ -137,16 +137,14 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
       case fileStoreTable: FileStoreTable =>
         val partitions = toPaimonPartitions(rows)
         val partitionHandler = fileStoreTable.catalogEnvironment().partitionHandler()
-        if (partitionHandler == null) {
-          throw new UnsupportedOperationException(
-            "The table must have metastore to create partition.")
-        }
-        try {
-          if (fileStoreTable.coreOptions().partitionedTableInMetastore()) {
-            partitionHandler.createPartitions(partitions.toSeq.asJava)
+        if (partitionHandler != null) {
+          try {
+            if (fileStoreTable.coreOptions().partitionedTableInMetastore()) {
+              partitionHandler.createPartitions(partitions.toSeq.asJava)
+            }
+          } finally {
+            partitionHandler.close()
           }
-        } finally {
-          partitionHandler.close()
         }
       case _ =>
         throw new UnsupportedOperationException("Only FileStoreTable supports create partitions.")

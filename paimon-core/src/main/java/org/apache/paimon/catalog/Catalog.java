@@ -19,11 +19,15 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.PagedList;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.view.View;
 
 import javax.annotation.Nullable;
@@ -31,6 +35,7 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * This interface is responsible for reading and writing metadata such as database/table from a
@@ -283,37 +288,6 @@ public interface Catalog extends AutoCloseable {
     // ======================= partition methods ===============================
 
     /**
-     * Create partitions of the specify table. Ignore existing partitions.
-     *
-     * @param identifier path of the table to create partitions
-     * @param partitions partitions to be created
-     * @throws TableNotExistException if the table does not exist
-     */
-    void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException;
-
-    /**
-     * Drop partitions of the specify table. Ignore non-existent partitions.
-     *
-     * @param identifier path of the table to drop partitions
-     * @param partitions partitions to be deleted
-     * @throws TableNotExistException if the table does not exist
-     */
-    void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException;
-
-    /**
-     * Alter partitions of the specify table. For non-existent partitions, partitions will be
-     * created directly.
-     *
-     * @param identifier path of the table to alter partitions
-     * @param partitions partitions to be altered
-     * @throws TableNotExistException if the table does not exist
-     */
-    void alterPartitions(Identifier identifier, List<Partition> partitions)
-            throws TableNotExistException;
-
-    /**
      * Mark partitions done of the specify table. For non-existent partitions, partitions will be
      * created directly.
      *
@@ -488,6 +462,114 @@ public interface Catalog extends AutoCloseable {
     default void repairTable(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
+
+    // ==================== Branch methods ==========================
+
+    /**
+     * Create a new branch for this table. By default, an empty branch will be created using the
+     * latest schema. If you provide {@code #fromTag}, a branch will be created from the tag and the
+     * data files will be inherited from it.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param branch the branch name
+     * @param fromTag from the tag
+     * @throws TableNotExistException if the table in identifier doesn't exist
+     * @throws BranchAlreadyExistException if the branch already exists
+     * @throws TagNotExistException if the tag doesn't exist
+     */
+    void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException;
+
+    /**
+     * Drop the branch for this table.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param branch the branch name
+     * @throws BranchNotExistException if the branch doesn't exist
+     */
+    void dropBranch(Identifier identifier, String branch) throws BranchNotExistException;
+
+    /**
+     * Fast-forward a branch to main branch.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param branch the branch name
+     * @throws BranchNotExistException if the branch doesn't exist
+     */
+    void fastForward(Identifier identifier, String branch) throws BranchNotExistException;
+
+    /**
+     * List all branches of the table.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @throws TableNotExistException if the table in identifier doesn't exist
+     */
+    List<String> listBranches(Identifier identifier) throws TableNotExistException;
+
+    // ==================== Snapshot Operations ==========================
+
+    /**
+     * Commit the {@link Snapshot} for table identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @param snapshot Snapshot to be committed
+     * @param statistics statistics information of this change
+     * @return Success or not
+     * @throws Catalog.TableNotExistException if the target does not exist
+     */
+    boolean commitSnapshot(
+            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
+            throws Catalog.TableNotExistException;
+
+    /**
+     * Return the snapshot of table identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @return The requested snapshot of the table
+     * @throws Catalog.TableNotExistException if the target does not exist
+     */
+    Optional<TableSnapshot> loadSnapshot(Identifier identifier)
+            throws Catalog.TableNotExistException;
+
+    // ==================== Partition Modifications ==========================
+
+    /**
+     * Create partitions of the specify table. Ignore existing partitions.
+     *
+     * @param identifier path of the table to create partitions
+     * @param partitions partitions to be created
+     * @throws TableNotExistException if the table does not exist
+     */
+    default void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
+
+    /**
+     * Drop partitions of the specify table. Ignore non-existent partitions.
+     *
+     * @param identifier path of the table to drop partitions
+     * @param partitions partitions to be deleted
+     * @throws TableNotExistException if the table does not exist
+     */
+    default void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Alter partitions of the specify table. For non-existent partitions, partitions will be
+     * created directly.
+     *
+     * @param identifier path of the table to alter partitions
+     * @param partitions partitions to be altered
+     * @throws TableNotExistException if the table does not exist
+     */
+    default void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
+            throws TableNotExistException {}
 
     // ==================== Catalog Information ==========================
 
@@ -770,6 +852,87 @@ public interface Catalog extends AutoCloseable {
 
         public Identifier identifier() {
             return identifier;
+        }
+    }
+
+    /** Exception for trying to create a branch that already exists. */
+    class BranchAlreadyExistException extends Exception {
+
+        private static final String MSG = "Branch %s in table %s already exists.";
+
+        private final Identifier identifier;
+        private final String branch;
+
+        public BranchAlreadyExistException(Identifier identifier, String branch) {
+            this(identifier, branch, null);
+        }
+
+        public BranchAlreadyExistException(Identifier identifier, String branch, Throwable cause) {
+            super(String.format(MSG, branch, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.branch = branch;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String branch() {
+            return branch;
+        }
+    }
+
+    /** Exception for trying to operate on a branch that doesn't exist. */
+    class BranchNotExistException extends Exception {
+
+        private static final String MSG = "Branch %s in table %s doesn't exist.";
+
+        private final Identifier identifier;
+        private final String branch;
+
+        public BranchNotExistException(Identifier identifier, String branch) {
+            this(identifier, branch, null);
+        }
+
+        public BranchNotExistException(Identifier identifier, String branch, Throwable cause) {
+            super(String.format(MSG, branch, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.branch = branch;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String branch() {
+            return branch;
+        }
+    }
+
+    /** Exception for trying to operate on a tag that doesn't exist. */
+    class TagNotExistException extends Exception {
+
+        private static final String MSG = "Tag %s in table %s doesn't exist.";
+
+        private final Identifier identifier;
+        private final String tag;
+
+        public TagNotExistException(Identifier identifier, String tag) {
+            this(identifier, tag, null);
+        }
+
+        public TagNotExistException(Identifier identifier, String tag, Throwable cause) {
+            super(String.format(MSG, tag, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.tag = tag;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String tag() {
+            return tag;
         }
     }
 }

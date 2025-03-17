@@ -19,7 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.Serializable;
@@ -28,7 +28,8 @@ import java.util.List;
 /** Interface to commit snapshot atomically. */
 public interface SnapshotCommit extends AutoCloseable {
 
-    boolean commit(Snapshot snapshot, String branch, List<Partition> statistics) throws Exception;
+    boolean commit(Snapshot snapshot, String branch, List<PartitionStatistics> statistics)
+            throws Exception;
 
     /** Factory to create {@link SnapshotCommit}. */
     interface Factory extends Serializable {

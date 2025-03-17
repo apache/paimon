@@ -29,7 +29,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -122,7 +122,7 @@ public class PartitionExpireTest {
                     }
 
                     @Override
-                    public void alterPartitions(List<Partition> partitions)
+                    public void alterPartitions(List<PartitionStatistics> partitions)
                             throws Catalog.TableNotExistException {}
 
                     @Override
@@ -134,7 +134,7 @@ public class PartitionExpireTest {
                 };
 
         CatalogEnvironment env =
-                new CatalogEnvironment(null, null, null, null, null, false, false) {
+                new CatalogEnvironment(null, null, null, null, null) {
 
                     @Override
                     public PartitionHandler partitionHandler() {

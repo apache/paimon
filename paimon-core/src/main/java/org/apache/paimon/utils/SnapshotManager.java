@@ -166,6 +166,7 @@ public class SnapshotManager implements Serializable {
         if (snapshotLoader != null) {
             try {
                 return snapshotLoader.load().orElse(null);
+            } catch (UnsupportedOperationException ignored) {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -177,7 +178,10 @@ public class SnapshotManager implements Serializable {
     public @Nullable Long latestSnapshotId() {
         try {
             if (snapshotLoader != null) {
-                return snapshotLoader.load().map(Snapshot::id).orElse(null);
+                try {
+                    return snapshotLoader.load().map(Snapshot::id).orElse(null);
+                } catch (UnsupportedOperationException ignored) {
+                }
             }
             return findLatest(snapshotDirectory(), SNAPSHOT_PREFIX, this::snapshotPath);
         } catch (IOException e) {
