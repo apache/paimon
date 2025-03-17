@@ -1268,6 +1268,22 @@ public abstract class FileStoreTableTestBase {
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'branch1' doesn't exist."));
+
+        // test delete fallback branch
+        table.createBranch("fallback");
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put("scan.fallback-branch", "fallback");
+        FileStoreTable table1 = table.copy(dynamicOptions);
+        assertThatThrownBy(() -> table1.deleteBranch("fallback"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "can not delete the fallback branch. "
+                                        + "branchName to be deleted is fallback. you have set 'scan.fallback-branch' = 'fallback'. "
+                                        + "you should reset 'scan.fallback-branch' before deleting this branch."));
+
+        table.deleteBranch("fallback");
     }
 
     @Test
