@@ -50,6 +50,7 @@ import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNotNull;
 
 /** Test for AliyunJsonRecordParser. */
 public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
@@ -179,7 +180,7 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
             Map<String, String> data = records.get(0).toRichCdcRecord().toCdcRecord().data();
             String createTime = data.get("etl_create_time");
             String updateTime = data.get("etl_update_time");
-            Assert.assertNotNull(createTime);
+            assertNotNull(createTime);
 
             updateTime =
                     BinaryStringUtils.toTimestamp(BinaryString.fromString(updateTime), 6)
@@ -218,7 +219,7 @@ public class AliyunJsonRecordParserTest extends KafkaActionITCaseBase {
             Map<String, String> data = records.get(0).toRichCdcRecord().toCdcRecord().data();
             String createTime = data.get("etl_create_time");
             String updateTime = data.get("etl_update_time");
-            Assert.assertNotNull(createTime);
+            assertNotNull(createTime);
 
             updateTime =
                     BinaryStringUtils.toTimestamp(BinaryString.fromString(updateTime), 6)
