@@ -36,7 +36,7 @@ public class ManifestReadThreadPool {
             createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
 
     public static synchronized ThreadPoolExecutor getExecutorService(@Nullable Integer threadNum) {
-        if (threadNum == null || threadNum >= executorService.getMaximumPoolSize()) {
+        if (threadNum == null) {
             return executorService;
         }
         // we don't need to close previous pool
