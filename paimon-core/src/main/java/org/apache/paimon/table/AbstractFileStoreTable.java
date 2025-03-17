@@ -688,7 +688,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public BranchManager branchManager() {
-        if (catalogEnvironment.catalogLoader() != null && catalogEnvironment.supportsBranches()) {
+        if (catalogEnvironment.catalogLoader() != null) {
             return new CatalogBranchManager(catalogEnvironment.catalogLoader(), identifier());
         }
         return new FileSystemBranchManager(

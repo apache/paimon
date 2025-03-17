@@ -46,28 +46,22 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final CatalogLoader catalogLoader;
     @Nullable private final CatalogLockFactory lockFactory;
     @Nullable private final CatalogLockContext lockContext;
-    private final boolean supportsSnapshots;
-    private final boolean supportsBranches;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
             @Nullable String uuid,
             @Nullable CatalogLoader catalogLoader,
             @Nullable CatalogLockFactory lockFactory,
-            @Nullable CatalogLockContext lockContext,
-            boolean supportsSnapshots,
-            boolean supportsBranches) {
+            @Nullable CatalogLockContext lockContext) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
         this.lockFactory = lockFactory;
         this.lockContext = lockContext;
-        this.supportsSnapshots = supportsSnapshots;
-        this.supportsBranches = supportsBranches;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null, null, false, false);
+        return new CatalogEnvironment(null, null, null, null, null);
     }
 
     @Nullable
@@ -102,17 +96,17 @@ public class CatalogEnvironment implements Serializable {
     @Nullable
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
         SnapshotCommit.Factory factory;
-        if (catalogLoader == null || !supportsSnapshots) {
+        if (catalogLoader == null) {
             factory = new RenamingSnapshotCommit.Factory(lockFactory, lockContext);
         } else {
-            factory = new CatalogSnapshotCommit.Factory(catalogLoader);
+            factory = new CatalogSnapshotCommit.Factory(catalogLoader, lockFactory, lockContext);
         }
         return factory.create(identifier, snapshotManager);
     }
 
     @Nullable
     public SnapshotLoader snapshotLoader() {
-        if (catalogLoader == null || !supportsSnapshots) {
+        if (catalogLoader == null) {
             return null;
         }
         return new SnapshotLoaderImpl(catalogLoader, identifier);
@@ -131,9 +125,5 @@ public class CatalogEnvironment implements Serializable {
     @Nullable
     public CatalogLoader catalogLoader() {
         return catalogLoader;
-    }
-
-    public boolean supportsBranches() {
-        return supportsBranches;
     }
 }

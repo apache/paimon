@@ -26,7 +26,6 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.catalog.SupportsPartitionModification;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
@@ -1419,12 +1418,8 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             Identifier identifier = toIdentifier(tablePath);
-            if (catalog instanceof SupportsPartitionModification) {
-                ((SupportsPartitionModification) catalog)
-                        .createPartitions(
-                                identifier,
-                                Collections.singletonList(partitionSpec.getPartitionSpec()));
-            }
+            catalog.createPartitions(
+                    identifier, Collections.singletonList(partitionSpec.getPartitionSpec()));
         } catch (Catalog.TableNotExistException e) {
             throw new CatalogException(e);
         }
@@ -1445,16 +1440,7 @@ public class FlinkCatalog extends AbstractCatalog {
             Identifier identifier = toIdentifier(tablePath);
             List<Map<String, String>> partitions =
                     Collections.singletonList(partitionSpec.getPartitionSpec());
-            if (catalog instanceof SupportsPartitionModification) {
-                ((SupportsPartitionModification) catalog).dropPartitions(identifier, partitions);
-            } else {
-                Table table = catalog.getTable(identifier);
-                try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-                    commit.truncatePartitions(partitions);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }
+            catalog.dropPartitions(identifier, partitions);
         } catch (Catalog.TableNotExistException e) {
             throw new CatalogException(e);
         }

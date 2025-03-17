@@ -20,12 +20,14 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -33,10 +35,13 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileSystemBranchManager;
 
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -433,6 +438,66 @@ public abstract class AbstractCatalog implements Catalog {
                 this::loadTableMetadata,
                 lockFactory().orElse(null),
                 lockContext().orElse(null));
+    }
+
+    private FileSystemBranchManager fileSystemBranchManager(Identifier identifier)
+            throws TableNotExistException {
+        FileStoreTable table = (FileStoreTable) getTable(identifier);
+        return new FileSystemBranchManager(
+                table.fileIO(),
+                table.location(),
+                table.snapshotManager(),
+                table.tagManager(),
+                table.schemaManager());
+    }
+
+    @Override
+    public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
+        FileSystemBranchManager branchManager = fileSystemBranchManager(identifier);
+        if (fromTag == null) {
+            branchManager.createBranch(branch);
+        } else {
+            branchManager.createBranch(branch, fromTag);
+        }
+    }
+
+    @Override
+    public void dropBranch(Identifier identifier, String branch) throws BranchNotExistException {
+        FileSystemBranchManager branchManager;
+        try {
+            branchManager = fileSystemBranchManager(identifier);
+        } catch (TableNotExistException e) {
+            throw new BranchNotExistException(identifier, branch);
+        }
+        branchManager.dropBranch(branch);
+    }
+
+    @Override
+    public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
+        FileSystemBranchManager branchManager;
+        try {
+            branchManager = fileSystemBranchManager(identifier);
+        } catch (TableNotExistException e) {
+            throw new BranchNotExistException(identifier, branch);
+        }
+        branchManager.fastForward(branch);
+    }
+
+    @Override
+    public List<String> listBranches(Identifier identifier) throws TableNotExistException {
+        return fileSystemBranchManager(identifier).branches();
+    }
+
+    @Override
+    public boolean commitSnapshot(
+            Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<TableSnapshot> loadSnapshot(Identifier identifier) {
+        throw new UnsupportedOperationException();
     }
 
     /**

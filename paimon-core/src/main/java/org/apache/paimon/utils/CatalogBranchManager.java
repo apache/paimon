@@ -21,7 +21,6 @@ package org.apache.paimon.utils;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.SupportsBranches;
 
 import javax.annotation.Nullable;
 
@@ -38,7 +37,7 @@ public class CatalogBranchManager implements BranchManager {
         this.identifier = identifier;
     }
 
-    private void executePost(ThrowingConsumer<SupportsBranches, Exception> func) {
+    private void executePost(ThrowingConsumer<Catalog, Exception> func) {
         executeGet(
                 catalog -> {
                     func.accept(catalog);
@@ -46,10 +45,9 @@ public class CatalogBranchManager implements BranchManager {
                 });
     }
 
-    private <T> T executeGet(FunctionWithException<SupportsBranches, T, Exception> func) {
+    private <T> T executeGet(FunctionWithException<Catalog, T, Exception> func) {
         try (Catalog catalog = catalogLoader.load()) {
-            SupportsBranches supportsBranches = (SupportsBranches) catalog;
-            return func.apply(supportsBranches);
+            return func.apply(catalog);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

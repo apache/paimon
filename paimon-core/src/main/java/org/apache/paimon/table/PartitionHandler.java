@@ -20,9 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.SupportsPartitionModification;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.table.sink.BatchTableCommit;
 
 import java.util.List;
 import java.util.Map;
@@ -47,34 +45,19 @@ public interface PartitionHandler extends AutoCloseable {
             @Override
             public void createPartitions(List<Map<String, String>> partitions)
                     throws Catalog.TableNotExistException {
-                if (catalog instanceof SupportsPartitionModification) {
-                    ((SupportsPartitionModification) catalog)
-                            .createPartitions(identifier, partitions);
-                }
+                catalog.createPartitions(identifier, partitions);
             }
 
             @Override
             public void dropPartitions(List<Map<String, String>> partitions)
                     throws Catalog.TableNotExistException {
-                if (catalog instanceof SupportsPartitionModification) {
-                    ((SupportsPartitionModification) catalog)
-                            .dropPartitions(identifier, partitions);
-                } else {
-                    try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-                        commit.truncatePartitions(partitions);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                }
+                catalog.dropPartitions(identifier, partitions);
             }
 
             @Override
             public void alterPartitions(List<PartitionStatistics> partitions)
                     throws Catalog.TableNotExistException {
-                if (catalog instanceof SupportsPartitionModification) {
-                    ((SupportsPartitionModification) catalog)
-                            .alterPartitions(identifier, partitions);
-                }
+                catalog.alterPartitions(identifier, partitions);
             }
 
             @Override

@@ -848,10 +848,7 @@ public abstract class CatalogTestBase {
                                                 SchemaChange.updateColumnType(
                                                         "dt", DataTypes.DATE())),
                                         false))
-                .satisfies(
-                        anyCauseMatches(
-                                UnsupportedOperationException.class,
-                                "Cannot update partition column: [dt]"));
+                .satisfies(anyCauseMatches("Cannot update partition column: [dt]"));
     }
 
     @Test
@@ -976,10 +973,7 @@ public abstract class CatalogTestBase {
                                                 SchemaChange.updateColumnNullability(
                                                         new String[] {"col2"}, true)),
                                         false))
-                .satisfies(
-                        anyCauseMatches(
-                                UnsupportedOperationException.class,
-                                "Cannot change nullability of primary key"));
+                .satisfies(anyCauseMatches("Cannot change nullability of primary key"));
     }
 
     @Test
@@ -1210,7 +1204,6 @@ public abstract class CatalogTestBase {
         // alter table
         SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.STRING());
         assertThatThrownBy(() -> catalog.alterTable(identifier, schemaChange, false))
-                .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Only data table support alter table.");
 
         // drop table
@@ -1277,13 +1270,8 @@ public abstract class CatalogTestBase {
 
         assertDoesNotThrow(() -> catalog.markDonePartitions(identifier, partitionSpecs));
 
-        if (catalog instanceof SupportsPartitionModification) {
-            ((SupportsPartitionModification) catalog).dropPartitions(identifier, partitionSpecs);
-        } else {
-            try (BatchTableCommit commit = writeBuilder.newCommit()) {
-                commit.truncatePartitions(partitionSpecs);
-            }
-        }
+        catalog.dropPartitions(identifier, partitionSpecs);
+
         assertThat(catalog.listPartitions(identifier)).isEmpty();
 
         assertThatExceptionOfType(Catalog.TableNotExistException.class)

@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.catalog.SupportsBranches;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -924,22 +923,22 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         catalog.createTable(
                 identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
         assertThrows(
-                SupportsBranches.TagNotExistException.class,
+                Catalog.TagNotExistException.class,
                 () -> restCatalog.createBranch(identifier, "my_branch", "tag"));
         restCatalog.createBranch(identifier, "my_branch", null);
         Identifier branchIdentifier = new Identifier(databaseName, "table", "my_branch");
         assertThat(restCatalog.getTable(branchIdentifier)).isNotNull();
         assertThrows(
-                SupportsBranches.BranchAlreadyExistException.class,
+                Catalog.BranchAlreadyExistException.class,
                 () -> restCatalog.createBranch(identifier, "my_branch", null));
         assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
         restCatalog.dropBranch(identifier, "my_branch");
 
         assertThrows(
-                SupportsBranches.BranchNotExistException.class,
+                Catalog.BranchNotExistException.class,
                 () -> restCatalog.dropBranch(identifier, "no_exist_branch"));
         assertThrows(
-                SupportsBranches.BranchNotExistException.class,
+                Catalog.BranchNotExistException.class,
                 () -> restCatalog.fastForward(identifier, "no_exist_branch"));
         assertThat(restCatalog.listBranches(identifier)).isEmpty();
     }

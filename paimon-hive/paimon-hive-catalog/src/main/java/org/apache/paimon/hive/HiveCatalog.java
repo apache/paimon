@@ -29,7 +29,6 @@ import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.catalog.SupportsPartitionModification;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
@@ -130,7 +129,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
-public class HiveCatalog extends AbstractCatalog implements SupportsPartitionModification {
+public class HiveCatalog extends AbstractCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 

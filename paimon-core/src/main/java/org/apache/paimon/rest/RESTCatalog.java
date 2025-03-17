@@ -27,8 +27,6 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.catalog.SupportsBranches;
-import org.apache.paimon.catalog.SupportsSnapshots;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -116,7 +114,7 @@ import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
 
 /** A catalog implementation for REST. */
-public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches {
+public class RESTCatalog implements Catalog {
 
     public static final String HEADER_PREFIX = "header.";
     public static final String MAX_RESULTS = "maxResults";
@@ -522,8 +520,6 @@ public class RESTCatalog implements Catalog, SupportsSnapshots, SupportsBranches
             throw new ColumnAlreadyExistException(identifier, e.resourceName());
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
-        } catch (NotImplementedException e) {
-            throw new UnsupportedOperationException(e.getMessage());
         } catch (ServiceFailureException e) {
             throw new IllegalStateException(e.getMessage());
         } catch (BadRequestException e) {

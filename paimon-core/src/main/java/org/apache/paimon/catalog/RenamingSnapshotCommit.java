@@ -97,7 +97,8 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
         }
 
         @Override
-        public SnapshotCommit create(Identifier identifier, SnapshotManager snapshotManager) {
+        public RenamingSnapshotCommit create(
+                Identifier identifier, SnapshotManager snapshotManager) {
             Lock lock =
                     Optional.ofNullable(lockFactory)
                             .map(factory -> factory.createLock(lockContext))
