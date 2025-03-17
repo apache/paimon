@@ -27,13 +27,12 @@ class DDLTest extends DDLTestBase {
       sql("CREATE TABLE T (id INT, t1 INT DEFAULT 5, t2 INT DEFAULT 2)")
 
       val schema = spark.table("T").schema
-      val m1 = Metadata.fromJson(schema(
-        "t1").metadata.json)
+      val m1 = Metadata.fromJson(schema("t1").metadata.json)
       Assertions.assertTrue(schema("id").metadata.json == "{}")
-      Assertions.assertTrue(Metadata.fromJson(schema(
-        "t1").metadata.json).getString("EXISTS_DEFAULT") == "5")
-      Assertions.assertTrue(Metadata.fromJson(schema(
-        "t2").metadata.json).getString("EXISTS_DEFAULT") == "2")
+      Assertions.assertTrue(
+        Metadata.fromJson(schema("t1").metadata.json).getString("EXISTS_DEFAULT") == "5")
+      Assertions.assertTrue(
+        Metadata.fromJson(schema("t2").metadata.json).getString("EXISTS_DEFAULT") == "2")
       sql(
         """INSERT INTO T VALUES (1, 2, 3), (2, DEFAULT, 3), (3, 2, DEFAULT), (4, DEFAULT, DEFAULT)"""
       )
@@ -42,6 +41,5 @@ class DDLTest extends DDLTestBase {
       Assertions.assertTrue(res(2).getAs[Integer]("t2") == 2)
     }
   }
-
 
 }

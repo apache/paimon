@@ -25,7 +25,7 @@ import org.apache.paimon.table.{DataTable, FileStoreTable, KnownSplitsTable, Tab
 import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.PaimonUtils
-import org.apache.spark.sql.connector.catalog._
+import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, SupportsWrite, TableCapability, TableCatalog}
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
