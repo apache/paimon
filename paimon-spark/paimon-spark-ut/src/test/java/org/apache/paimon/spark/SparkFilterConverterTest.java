@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.IntType;
@@ -195,6 +196,18 @@ public class SparkFilterConverterTest {
 
         assertThat(timestampExpression).isEqualTo(rawExpression);
         assertThat(instantExpression).isEqualTo(rawExpression);
+    }
+
+    @Test
+    public void testChar() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "id", new CharType())));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+        StringEndsWith endsWith = StringEndsWith.apply("id", "abc");
+        Predicate endsWithPre = converter.convert(endsWith);
+        GenericRow row = GenericRow.of(fromString("aabc"));
+        boolean test = endsWithPre.test(row);
+        assertThat(test).isEqualTo(true);
     }
 
     @Test
