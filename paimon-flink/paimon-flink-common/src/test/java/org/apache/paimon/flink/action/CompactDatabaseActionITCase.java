@@ -46,6 +46,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -998,20 +999,26 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
     }
 
-    @Test
-    public void testCombinedModeWithDynamicOptions() throws Exception {
+    @ParameterizedTest(name = "type = {0}")
+    @ValueSource(strings = {"pk", "unaware"})
+    public void testCombinedModeWithDynamicOptions(String type) throws Exception {
         // create table and commit data
         Map<String, String> options = new HashMap<>();
+        List<String> keys;
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
-        options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1000");
+        if (type.equals("pk")) {
+            options.put(CoreOptions.BUCKET.key(), "1");
+            keys = Arrays.asList("dt", "hh", "k");
+        } else {
+            options.put(CoreOptions.BUCKET.key(), "-1");
+            options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+            options.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
+            keys = Collections.emptyList();
+        }
+
         FileStoreTable table =
-                createTable(
-                        "test_db",
-                        "t",
-                        Arrays.asList("dt", "hh"),
-                        Arrays.asList("dt", "hh", "k"),
-                        options);
+                createTable("test_db", "t", Arrays.asList("dt", "hh"), keys, options);
 
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -1036,6 +1043,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         "combined",
                         "--table_conf",
                         CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s",
+                        "--table_conf",
+                        CoreOptions.FILE_FORMAT.key() + "=avro",
                         // test dynamic options will be copied in commit
                         "--table_conf",
                         CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key() + "=3",
@@ -1061,6 +1070,14 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 Duration.ofSeconds(60),
                 Duration.ofMillis(200),
                 "Failed to wait snapshot expiration success");
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits.size()).isEqualTo(1);
+
+        boolean hasAvroFile =
+                splits.get(0).dataFiles().stream()
+                        .anyMatch(file -> file.fileFormat().equalsIgnoreCase("avro"));
+        assertThat(hasAvroFile).isTrue();
     }
 
     private void writeData(
