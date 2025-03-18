@@ -21,15 +21,16 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
-import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
@@ -91,21 +92,26 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        checkTableSchema(
-                "[{\"id\":0,\"name\":\"pt\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},"
-                        + "{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"_id\"},"
-                        + "{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"}]");
+        Schema excepted =
+                Schema.newBuilder()
+                        .comment("")
+                        .column("pt", DataTypes.INT().notNull(), "primary")
+                        .column("_id", DataTypes.INT().notNull(), "_id")
+                        .column("v1", DataTypes.VARCHAR(10), "v1")
+                        .build();
+        checkTableSchema(excepted);
 
         try (Statement statement = getStatement()) {
             testSchemaEvolutionImpl(statement);
         }
     }
 
-    private void checkTableSchema(String excepted) throws Exception {
-
+    private void checkTableSchema(Schema excepted) throws Exception {
         FileStoreTable table = getFileStoreTable();
 
-        assertThat(JsonSerdeUtil.toFlatJson(table.schema().fields())).isEqualTo(excepted);
+        TableSchema schema = table.schema();
+        assertThat(schema.fields()).isEqualTo(excepted.fields());
+        assertThat(schema.comment()).isEqualTo(excepted.comment());
     }
 
     private void testSchemaEvolutionImpl(Statement statement) throws Exception {
@@ -267,11 +273,15 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        checkTableSchema(
-                "[{\"id\":0,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},"
-                        + "{\"id\":1,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"},"
-                        + "{\"id\":2,\"name\":\"v2\",\"type\":\"INT\",\"description\":\"v2\"},"
-                        + "{\"id\":3,\"name\":\"v3\",\"type\":\"VARCHAR(10)\",\"description\":\"v3\"}]");
+        Schema excepted =
+                Schema.newBuilder()
+                        .comment("")
+                        .column("_id", DataTypes.INT().notNull(), "primary")
+                        .column("v1", DataTypes.VARCHAR(10), "v1")
+                        .column("v2", DataTypes.INT(), "v2")
+                        .column("v3", DataTypes.VARCHAR(10), "v3")
+                        .build();
+        checkTableSchema(excepted);
 
         try (Statement statement = getStatement()) {
             testSchemaEvolutionMultipleImpl(statement);
@@ -387,6 +397,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         FileStoreTable table = getFileStoreTable();
         assertThat(table.comment()).hasValue("schema_evolution_comment");
         statement.executeUpdate("USE " + DATABASE_NAME);
+        // alter table comment
+        statement.executeUpdate("ALTER TABLE schema_evolution_comment COMMENT 'table_comment_new'");
+
         statement.executeUpdate("INSERT INTO schema_evolution_comment VALUES (1, 'one')");
 
         RowType rowType =
@@ -414,10 +427,14 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         expected = Arrays.asList("+I[1, one, NULL]", "+I[2, two, NULL]", "+I[3, three, 30]");
         waitForResult(expected, table, rowType, primaryKeys);
 
-        checkTableSchema(
-                "[{\"id\":0,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},"
-                        + "{\"id\":1,\"name\":\"v1\",\"type\":\"VARCHAR(20)\",\"description\":\"v1-new\"},"
-                        + "{\"id\":2,\"name\":\"v2\",\"type\":\"INT\",\"description\":\"v2\"}]");
+        Schema excepted =
+                Schema.newBuilder()
+                        .comment("table_comment_new")
+                        .column("_id", DataTypes.INT().notNull(), "primary")
+                        .column("v1", DataTypes.VARCHAR(20), "v1-new")
+                        .column("v2", DataTypes.INT(), "v2")
+                        .build();
+        checkTableSchema(excepted);
     }
 
     @Test

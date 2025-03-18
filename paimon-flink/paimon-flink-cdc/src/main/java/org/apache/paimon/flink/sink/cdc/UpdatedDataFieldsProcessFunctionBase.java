@@ -148,6 +148,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnComment) {
             catalog.alterTable(identifier, schemaChange, false);
+        } else if (schemaChange instanceof SchemaChange.UpdateComment) {
+            catalog.alterTable(identifier, schemaChange, false);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported schema change class "
@@ -219,8 +221,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     }
 
     protected List<SchemaChange> extractSchemaChanges(
-            SchemaManager schemaManager, List<DataField> updatedDataFields) {
-        RowType oldRowType = schemaManager.latest().get().logicalRowType();
+            SchemaManager schemaManager, CdcSchema updatedSchema) {
+        TableSchema oldTableSchema = schemaManager.latest().get();
+        RowType oldRowType = oldTableSchema.logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();
         for (DataField oldField : oldRowType.getFields()) {
             oldFields.put(oldField.name(), oldField);
@@ -232,7 +235,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                                 TypeMapping.TypeMappingMode.DECIMAL_NO_CHANGE);
 
         List<SchemaChange> result = new ArrayList<>();
-        for (DataField newField : updatedDataFields) {
+        for (DataField newField : updatedSchema.fields()) {
             String newFieldName = StringUtils.toLowerCaseIfNeed(newField.name(), caseSensitive);
             if (oldFields.containsKey(newFieldName)) {
                 DataField oldField = oldFields.get(newFieldName);
@@ -267,6 +270,12 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                         SchemaChange.addColumn(
                                 newFieldName, newField.type(), newField.description(), null));
             }
+        }
+
+        if (updatedSchema.comment() != null
+                && !updatedSchema.comment().equals(oldTableSchema.comment())) {
+            // update table comment
+            result.add(SchemaChange.updateComment(updatedSchema.comment()));
         }
         return result;
     }

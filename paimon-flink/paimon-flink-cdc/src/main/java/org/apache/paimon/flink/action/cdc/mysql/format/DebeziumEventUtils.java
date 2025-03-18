@@ -19,9 +19,13 @@
 package org.apache.paimon.flink.action.cdc.mysql.format;
 
 import io.debezium.document.Array;
+import io.debezium.document.Document;
 import io.debezium.document.DocumentReader;
+import io.debezium.relational.Table;
 import io.debezium.relational.history.HistoryRecord;
 import io.debezium.relational.history.TableChanges;
+import io.debezium.relational.history.TableChanges.TableChange;
+import io.debezium.relational.history.TableChanges.TableChangeType;
 import org.apache.flink.cdc.debezium.history.FlinkJsonTableChangeSerializer;
 
 import java.io.IOException;
@@ -30,8 +34,6 @@ import java.io.IOException;
 public class DebeziumEventUtils {
 
     private static final DocumentReader DOCUMENT_READER = DocumentReader.defaultReader();
-    private static final FlinkJsonTableChangeSerializer TABLE_CHANGE_SERIALIZER =
-            new FlinkJsonTableChangeSerializer();
 
     public static HistoryRecord getHistoryRecord(String historyRecordStr) throws IOException {
         return new HistoryRecord(DOCUMENT_READER.read(historyRecordStr));
@@ -39,7 +41,46 @@ public class DebeziumEventUtils {
 
     public static TableChanges getTableChanges(String historyRecordStr) throws IOException {
         HistoryRecord historyRecord = getHistoryRecord(historyRecordStr);
-        Array tableChanges = historyRecord.document().getArray(HistoryRecord.Fields.TABLE_CHANGES);
-        return TABLE_CHANGE_SERIALIZER.deserialize(tableChanges, true);
+        Array tableChangesDocument =
+                historyRecord.document().getArray(HistoryRecord.Fields.TABLE_CHANGES);
+        return deserialize(tableChangesDocument, true);
+    }
+
+    /**
+     * Copy from {@link FlinkJsonTableChangeSerializer#deserialize}, add a method to supplement
+     * table comment. TODO remove this method after the method is added to {@link
+     * FlinkJsonTableChangeSerializer}.
+     */
+    private static TableChanges deserialize(Array array, boolean useCatalogBeforeSchema) {
+        TableChanges tableChanges = new TableChanges();
+
+        for (Array.Entry entry : array) {
+            Document document = entry.getValue().asDocument();
+            TableChange change =
+                    FlinkJsonTableChangeSerializer.fromDocument(document, useCatalogBeforeSchema);
+
+            if (change.getType() == TableChangeType.CREATE) {
+                // tableChanges.create(change.getTable());
+                tableChanges.create(supplementTableComment(document, change.getTable()));
+            } else if (change.getType() == TableChangeType.ALTER) {
+                // tableChanges.alter(change.getTable());
+                tableChanges.alter(supplementTableComment(document, change.getTable()));
+            } else if (change.getType() == TableChangeType.DROP) {
+                tableChanges.drop(change.getTable());
+            }
+        }
+
+        return tableChanges;
+    }
+
+    private static Table supplementTableComment(Document document, Table table) {
+        if (table.comment() != null) {
+            return table;
+        }
+        String comment = document.getString("comment");
+        if (comment != null) {
+            return table.edit().setComment(comment).create();
+        }
+        return table;
     }
 }

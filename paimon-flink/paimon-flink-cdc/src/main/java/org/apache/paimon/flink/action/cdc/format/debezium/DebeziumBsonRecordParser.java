@@ -22,10 +22,10 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mongodb.BsonValueConvertor;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.TypeUtils;
 
@@ -121,7 +121,7 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(JsonNode record, CdcSchema.Builder schemaBuilder) {
         // bson record should be a string
         Preconditions.checkArgument(
                 record.isTextual(),
@@ -133,10 +133,10 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
         for (Map.Entry<String, BsonValue> entry : document.entrySet()) {
             String fieldName = entry.getKey();
             resultMap.put(fieldName, toJsonString(BsonValueConvertor.convert(entry.getValue())));
-            rowTypeBuilder.field(fieldName, DataTypes.STRING());
+            schemaBuilder.column(fieldName, DataTypes.STRING());
         }
 
-        evalComputedColumns(resultMap, rowTypeBuilder);
+        evalComputedColumns(resultMap, schemaBuilder);
 
         return resultMap;
     }

@@ -23,10 +23,10 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.watermark.MessageQueueCdcTimestampExtractor;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.StringUtils;
 
@@ -40,8 +40,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.net.URL;
 import java.nio.file.Files;
@@ -56,21 +54,20 @@ import java.util.Map;
 /** Test for DebeziumBsonRecordParser. */
 public class DebeziumBsonRecordParserTest {
 
-    private static final Logger log = LoggerFactory.getLogger(DebeziumBsonRecordParserTest.class);
-    private static List<CdcSourceRecord> insertList = new ArrayList<>();
-    private static List<CdcSourceRecord> updateList = new ArrayList<>();
-    private static List<CdcSourceRecord> deleteList = new ArrayList<>();
+    private static final List<CdcSourceRecord> insertList = new ArrayList<>();
+    private static final List<CdcSourceRecord> updateList = new ArrayList<>();
+    private static final List<CdcSourceRecord> deleteList = new ArrayList<>();
 
-    private static ArrayList<CdcSourceRecord> bsonRecords = new ArrayList<>();
-    private static ArrayList<CdcSourceRecord> jsonRecords = new ArrayList<>();
+    private static final ArrayList<CdcSourceRecord> bsonRecords = new ArrayList<>();
+    private static final ArrayList<CdcSourceRecord> jsonRecords = new ArrayList<>();
 
-    private static Map<String, String> keyEvent = new HashMap<>();
+    private static final Map<String, String> keyEvent = new HashMap<>();
 
     private static KafkaDeserializationSchema<CdcSourceRecord> kafkaDeserializationSchema = null;
 
-    private static Map<String, String> beforeEvent = new HashMap<>();
+    private static final Map<String, String> beforeEvent = new HashMap<>();
 
-    private static Map<String, String> afterEvent = new HashMap<>();
+    private static final Map<String, String> afterEvent = new HashMap<>();
 
     @BeforeAll
     public static void beforeAll() throws Exception {
@@ -241,7 +238,8 @@ public class DebeziumBsonRecordParserTest {
 
             JsonNode bsonTextNode =
                     new TextNode(JsonSerdeUtil.writeValueAsString(bsonRecord.getValue()));
-            Map<String, String> resultMap = parser.extractRowData(bsonTextNode, RowType.builder());
+            Map<String, String> resultMap =
+                    parser.extractRowData(bsonTextNode, CdcSchema.newBuilder());
 
             ObjectNode expectNode = (ObjectNode) jsonRecord.getValue();
 

@@ -22,10 +22,10 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
@@ -166,7 +166,7 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(JsonNode record, CdcSchema.Builder schemaBuilder) {
 
         Map<String, Object> recordMap =
                 JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
@@ -184,14 +184,14 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
             Tuple3<String, Integer, Integer> typeInfo = MySqlTypeUtils.getTypeInfo(originalType);
             DataType paimonDataType =
                     MySqlTypeUtils.toDataType(typeInfo.f0, typeInfo.f1, typeInfo.f2, typeMapping);
-            rowTypeBuilder.field(originalName, paimonDataType);
+            schemaBuilder.column(originalName, paimonDataType);
         }
 
         for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
             rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
         }
 
-        evalComputedColumns(rowData, rowTypeBuilder);
+        evalComputedColumns(rowData, schemaBuilder);
         return rowData;
     }
 
