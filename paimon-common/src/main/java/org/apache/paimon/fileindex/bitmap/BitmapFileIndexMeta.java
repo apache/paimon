@@ -21,29 +21,7 @@ package org.apache.paimon.fileindex.bitmap;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.BinaryType;
-import org.apache.paimon.types.BooleanType;
-import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeVisitor;
-import org.apache.paimon.types.DateType;
-import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.DoubleType;
-import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.LocalZonedTimestampType;
-import org.apache.paimon.types.MapType;
-import org.apache.paimon.types.MultisetType;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.SmallIntType;
-import org.apache.paimon.types.TimeType;
-import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.types.TinyIntType;
-import org.apache.paimon.types.VarBinaryType;
-import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.types.VariantType;
 
 import java.io.BufferedInputStream;
 import java.io.DataInput;
@@ -214,7 +192,7 @@ public class BitmapFileIndexMeta {
 
     protected Function<Object, Integer> getSerializeSizeMeasure() {
         return dataType.accept(
-                new DataTypeVisitorAdapter<Function<Object, Integer>>() {
+                new BitmapTypeVisitor<Function<Object, Integer>>() {
                     @Override
                     public Function<Object, Integer> visitBinaryString() {
                         return o -> Integer.BYTES + ((BinaryString) o).getSizeInBytes();
@@ -258,106 +236,102 @@ public class BitmapFileIndexMeta {
     }
 
     protected ThrowableConsumer getValueWriter(DataOutput out) {
-        ThrowableConsumer valueWriter =
-                dataType.accept(
-                        new DataTypeVisitorAdapter<ThrowableConsumer>() {
-                            @Override
-                            public ThrowableConsumer visitBinaryString() {
-                                return o -> {
-                                    byte[] bytes = ((BinaryString) o).toBytes();
-                                    out.writeInt(bytes.length);
-                                    out.write(bytes);
-                                };
-                            }
+        return dataType.accept(
+                new BitmapTypeVisitor<ThrowableConsumer>() {
+                    @Override
+                    public ThrowableConsumer visitBinaryString() {
+                        return o -> {
+                            byte[] bytes = ((BinaryString) o).toBytes();
+                            out.writeInt(bytes.length);
+                            out.write(bytes);
+                        };
+                    }
 
-                            @Override
-                            public ThrowableConsumer visitByte() {
-                                return o -> out.writeByte((byte) o);
-                            }
+                    @Override
+                    public ThrowableConsumer visitByte() {
+                        return o -> out.writeByte((byte) o);
+                    }
 
-                            @Override
-                            public ThrowableConsumer visitShort() {
-                                return o -> out.writeShort((short) o);
-                            }
+                    @Override
+                    public ThrowableConsumer visitShort() {
+                        return o -> out.writeShort((short) o);
+                    }
 
-                            @Override
-                            public ThrowableConsumer visitInt() {
-                                return o -> out.writeInt((int) o);
-                            }
+                    @Override
+                    public ThrowableConsumer visitInt() {
+                        return o -> out.writeInt((int) o);
+                    }
 
-                            @Override
-                            public ThrowableConsumer visitLong() {
-                                return o -> out.writeLong((long) o);
-                            }
+                    @Override
+                    public ThrowableConsumer visitLong() {
+                        return o -> out.writeLong((long) o);
+                    }
 
-                            @Override
-                            public ThrowableConsumer visitFloat() {
-                                return o -> out.writeFloat((float) o);
-                            }
+                    @Override
+                    public ThrowableConsumer visitFloat() {
+                        return o -> out.writeFloat((float) o);
+                    }
 
-                            @Override
-                            public ThrowableConsumer visitDouble() {
-                                return o -> out.writeDouble((double) o);
-                            }
+                    @Override
+                    public ThrowableConsumer visitDouble() {
+                        return o -> out.writeDouble((double) o);
+                    }
 
-                            @Override
-                            public ThrowableConsumer visitBoolean() {
-                                return o -> out.writeBoolean((Boolean) o);
-                            }
-                        });
-        return valueWriter;
+                    @Override
+                    public ThrowableConsumer visitBoolean() {
+                        return o -> out.writeBoolean((Boolean) o);
+                    }
+                });
     }
 
     protected ThrowableSupplier getValueReader(DataInput in) {
-        ThrowableSupplier valueReader =
-                dataType.accept(
-                        new DataTypeVisitorAdapter<ThrowableSupplier>() {
-                            @Override
-                            public ThrowableSupplier visitBinaryString() {
-                                return () -> {
-                                    int length = in.readInt();
-                                    byte[] bytes = new byte[length];
-                                    in.readFully(bytes);
-                                    return BinaryString.fromBytes(bytes);
-                                };
-                            }
+        return dataType.accept(
+                new BitmapTypeVisitor<ThrowableSupplier>() {
+                    @Override
+                    public ThrowableSupplier visitBinaryString() {
+                        return () -> {
+                            int length = in.readInt();
+                            byte[] bytes = new byte[length];
+                            in.readFully(bytes);
+                            return BinaryString.fromBytes(bytes);
+                        };
+                    }
 
-                            @Override
-                            public ThrowableSupplier visitByte() {
-                                return in::readByte;
-                            }
+                    @Override
+                    public ThrowableSupplier visitByte() {
+                        return in::readByte;
+                    }
 
-                            @Override
-                            public ThrowableSupplier visitShort() {
-                                return in::readShort;
-                            }
+                    @Override
+                    public ThrowableSupplier visitShort() {
+                        return in::readShort;
+                    }
 
-                            @Override
-                            public ThrowableSupplier visitInt() {
-                                return in::readInt;
-                            }
+                    @Override
+                    public ThrowableSupplier visitInt() {
+                        return in::readInt;
+                    }
 
-                            @Override
-                            public ThrowableSupplier visitLong() {
-                                return in::readLong;
-                            }
+                    @Override
+                    public ThrowableSupplier visitLong() {
+                        return in::readLong;
+                    }
 
-                            @Override
-                            public ThrowableSupplier visitFloat() {
-                                return in::readFloat;
-                            }
+                    @Override
+                    public ThrowableSupplier visitFloat() {
+                        return in::readFloat;
+                    }
 
-                            @Override
-                            public ThrowableSupplier visitDouble() {
-                                return in::readDouble;
-                            }
+                    @Override
+                    public ThrowableSupplier visitDouble() {
+                        return in::readDouble;
+                    }
 
-                            @Override
-                            public ThrowableSupplier visitBoolean() {
-                                return in::readBoolean;
-                            }
-                        });
-        return valueReader;
+                    @Override
+                    public ThrowableSupplier visitBoolean() {
+                        return in::readBoolean;
+                    }
+                });
     }
 
     /** functional interface. */
@@ -368,131 +342,6 @@ public class BitmapFileIndexMeta {
     /** functional interface. */
     public interface ThrowableSupplier {
         Object get() throws Exception;
-    }
-
-    /** simplified visitor. */
-    public abstract static class DataTypeVisitorAdapter<R> implements DataTypeVisitor<R> {
-
-        public abstract R visitBinaryString();
-
-        public abstract R visitByte();
-
-        public abstract R visitShort();
-
-        public abstract R visitInt();
-
-        public abstract R visitLong();
-
-        public abstract R visitFloat();
-
-        public abstract R visitDouble();
-
-        public abstract R visitBoolean();
-
-        @Override
-        public final R visit(CharType charType) {
-            return visitBinaryString();
-        }
-
-        @Override
-        public final R visit(VarCharType varCharType) {
-            return visitBinaryString();
-        }
-
-        @Override
-        public final R visit(BooleanType booleanType) {
-            return visitBoolean();
-        }
-
-        @Override
-        public final R visit(BinaryType binaryType) {
-            throw new UnsupportedOperationException("Does not support type binary");
-        }
-
-        @Override
-        public final R visit(VarBinaryType varBinaryType) {
-            throw new UnsupportedOperationException("Does not support type binary");
-        }
-
-        @Override
-        public final R visit(DecimalType decimalType) {
-            throw new UnsupportedOperationException("Does not support decimal");
-        }
-
-        @Override
-        public final R visit(TinyIntType tinyIntType) {
-            return visitByte();
-        }
-
-        @Override
-        public final R visit(SmallIntType smallIntType) {
-            return visitShort();
-        }
-
-        @Override
-        public final R visit(IntType intType) {
-            return visitInt();
-        }
-
-        @Override
-        public final R visit(BigIntType bigIntType) {
-            return visitLong();
-        }
-
-        @Override
-        public final R visit(FloatType floatType) {
-            return visitFloat();
-        }
-
-        @Override
-        public final R visit(DoubleType doubleType) {
-            return visitDouble();
-        }
-
-        @Override
-        public final R visit(DateType dateType) {
-            return visitInt();
-        }
-
-        @Override
-        public final R visit(TimeType timeType) {
-            return visitInt();
-        }
-
-        @Override
-        public final R visit(ArrayType arrayType) {
-            throw new UnsupportedOperationException("Does not support type array");
-        }
-
-        @Override
-        public final R visit(MultisetType multisetType) {
-            throw new UnsupportedOperationException("Does not support type mutiset");
-        }
-
-        @Override
-        public final R visit(TimestampType timestampType) {
-            return visitLong();
-        }
-
-        @Override
-        public final R visit(LocalZonedTimestampType localZonedTimestampType) {
-            return visitLong();
-        }
-
-        @Override
-        public final R visit(MapType mapType) {
-            throw new UnsupportedOperationException("Does not support type map");
-        }
-
-        @Override
-        public final R visit(RowType rowType) {
-            throw new UnsupportedOperationException("Does not support type row");
-        }
-
-        @Override
-        public final R visit(VariantType rowType) {
-            throw new UnsupportedOperationException("Does not support type variant");
-        }
     }
 
     /** Bitmap entry. */
