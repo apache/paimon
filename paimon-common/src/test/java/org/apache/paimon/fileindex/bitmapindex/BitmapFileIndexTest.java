@@ -86,6 +86,7 @@ public class BitmapFileIndexTest {
         testStringType(BitmapFileIndex.VERSION_1);
         testBooleanType(BitmapFileIndex.VERSION_1);
         testHighCardinality(BitmapFileIndex.VERSION_1, 1000000, 100000, null);
+        testStringTypeWithReusing(BitmapFileIndex.VERSION_1);
     }
 
     @Test
@@ -94,6 +95,7 @@ public class BitmapFileIndexTest {
         testStringType(BitmapFileIndex.VERSION_2);
         testBooleanType(BitmapFileIndex.VERSION_2);
         testHighCardinality(BitmapFileIndex.VERSION_2, 1000000, 100000, null);
+        testStringTypeWithReusing(BitmapFileIndex.VERSION_2);
     }
 
     private FileIndexReader createTestReaderOnWriter(
@@ -239,5 +241,40 @@ public class BitmapFileIndexTest {
         RoaringBitmap32 resultNullBm = ((BitmapIndexResult) resultNull).get();
         System.out.println("read null bitmap time: " + (System.currentTimeMillis() - time3));
         assert resultNullBm.equals(nullBm);
+    }
+
+    private void testStringTypeWithReusing(int version) throws Exception {
+        FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
+        BinaryString a = BinaryString.fromString("a");
+        BinaryString b = BinaryString.fromString("b");
+        BinaryString c = BinaryString.fromString("a");
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        version,
+                        null,
+                        DataTypes.STRING(),
+                        writer -> {
+                            writer.writeRecord(a);
+                            writer.writeRecord(null);
+                            a.pointTo(b.getSegments(), b.getOffset(), b.getSizeInBytes());
+                            writer.writeRecord(null);
+                            writer.writeRecord(a);
+                            writer.writeRecord(null);
+                            a.pointTo(c.getSegments(), c.getOffset(), c.getSizeInBytes());
+                            writer.writeRecord(null);
+                        });
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, a))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0));
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, b))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(3));
+        assert ((BitmapIndexResult) reader.visitIsNull(fieldRef))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(1, 2, 4, 5));
+        assert ((BitmapIndexResult) reader.visitIn(fieldRef, Arrays.asList(a, b)))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0, 3));
+        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c")).remain();
     }
 }
