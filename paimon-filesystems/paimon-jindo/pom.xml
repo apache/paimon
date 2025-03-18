@@ -35,6 +35,13 @@
         <jindodata.version>6.5.6</jindodata.version>
     </properties>
 
+    <repositories>
+        <repository>
+            <id>jindodata</id>
+            <url>https://jindodata-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
+        </repository>
+    </repositories>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
