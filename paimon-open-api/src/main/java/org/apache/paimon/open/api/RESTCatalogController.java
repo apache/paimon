@@ -668,7 +668,6 @@ public class RESTCatalogController {
                         "created",
                         System.currentTimeMillis(),
                         "updated");
-        ;
         return new ListViewDetailsResponse(ImmutableList.of(singleView), null);
     }
 
