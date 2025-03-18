@@ -899,7 +899,6 @@ public class RESTCatalogServer {
                                 "created",
                                 1L,
                                 "updated");
-                ;
                 return mockResponse(response, 200);
             case "POST":
                 AlterTableRequest requestBody =
