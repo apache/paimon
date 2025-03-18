@@ -21,5 +21,5 @@ package org.apache.paimon.spark
 import org.apache.paimon.table.source.Split
 
 // never be used
-case class PaimonBucketedInputPartition(splits: Seq[Split], bucket: Int)
+case class PaimonBucketedInputPartition(splits: Seq[Split], key: OutputPartitionKey)
   extends PaimonInputPartition
