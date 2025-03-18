@@ -23,6 +23,7 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
@@ -106,7 +107,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
-import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Mock REST server for testing. */
@@ -263,7 +263,7 @@ public class RESTCatalogServer {
                         if (noPermissionDatabases.contains(databaseName)) {
                             throw new Catalog.DatabaseNoPermissionException(databaseName);
                         }
-                        if (!SYSTEM_DATABASE_NAME.equals(databaseName)
+                        if (!CatalogUtils.isSystemDatabase(databaseName)
                                 && !databaseStore.containsKey(databaseName)) {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
@@ -731,7 +731,7 @@ public class RESTCatalogServer {
     private MockResponse tablesHandle(
             String method, String data, String databaseName, Map<String, String> parameters)
             throws Exception {
-        if (SYSTEM_DATABASE_NAME.equals(databaseName)) {
+        if (CatalogUtils.isSystemDatabase(databaseName)) {
             switch (method) {
                 case "GET":
                     List<String> tables = catalog.listTables(databaseName);
