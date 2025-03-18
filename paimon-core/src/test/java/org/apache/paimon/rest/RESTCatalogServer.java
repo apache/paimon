@@ -909,6 +909,8 @@ public class RESTCatalogServer {
                     System.out.println(e.getMessage());
                 }
                 tableMetadataStore.remove(identifier.getFullName());
+                tableSnapshotStore.remove(identifier.getFullName());
+                tablePartitionsStore.remove(identifier.getFullName());
                 return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
@@ -1355,11 +1357,6 @@ public class RESTCatalogServer {
 
     private TableMetadata createFormatTable(Identifier identifier, Schema schema) {
         return createTableMetadata(identifier, 1L, schema, UUID.randomUUID().toString(), true);
-    }
-
-    private Partition spec2Partition(Map<String, String> spec) {
-        // todo: need update
-        return new Partition(spec, 123, 456, 789, 123, false);
     }
 
     private FileStoreTable getFileTable(Identifier identifier)

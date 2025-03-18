@@ -93,6 +93,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         // Flink 1.17 introduced this config, use string to keep compatibility
         flinkConf.setString("execution.batch.adaptive.auto-parallelism.enabled", "false");
         env.configure(flinkConf);
+
         List<String> branches = validBranches();
 
         // snapshot and changelog files are the root of everything, so they are handled specially
@@ -301,7 +302,14 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     }
                                 });
 
-        deleted = deleted.union(cleanBranchSnapshotDirResult);
+        if (deletedFilesCountInLocal.get() != 0 || deletedFilesLenInBytesInLocal.get() != 0) {
+            deleted =
+                    deleted.union(
+                            env.fromElements(
+                                    new CleanOrphanFilesResult(
+                                            deletedFilesCountInLocal.get(),
+                                            deletedFilesLenInBytesInLocal.get())));
+        }
 
         return deleted;
     }
