@@ -19,58 +19,70 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.rest.RESTResponse;
-import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Response for getting view. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class GetViewResponse extends BaseResourceAuditResponse implements RESTResponse {
+/** Base class for database, table, view, audit response. */
+public abstract class BaseResourceAuditResponse implements RESTResponse {
+    protected static final String FIELD_OWNER = "owner";
+    protected static final String FIELD_CREATED_AT = "createdAt";
+    protected static final String FIELD_CREATED_BY = "createdBy";
+    protected static final String FIELD_UPDATED_AT = "updatedAt";
+    protected static final String FIELD_UPDATED_BY = "updatedBy";
 
-    private static final String FIELD_ID = "id";
-    private static final String FIELD_NAME = "name";
-    private static final String FIELD_SCHEMA = "schema";
+    @JsonProperty(FIELD_OWNER)
+    private final String owner;
 
-    @JsonProperty(FIELD_ID)
-    private final String id;
+    @JsonProperty(FIELD_CREATED_AT)
+    private final long createdAt;
 
-    @JsonProperty(FIELD_NAME)
-    private final String name;
+    @JsonProperty(FIELD_CREATED_BY)
+    private final String createdBy;
 
-    @JsonProperty(FIELD_SCHEMA)
-    private final ViewSchema schema;
+    @JsonProperty(FIELD_UPDATED_AT)
+    private final long updatedAt;
+
+    @JsonProperty(FIELD_UPDATED_BY)
+    private final String updatedBy;
 
     @JsonCreator
-    public GetViewResponse(
-            @JsonProperty(FIELD_ID) String id,
-            @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_SCHEMA) ViewSchema schema,
+    public BaseResourceAuditResponse(
             @JsonProperty(FIELD_OWNER) String owner,
             @JsonProperty(FIELD_CREATED_AT) long createdAt,
             @JsonProperty(FIELD_CREATED_BY) String createdBy,
             @JsonProperty(FIELD_UPDATED_AT) long updatedAt,
             @JsonProperty(FIELD_UPDATED_BY) String updatedBy) {
-        super(owner, createdAt, createdBy, updatedAt, updatedBy);
-        this.id = id;
-        this.name = name;
-        this.schema = schema;
+        this.owner = owner;
+        this.createdAt = createdAt;
+        this.createdBy = createdBy;
+        this.updatedAt = updatedAt;
+        this.updatedBy = updatedBy;
     }
 
-    @JsonGetter(FIELD_ID)
-    public String getId() {
-        return this.id;
+    @JsonGetter(FIELD_OWNER)
+    public String getOwner() {
+        return owner;
     }
 
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return this.name;
+    @JsonGetter(FIELD_CREATED_AT)
+    public long getCreatedAt() {
+        return createdAt;
     }
 
-    @JsonGetter(FIELD_SCHEMA)
-    public ViewSchema getSchema() {
-        return this.schema;
+    @JsonGetter(FIELD_CREATED_BY)
+    public String getCreatedBy() {
+        return createdBy;
+    }
+
+    @JsonGetter(FIELD_UPDATED_AT)
+    public long getUpdatedAt() {
+        return updatedAt;
+    }
+
+    @JsonGetter(FIELD_UPDATED_BY)
+    public String getUpdatedBy() {
+        return updatedBy;
     }
 }

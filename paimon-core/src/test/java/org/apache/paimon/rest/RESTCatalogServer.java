@@ -678,7 +678,12 @@ public class RESTCatalogServer {
                             new GetDatabaseResponse(
                                     UUID.randomUUID().toString(),
                                     database.name(),
-                                    database.options());
+                                    database.options(),
+                                    "owner",
+                                    1L,
+                                    "created",
+                                    1L,
+                                    "updated");
                     return mockResponse(response, 200);
                 case "DELETE":
                     catalog.dropDatabase(databaseName, false, true);
@@ -849,7 +854,12 @@ public class RESTCatalogServer {
                                 identifier.getTableName(),
                                 entry.getValue().isExternal(),
                                 entry.getValue().schema().id(),
-                                entry.getValue().schema().toSchema());
+                                entry.getValue().schema().toSchema(),
+                                "owner",
+                                1L,
+                                "created",
+                                1L,
+                                "updated");
                 tableDetails.add(getTableResponse);
             }
         }
@@ -883,7 +893,13 @@ public class RESTCatalogServer {
                                 identifier.getTableName(),
                                 tableMetadata.isExternal(),
                                 tableMetadata.schema().id(),
-                                tableMetadata.schema().toSchema());
+                                tableMetadata.schema().toSchema(),
+                                "owner",
+                                1L,
+                                "created",
+                                1L,
+                                "updated");
+                ;
                 return mockResponse(response, 200);
             case "POST":
                 AlterTableRequest requestBody =
@@ -1179,7 +1195,15 @@ public class RESTCatalogServer {
                                             view.dialects(),
                                             view.comment().orElse(null),
                                             view.options());
-                            return new GetViewResponse("id", identifier.getTableName(), schema);
+                            return new GetViewResponse(
+                                    "id",
+                                    identifier.getTableName(),
+                                    schema,
+                                    "owner",
+                                    1L,
+                                    "created",
+                                    1L,
+                                    "updated");
                         })
                 .collect(Collectors.toList());
     }
@@ -1198,7 +1222,16 @@ public class RESTCatalogServer {
                                         view.dialects(),
                                         view.comment().orElse(null),
                                         view.options());
-                        response = new GetViewResponse("id", identifier.getTableName(), schema);
+                        response =
+                                new GetViewResponse(
+                                        "id",
+                                        identifier.getTableName(),
+                                        schema,
+                                        "owner",
+                                        1L,
+                                        "created",
+                                        1L,
+                                        "updated");
                         return mockResponse(response, 200);
                     }
                     throw new Catalog.ViewNotExistException(identifier);

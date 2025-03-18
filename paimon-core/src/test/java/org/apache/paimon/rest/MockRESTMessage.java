@@ -82,7 +82,15 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("a", "b");
         options.put(COMMENT_PROP, "comment");
-        return new GetDatabaseResponse(UUID.randomUUID().toString(), name, options);
+        return new GetDatabaseResponse(
+                UUID.randomUUID().toString(),
+                name,
+                options,
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     public static ListDatabasesResponse listDatabasesResponse(String name) {
@@ -219,7 +227,17 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
-        return new GetTableResponse(UUID.randomUUID().toString(), "", false, 1, schema(options));
+        return new GetTableResponse(
+                UUID.randomUUID().toString(),
+                "",
+                false,
+                1,
+                schema(options),
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     public static CreateViewRequest createViewRequest(String name) {
@@ -228,7 +246,15 @@ public class MockRESTMessage {
     }
 
     public static GetViewResponse getViewResponse() {
-        return new GetViewResponse(UUID.randomUUID().toString(), "", viewSchema());
+        return new GetViewResponse(
+                UUID.randomUUID().toString(),
+                "",
+                viewSchema(),
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     public static ListViewsResponse listViewsResponse() {

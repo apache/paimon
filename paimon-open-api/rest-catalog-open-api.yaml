@@ -1219,6 +1219,16 @@ components:
           $ref: '#/components/schemas/Schema'
         uuid:
           type: string
+        owner:
+          type: string
+        createdAt:
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          format: int64
+        updatedBy:
+          type: string
     SchemaChange:
       anyOf:
         - $ref: '#/components/schemas/SetOption'
@@ -1509,6 +1519,16 @@ components:
           type: object
           additionalProperties:
             type: string
+        owner:
+          type: string
+        createdAt:
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          format: int64
+        updatedBy:
+          type: string
     ListTablesResponse:
       type: object
       properties:
@@ -1576,6 +1596,16 @@ components:
           type: string
         schema:
           $ref: '#/components/schemas/ViewSchema'
+        owner:
+          type: string
+        createdAt:
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          format: int64
+        updatedBy:
+          type: string
     ListViewsResponse:
       type: object
       properties:

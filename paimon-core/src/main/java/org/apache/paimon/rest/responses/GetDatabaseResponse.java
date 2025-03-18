@@ -33,7 +33,8 @@ import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 
 /** Response for getting database. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetDatabaseResponse implements RESTResponse, Database {
+public class GetDatabaseResponse extends BaseResourceAuditResponse
+        implements RESTResponse, Database {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
@@ -52,7 +53,13 @@ public class GetDatabaseResponse implements RESTResponse, Database {
     public GetDatabaseResponse(
             @JsonProperty(FIELD_ID) String id,
             @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options,
+            @JsonProperty(FIELD_OWNER) String owner,
+            @JsonProperty(FIELD_CREATED_AT) long createdAt,
+            @JsonProperty(FIELD_CREATED_BY) String createdBy,
+            @JsonProperty(FIELD_UPDATED_AT) long updatedAt,
+            @JsonProperty(FIELD_UPDATED_BY) String updatedBy) {
+        super(owner, createdAt, createdBy, updatedAt, updatedBy);
         this.id = id;
         this.name = name;
         this.options = options;
