@@ -16,22 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.factories.Factory;
+import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.options.Options;
 
-import java.util.List;
-import java.util.Map;
+/** Factory for {@link DLFTokenLoader}. */
+public interface DLFTokenLoaderFactory extends Factory {
 
-/** Request for dropping partition. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class DropPartitionsRequest extends BasePartitionsRequest {
+    DLFTokenLoader create(Options options);
 
-    @JsonCreator
-    public DropPartitionsRequest(
-            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
-        super(partitionSpecs);
+    static DLFTokenLoader createDLFTokenLoader(String name, Options options) {
+        DLFTokenLoaderFactory factory =
+                FactoryUtil.discoverFactory(
+                        DLFTokenLoaderFactory.class.getClassLoader(),
+                        DLFTokenLoaderFactory.class,
+                        name);
+        return factory.create(options);
     }
 }

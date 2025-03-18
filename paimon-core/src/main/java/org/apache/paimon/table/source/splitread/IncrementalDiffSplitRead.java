@@ -92,7 +92,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                                 split.bucket(),
                                 split.beforeFiles(),
                                 split.beforeDeletionFiles().orElse(null),
-                                false),
+                                forceKeepDelete),
                         mergeRead.createMergeReader(
                                 split.partition(),
                                 split.bucket(),
@@ -195,19 +195,18 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
             if (kvs.size() == 1) {
                 KeyValue kv = kvs.get(0);
                 if (kv.level() == BEFORE_LEVEL) {
-                    if (keepDelete) {
+                    if (keepDelete && kv.isAdd()) {
                         return kv.replaceValueKind(RowKind.DELETE);
                     }
                 } else {
                     toReturn = kv;
                 }
             } else if (kvs.size() == 2) {
-                KeyValue latest = kvs.get(1);
-                if (latest.level() == AFTER_LEVEL) {
-                    // Return when the value or rowKind is different. Since before is always add, we
-                    // only need to check if after is not add.
-                    if (!valueEquals() || !latest.isAdd()) {
-                        toReturn = latest;
+                KeyValue before = kvs.get(0);
+                KeyValue after = kvs.get(1);
+                if (after.level() == AFTER_LEVEL) {
+                    if (!valueAndRowKindEquals(before, after)) {
+                        toReturn = after;
                     }
                 }
             } else {
@@ -221,10 +220,11 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
             return null;
         }
 
-        private boolean valueEquals() {
+        private boolean valueAndRowKindEquals(KeyValue before, KeyValue after) {
             return serializer1
-                    .toBinaryRow(kvs.get(0).value())
-                    .equals(serializer2.toBinaryRow(kvs.get(1).value()));
+                            .toBinaryRow(before.value())
+                            .equals(serializer2.toBinaryRow(after.value()))
+                    && before.isAdd() == after.isAdd();
         }
     }
 }

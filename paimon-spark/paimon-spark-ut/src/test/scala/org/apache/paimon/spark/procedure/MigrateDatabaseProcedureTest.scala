@@ -22,30 +22,34 @@ import org.apache.paimon.spark.PaimonHiveTestBase
 
 import org.apache.spark.sql.Row
 
+import java.util.concurrent.ThreadLocalRandom
+
 class MigrateDatabaseProcedureTest extends PaimonHiveTestBase {
+
+  private val random = ThreadLocalRandom.current().nextInt(10000)
 
   Seq("parquet", "orc", "avro").foreach(
     format => {
       test(s"Paimon migrate database procedure: migrate $format non-partitioned database") {
-        withTable("hive_tbl", "hive_tbl1") {
+        withTable(s"hive_tbl$random", s"hive_tbl1$random") {
           // create hive table
           spark.sql(s"""
-                       |CREATE TABLE hive_tbl (id STRING, name STRING, pt STRING)
+                       |CREATE TABLE hive_tbl$random (id STRING, name STRING, pt STRING)
                        |USING $format
                        |""".stripMargin)
 
           spark.sql(s"""
-                       |CREATE TABLE hive_tbl1 (id STRING, name STRING, pt STRING)
+                       |CREATE TABLE hive_tbl1$random (id STRING, name STRING, pt STRING)
                        |USING $format
                        |""".stripMargin)
 
-          var rows0 = spark.sql("SHOW CREATE TABLE hive_tbl").collect()
+          var rows0 = spark.sql(s"SHOW CREATE TABLE hive_tbl$random").collect()
           assert(!rows0.apply(0).toString().contains("USING paimon"))
 
-          rows0 = spark.sql("SHOW CREATE TABLE hive_tbl1").collect()
+          rows0 = spark.sql(s"SHOW CREATE TABLE hive_tbl1$random").collect()
           assert(!rows0.apply(0).toString().contains("USING paimon"))
 
-          spark.sql(s"INSERT INTO hive_tbl VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
+          spark.sql(s"INSERT INTO hive_tbl$random VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
           checkAnswer(
             spark.sql(
@@ -54,13 +58,13 @@ class MigrateDatabaseProcedureTest extends PaimonHiveTestBase {
           )
 
           checkAnswer(
-            spark.sql(s"SELECT * FROM hive_tbl ORDER BY id"),
+            spark.sql(s"SELECT * FROM hive_tbl$random ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
 
-          var rows1 = spark.sql("SHOW CREATE TABLE hive_tbl").collect()
+          var rows1 = spark.sql(s"SHOW CREATE TABLE hive_tbl$random").collect()
           assert(rows1.apply(0).toString().contains("USING paimon"))
 
-          rows1 = spark.sql("SHOW CREATE TABLE hive_tbl1").collect()
+          rows1 = spark.sql(s"SHOW CREATE TABLE hive_tbl1$random").collect()
           assert(rows1.apply(0).toString().contains("USING paimon"))
         }
       }
@@ -70,37 +74,37 @@ class MigrateDatabaseProcedureTest extends PaimonHiveTestBase {
     format => {
       test(
         s"Paimon migrate database procedure: migrate $format database with setting parallelism") {
-        withTable("hive_tbl_01", "hive_tbl_02") {
+        withTable(s"hive_tbl_01$random", s"hive_tbl_02$random") {
           // create hive table
           spark.sql(s"""
-                       |CREATE TABLE hive_tbl_01 (id STRING, name STRING, pt STRING)
+                       |CREATE TABLE hive_tbl_01$random (id STRING, name STRING, pt STRING)
                        |USING $format
                        |""".stripMargin)
 
           spark.sql(s"""
-                       |CREATE TABLE hive_tbl_02 (id STRING, name STRING, pt STRING)
+                       |CREATE TABLE hive_tbl_02$random (id STRING, name STRING, pt STRING)
                        |USING $format
                        |""".stripMargin)
 
-          var rows0 = spark.sql("SHOW CREATE TABLE hive_tbl_01").collect()
+          var rows0 = spark.sql(s"SHOW CREATE TABLE hive_tbl_01$random").collect()
           assert(!rows0.apply(0).toString().contains("USING paimon"))
 
-          rows0 = spark.sql("SHOW CREATE TABLE hive_tbl_02").collect()
+          rows0 = spark.sql(s"SHOW CREATE TABLE hive_tbl_02$random").collect()
           assert(!rows0.apply(0).toString().contains("USING paimon"))
 
-          spark.sql(s"INSERT INTO hive_tbl_01 VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
+          spark.sql(s"INSERT INTO hive_tbl_01$random VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
           spark.sql(
             s"CALL sys.migrate_database(source_type => 'hive', database => '$hiveDbName', options => 'file.format=$format', parallelism => 6)")
 
           checkAnswer(
-            spark.sql(s"SELECT * FROM hive_tbl_01 ORDER BY id"),
+            spark.sql(s"SELECT * FROM hive_tbl_01$random ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
 
-          var rows1 = spark.sql("SHOW CREATE TABLE hive_tbl_01").collect()
+          var rows1 = spark.sql(s"SHOW CREATE TABLE hive_tbl_01$random").collect()
           assert(rows1.apply(0).toString().contains("USING paimon"))
 
-          rows1 = spark.sql("SHOW CREATE TABLE hive_tbl_02").collect()
+          rows1 = spark.sql(s"SHOW CREATE TABLE hive_tbl_02$random").collect()
           assert(rows1.apply(0).toString().contains("USING paimon"))
         }
       }

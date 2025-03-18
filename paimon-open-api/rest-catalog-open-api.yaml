@@ -62,6 +62,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -619,124 +630,11 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-    post:
-      tags:
-        - partition
-      summary: Create partitions
-      operationId: createPartitions
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreatePartitionsRequest'
-      responses:
-        "200":
-          description: Success, no content
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
-    post:
-      tags:
-        - partition
-      summary: Drop partitions
-      operationId: dropPartitions
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DropPartitionsRequest'
-      responses:
-        "200":
-          description: Success, no content
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/partitions/alter:
-    post:
-      tags:
-        - partition
-      summary: Alter partitions
-      operationId: alterPartitions
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AlterPartitionsRequest'
-      responses:
-        "200":
-          description: Success, no content
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}/partitions/mark:
     post:
       tags:
         - partition
-      summary: MarkDone partitions
+      summary: MarkDone partitions, for non-existent partitions, partitions will be created directly
       operationId: markDonePartitions
       parameters:
         - name: prefix
@@ -1469,7 +1367,7 @@ components:
         statistics:
           type: array
           items:
-            $ref: '#/components/schemas/Partition'
+            $ref: '#/components/schemas/PartitionStatistics'
     Snapshot:
       type: object
       properties:
@@ -1598,6 +1496,8 @@ components:
           type: array
           items:
             type: string
+        nextPageToken:
+          type: string
     GetDatabaseResponse:
       type: object
       properties:
@@ -1714,6 +1614,25 @@ components:
           additionalProperties:
             type: string
     Partition:
+      type: object
+      properties:
+        spec:
+          type: object
+        recordCount:
+          type: integer
+          format: int64
+        fileSizeInBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        lastFileCreationTime:
+          type: integer
+          format: int64
+        done:
+          type: boolean
+    PartitionStatistics:
       type: object
       properties:
         spec:

@@ -19,33 +19,42 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.utils.SnapshotManager;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
 /** A {@link SnapshotCommit} using {@link Catalog} to commit. */
 public class CatalogSnapshotCommit implements SnapshotCommit {
 
-    private final SupportsSnapshots supportsSnapshots;
+    private final Catalog catalog;
     private final Identifier identifier;
+    private final RenamingSnapshotCommit renamingCommit;
 
-    public CatalogSnapshotCommit(SupportsSnapshots supportsSnapshots, Identifier identifier) {
-        this.supportsSnapshots = supportsSnapshots;
+    public CatalogSnapshotCommit(
+            Catalog catalog, Identifier identifier, RenamingSnapshotCommit renamingCommit) {
+        this.catalog = catalog;
         this.identifier = identifier;
+        this.renamingCommit = renamingCommit;
     }
 
     @Override
-    public boolean commit(Snapshot snapshot, String branch, List<Partition> statistics)
+    public boolean commit(Snapshot snapshot, String branch, List<PartitionStatistics> statistics)
             throws Exception {
-        Identifier newIdentifier =
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
-        return supportsSnapshots.commitSnapshot(newIdentifier, snapshot, statistics);
+        try {
+            Identifier newIdentifier =
+                    new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
+            return catalog.commitSnapshot(newIdentifier, snapshot, statistics);
+        } catch (UnsupportedOperationException e) {
+            return renamingCommit.commit(snapshot, branch, statistics);
+        }
     }
 
     @Override
     public void close() throws Exception {
-        supportsSnapshots.close();
+        catalog.close();
     }
 
     /** Factory to create {@link CatalogSnapshotCommit}. */
@@ -54,14 +63,24 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
         private static final long serialVersionUID = 1L;
 
         private final CatalogLoader catalogLoader;
+        @Nullable private final CatalogLockFactory lockFactory;
+        @Nullable private final CatalogLockContext lockContext;
 
-        public Factory(CatalogLoader catalogLoader) {
+        public Factory(
+                CatalogLoader catalogLoader,
+                @Nullable CatalogLockFactory lockFactory,
+                @Nullable CatalogLockContext lockContext) {
             this.catalogLoader = catalogLoader;
+            this.lockFactory = lockFactory;
+            this.lockContext = lockContext;
         }
 
         @Override
         public SnapshotCommit create(Identifier identifier, SnapshotManager snapshotManager) {
-            return new CatalogSnapshotCommit((SupportsSnapshots) catalogLoader.load(), identifier);
+            RenamingSnapshotCommit renamingCommit =
+                    new RenamingSnapshotCommit.Factory(lockFactory, lockContext)
+                            .create(identifier, snapshotManager);
+            return new CatalogSnapshotCommit(catalogLoader.load(), identifier, renamingCommit);
         }
     }
 }

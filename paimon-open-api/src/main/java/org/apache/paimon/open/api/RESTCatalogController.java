@@ -20,15 +20,12 @@ package org.apache.paimon.open.api;
 
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
-import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -117,8 +114,11 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @GetMapping("/v1/{prefix}/databases")
-    public ListDatabasesResponse listDatabases(@PathVariable String prefix) {
-        return new ListDatabasesResponse(ImmutableList.of("account"));
+    public ListDatabasesResponse listDatabases(
+            @PathVariable String prefix,
+            @PathVariable Integer maxResults,
+            @PathVariable String pageToken) {
+        return new ListDatabasesResponse(ImmutableList.of("account"), null);
     }
 
     @Operation(
@@ -480,69 +480,9 @@ public class RESTCatalogController {
         // paged list partitions in this table with provided maxResults and pageToken
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
-        Partition partition = new Partition(spec, 1, 2, 3, 4);
+        Partition partition = new Partition(spec, 1, 2, 3, 4, false);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
-
-    @Operation(
-            summary = "Create partition",
-            tags = {"partition"})
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Success, no content"),
-        @ApiResponse(
-                responseCode = "404",
-                description = "Resource not found",
-                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
-        @ApiResponse(
-                responseCode = "500",
-                content = {@Content(schema = @Schema())})
-    })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
-    public void createPartitions(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @PathVariable String table,
-            @RequestBody CreatePartitionsRequest request) {}
-
-    @Operation(
-            summary = "Drop partitions",
-            tags = {"partition"})
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Success, no content"),
-        @ApiResponse(
-                responseCode = "404",
-                description = "Resource not found",
-                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
-        @ApiResponse(
-                responseCode = "500",
-                content = {@Content(schema = @Schema())})
-    })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/drop")
-    public void dropPartitions(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @PathVariable String table,
-            @RequestBody DropPartitionsRequest request) {}
-
-    @Operation(
-            summary = "Alter partitions",
-            tags = {"partition"})
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Success, no content"),
-        @ApiResponse(
-                responseCode = "404",
-                description = "Resource not found",
-                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
-        @ApiResponse(
-                responseCode = "500",
-                content = {@Content(schema = @Schema())})
-    })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/alter")
-    public void alterPartitions(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @PathVariable String table,
-            @RequestBody AlterPartitionsRequest request) {}
 
     @Operation(
             summary = "MarkDone partitions",

@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.partition;
+package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -33,7 +33,6 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -84,7 +83,7 @@ public class PartitionStatisticsReporterTest {
         BatchTableCommit committer = table.newBatchWriteBuilder().newCommit();
         committer.commit(messages);
         AtomicBoolean closed = new AtomicBoolean(false);
-        Map<String, Partition> partitionParams = Maps.newHashMap();
+        Map<String, PartitionStatistics> partitionParams = Maps.newHashMap();
 
         PartitionHandler partitionHandler =
                 new PartitionHandler() {
@@ -105,7 +104,7 @@ public class PartitionStatisticsReporterTest {
                     }
 
                     @Override
-                    public void alterPartitions(List<Partition> partitions) {
+                    public void alterPartitions(List<PartitionStatistics> partitions) {
                         partitions.forEach(
                                 partition -> {
                                     partitionParams.put(

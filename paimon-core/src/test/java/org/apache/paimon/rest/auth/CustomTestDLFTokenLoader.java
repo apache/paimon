@@ -16,22 +16,27 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 
-import java.util.List;
-import java.util.Map;
+import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 
-/** Request for creating partition. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class CreatePartitionsRequest extends BasePartitionsRequest {
+/** DLF Token Loader for custom. */
+public class CustomTestDLFTokenLoader implements DLFTokenLoader {
 
-    @JsonCreator
-    public CreatePartitionsRequest(
-            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
-        super(partitionSpecs);
+    DLFToken token;
+
+    public CustomTestDLFTokenLoader(
+            String accessKeyId, String accessKeySecret, String securityToken) {
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String expiration = now.format(TOKEN_DATE_FORMATTER);
+        this.token = new DLFToken(accessKeyId, accessKeySecret, securityToken, expiration);
+    }
+
+    @Override
+    public DLFToken loadToken() {
+        return token;
     }
 }

@@ -1276,6 +1276,24 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.");
 
+    public static final ConfigOption<PartitionSinkStrategy> PARTITION_SINK_STRATEGY =
+            key("partition.sink-strategy")
+                    .enumType(PartitionSinkStrategy.class)
+                    .defaultValue(PartitionSinkStrategy.NONE)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance."
+                                                    + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
+                                    .list(
+                                            text(
+                                                    "none: Rebalanced or Forward partitioning, this is the default behavior,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism."),
+                                            text(
+                                                    "hash: Hash the partitions value,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."))
+                                    .build());
+
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
                     .booleanType()
@@ -1581,6 +1599,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Enable data file thin mode to avoid duplicate columns storage.");
+
+    public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
+            key("partition.idle-time-to-report-statistic")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription(
+                            "Set a time duration when a partition has no new data after this time duration, "
+                                    + "start to report the partition statistics to hms.");
 
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
@@ -1990,6 +2016,10 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_BUFFER_FOR_APPEND);
     }
 
+    public PartitionSinkStrategy partitionSinkStrategy() {
+        return options.get(PARTITION_SINK_STRATEGY);
+    }
+
     public int writeMaxWritersToSpill() {
         return options.get(WRITE_MAX_WRITERS_TO_SPILL);
     }
@@ -2219,21 +2249,42 @@ public class CoreOptions implements Serializable {
 
     public Pair<String, String> incrementalBetween() {
         String str = options.get(INCREMENTAL_BETWEEN);
-        if (str == null) {
-            str = options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
-            if (str == null) {
-                return null;
-            }
-        }
-
         String[] split = str.split(",");
         if (split.length != 2) {
             throw new IllegalArgumentException(
-                    "The incremental-between or incremental-between-timestamp  must specific start(exclusive) and end snapshot or timestamp,"
+                    "The incremental-between must specific start(exclusive) and end snapshot,"
                             + " for example, 'incremental-between'='5,10' means changes between snapshot 5 and snapshot 10. But is: "
                             + str);
         }
         return Pair.of(split[0], split[1]);
+    }
+
+    public Pair<Long, Long> incrementalBetweenTimestamp() {
+        String str = options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
+        String[] split = str.split(",");
+        if (split.length != 2) {
+            throw new IllegalArgumentException(
+                    "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
+                            + str);
+        }
+
+        try {
+            return Pair.of(Long.parseLong(split[0]), Long.parseLong(split[1]));
+        } catch (NumberFormatException nfe) {
+            try {
+                long startTimestamp =
+                        DateTimeUtils.parseTimestampData(split[0], 3, TimeZone.getDefault())
+                                .getMillisecond();
+                long endTimestamp =
+                        DateTimeUtils.parseTimestampData(split[1], 3, TimeZone.getDefault())
+                                .getMillisecond();
+                return Pair.of(startTimestamp, endTimestamp);
+            } catch (Exception e) {
+                throw new IllegalArgumentException(
+                        "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
+                                + str);
+            }
+        }
     }
 
     public IncrementalBetweenScanMode incrementalBetweenScanMode() {
@@ -3331,5 +3382,12 @@ public class CoreOptions implements Serializable {
 
         /** Lookup compaction will use UniversalCompaction strategy to gently compact new files. */
         GENTLE
+    }
+
+    /** Partition strategy for unaware bucket partitioned append only table. */
+    public enum PartitionSinkStrategy {
+        NONE,
+        HASH
+        // TODO : Supports range-partition strategy.
     }
 }

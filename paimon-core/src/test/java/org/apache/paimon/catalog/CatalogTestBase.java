@@ -20,6 +20,8 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
@@ -33,6 +35,9 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -881,10 +886,7 @@ public abstract class CatalogTestBase {
                                                 SchemaChange.updateColumnType(
                                                         "dt", DataTypes.DATE())),
                                         false))
-                .satisfies(
-                        anyCauseMatches(
-                                UnsupportedOperationException.class,
-                                "Cannot update partition column: [dt]"));
+                .satisfies(anyCauseMatches("Cannot update partition column: [dt]"));
     }
 
     @Test
@@ -1009,10 +1011,7 @@ public abstract class CatalogTestBase {
                                                 SchemaChange.updateColumnNullability(
                                                         new String[] {"col2"}, true)),
                                         false))
-                .satisfies(
-                        anyCauseMatches(
-                                UnsupportedOperationException.class,
-                                "Cannot change nullability of primary key"));
+                .satisfies(anyCauseMatches("Cannot change nullability of primary key"));
     }
 
     @Test
@@ -1232,7 +1231,7 @@ public abstract class CatalogTestBase {
                 Schema.newBuilder()
                         .column("str", DataTypes.STRING())
                         .column("int", DataTypes.INT())
-                        .option("type", "format-table")
+                        .options(getFormatTableOptions())
                         .option("file.format", "csv")
                         .build();
         catalog.createTable(identifier, schema, false);
@@ -1243,7 +1242,6 @@ public abstract class CatalogTestBase {
         // alter table
         SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.STRING());
         assertThatThrownBy(() -> catalog.alterTable(identifier, schemaChange, false))
-                .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Only data table support alter table.");
 
         // drop table
@@ -1296,22 +1294,24 @@ public abstract class CatalogTestBase {
                         .build(),
                 true);
 
-        catalog.createPartitions(identifier, partitionSpecs);
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
         assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
                 .containsExactlyInAnyOrder(partitionSpecs.get(0), partitionSpecs.get(1));
 
         assertDoesNotThrow(() -> catalog.markDonePartitions(identifier, partitionSpecs));
 
         catalog.dropPartitions(identifier, partitionSpecs);
+
         assertThat(catalog.listPartitions(identifier)).isEmpty();
 
-        // Test when table does not exist
-        assertThatExceptionOfType(Catalog.TableNotExistException.class)
-                .isThrownBy(
-                        () ->
-                                catalog.createPartitions(
-                                        Identifier.create(databaseName, "non_existing_table"),
-                                        partitionSpecs));
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
                 .isThrownBy(
                         () ->
@@ -1321,12 +1321,6 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.markDonePartitions(
-                                        Identifier.create(databaseName, "non_existing_table"),
-                                        partitionSpecs));
-        assertThatExceptionOfType(Catalog.TableNotExistException.class)
-                .isThrownBy(
-                        () ->
-                                catalog.dropPartitions(
                                         Identifier.create(databaseName, "non_existing_table"),
                                         partitionSpecs));
     }
@@ -1359,7 +1353,14 @@ public abstract class CatalogTestBase {
                         .build(),
                 true);
 
-        catalog.createPartitions(identifier, partitionSpecs);
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
 
         // List partitions paged returns a list with all partitions of the table in all catalogs
         // except RestCatalog even
@@ -1392,49 +1393,6 @@ public abstract class CatalogTestBase {
                                         Identifier.create(databaseName, "non_existing_table"),
                                         finalMaxResults,
                                         pageToken));
-    }
-
-    @Test
-    public void testAlterPartitions() throws Exception {
-        if (!supportPartitions()) {
-            return;
-        }
-        String databaseName = "testAlterPartitionTable";
-        catalog.dropDatabase(databaseName, true, true);
-        catalog.createDatabase(databaseName, true);
-        Identifier alterIdentifier = Identifier.create(databaseName, "alert_partitions");
-        catalog.createTable(
-                alterIdentifier,
-                Schema.newBuilder()
-                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
-                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
-                        .column("col", DataTypes.INT())
-                        .column("dt", DataTypes.STRING())
-                        .partitionKeys("dt")
-                        .build(),
-                true);
-        catalog.createPartitions(
-                alterIdentifier, Arrays.asList(Collections.singletonMap("dt", "20250101")));
-        assertThat(catalog.listPartitions(alterIdentifier).stream().map(Partition::spec))
-                .containsExactlyInAnyOrder(Collections.singletonMap("dt", "20250101"));
-        Partition partition =
-                new Partition(
-                        Collections.singletonMap("dt", "20250101"),
-                        1,
-                        2,
-                        3,
-                        System.currentTimeMillis());
-        catalog.alterPartitions(alterIdentifier, Arrays.asList(partition));
-        Partition partitionFromServer = catalog.listPartitions(alterIdentifier).get(0);
-        checkPartition(partition, partitionFromServer);
-
-        // Test when table does not exist
-        assertThatExceptionOfType(Catalog.TableNotExistException.class)
-                .isThrownBy(
-                        () ->
-                                catalog.alterPartitions(
-                                        Identifier.create(databaseName, "non_existing_table"),
-                                        Arrays.asList(partition)));
     }
 
     protected boolean supportsAlterDatabase() {
@@ -1605,5 +1563,11 @@ public abstract class CatalogTestBase {
             assertThat(partitions.stream().map(Partition::spec))
                     .containsExactlyInAnyOrder(partitionSpecs);
         }
+    }
+
+    protected Map<String, String> getFormatTableOptions() {
+        Map<String, String> options = new HashMap<>(1);
+        options.put("type", "format-table");
+        return options;
     }
 }

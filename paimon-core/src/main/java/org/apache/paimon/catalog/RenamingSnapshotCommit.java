@@ -23,7 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -51,7 +51,7 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
     }
 
     @Override
-    public boolean commit(Snapshot snapshot, String branch, List<Partition> statistics)
+    public boolean commit(Snapshot snapshot, String branch, List<PartitionStatistics> statistics)
             throws Exception {
         Path newSnapshotPath =
                 snapshotManager.branch().equals(branch)
@@ -97,7 +97,8 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
         }
 
         @Override
-        public SnapshotCommit create(Identifier identifier, SnapshotManager snapshotManager) {
+        public RenamingSnapshotCommit create(
+                Identifier identifier, SnapshotManager snapshotManager) {
             Lock lock =
                     Optional.ofNullable(lockFactory)
                             .map(factory -> factory.createLock(lockContext))

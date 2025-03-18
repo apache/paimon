@@ -222,33 +222,4 @@ If the pull request introduces a new feature, the feature should be documented.
 
 ## Become a Committer
 
-#### How to become a committer
-
-There is no strict protocol for becoming a committer. Candidates for new committers are typically people that are
-active contributors and community members. Candidates are suggested by current committers or PPMC members, and
-voted upon by the PPMC.
-
-If you would like to become a committer, you should engage with the community and start contributing to Apache Paimon in
-any of the above ways. You might also want to talk to other committers and ask for their advice and guidance.
-
-- Community contributions include helping to answer user questions on the mailing list, verifying release candidates,
-  giving talks, organizing community events, and other forms of evangelism and community building. The "Apache Way" has
-  a strong focus on the project community, and committers can be recognized for outstanding community contributions even
-  without any code contributions.
-
-- Code/technology contributions include contributed pull requests (patches), design discussions, reviews, testing, 
-  and other help in identifying and fixing bugs. Especially constructive and high quality design discussions, as well
-  as helping other contributors, are strong indicators.
-
-#### Identify promising candidates
-
-While the prior points give ways to identify promising candidates, the following are "must haves" for any committer candidate:
-
-- Being community minded: The candidate understands the meritocratic principles of community management. They do not
-  always optimize for as much as possible personal contribution, but will help and empower others where it makes sense.
-
-- We trust that a committer candidate will use their write access to the repositories responsibly, and if in doubt,
-  conservatively. It is important that committers are aware of what they know and what they don't know. In doubt, 
-  committers should ask for a second pair of eyes rather than commit to parts that they are not well familiar with.
-
-- They have shown to be respectful towards other community members and constructive in discussions.
+When you have made enough contributions, you can be nominated as Paimon's Committer. See [Committer]({{< ref "project/committer" >}}).
