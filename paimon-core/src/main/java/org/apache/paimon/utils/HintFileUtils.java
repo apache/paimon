@@ -109,7 +109,7 @@ public class HintFileUtils {
         int loopTime = 3;
         while (loopTime-- > 0) {
             try {
-                fileIO.overwriteFileUtf8(hintFile, String.valueOf(id));
+                fileIO.overwriteHintFile(hintFile, String.valueOf(id));
                 return;
             } catch (IOException e) {
                 try {
