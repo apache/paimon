@@ -132,7 +132,6 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                         deletedFilesLenInBytes.get()));
                                     }
                                 })
-                        .setParallelism(1)
                         .keyBy(tuple -> 1)
                         .reduce(
                                 (ReduceFunction<Tuple2<Long, Long>>)
@@ -140,6 +139,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 new Tuple2<>(
                                                         value1.f0 + value2.f0,
                                                         value1.f1 + value2.f1))
+                        .setParallelism(1)
                         .map(tuple -> new CleanOrphanFilesResult(tuple.f0, tuple.f1));
 
         // branch and manifest file
@@ -263,7 +263,6 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                         String,
                                                         Integer,
                                                         String>>() {}))
-                        .setParallelism(1)
                         .process(
                                 new ProcessFunction<
                                         Tuple7<
@@ -323,7 +322,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             }
                                         }
                                     }
-                                });
+                                })
+                        .setParallelism(1);
 
         DataStream<CleanOrphanFilesResult> deleted =
                 usedFiles
