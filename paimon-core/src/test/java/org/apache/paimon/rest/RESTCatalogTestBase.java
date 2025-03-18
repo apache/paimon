@@ -850,6 +850,20 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         assertThat(snapshot.get().fileSizeInBytes()).isEqualTo(2);
         assertThat(snapshot.get().fileCount()).isEqualTo(3);
         assertThat(snapshot.get().lastFileCreationTime()).isEqualTo(4);
+
+        // drop table then create table
+        catalog.dropTable(hasSnapshotTableIdentifier, true);
+        createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        snapshot = catalog.loadSnapshot(hasSnapshotTableIdentifier);
+        assertThat(snapshot).isEmpty();
+        updateSnapshotOnRestServer(
+                hasSnapshotTableIdentifier, createSnapshotWithMillis(id, millis), 5, 6, 7, 8);
+        snapshot = catalog.loadSnapshot(hasSnapshotTableIdentifier);
+        assertThat(snapshot.get().recordCount()).isEqualTo(5);
+
+        // test no snapshot
+        catalog.loadSnapshot(hasSnapshotTableIdentifier);
+        createTable(hasSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         Identifier noSnapshotTableIdentifier = Identifier.create("test_db_a_1", "unknown");
         createTable(noSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         snapshot = catalog.loadSnapshot(noSnapshotTableIdentifier);

@@ -273,10 +273,6 @@ public class RESTCatalogServer {
                                 resources.length == 2 && resources[1].startsWith("tables");
                         boolean isTableDetails =
                                 resources.length == 2 && resources[1].startsWith("table-details");
-                        boolean isViewRename =
-                                resources.length == 3
-                                        && "views".equals(resources[1])
-                                        && "rename".equals(resources[2]);
                         boolean isView =
                                 resources.length == 3
                                         && "views".equals(resources[1])
@@ -485,14 +481,18 @@ public class RESTCatalogServer {
                                 new ErrorResponse(
                                         null, null, e.getCause().getCause().getMessage(), 400);
                         return mockResponse(response, 400);
-                    } else if (e instanceof UnsupportedOperationException) {
+                    } else if (e instanceof UnsupportedOperationException
+                            || e.getCause() instanceof UnsupportedOperationException) {
                         response = new ErrorResponse(null, null, e.getMessage(), 501);
                         return mockResponse(response, 501);
-                    } else if (e instanceof IllegalStateException) {
+                    } else if (e instanceof IllegalStateException
+                            || e.getCause() instanceof IllegalStateException) {
                         response = new ErrorResponse(null, null, e.getMessage(), 500);
                         return mockResponse(response, 500);
                     }
-                    return new MockResponse().setResponseCode(500);
+                    return new MockResponse()
+                            .setResponseCode(500)
+                            .setBody(e.getCause().getMessage());
                 }
             }
         };
@@ -671,7 +671,12 @@ public class RESTCatalogServer {
                             new GetDatabaseResponse(
                                     UUID.randomUUID().toString(),
                                     database.name(),
-                                    database.options());
+                                    database.options(),
+                                    "owner",
+                                    1L,
+                                    "created",
+                                    1L,
+                                    "updated");
                     return mockResponse(response, 200);
                 case "DELETE":
                     catalog.dropDatabase(databaseName, false, true);
@@ -740,7 +745,7 @@ public class RESTCatalogServer {
                         tableMetadata =
                                 createTableMetadata(
                                         requestBody.getIdentifier(),
-                                        1L,
+                                        0L,
                                         requestBody.getSchema(),
                                         UUID.randomUUID().toString(),
                                         false);
@@ -842,7 +847,12 @@ public class RESTCatalogServer {
                                 identifier.getTableName(),
                                 entry.getValue().isExternal(),
                                 entry.getValue().schema().id(),
-                                entry.getValue().schema().toSchema());
+                                entry.getValue().schema().toSchema(),
+                                "owner",
+                                1L,
+                                "created",
+                                1L,
+                                "updated");
                 tableDetails.add(getTableResponse);
             }
         }
@@ -862,7 +872,6 @@ public class RESTCatalogServer {
         switch (method) {
             case "GET":
                 TableMetadata tableMetadata;
-                identifier.isSystemTable();
                 if (identifier.isSystemTable()) {
                     TableSchema schema = catalog.loadTableSchema(identifier);
                     tableMetadata =
@@ -877,7 +886,12 @@ public class RESTCatalogServer {
                                 identifier.getTableName(),
                                 tableMetadata.isExternal(),
                                 tableMetadata.schema().id(),
-                                tableMetadata.schema().toSchema());
+                                tableMetadata.schema().toSchema(),
+                                "owner",
+                                1L,
+                                "created",
+                                1L,
+                                "updated");
                 return mockResponse(response, 200);
             case "POST":
                 AlterTableRequest requestBody =
@@ -891,6 +905,8 @@ public class RESTCatalogServer {
                     System.out.println(e.getMessage());
                 }
                 tableMetadataStore.remove(identifier.getFullName());
+                tableSnapshotStore.remove(identifier.getFullName());
+                tablePartitionsStore.remove(identifier.getFullName());
                 return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
@@ -1171,7 +1187,15 @@ public class RESTCatalogServer {
                                             view.dialects(),
                                             view.comment().orElse(null),
                                             view.options());
-                            return new GetViewResponse("id", identifier.getTableName(), schema);
+                            return new GetViewResponse(
+                                    "id",
+                                    identifier.getTableName(),
+                                    schema,
+                                    "owner",
+                                    1L,
+                                    "created",
+                                    1L,
+                                    "updated");
                         })
                 .collect(Collectors.toList());
     }
@@ -1190,7 +1214,16 @@ public class RESTCatalogServer {
                                         view.dialects(),
                                         view.comment().orElse(null),
                                         view.options());
-                        response = new GetViewResponse("id", identifier.getTableName(), schema);
+                        response =
+                                new GetViewResponse(
+                                        "id",
+                                        identifier.getTableName(),
+                                        schema,
+                                        "owner",
+                                        1L,
+                                        "created",
+                                        1L,
+                                        "updated");
                         return mockResponse(response, 200);
                     }
                     throw new Catalog.ViewNotExistException(identifier);
@@ -1414,11 +1447,6 @@ public class RESTCatalogServer {
 
     private TableMetadata createFormatTable(Identifier identifier, Schema schema) {
         return createTableMetadata(identifier, 1L, schema, UUID.randomUUID().toString(), true);
-    }
-
-    private Partition spec2Partition(Map<String, String> spec) {
-        // todo: need update
-        return new Partition(spec, 123, 456, 789, 123, false);
     }
 
     private FileStoreTable getFileTable(Identifier identifier)

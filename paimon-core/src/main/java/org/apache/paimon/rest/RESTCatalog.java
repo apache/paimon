@@ -75,6 +75,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
@@ -286,6 +287,9 @@ public class RESTCatalog implements Catalog {
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
+            if (isSystemDatabase(databaseName)) {
+                return SystemTableLoader.loadGlobalTableNames();
+            }
             return listDataFromPageApi(
                     queryParams ->
                             client.get(
@@ -465,6 +469,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
             }
+        } catch (NotImplementedException e) {
+            throw new RuntimeException(new UnsupportedOperationException(e.getMessage()));
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         } catch (BadRequestException e) {
@@ -522,6 +528,8 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         } catch (ServiceFailureException e) {
             throw new IllegalStateException(e.getMessage());
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException(e.getMessage());
         } catch (BadRequestException e) {
             throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
         }

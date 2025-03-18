@@ -312,7 +312,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 spark.sql(
                                         "CREATE TABLE T (a INT) TBLPROPERTIES ('changelog-producer' = 'input')"))
                 .rootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Can not set changelog-producer on table without primary keys");
 
@@ -323,7 +323,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 spark.sql(
                                         "ALTER TABLE T SET TBLPROPERTIES('changelog-producer' 'input')"))
                 .rootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Can not set changelog-producer on table without primary keys");
     }

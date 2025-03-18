@@ -36,12 +36,15 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -483,6 +486,20 @@ public abstract class CatalogTestBase {
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
                         "Unrecognized option for boolean: max. Expected either true or false(case insensitive)");
+
+        // conflict options
+        Schema conflictOptionsSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .options(ImmutableMap.of("changelog-producer", "input"))
+                        .build();
+        assertThatThrownBy(
+                        () ->
+                                catalog.createTable(
+                                        Identifier.create("test_db", "conflict_options_table"),
+                                        conflictOptionsSchema,
+                                        false))
+                .isInstanceOf(RuntimeException.class);
     }
 
     @Test
@@ -538,6 +555,12 @@ public abstract class CatalogTestBase {
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
                 .isThrownBy(
                         () -> catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, "1111")));
+
+        List<String> sysTables = catalog.listTables(SYSTEM_DATABASE_NAME);
+        assertThat(sysTables)
+                .containsExactlyInAnyOrder(
+                        AllTableOptionsTable.ALL_TABLE_OPTIONS,
+                        CatalogOptionsTable.CATALOG_OPTIONS);
     }
 
     @Test
@@ -683,6 +706,19 @@ public abstract class CatalogTestBase {
                         anyCauseMatches(
                                 Catalog.ColumnAlreadyExistException.class,
                                 "Column col1 already exists in the test_db.test_table table."));
+
+        // conflict options
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.setOption(
+                                                        "changelog-producer", "input")),
+                                        false))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Can not set changelog-producer on table without primary keys");
     }
 
     @Test

@@ -28,7 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 /** Response for getting table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetTableResponse implements RESTResponse {
+public class GetTableResponse extends BaseResourceAuditResponse implements RESTResponse {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
@@ -57,7 +57,13 @@ public class GetTableResponse implements RESTResponse {
             @JsonProperty(FIELD_NAME) String name,
             @JsonProperty(FIELD_IS_EXTERNAL) boolean isExternal,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
-            @JsonProperty(FIELD_SCHEMA) Schema schema) {
+            @JsonProperty(FIELD_SCHEMA) Schema schema,
+            @JsonProperty(FIELD_OWNER) String owner,
+            @JsonProperty(FIELD_CREATED_AT) long createdAt,
+            @JsonProperty(FIELD_CREATED_BY) String createdBy,
+            @JsonProperty(FIELD_UPDATED_AT) long updatedAt,
+            @JsonProperty(FIELD_UPDATED_BY) String updatedBy) {
+        super(owner, createdAt, createdBy, updatedAt, updatedBy);
         this.id = id;
         this.name = name;
         this.isExternal = isExternal;

@@ -164,7 +164,15 @@ public class RESTCatalogController {
     public GetDatabaseResponse getDatabases(
             @PathVariable String prefix, @PathVariable String database) {
         Map<String, String> options = new HashMap<>();
-        return new GetDatabaseResponse(UUID.randomUUID().toString(), "name", options);
+        return new GetDatabaseResponse(
+                UUID.randomUUID().toString(),
+                "name",
+                options,
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     @Operation(
@@ -267,7 +275,12 @@ public class RESTCatalogController {
                                 ImmutableList.of(),
                                 ImmutableList.of(),
                                 new HashMap<>(),
-                                "test-comment"));
+                                "test-comment"),
+                        "owner",
+                        System.currentTimeMillis(),
+                        "created",
+                        System.currentTimeMillis(),
+                        "updated");
         return new ListTableDetailsResponse(ImmutableList.of(singleTable), null);
     }
 
@@ -305,7 +318,12 @@ public class RESTCatalogController {
                         ImmutableList.of(),
                         ImmutableList.of(),
                         new HashMap<>(),
-                        "comment"));
+                        "comment"),
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     @Operation(
@@ -640,7 +658,16 @@ public class RESTCatalogController {
                         Collections.emptyMap(),
                         "comment",
                         Collections.singletonMap("pt", "1"));
-        GetViewResponse singleView = new GetViewResponse("id", "name", schema);
+        GetViewResponse singleView =
+                new GetViewResponse(
+                        "id",
+                        "name",
+                        schema,
+                        "owner",
+                        System.currentTimeMillis(),
+                        "created",
+                        System.currentTimeMillis(),
+                        "updated");
         return new ListViewDetailsResponse(ImmutableList.of(singleView), null);
     }
 
@@ -692,7 +719,15 @@ public class RESTCatalogController {
                         Collections.emptyMap(),
                         "comment",
                         Collections.singletonMap("pt", "1"));
-        return new GetViewResponse("id", "name", schema);
+        return new GetViewResponse(
+                "id",
+                "name",
+                schema,
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     @Operation(

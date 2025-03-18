@@ -89,9 +89,11 @@ public class DLFAuthProvider implements AuthProvider {
     public Map<String, String> header(
             Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
         try {
-            ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-            String date = now.format(AUTH_DATE_FORMATTER);
-            String dateTime = now.format(AUTH_DATE_TIME_FORMATTER);
+            String dateTime =
+                    baseHeader.getOrDefault(
+                            DLF_DATE_HEADER_KEY.toLowerCase(),
+                            ZonedDateTime.now(ZoneOffset.UTC).format(AUTH_DATE_TIME_FORMATTER));
+            String date = dateTime.substring(0, 8);
             Map<String, String> signHeaders =
                     generateSignHeaders(
                             restAuthParameter.data(), dateTime, token.getSecurityToken());
