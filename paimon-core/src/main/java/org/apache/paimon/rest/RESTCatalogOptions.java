@@ -85,4 +85,17 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth DLF token loader.");
+
+    public static final ConfigOption<String> DLF_TOKEN_ECS_METADATA_URL =
+            ConfigOptions.key("dlf.token-ecs-metadata-url")
+                    .stringType()
+                    .defaultValue(
+                            "http://100.100.100.200/latest/meta-data/Ram/security-credentials/")
+                    .withDescription("REST Catalog auth DLF token ecs metadata url.");
+
+    public static final ConfigOption<String> DLF_TOKEN_ECS_ROLE_NAME =
+            ConfigOptions.key("dlf.token-ecs-role-name")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("REST Catalog auth DLF token ecs role name.");
 }
