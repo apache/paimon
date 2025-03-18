@@ -158,7 +158,7 @@ public class ChangelogManager implements Serializable {
                         if (StringUtils.isNullOrWhitespaceOnly(changelogStr)) {
                             LOG.warn("Changelog file is empty, path: {}", path);
                         }
-                        changelogs.add(Changelog.fromJson(fileIO.readFileUtf8(path)));
+                        changelogs.add(Changelog.fromJson(changelogStr));
                     } catch (IOException e) {
                         if (!(e instanceof FileNotFoundException)) {
                             throw new RuntimeException(e);
