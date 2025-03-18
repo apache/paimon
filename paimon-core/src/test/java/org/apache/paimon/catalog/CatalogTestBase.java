@@ -31,6 +31,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -550,6 +552,12 @@ public abstract class CatalogTestBase {
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
                 .isThrownBy(
                         () -> catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, "1111")));
+
+        List<String> sysTables = catalog.listTables(SYSTEM_DATABASE_NAME);
+        assertThat(sysTables)
+                .containsExactlyInAnyOrder(
+                        AllTableOptionsTable.ALL_TABLE_OPTIONS,
+                        CatalogOptionsTable.CATALOG_OPTIONS);
     }
 
     @Test

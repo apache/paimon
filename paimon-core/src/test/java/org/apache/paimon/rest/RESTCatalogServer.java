@@ -111,6 +111,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Mock REST server for testing. */
@@ -269,7 +270,8 @@ public class RESTCatalogServer {
                         if (noPermissionDatabases.contains(databaseName)) {
                             throw new Catalog.DatabaseNoPermissionException(databaseName);
                         }
-                        if (!databaseStore.containsKey(databaseName)) {
+                        if (!SYSTEM_DATABASE_NAME.equals(databaseName)
+                                && !databaseStore.containsKey(databaseName)) {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
                         boolean isViews = resources.length == 2 && resources[1].startsWith("views");
@@ -279,10 +281,6 @@ public class RESTCatalogServer {
                                 resources.length == 2 && resources[1].startsWith("tables");
                         boolean isTableDetails =
                                 resources.length == 2 && resources[1].startsWith("table-details");
-                        boolean isViewRename =
-                                resources.length == 3
-                                        && "views".equals(resources[1])
-                                        && "rename".equals(resources[2]);
                         boolean isView =
                                 resources.length == 3
                                         && "views".equals(resources[1])
@@ -691,6 +689,15 @@ public class RESTCatalogServer {
     private MockResponse tablesHandle(
             String method, String data, String databaseName, Map<String, String> parameters)
             throws Exception {
+        if (SYSTEM_DATABASE_NAME.equals(databaseName)) {
+            switch (method) {
+                case "GET":
+                    List<String> tables = catalog.listTables(databaseName);
+                    return generateFinalListTablesResponse(parameters, tables);
+                default:
+                    return new MockResponse().setResponseCode(404);
+            }
+        }
         if (databaseStore.containsKey(databaseName)) {
             switch (method) {
                 case "GET":
