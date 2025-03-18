@@ -146,9 +146,7 @@ public final class DataFileIndexWriter implements Closeable {
     }
 
     public void write(InternalRow row) {
-        indexMaintainers
-                .values()
-                .forEach(mapFileIndexMaintainer -> mapFileIndexMaintainer.write(row));
+        indexMaintainers.values().forEach(index -> index.write(row));
     }
 
     @Override
@@ -313,19 +311,19 @@ public final class DataFileIndexWriter implements Closeable {
             InternalArray keyArray = internalMap.keyArray();
             InternalArray valueArray = internalMap.valueArray();
 
-            Set<String> writedKeys = new HashSet<>();
+            Set<String> writtenKeys = new HashSet<>();
             for (int i = 0; i < keyArray.size(); i++) {
                 String key = keyArray.getString(i).toString();
                 org.apache.paimon.fileindex.FileIndexWriter writer =
                         indexWritersMap.getOrDefault(key, null);
                 if (writer != null) {
-                    writedKeys.add(key);
+                    writtenKeys.add(key);
                     writer.writeRecord(valueElementGetter.getElementOrNull(valueArray, i));
                 }
             }
 
             for (Map.Entry<String, FileIndexWriter> writerEntry : indexWritersMap.entrySet()) {
-                if (!writedKeys.contains(writerEntry.getKey())) {
+                if (!writtenKeys.contains(writerEntry.getKey())) {
                     writerEntry.getValue().writeRecord(null);
                 }
             }

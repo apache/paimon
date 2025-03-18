@@ -261,34 +261,6 @@ Bitmap only support the following data type:
       <td><code>BooleanType</code></td>
       <td>true</td>
     </tr>
-    <tr>
-      <td><code>DecimalType(precision, scale)</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>FloatType</code></td>
-      <td>Not recommended</td>
-    </tr>
-    <tr>
-      <td><code>DoubleType</code></td>
-      <td>Not recommended</td>
-    </tr>
-    <tr>
-      <td><code>VarBinaryType</code>, <code>BinaryType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>RowType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>MapType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>ArrayType</code></td>
-      <td>false</td>
-    </tr>
     </tbody>
 </table>
 
@@ -383,38 +355,6 @@ BSI only support the following data type:
     <tr>
       <td><code>DecimalType(precision, scale)</code></td>
       <td>true</td>
-    </tr>
-    <tr>
-      <td><code>FloatType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>DoubleType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>String</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>VarBinaryType</code>, <code>BinaryType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>RowType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>MapType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>ArrayType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>BooleanType</code></td>
-      <td>false</td>
     </tr>
     </tbody>
 </table>

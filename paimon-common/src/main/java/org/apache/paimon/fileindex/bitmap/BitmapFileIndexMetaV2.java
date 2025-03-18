@@ -151,7 +151,7 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
 
     public static Comparator<Object> getComparator(DataType dataType) {
         return dataType.accept(
-                new DataTypeVisitorAdapter<Comparator<Object>>() {
+                new BitmapTypeVisitor<Comparator<Object>>() {
                     @Override
                     public Comparator<Object> visitBinaryString() {
                         return Comparator.comparing(o -> ((BinaryString) o));
