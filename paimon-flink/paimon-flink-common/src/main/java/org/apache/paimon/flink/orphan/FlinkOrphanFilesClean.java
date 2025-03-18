@@ -132,6 +132,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                         deletedFilesLenInBytes.get()));
                                     }
                                 })
+                        .setParallelism(1)
                         .keyBy(tuple -> 1)
                         .reduce(
                                 (ReduceFunction<Tuple2<Long, Long>>)
@@ -262,6 +263,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                         String,
                                                         Integer,
                                                         String>>() {}))
+                        .setParallelism(1)
                         .process(
                                 new ProcessFunction<
                                         Tuple7<

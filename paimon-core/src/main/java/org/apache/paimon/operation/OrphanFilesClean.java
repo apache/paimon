@@ -249,7 +249,7 @@ public abstract class OrphanFilesClean implements Serializable {
         TagManager tagManager = branchTable.tagManager();
         Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
         readSnapshots.addAll(tagManager.taggedSnapshots());
-        readSnapshots.addAll(changelogManager.safelyGetAllChangelogsAndIgnoreEmpty());
+        readSnapshots.addAll(changelogManager.safelyGetAllChangelogs());
         return readSnapshots;
     }
 
