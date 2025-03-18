@@ -524,6 +524,8 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         } catch (ServiceFailureException e) {
             throw new IllegalStateException(e.getMessage());
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException(e.getMessage());
         } catch (BadRequestException e) {
             throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
         }

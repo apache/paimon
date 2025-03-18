@@ -758,7 +758,7 @@ public class RESTCatalogServer {
                         tableMetadata =
                                 createTableMetadata(
                                         requestBody.getIdentifier(),
-                                        1L,
+                                        0L,
                                         requestBody.getSchema(),
                                         UUID.randomUUID().toString(),
                                         false);
