@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.utils.FileSystemBranchManager
 
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
@@ -68,7 +67,7 @@ class AlterBranchProcedureTest extends PaimonSparkTestBase with StreamTest {
           checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
 
           val table = loadTable("T")
-          val branchManager = table.branchManager().asInstanceOf[FileSystemBranchManager]
+          val branchManager = table.branchManager()
 
           // create branch with tag
           checkAnswer(

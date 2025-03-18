@@ -541,7 +541,8 @@ public abstract class MergeTreeTestBase {
                 null,
                 null,
                 false,
-                options.needLookup());
+                options.needLookup(),
+                null);
     }
 
     static class MockFailResultCompactionManager extends MergeTreeCompactManager {
@@ -564,7 +565,8 @@ public abstract class MergeTreeTestBase {
                     null,
                     null,
                     false,
-                    false);
+                    false,
+                    null);
         }
 
         protected CompactResult obtainCompactResult()

@@ -78,6 +78,7 @@ This section introduce all available spark procedures about paimon.
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
             <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
+            <li>max_expires: The maximum of limited expired partitions, it is optional.</li>
       </td>
       <td>CALL sys.expire_partitions(table => 'default.T', expiration_time => '1 d', timestamp_formatter => 
 'yyyy-MM-dd', timestamp_pattern => '$dt', expire_strategy => 'values-time')</td>
@@ -102,7 +103,7 @@ This section introduce all available spark procedures about paimon.
       <td>create_tag_from_timestamp</td>
       <td>
          To create a tag based on given timestamp. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>tag: name of the new tag.</li>
             <li>timestamp (Long): Find the first snapshot whose commit-time is greater than this timestamp.</li>
             <li>time_retained : The maximum time retained for newly created tags.</li>
@@ -116,11 +117,11 @@ This section introduce all available spark procedures about paimon.
       <td>
          Rename a tag with a new tag name. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>tag_name: name of the tag. Cannot be empty.</li>
-            <li>target_tag_name: the new tag name to rename. Cannot be empty.</li>
+            <li>tag: name of the tag. Cannot be empty.</li>
+            <li>target_tag: the new tag name to rename. Cannot be empty.</li>
       </td>
       <td>
-         CALL sys.rename_tag(table => 'default.T', tag_name => 'tag1', target_tag_name => 'tag2')
+         CALL sys.rename_tag(table => 'default.T', tag => 'tag1', target_tag => 'tag2')
       </td>
     </tr>
     <tr>
@@ -252,8 +253,8 @@ This section introduce all available spark procedures about paimon.
       <td>remove_unexisting_files</td>
       <td>
         Procedure to remove unexisting data files from manifest entries. See <a href="https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/RemoveUnexistingFilesAction.html">Java docs</a> for detailed use cases. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
-            <li>dryRun (optional): only check what files will be removed, but not really remove them. Default is false.</li>
+            <li>table: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
+            <li>dry_run (optional): only check what files will be removed, but not really remove them. Default is false.</li>
             <li>parallelism (optional): number of parallelisms to check files in the manifests.</li>
          <br>
          Note that user is on his own risk using this procedure, which may cause data loss when used outside from the use cases listed in Java docs.
@@ -316,7 +317,7 @@ This section introduce all available spark procedures about paimon.
       <td>reset_consumer</td>
       <td>
          To reset or delete consumer. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>consumerId: consumer to be reset or deleted.</li>
             <li>nextSnapshotId (Long): the new next snapshot id of the consumer.</li>
       </td>
@@ -331,7 +332,7 @@ This section introduce all available spark procedures about paimon.
       <td>clear_consumers</td>
       <td>
          To clear consumers. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
             <li>includingConsumers: consumers to be cleared.</li>
             <li>excludingConsumers: consumers which not to be cleared.</li>
       </td>
@@ -364,7 +365,7 @@ This section introduce all available spark procedures about paimon.
       <td>refresh_object_table</td>
       <td>
          To refresh_object_table a object table. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
       </td>
       <td>
          CALL sys.refresh_object_table('default.T')
@@ -374,7 +375,7 @@ This section introduce all available spark procedures about paimon.
       <td>compact_manifest</td>
       <td>
          To compact_manifest the manifests. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li>
       </td>
       <td>
          CALL sys.compact_manifest(`table` => 'default.T')

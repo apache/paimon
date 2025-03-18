@@ -158,7 +158,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         pathFactory,
                         extractor,
                         options);
-        this.recordLevelExpire = RecordLevelExpire.create(options, valueType);
+        this.recordLevelExpire = RecordLevelExpire.create(options, schema, schemaManager);
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,
@@ -281,7 +281,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             : compactionMetrics.createReporter(partition, bucket),
                     dvMaintainer,
                     options.prepareCommitWaitCompaction(),
-                    options.needLookup());
+                    options.needLookup(),
+                    recordLevelExpire);
         }
     }
 

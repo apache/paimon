@@ -40,6 +40,10 @@ public interface BranchManager {
 
     List<String> branches();
 
+    default boolean branchExists(String branchName) {
+        return branches().contains(branchName);
+    }
+
     /** Return the path string of a branch. */
     static String branchPath(Path tablePath, String branch) {
         return isMainBranch(branch)

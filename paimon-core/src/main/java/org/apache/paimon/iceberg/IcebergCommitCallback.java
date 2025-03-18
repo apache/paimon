@@ -424,7 +424,7 @@ public class IcebergCommitCallback implements CommitCallback {
                         new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
                         String.valueOf(snapshotId));
 
-        table.fileIO().deleteQuietly(baseMetadataPath);
+        deleteApplicableMetadataFiles(snapshotId);
         for (int i = 0; i + 1 < toExpireExceptLast.size(); i++) {
             expireManifestList(
                     new Path(toExpireExceptLast.get(i).manifestList()).getName(),
@@ -752,7 +752,25 @@ public class IcebergCommitCallback implements CommitCallback {
                 }
                 table.fileIO().deleteQuietly(listPath);
             }
-            table.fileIO().deleteQuietly(path);
+            deleteApplicableMetadataFiles(snapshotId);
+        }
+    }
+
+    private void deleteApplicableMetadataFiles(long snapshotId) throws IOException {
+        Options options = new Options(table.options());
+        if (options.get(IcebergOptions.METADATA_DELETE_AFTER_COMMIT)) {
+            long earliestMetadataId =
+                    snapshotId - options.get(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX);
+            if (earliestMetadataId > 0) {
+                Iterator<Path> it =
+                        pathFactory
+                                .getAllMetadataPathBefore(table.fileIO(), earliestMetadataId)
+                                .iterator();
+                while (it.hasNext()) {
+                    Path path = it.next();
+                    table.fileIO().deleteQuietly(path);
+                }
+            }
         }
     }
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
@@ -39,11 +40,13 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
 
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
         convertAction =
-                UpdatedDataFieldsProcessFunctionBase.canConvert(oldVarchar, biggerLengthVarchar);
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldVarchar, biggerLengthVarchar, TypeMapping.defaultMapping());
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
         convertAction =
-                UpdatedDataFieldsProcessFunctionBase.canConvert(oldVarchar, smallerLengthVarchar);
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldVarchar, smallerLengthVarchar, TypeMapping.defaultMapping());
 
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
@@ -56,10 +59,14 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
         SmallIntType smallintType = new SmallIntType();
 
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
-        convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, bigintType);
+        convertAction =
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldType, bigintType, TypeMapping.defaultMapping());
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
-        convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, smallintType);
+        convertAction =
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldType, smallintType, TypeMapping.defaultMapping());
 
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
@@ -72,10 +79,14 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
         DecimalType smallerRangeType = new DecimalType(10, 3);
 
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
-        convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, biggerRangeType);
+        convertAction =
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldType, biggerRangeType, TypeMapping.defaultMapping());
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
-        convertAction = UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, smallerRangeType);
+        convertAction =
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldType, smallerRangeType, TypeMapping.defaultMapping());
 
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
@@ -89,11 +100,13 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
 
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;
         convertAction =
-                UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, biggerLengthTimestamp);
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldType, biggerLengthTimestamp, TypeMapping.defaultMapping());
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT, convertAction);
         convertAction =
-                UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, smallerLengthTimestamp);
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldType, smallerLengthTimestamp, TypeMapping.defaultMapping());
 
         Assert.assertEquals(
                 UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);

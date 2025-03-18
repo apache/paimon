@@ -45,6 +45,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 
 /** Base {@link Action} for synchronizing into one Paimon database. */
 public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
@@ -60,6 +61,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected String includingTables = ".*";
     protected List<String> partitionKeys = new ArrayList<>();
     protected List<String> primaryKeys = new ArrayList<>();
+    protected List<ComputedColumn> computedColumns = new ArrayList<>();
     @Nullable protected String excludingTables;
     protected String includingDbs = ".*";
     @Nullable protected String excludingDbs;
@@ -172,10 +174,15 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return this;
     }
 
+    public SyncDatabaseActionBase withComputedColumnArgs(List<String> computedColumnArgs) {
+        this.computedColumns = buildComputedColumns(computedColumnArgs, Collections.emptyList());
+        return this;
+    }
+
     @Override
     protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
         return syncJobHandler.provideRecordParser(
-                Collections.emptyList(), typeMapping, metadataConverters);
+                this.computedColumns, typeMapping, metadataConverters);
     }
 
     public SyncDatabaseActionBase withPartitionKeyMultiple(

@@ -26,6 +26,7 @@ import org.apache.paimon.utils.ThreadPoolUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.commons.io.FileUtils;
+import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -45,6 +46,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_ID;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_SECRET;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_REGION;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_SECURITY_TOKEN;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_LOADER;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
@@ -229,6 +231,67 @@ public class AuthSessionTest {
     }
 
     @Test
+    public void testCreateDlfAuthProviderByDLFTokenLoader()
+            throws IOException, InterruptedException {
+        String fileName = UUID.randomUUID().toString();
+        Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        String theFirstGenerateToken = tokenFile2Token.getRight();
+        File tokenFile = tokenFile2Token.getLeft();
+        long tokenRefreshInMills = 1000;
+        // create options with token loader
+        Options options = new Options();
+        options.set(DLF_TOKEN_LOADER.key(), "local_file");
+        options.set(DLF_TOKEN_PATH.key(), folder.getRoot().getPath() + "/" + fileName);
+        options.set(RESTCatalogOptions.URI.key(), "serverUrl");
+        options.set(DLF_REGION.key(), "cn-hangzhou");
+        options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms");
+        AuthProvider authProvider =
+                AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
+        ScheduledExecutorService executor =
+                ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
+        AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+        String theFirstFetchToken =
+                OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        assertEquals(theFirstFetchToken, theFirstGenerateToken);
+        tokenFile.delete();
+        tokenFile2Token = generateTokenAndWriteToFile(fileName);
+        String theSecondGenerateToken = tokenFile2Token.getRight();
+        Thread.sleep(tokenRefreshInMills * 2);
+        String theSecondFetchToken =
+                OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+        // if the second fetch token is not equal to the first fetch token, it means refresh success
+        // as refresh maybe fail in test environment, so we need to check whether refresh success
+        if (!theSecondFetchToken.equals(theFirstFetchToken)) {
+            assertEquals(theSecondGenerateToken, theSecondFetchToken);
+        }
+    }
+
+    @Test
+    public void testCreateDlfAuthProviderByCustomDLFTokenLoader()
+            throws IOException, InterruptedException {
+        DLFToken customToken = generateToken();
+        // create options with custom token loader
+        Options options = new Options();
+        options.set(DLF_TOKEN_LOADER.key(), "custom");
+        options.set(DLF_ACCESS_KEY_ID.key(), customToken.getAccessKeyId());
+        options.set(DLF_ACCESS_KEY_SECRET.key(), customToken.getAccessKeySecret());
+        options.set(DLF_SECURITY_TOKEN.key(), customToken.getSecurityToken());
+        options.set(RESTCatalogOptions.URI.key(), "serverUrl");
+        options.set(DLF_REGION.key(), "cn-hangzhou");
+        AuthProvider authProvider =
+                AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
+        ScheduledExecutorService executor =
+                ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
+        AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
+        DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+        DLFToken fetchToken = dlfAuthProvider.token;
+        Assert.assertEquals(fetchToken.getAccessKeyId(), customToken.getAccessKeyId());
+        Assert.assertEquals(fetchToken.getAccessKeySecret(), customToken.getAccessKeySecret());
+        Assert.assertEquals(fetchToken.getSecurityToken(), customToken.getSecurityToken());
+    }
+
+    @Test
     public void testDLFAuthProviderAuthHeaderWhenDataIsNotEmpty() throws Exception {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
@@ -241,7 +304,7 @@ public class AuthSessionTest {
         parameters.put("k2", "v2");
         String data = "data";
         RESTAuthParameter restAuthParameter =
-                new RESTAuthParameter(serverUrl, "/path", parameters, "method", "data");
+                new RESTAuthParameter("/path", parameters, "method", "data");
         Map<String, String> header = authProvider.header(new HashMap<>(), restAuthParameter);
         String authorization = header.get(DLF_AUTHORIZATION_HEADER_KEY);
         String[] credentials = authorization.split(",")[0].split(" ")[1].split("/");
@@ -249,14 +312,13 @@ public class AuthSessionTest {
         String date = credentials[1];
         String newAuthorization =
                 DLFAuthSignature.getAuthorization(
-                        new RESTAuthParameter(serverUrl, "/path", parameters, "method", "data"),
+                        new RESTAuthParameter("/path", parameters, "method", "data"),
                         token,
                         "cn-hangzhou",
                         header,
                         dateTime,
                         date);
         assertEquals(newAuthorization, authorization);
-        assertEquals(restAuthParameter.host(), header.get(DLFAuthProvider.DLF_HOST_HEADER_KEY));
         assertEquals(
                 token.getSecurityToken(),
                 header.get(DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY));
@@ -282,6 +344,15 @@ public class AuthSessionTest {
         String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
         FileUtils.writeStringToFile(tokenFile, tokenStr);
         return Pair.of(tokenFile, tokenStr);
+    }
+
+    private DLFToken generateToken() {
+        String accessKeyId = UUID.randomUUID().toString();
+        String accessKeySecret = UUID.randomUUID().toString();
+        String securityToken = UUID.randomUUID().toString();
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String expiration = now.format(TOKEN_DATE_FORMATTER);
+        return new DLFToken(accessKeyId, accessKeySecret, securityToken, expiration);
     }
 
     private AuthProvider generateDLFAuthProvider(

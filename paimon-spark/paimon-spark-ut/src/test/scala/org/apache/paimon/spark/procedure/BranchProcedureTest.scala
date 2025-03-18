@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.utils.FileSystemBranchManager
 
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
@@ -84,7 +83,7 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
                 "CALL paimon.sys.create_branch(table => 'test.T', branch => 'test_branch', tag => 'test_tag')"),
               Row(true) :: Nil)
             val table = loadTable("T")
-            val branchManager = table.branchManager().asInstanceOf[FileSystemBranchManager]
+            val branchManager = table.branchManager()
             assert(branchManager.branchExists("test_branch"))
 
             // query from branch

@@ -100,6 +100,7 @@ SELECT * FROM paimon_incremental_query('tableName', 12, 20);
 
 -- read the incremental data between ts 1692169900000 and ts 1692169900000.
 SELECT * FROM paimon_incremental_between_timestamp('tableName', '1692169000000', '1692169900000');
+SELECT * FROM paimon_incremental_between_timestamp('tableName', '2025-03-12 00:00:00', '2025-03-12 00:08:00');
 
 -- read the incremental data to tag '2024-12-04'.
 -- Paimon will find an earlier tag and return changes between them.

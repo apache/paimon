@@ -47,8 +47,8 @@ import org.bson.BsonValue;
 import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,15 +61,22 @@ public class BsonValueConvertor {
         return bsonTimestamp.getTime();
     }
 
-    private static BigDecimal convert(BsonDecimal128 bsonValue) {
+    private static Number convert(BsonDecimal128 bsonValue) {
         return convert(bsonValue.decimal128Value());
     }
 
-    private static BigDecimal convert(Decimal128 bsonValue) {
-        if (bsonValue.isNaN() || bsonValue.isInfinite()) {
-            return null;
+    private static Number convert(Decimal128 bsonValue) {
+        if (bsonValue.isNaN()) {
+            return Double.NaN;
+        } else if (bsonValue.isInfinite()) {
+            if (bsonValue.isNegative()) {
+                return Double.NEGATIVE_INFINITY;
+            } else {
+                return Double.POSITIVE_INFINITY;
+            }
+        } else {
+            return bsonValue.bigDecimalValue();
         }
-        return bsonValue.bigDecimalValue();
     }
 
     private static String convert(BsonObjectId objectId) {
@@ -84,7 +91,7 @@ public class BsonValueConvertor {
         if (BsonBinarySubType.isUuid(bsonBinary.getType())) {
             return bsonBinary.asUuid().toString();
         } else {
-            return toHex(bsonBinary.getData());
+            return Base64.getEncoder().encodeToString(bsonBinary.getData());
         }
     }
 
@@ -99,11 +106,7 @@ public class BsonValueConvertor {
     }
 
     private static Double convert(BsonDouble bsonDouble) {
-        double value = bsonDouble.getValue();
-        if (Double.isNaN(value) || Double.isInfinite(value)) {
-            return null;
-        }
-        return value;
+        return bsonDouble.getValue();
     }
 
     private static String convert(BsonString string) {
@@ -136,8 +139,8 @@ public class BsonValueConvertor {
 
     private static Map<String, Object> convert(BsonJavaScriptWithScope javascriptWithScope) {
         return CollectionUtil.map(
-                Pair.of("code", javascriptWithScope.getCode()),
-                Pair.of("scope", convert(javascriptWithScope.getScope())));
+                Pair.of("$code", javascriptWithScope.getCode()),
+                Pair.of("$scope", convert(javascriptWithScope.getScope())));
     }
 
     private static String convert(BsonNull bsonNull) {
@@ -223,20 +226,5 @@ public class BsonValueConvertor {
                 throw new IllegalArgumentException(
                         "Unsupported BSON type: " + bsonValue.getBsonType());
         }
-    }
-
-    public static String toHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-
-        for (byte b : bytes) {
-            String s = Integer.toHexString(255 & b);
-            if (s.length() < 2) {
-                sb.append("0");
-            }
-
-            sb.append(s);
-        }
-
-        return sb.toString();
     }
 }
