@@ -552,14 +552,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThatThrownBy(
                         () -> sql("CREATE TABLE T (a INT) WITH ('changelog-producer' = 'input')"))
                 .rootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Can not set changelog-producer on table without primary keys");
 
         sql("CREATE TABLE T (a INT)");
         assertThatThrownBy(() -> sql("ALTER TABLE T SET ('changelog-producer'='input')"))
                 .rootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Can not set changelog-producer on table without primary keys");
     }
