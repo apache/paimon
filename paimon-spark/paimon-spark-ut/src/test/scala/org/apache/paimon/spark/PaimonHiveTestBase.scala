@@ -50,6 +50,8 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
       .set("spark.sql.warehouse.dir", tempHiveDBDir.getCanonicalPath)
       .set("spark.sql.catalogImplementation", "hive")
       .set(s"spark.sql.catalog.$sparkCatalogName", "org.apache.paimon.spark.SparkGenericCatalog")
+      // remove this, when fix https://github.com/apache/paimon/issues/5307
+      .set(s"spark.sql.catalog.$sparkCatalogName.client-pool-size", "1")
       .set(s"spark.sql.catalog.$paimonHiveCatalogName", classOf[SparkCatalog].getName)
       .set(s"spark.sql.catalog.$paimonHiveCatalogName.metastore", "hive")
       .set(s"spark.sql.catalog.$paimonHiveCatalogName.warehouse", tempHiveDBDir.getCanonicalPath)
