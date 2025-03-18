@@ -68,7 +68,8 @@ public interface FormatTable extends Table {
     enum Format {
         ORC,
         PARQUET,
-        CSV
+        CSV,
+        JSON
     }
 
     /** Parses a file format string to a corresponding {@link Format} enum constant. */

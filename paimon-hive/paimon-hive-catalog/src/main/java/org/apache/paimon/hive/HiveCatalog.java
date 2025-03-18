@@ -1404,6 +1404,8 @@ public class HiveCatalog extends AbstractCatalog {
                 return "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe";
             case ORC:
                 return "org.apache.hadoop.hive.ql.io.orc.OrcSerde";
+            case JSON:
+                return "org.apache.hive.hcatalog.data.JsonSerDe";
         }
         return SERDE_CLASS_NAME;
     }
@@ -1414,6 +1416,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case JSON:
                 return "org.apache.hadoop.mapred.TextInputFormat";
             case PARQUET:
                 return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat";
@@ -1429,6 +1432,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case JSON:
                 return "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat";
             case PARQUET:
                 return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat";

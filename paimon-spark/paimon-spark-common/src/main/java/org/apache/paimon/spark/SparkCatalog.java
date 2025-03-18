@@ -46,10 +46,12 @@ import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
+import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
 import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
 import org.apache.spark.sql.execution.datasources.v2.FileTable;
 import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable;
+import org.apache.spark.sql.execution.datasources.v2.json.JsonTable;
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable;
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable;
 import org.apache.spark.sql.types.StructField;
@@ -489,6 +491,14 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
                     ParquetFileFormat.class);
+        } else if (formatTable.format() == FormatTable.Format.JSON) {
+            return new JsonTable(
+                    ident.name(),
+                    SparkSession.active(),
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    JsonFileFormat.class);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported format table "

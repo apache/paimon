@@ -72,10 +72,15 @@ class HiveTableUtils {
         } else if (serLib.contains("orc")) {
             format = Format.ORC;
         } else if (inputFormat.contains("Text")) {
-            format = Format.CSV;
-            // hive default field delimiter is '\u0001'
-            options.set(
-                    FIELD_DELIMITER, serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
+            if (serLib.contains("json")) {
+                format = Format.JSON;
+            } else {
+                format = Format.CSV;
+                // hive default field delimiter is '\u0001'
+                options.set(
+                        FIELD_DELIMITER,
+                        serdeInfo.getParameters().getOrDefault(FIELD_DELIM, "\u0001"));
+            }
         } else {
             throw new UnsupportedOperationException("Unsupported table: " + hiveTable);
         }

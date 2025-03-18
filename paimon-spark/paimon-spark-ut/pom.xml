@@ -33,7 +33,7 @@ under the License.
 
     <properties>
         <spark.version>${paimon-spark-common.spark.version}</spark.version>
-        <jackson.version>${paimon.shade.jackson.version}</jackson.version>
+        <jackson.version>2.15.2</jackson.version>
     </properties>
 
     <dependencies>
