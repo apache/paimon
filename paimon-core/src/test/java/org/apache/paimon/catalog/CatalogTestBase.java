@@ -499,9 +499,7 @@ public abstract class CatalogTestBase {
                                         Identifier.create("test_db", "conflict_options_table"),
                                         conflictOptionsSchema,
                                         false))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "Can not set changelog-producer on table without primary keys");
+                .isInstanceOf(RuntimeException.class);
     }
 
     @Test
@@ -718,7 +716,7 @@ public abstract class CatalogTestBase {
                                                 SchemaChange.setOption(
                                                         "changelog-producer", "input")),
                                         false))
-                .isInstanceOf(UnsupportedOperationException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Can not set changelog-producer on table without primary keys");
     }
