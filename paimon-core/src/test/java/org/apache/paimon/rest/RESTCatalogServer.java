@@ -23,7 +23,6 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
@@ -263,8 +262,7 @@ public class RESTCatalogServer {
                         if (noPermissionDatabases.contains(databaseName)) {
                             throw new Catalog.DatabaseNoPermissionException(databaseName);
                         }
-                        if (!CatalogUtils.isSystemDatabase(databaseName)
-                                && !databaseStore.containsKey(databaseName)) {
+                        if (!databaseStore.containsKey(databaseName)) {
                             throw new Catalog.DatabaseNotExistException(databaseName);
                         }
                         boolean isViews = resources.length == 2 && resources[1].startsWith("views");
@@ -731,15 +729,6 @@ public class RESTCatalogServer {
     private MockResponse tablesHandle(
             String method, String data, String databaseName, Map<String, String> parameters)
             throws Exception {
-        if (CatalogUtils.isSystemDatabase(databaseName)) {
-            switch (method) {
-                case "GET":
-                    List<String> tables = catalog.listTables(databaseName);
-                    return generateFinalListTablesResponse(parameters, tables);
-                default:
-                    return new MockResponse().setResponseCode(404);
-            }
-        }
         if (databaseStore.containsKey(databaseName)) {
             switch (method) {
                 case "GET":
@@ -880,7 +869,6 @@ public class RESTCatalogServer {
         switch (method) {
             case "GET":
                 TableMetadata tableMetadata;
-                identifier.isSystemTable();
                 if (identifier.isSystemTable()) {
                     TableSchema schema = catalog.loadTableSchema(identifier);
                     tableMetadata =
