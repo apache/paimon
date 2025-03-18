@@ -597,11 +597,18 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         Identifier branchIdentifier = new Identifier("test_db", "test_table", branchName);
         assertThrows(
                 Catalog.TableNotExistException.class, () -> restCatalog.listPartitions(identifier));
-
-        createTable(
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        restCatalog.createTable(
                 identifier,
-                ImmutableMap.of(METASTORE_PARTITIONED_TABLE.key(), "" + true),
-                Lists.newArrayList("col1"));
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.INT()),
+                                new DataField(1, "dt", DataTypes.STRING())),
+                        Arrays.asList("dt"),
+                        Collections.emptyList(),
+                        ImmutableMap.of(METASTORE_PARTITIONED_TABLE.key(), "" + true),
+                        ""),
+                true);
         List<Partition> result = catalog.listPartitions(identifier);
         assertEquals(0, result.size());
         List<Map<String, String>> partitionSpecs =
@@ -1007,7 +1014,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
     @Override
     protected boolean supportPartitions() {
         // TODO support this
-        return false;
+        return true;
     }
 
     @Override
