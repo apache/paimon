@@ -46,6 +46,8 @@ import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_ID;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_KEY_SECRET;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_REGION;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_SECURITY_TOKEN;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_LOADER;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN;
@@ -289,6 +291,124 @@ public class AuthSessionTest {
         Assert.assertEquals(fetchToken.getAccessKeyId(), customToken.getAccessKeyId());
         Assert.assertEquals(fetchToken.getAccessKeySecret(), customToken.getAccessKeySecret());
         Assert.assertEquals(fetchToken.getSecurityToken(), customToken.getSecurityToken());
+    }
+
+    @Test
+    public void testCreateDlfAuthProviderByECSTokenProvider()
+            throws IOException, InterruptedException {
+        MockECSMetadataService mockECSMetadataService = new MockECSMetadataService("EcsTestRole");
+        mockECSMetadataService.start();
+        try {
+            DLFToken theFirstMockToken = generateToken();
+            mockECSMetadataService.setMockToken(theFirstMockToken);
+            String theFirstMockTokenStr =
+                    OBJECT_MAPPER_INSTANCE.writeValueAsString(theFirstMockToken);
+            long tokenRefreshInMills = 1000;
+            // create options with token loader
+            Options options = new Options();
+            options.set(DLF_TOKEN_LOADER.key(), "ecs");
+            options.set(
+                    DLF_TOKEN_ECS_METADATA_URL.key(),
+                    mockECSMetadataService.getUrl() + "latest/meta-data/Ram/security-credentials/");
+            options.set(RESTCatalogOptions.URI.key(), "serverUrl");
+            options.set(DLF_REGION.key(), "cn-hangzhou");
+            options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms");
+            AuthProvider authProvider =
+                    AuthProviderFactory.createAuthProvider(
+                            AuthProviderEnum.DLF.identifier(), options);
+            ScheduledExecutorService executor =
+                    ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
+            AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
+            DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+            String theFirstFetchTokenStr =
+                    OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+            assertEquals(theFirstFetchTokenStr, theFirstMockTokenStr);
+
+            DLFToken theSecondMockToken = generateToken();
+            String theSecondMockTokenStr =
+                    OBJECT_MAPPER_INSTANCE.writeValueAsString(theSecondMockToken);
+            mockECSMetadataService.setMockToken(theSecondMockToken);
+            Thread.sleep(tokenRefreshInMills * 2);
+            String theSecondFetchTokenStr =
+                    OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+            assertEquals(theSecondFetchTokenStr, theSecondMockTokenStr);
+        } finally {
+            mockECSMetadataService.shutdown();
+        }
+    }
+
+    @Test
+    public void testCreateDlfAuthProviderByECSTokenProviderWithDefineRole()
+            throws IOException, InterruptedException {
+        MockECSMetadataService mockECSMetadataService = new MockECSMetadataService("CustomRole");
+        mockECSMetadataService.start();
+        try {
+            DLFToken theFirstMockToken = generateToken();
+            mockECSMetadataService.setMockToken(theFirstMockToken);
+            String theFirstMockTokenStr =
+                    OBJECT_MAPPER_INSTANCE.writeValueAsString(theFirstMockToken);
+            long tokenRefreshInMills = 1000;
+            // create options with token loader
+            Options options = new Options();
+            options.set(DLF_TOKEN_LOADER.key(), "ecs");
+            options.set(
+                    DLF_TOKEN_ECS_METADATA_URL.key(),
+                    mockECSMetadataService.getUrl() + "latest/meta-data/Ram/security-credentials/");
+            options.set(DLF_TOKEN_ECS_ROLE_NAME.key(), "CustomRole");
+            options.set(RESTCatalogOptions.URI.key(), "serverUrl");
+            options.set(DLF_REGION.key(), "cn-hangzhou");
+            options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms");
+            AuthProvider authProvider =
+                    AuthProviderFactory.createAuthProvider(
+                            AuthProviderEnum.DLF.identifier(), options);
+            ScheduledExecutorService executor =
+                    ThreadPoolUtils.createScheduledThreadPool(1, "refresh-token");
+            AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
+            DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
+            String theFirstFetchTokenStr =
+                    OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+            assertEquals(theFirstFetchTokenStr, theFirstMockTokenStr);
+
+            DLFToken theSecondMockToken = generateToken();
+            String theSecondMockTokenStr =
+                    OBJECT_MAPPER_INSTANCE.writeValueAsString(theSecondMockToken);
+            mockECSMetadataService.setMockToken(theSecondMockToken);
+            Thread.sleep(tokenRefreshInMills * 2);
+            String theSecondFetchTokenStr =
+                    OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
+            assertEquals(theSecondFetchTokenStr, theSecondMockTokenStr);
+        } finally {
+            mockECSMetadataService.shutdown();
+        }
+    }
+
+    @Test
+    public void testCreateDlfAuthProviderByECSTokenProviderWithInvalidRole()
+            throws IOException, InterruptedException {
+        MockECSMetadataService mockECSMetadataService = new MockECSMetadataService("EcsTestRole");
+        mockECSMetadataService.start();
+        try {
+            DLFToken theFirstMockToken = generateToken();
+            mockECSMetadataService.setMockToken(theFirstMockToken);
+            // create options with token loader
+            Options options = new Options();
+            options.set(DLF_TOKEN_LOADER.key(), "ecs");
+            options.set(
+                    DLF_TOKEN_ECS_METADATA_URL.key(),
+                    mockECSMetadataService.getUrl() + "latest/meta-data/Ram/security-credentials/");
+            options.set(DLF_TOKEN_ECS_ROLE_NAME.key(), "CustomRole");
+            options.set(RESTCatalogOptions.URI.key(), "serverUrl");
+            options.set(DLF_REGION.key(), "cn-hangzhou");
+            assertThrows(
+                    RuntimeException.class,
+                    () -> {
+                        AuthProvider authProvider =
+                                AuthProviderFactory.createAuthProvider(
+                                        AuthProviderEnum.DLF.identifier(), options);
+                    });
+        } finally {
+            mockECSMetadataService.shutdown();
+        }
     }
 
     @Test

@@ -41,3 +41,4 @@ org.apache.paimon.iceberg.migrate.IcebergMigrateHadoopMetadataFactory
 org.apache.paimon.rest.auth.BearTokenAuthProviderFactory
 org.apache.paimon.rest.auth.DLFAuthProviderFactory
 org.apache.paimon.rest.auth.DLFLocalFileTokenLoaderFactory
+org.apache.paimon.rest.auth.DLFECSTokenLoaderFactory
