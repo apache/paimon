@@ -374,8 +374,6 @@ public class HiveCatalogTest extends CatalogTestBase {
         try (HiveCatalog customCatalog =
                 new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse)) {
             customBatchTables = customCatalog.listTables(databaseName);
-        } catch (Exception e) {
-            throw e;
         }
         assertEquals(defaultBatchTables.size(), customBatchTables.size());
         defaultBatchTables.sort(String::compareTo);
@@ -391,8 +389,6 @@ public class HiveCatalogTest extends CatalogTestBase {
         try (HiveCatalog invalidBatchSizeCatalog =
                 new HiveCatalog(fileIO, invalidHiveConf, metastoreClientClass, warehouse)) {
             invalidBatchSizeTables = invalidBatchSizeCatalog.listTables(databaseName);
-        } catch (Exception e) {
-            throw e;
         }
         assertEquals(defaultBatchTables.size(), invalidBatchSizeTables.size());
         invalidBatchSizeTables.sort(String::compareTo);
@@ -471,12 +467,11 @@ public class HiveCatalogTest extends CatalogTestBase {
                         .build(),
                 true);
 
-        ((HiveCatalog) catalog)
-                .createPartitions(
-                        identifier,
-                        Arrays.asList(
-                                Collections.singletonMap("dt", "20250101"),
-                                Collections.singletonMap("dt", "20250102")));
+        catalog.createPartitions(
+                identifier,
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102")));
         assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
                 .containsExactlyInAnyOrder(
                         Collections.singletonMap("dt", "20250102"),
@@ -502,19 +497,16 @@ public class HiveCatalogTest extends CatalogTestBase {
                         .partitionKeys("dt")
                         .build(),
                 true);
-        ((HiveCatalog) catalog)
-                .createPartitions(
-                        alterIdentifier, Arrays.asList(Collections.singletonMap("dt", "20250101")));
+        catalog.createPartitions(
+                alterIdentifier,
+                Collections.singletonList(Collections.singletonMap("dt", "20250101")));
         assertThat(catalog.listPartitions(alterIdentifier).stream().map(Partition::spec))
                 .containsExactlyInAnyOrder(Collections.singletonMap("dt", "20250101"));
+        long fileCreationTime = System.currentTimeMillis();
         PartitionStatistics partition =
                 new PartitionStatistics(
-                        Collections.singletonMap("dt", "20250101"),
-                        1,
-                        2,
-                        3,
-                        System.currentTimeMillis());
-        ((HiveCatalog) catalog).alterPartitions(alterIdentifier, Arrays.asList(partition));
+                        Collections.singletonMap("dt", "20250101"), 1, 2, 3, fileCreationTime);
+        catalog.alterPartitions(alterIdentifier, Collections.singletonList(partition));
         Partition partitionFromServer = catalog.listPartitions(alterIdentifier).get(0);
         checkPartition(
                 new Partition(
@@ -522,7 +514,7 @@ public class HiveCatalogTest extends CatalogTestBase {
                         1,
                         2,
                         3,
-                        System.currentTimeMillis(),
+                        fileCreationTime,
                         false),
                 partitionFromServer);
 
@@ -530,11 +522,9 @@ public class HiveCatalogTest extends CatalogTestBase {
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
                 .isThrownBy(
                         () ->
-                                ((HiveCatalog) catalog)
-                                        .alterPartitions(
-                                                Identifier.create(
-                                                        databaseName, "non_existing_table"),
-                                                Arrays.asList(partition)));
+                                catalog.alterPartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        Collections.singletonList(partition)));
     }
 
     @Override
