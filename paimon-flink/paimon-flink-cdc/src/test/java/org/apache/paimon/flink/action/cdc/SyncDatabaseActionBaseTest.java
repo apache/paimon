@@ -32,7 +32,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -72,25 +71,13 @@ public class SyncDatabaseActionBaseTest {
         rawData.put("field", "value");
 
         CdcRecord cdcData = new CdcRecord(RowKind.INSERT, rawData);
-        whiteAnyDbCdcRecord =
-                new RichCdcMultiplexRecord(
-                        ANY_DB, WHITE_TBL, Arrays.asList(), Arrays.asList(), cdcData);
-        blackAnyDbCdcRecord =
-                new RichCdcMultiplexRecord(
-                        ANY_DB, BLACK_TBL, Arrays.asList(), Arrays.asList(), cdcData);
-        whiteCdcRecord =
-                new RichCdcMultiplexRecord(
-                        WHITE_DB, WHITE_TBL, Arrays.asList(), Arrays.asList(), cdcData);
-        blackCdcRecord =
-                new RichCdcMultiplexRecord(
-                        BLACK_DB, WHITE_TBL, Arrays.asList(), Arrays.asList(), cdcData);
+        whiteAnyDbCdcRecord = new RichCdcMultiplexRecord(ANY_DB, WHITE_TBL, null, cdcData);
+        blackAnyDbCdcRecord = new RichCdcMultiplexRecord(ANY_DB, BLACK_TBL, null, cdcData);
+        whiteCdcRecord = new RichCdcMultiplexRecord(WHITE_DB, WHITE_TBL, null, cdcData);
+        blackCdcRecord = new RichCdcMultiplexRecord(BLACK_DB, WHITE_TBL, null, cdcData);
 
-        whiteDbBlackTblCdcRecord =
-                new RichCdcMultiplexRecord(
-                        WHITE_DB, BLACK_TBL, Arrays.asList(), Arrays.asList(), cdcData);
-        blackDbWhiteTblCdcRecord =
-                new RichCdcMultiplexRecord(
-                        BLACK_DB, WHITE_TBL, Arrays.asList(), Arrays.asList(), cdcData);
+        whiteDbBlackTblCdcRecord = new RichCdcMultiplexRecord(WHITE_DB, BLACK_TBL, null, cdcData);
+        blackDbWhiteTblCdcRecord = new RichCdcMultiplexRecord(BLACK_DB, WHITE_TBL, null, cdcData);
     }
 
     @Test

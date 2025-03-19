@@ -26,19 +26,13 @@ import static org.apache.paimon.rest.RESTUtil.encodeString;
 /** RestAuthParameter for building rest auth header. */
 public class RESTAuthParameter {
 
-    private final String host;
     private final String resourcePath;
     private final Map<String, String> parameters;
     private final String method;
     private final String data;
 
     public RESTAuthParameter(
-            String host,
-            String resourcePath,
-            Map<String, String> parameters,
-            String method,
-            String data) {
-        this.host = host;
+            String resourcePath, Map<String, String> parameters, String method, String data) {
         this.resourcePath = resourcePath;
         this.parameters = new HashMap<>();
         for (Map.Entry<String, String> entry : parameters.entrySet()) {
@@ -46,10 +40,6 @@ public class RESTAuthParameter {
         }
         this.method = method;
         this.data = data;
-    }
-
-    public String host() {
-        return host;
     }
 
     public String resourcePath() {

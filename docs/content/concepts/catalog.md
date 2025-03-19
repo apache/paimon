@@ -89,6 +89,8 @@ CREATE CATALOG my_jdbc WITH (
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
 ```
+
 ## REST Catalog
+
 By using the Paimon REST catalog, changes to the catalog will be directly stored in a remote catalog server which exposed through REST API.
-See [Paimon REST Catalog]({{< ref "concepts/rest-catalog" >}}).
+See [Paimon REST Catalog]({{< ref "concepts/rest/overview" >}}).

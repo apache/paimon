@@ -175,6 +175,9 @@ spark.read.format("paimon").option("branch", "branch1").table("t")
 
 Fast-Forward the custom branch to main will delete all the snapshots, tags and schemas in the main branch that are created after the branch's initial tag. And copy snapshots, tags and schemas from the branch to the main branch.
 
+If your branch modifies the schema, after Fast Forward, if it is Spark SQL, you can execute `REFRESH TABLE my_table`
+to clean up the cache to avoid inconsistencies caused by caching.
+
 {{< tabs "fast_forward" >}}
 
 {{< tab "Flink SQL" >}}

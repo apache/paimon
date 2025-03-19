@@ -38,6 +38,7 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -122,21 +123,21 @@ public abstract class HiveCatalogFormatTableITCaseBase {
     public void testCsvFormatTable() throws Exception {
         hiveShell.execute(
                 "CREATE TABLE csv_table (a INT COMMENT 'comment a', b STRING COMMENT 'comment b')");
-        doTestFormatTable("csv_table");
+        doTestCSVFormatTable("csv_table");
     }
 
     @Test
     public void testCsvFormatTableWithDelimiter() throws Exception {
         hiveShell.execute(
                 "CREATE TABLE csv_table_delimiter (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') ROW FORMAT DELIMITED FIELDS TERMINATED BY ';'");
-        doTestFormatTable("csv_table_delimiter");
+        doTestCSVFormatTable("csv_table_delimiter");
     }
 
     @Test
     public void testPartitionTable() throws Exception {
         hiveShell.execute(
                 "CREATE TABLE partition_table (a INT COMMENT 'comment a') PARTITIONED BY (b STRING COMMENT 'comment b')");
-        doTestFormatTable("partition_table");
+        doTestCSVFormatTable("partition_table");
     }
 
     @Test
@@ -144,24 +145,41 @@ public abstract class HiveCatalogFormatTableITCaseBase {
         tEnv.executeSql(
                         "CREATE TABLE flink_csv_table (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') with ('type'='format-table', 'file.format'='csv')")
                 .await();
-        doTestFormatTable("flink_csv_table");
+        doTestCSVFormatTable("flink_csv_table");
     }
 
     @Test
     public void testFlinkCreateFormatTableWithDelimiter() throws Exception {
         tEnv.executeSql(
                 "CREATE TABLE flink_csv_table_delimiter (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') with ('type'='format-table', 'file.format'='csv', 'field-delimiter'=';')");
-        doTestFormatTable("flink_csv_table_delimiter");
+        doTestCSVFormatTable("flink_csv_table_delimiter");
     }
 
     @Test
     public void testFlinkCreatePartitionTable() throws Exception {
         tEnv.executeSql(
                 "CREATE TABLE flink_partition_table (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') PARTITIONED BY (b) with ('type'='format-table', 'file.format'='csv')");
-        doTestFormatTable("flink_partition_table");
+        doTestCSVFormatTable("flink_partition_table");
     }
 
-    private void doTestFormatTable(String tableName) throws Exception {
+    @Test
+    public void testJsonFormatTable() throws Exception {
+        hiveShell.execute(
+                "CREATE TABLE json_table (a INT COMMENT 'comment a', b TIMESTAMP COMMENT 'comment b') "
+                        + "ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe' "
+                        + "STORED AS TEXTFILE");
+        doTestJSONFormatTable("json_table");
+    }
+
+    @Test
+    public void testFlinkCreateJsonFormatTable() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE flink_json_table (a INT COMMENT 'comment a', b TIMESTAMP COMMENT 'comment b') with ('type'='format-table', 'file.format'='json')")
+                .await();
+        doTestJSONFormatTable("flink_json_table");
+    }
+
+    private void doTestCSVFormatTable(String tableName) throws Exception {
         List<String> descResult =
                 collect("DESC " + tableName).stream()
                         .map(Objects::toString)
@@ -178,6 +196,35 @@ public abstract class HiveCatalogFormatTableITCaseBase {
         assertThat(collect(String.format("SELECT * FROM %s", tableName)))
                 .containsExactlyInAnyOrder(
                         Row.of(100, "Hive"), Row.of(200, "Table"), Row.of(300, "Paimon"));
+    }
+
+    private void doTestJSONFormatTable(String tableName) throws Exception {
+        List<String> descResult =
+                collect("DESC " + tableName).stream()
+                        .map(Objects::toString)
+                        .collect(Collectors.toList());
+        assertThat(descResult)
+                .containsExactly(
+                        "+I[a, INT, true, null, null, null, comment a]",
+                        "+I[b, TIMESTAMP(3), true, null, null, null, comment b]");
+        hiveShell.execute(
+                String.format(
+                        "INSERT INTO %s VALUES (1, '2025-03-17 10:15:30'), (2, '2025-03-18 10:15:30')",
+                        tableName));
+        assertThat(collect(String.format("SELECT * FROM %s", tableName)))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, LocalDateTime.parse("2025-03-17T10:15:30")),
+                        Row.of(2, LocalDateTime.parse("2025-03-18T10:15:30")));
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO %s VALUES (3, CAST('2025-03-19 10:15:30' AS TIMESTAMP))",
+                                tableName))
+                .await();
+        assertThat(collect(String.format("SELECT * FROM %s", tableName)))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, LocalDateTime.parse("2025-03-17T10:15:30")),
+                        Row.of(2, LocalDateTime.parse("2025-03-18T10:15:30")),
+                        Row.of(3, LocalDateTime.parse("2025-03-19T10:15:30")));
     }
 
     @Test

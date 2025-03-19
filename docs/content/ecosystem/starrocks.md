@@ -3,7 +3,7 @@ title: "StarRocks"
 weight: 2
 type: docs
 aliases:
-- /engines/starrocks.html
+- /ecosystem/starrocks.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

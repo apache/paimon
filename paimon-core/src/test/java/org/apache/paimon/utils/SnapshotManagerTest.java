@@ -44,7 +44,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.SnapshotTest.newChangelogManager;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
-import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;

@@ -24,7 +24,6 @@ import org.apache.paimon.rest.RESTCatalogOptions;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_PATH;
 import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_REFRESH_TIME;
 import static org.apache.paimon.rest.RESTCatalogOptions.URI;
 
@@ -41,10 +40,17 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
         String region =
                 options.getOptional(RESTCatalogOptions.DLF_REGION)
                         .orElseGet(() -> parseRegionFromUri(options.get(URI)));
-        if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
-            String tokenFilePath = options.get(DLF_TOKEN_PATH);
+        if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_LOADER).isPresent()) {
+            DLFTokenLoader dlfTokenLoader =
+                    DLFTokenLoaderFactory.createDLFTokenLoader(
+                            options.get(RESTCatalogOptions.DLF_TOKEN_LOADER), options);
             long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
-            return DLFAuthProvider.buildRefreshToken(tokenFilePath, tokenRefreshInMills, region);
+            return DLFAuthProvider.buildRefreshToken(dlfTokenLoader, tokenRefreshInMills, region);
+        } else if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
+            DLFTokenLoader dlfTokenLoader =
+                    DLFTokenLoaderFactory.createDLFTokenLoader("local_file", options);
+            long tokenRefreshInMills = options.get(TOKEN_REFRESH_TIME).toMillis();
+            return DLFAuthProvider.buildRefreshToken(dlfTokenLoader, tokenRefreshInMills, region);
         } else if (options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_ID).isPresent()
                 && options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET).isPresent()) {
             return DLFAuthProvider.buildAKToken(

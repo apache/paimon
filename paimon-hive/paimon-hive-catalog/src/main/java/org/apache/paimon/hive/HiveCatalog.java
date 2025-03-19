@@ -38,6 +38,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -121,7 +122,7 @@ import static org.apache.paimon.options.CatalogOptions.SYNC_ALL_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.FormatTableOptions.FIELD_DELIMITER;
-import static org.apache.paimon.utils.FileSystemBranchManager.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.HadoopUtils.addHadoopConfIfFound;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -449,13 +450,12 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void alterPartitions(
-            Identifier identifier, List<org.apache.paimon.partition.Partition> partitions)
+    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {
         TableSchema tableSchema = this.loadTableSchema(identifier);
         if (!tableSchema.partitionKeys().isEmpty()
                 && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
-            for (org.apache.paimon.partition.Partition partition : partitions) {
+            for (PartitionStatistics partition : partitions) {
                 Map<String, String> spec = partition.spec();
                 List<String> partitionValues =
                         tableSchema.partitionKeys().stream()
@@ -561,7 +561,8 @@ public class HiveCatalog extends AbstractCatalog {
                                             recordCount,
                                             fileSizeInBytes,
                                             fileCount,
-                                            lastFileCreationTime);
+                                            lastFileCreationTime,
+                                            false);
                                 })
                         .collect(Collectors.toList());
             } catch (Exception e) {
@@ -1403,6 +1404,8 @@ public class HiveCatalog extends AbstractCatalog {
                 return "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe";
             case ORC:
                 return "org.apache.hadoop.hive.ql.io.orc.OrcSerde";
+            case JSON:
+                return "org.apache.hive.hcatalog.data.JsonSerDe";
         }
         return SERDE_CLASS_NAME;
     }
@@ -1413,6 +1416,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case JSON:
                 return "org.apache.hadoop.mapred.TextInputFormat";
             case PARQUET:
                 return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat";
@@ -1428,6 +1432,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case JSON:
                 return "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat";
             case PARQUET:
                 return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat";

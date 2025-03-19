@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.ObjectUtils;
 
 import java.util.Collections;
@@ -40,8 +39,8 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
-    public List<DataField> parseSchemaChange() {
-        return ObjectUtils.coalesce(raw.updatedDataFields(), Collections.emptyList());
+    public CdcSchema parseSchemaChange() {
+        return raw.cdcSchema();
     }
 
     @Override

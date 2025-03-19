@@ -28,6 +28,7 @@ public abstract class FileIndexWriter {
         write(key);
     }
 
+    /** The key object may be reused, if saved in memory, please be sure to manually copy it. */
     public abstract void write(Object key);
 
     public abstract byte[] serializedBytes();

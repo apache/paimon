@@ -129,30 +129,6 @@ public class ResourcePaths {
                 PARTITIONS);
     }
 
-    public String dropPartitions(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                PARTITIONS,
-                "drop");
-    }
-
-    public String alterPartitions(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                PARTITIONS,
-                "alter");
-    }
-
     public String markDonePartitions(String databaseName, String objectName) {
         return SLASH.join(
                 V1,

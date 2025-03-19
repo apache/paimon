@@ -53,7 +53,7 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
 
     @Nullable protected transient MemorySegmentPool memoryPool;
     @Nullable private transient MemorySegmentAllocator memoryAllocator;
-    private final Options options;
+    protected final Options options;
     private boolean endOfInput = false;
 
     public PrepareCommitOperator(StreamOperatorParameters<OUT> parameters, Options options) {

@@ -349,6 +349,15 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /**
+     * Overwrite hint file by content atomically, the characteristic of Hint file is that it can not
+     * exist for a period of time, which allows some file systems to perform overwrite writing by
+     * deleting and renaming.
+     */
+    default void overwriteHintFile(Path path, String content) throws IOException {
+        overwriteFileUtf8(path, content);
+    }
+
+    /**
      * Copy content of one file into another.
      *
      * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because

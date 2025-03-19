@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex.bitmap;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
@@ -27,7 +28,6 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeDefaultVisitor;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -315,7 +315,53 @@ public class BitmapFileIndex implements FileIndexer {
     // Currently, it is mainly used to convert timestamps to long
     public static Function<Object, Object> getValueMapper(DataType dataType) {
         return dataType.accept(
-                new DataTypeDefaultVisitor<Function<Object, Object>>() {
+                new BitmapTypeVisitor<Function<Object, Object>>() {
+
+                    @Override
+                    public Function<Object, Object> visitBinaryString() {
+                        return o -> {
+                            if (o instanceof BinaryString) {
+                                return ((BinaryString) o).copy();
+                            }
+                            return o;
+                        };
+                    }
+
+                    @Override
+                    public Function<Object, Object> visitByte() {
+                        return Function.identity();
+                    }
+
+                    @Override
+                    public Function<Object, Object> visitShort() {
+                        return Function.identity();
+                    }
+
+                    @Override
+                    public Function<Object, Object> visitInt() {
+                        return Function.identity();
+                    }
+
+                    @Override
+                    public Function<Object, Object> visitLong() {
+                        return Function.identity();
+                    }
+
+                    @Override
+                    public Function<Object, Object> visitFloat() {
+                        return Function.identity();
+                    }
+
+                    @Override
+                    public Function<Object, Object> visitDouble() {
+                        return Function.identity();
+                    }
+
+                    @Override
+                    public Function<Object, Object> visitBoolean() {
+                        return Function.identity();
+                    }
+
                     @Override
                     public Function<Object, Object> visit(TimestampType timestampType) {
                         return getTimeStampMapper(timestampType.getPrecision());
@@ -325,11 +371,6 @@ public class BitmapFileIndex implements FileIndexer {
                     public Function<Object, Object> visit(
                             LocalZonedTimestampType localZonedTimestampType) {
                         return getTimeStampMapper(localZonedTimestampType.getPrecision());
-                    }
-
-                    @Override
-                    protected Function<Object, Object> defaultMethod(DataType dataType) {
-                        return Function.identity();
                     }
 
                     private Function<Object, Object> getTimeStampMapper(int precision) {

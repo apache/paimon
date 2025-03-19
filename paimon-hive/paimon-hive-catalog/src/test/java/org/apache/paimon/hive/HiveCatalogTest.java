@@ -26,6 +26,7 @@ import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
@@ -56,10 +57,12 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -371,8 +374,6 @@ public class HiveCatalogTest extends CatalogTestBase {
         try (HiveCatalog customCatalog =
                 new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse)) {
             customBatchTables = customCatalog.listTables(databaseName);
-        } catch (Exception e) {
-            throw e;
         }
         assertEquals(defaultBatchTables.size(), customBatchTables.size());
         defaultBatchTables.sort(String::compareTo);
@@ -388,8 +389,6 @@ public class HiveCatalogTest extends CatalogTestBase {
         try (HiveCatalog invalidBatchSizeCatalog =
                 new HiveCatalog(fileIO, invalidHiveConf, metastoreClientClass, warehouse)) {
             invalidBatchSizeTables = invalidBatchSizeCatalog.listTables(databaseName);
-        } catch (Exception e) {
-            throw e;
         }
         assertEquals(defaultBatchTables.size(), invalidBatchSizeTables.size());
         invalidBatchSizeTables.sort(String::compareTo);
@@ -477,6 +476,55 @@ public class HiveCatalogTest extends CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         Collections.singletonMap("dt", "20250102"),
                         Collections.singletonMap("dt", "20250101"));
+    }
+
+    @Test
+    public void testAlterPartitions() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+        String databaseName = "testAlterPartitionTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier alterIdentifier = Identifier.create(databaseName, "alert_partitions");
+        catalog.createTable(
+                alterIdentifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+        catalog.createPartitions(
+                alterIdentifier,
+                Collections.singletonList(Collections.singletonMap("dt", "20250101")));
+        assertThat(catalog.listPartitions(alterIdentifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrder(Collections.singletonMap("dt", "20250101"));
+        long fileCreationTime = System.currentTimeMillis();
+        PartitionStatistics partition =
+                new PartitionStatistics(
+                        Collections.singletonMap("dt", "20250101"), 1, 2, 3, fileCreationTime);
+        catalog.alterPartitions(alterIdentifier, Collections.singletonList(partition));
+        Partition partitionFromServer = catalog.listPartitions(alterIdentifier).get(0);
+        checkPartition(
+                new Partition(
+                        Collections.singletonMap("dt", "20250101"),
+                        1,
+                        2,
+                        3,
+                        fileCreationTime,
+                        false),
+                partitionFromServer);
+
+        // Test when table does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.alterPartitions(
+                                        Identifier.create(databaseName, "non_existing_table"),
+                                        Collections.singletonList(partition)));
     }
 
     @Override

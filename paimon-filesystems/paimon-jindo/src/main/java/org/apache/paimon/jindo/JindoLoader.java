@@ -16,22 +16,34 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.jindo;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.Path;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
-/** Request for creating partition. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class CreatePartitionsRequest extends BasePartitionsRequest {
+/** File loader for {@link JindoFileIO}. */
+public class JindoLoader implements FileIOLoader {
 
-    @JsonCreator
-    public CreatePartitionsRequest(
-            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
-        super(partitionSpecs);
+    @Override
+    public List<String[]> requiredOptions() {
+        List<String[]> options = new ArrayList<>();
+        options.add(new String[] {"fs.oss.endpoint"});
+        options.add(new String[] {"fs.oss.accessKeyId"});
+        options.add(new String[] {"fs.oss.accessKeySecret"});
+        return options;
+    }
+
+    @Override
+    public String getScheme() {
+        return "oss";
+    }
+
+    @Override
+    public FileIO load(Path path) {
+        return new JindoFileIO();
     }
 }

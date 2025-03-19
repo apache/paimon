@@ -37,6 +37,8 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -54,6 +56,7 @@ public class CombinedTableCompactorSourceBuilder {
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
     @Nullable private Duration partitionIdleTime = null;
+    private Map<String, String> tableOptions = new HashMap<>();
 
     public CombinedTableCompactorSourceBuilder(
             CatalogLoader catalogLoader,
@@ -84,6 +87,11 @@ public class CombinedTableCompactorSourceBuilder {
         return this;
     }
 
+    public CombinedTableCompactorSourceBuilder withTableOptions(Map<String, String> tableOptions) {
+        this.tableOptions = tableOptions;
+        return this;
+    }
+
     public DataStream<RowData> buildAwareBucketTableSource() {
         Preconditions.checkArgument(env != null, "StreamExecutionEnvironment should not be null.");
         RowType produceType = CompactBucketsTable.getRowType();
@@ -96,6 +104,7 @@ public class CombinedTableCompactorSourceBuilder {
                     includingPattern,
                     excludingPattern,
                     databasePattern,
+                    tableOptions,
                     monitorInterval);
         } else {
             return CombinedAwareBatchSource.buildSource(
@@ -106,6 +115,7 @@ public class CombinedTableCompactorSourceBuilder {
                     includingPattern,
                     excludingPattern,
                     databasePattern,
+                    tableOptions,
                     partitionIdleTime);
         }
     }
@@ -120,6 +130,7 @@ public class CombinedTableCompactorSourceBuilder {
                     includingPattern,
                     excludingPattern,
                     databasePattern,
+                    tableOptions,
                     monitorInterval);
         } else {
             return CombinedUnawareBatchSource.buildSource(
@@ -129,6 +140,7 @@ public class CombinedTableCompactorSourceBuilder {
                     includingPattern,
                     excludingPattern,
                     databasePattern,
+                    tableOptions,
                     partitionIdleTime);
         }
     }

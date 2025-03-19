@@ -16,22 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.options.Options;
 
-import java.util.List;
-import java.util.Map;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_ECS_METADATA_URL;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_TOKEN_ECS_ROLE_NAME;
 
-/** Request for dropping partition. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public class DropPartitionsRequest extends BasePartitionsRequest {
+/** Factory for {@link DLFECSTokenLoader}. */
+public class DLFECSTokenLoaderFactory implements DLFTokenLoaderFactory {
 
-    @JsonCreator
-    public DropPartitionsRequest(
-            @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs) {
-        super(partitionSpecs);
+    @Override
+    public String identifier() {
+        return "ecs";
+    }
+
+    @Override
+    public DLFTokenLoader create(Options options) {
+        String ecsMetadataURL = options.get(DLF_TOKEN_ECS_METADATA_URL);
+        String roleName = options.get(DLF_TOKEN_ECS_ROLE_NAME);
+        return new DLFECSTokenLoader(ecsMetadataURL, roleName);
     }
 }

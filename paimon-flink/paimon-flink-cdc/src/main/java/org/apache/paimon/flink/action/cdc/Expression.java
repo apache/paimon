@@ -141,7 +141,8 @@ public interface Expression extends Serializable {
                             referencedField.fieldType(),
                             referencedField.literals());
                 }),
-        CAST((typeMapping, caseSensitive, args) -> cast(args));
+        CAST((typeMapping, caseSensitive, args) -> cast(args)),
+        NOW((typeMapping, caseSensitive, args) -> new NowExpression());
 
         public final ExpressionCreator creator;
 
@@ -606,6 +607,24 @@ public interface Expression extends Serializable {
         @Override
         public String eval(String input) {
             return value;
+        }
+    }
+
+    /** Get current timestamp. */
+    final class NowExpression implements Expression {
+        @Override
+        public String fieldReference() {
+            return null;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.TIMESTAMP(3);
+        }
+
+        @Override
+        public String eval(String input) {
+            return DateTimeUtils.formatLocalDateTime(LocalDateTime.now(), 3);
         }
     }
 }

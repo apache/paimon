@@ -233,8 +233,7 @@ public class IcebergCompatibilityTest {
                 Map<String, String> partition = new HashMap<>();
                 partition.put("pt1", "20250304");
                 partition.put("pt2", "16");
-                paimonCatalog.dropPartitions(
-                        paimonIdentifier, Collections.singletonList(partition));
+                commit.truncatePartitions(Collections.singletonList(partition));
 
                 assertThat(getIcebergResult())
                         .containsExactlyInAnyOrder(
@@ -243,8 +242,7 @@ public class IcebergCompatibilityTest {
                 // delete the first-level partition
                 Map<String, String> partition = new HashMap<>();
                 partition.put("pt1", "20250304");
-                paimonCatalog.dropPartitions(
-                        paimonIdentifier, Collections.singletonList(partition));
+                commit.truncatePartitions(Collections.singletonList(partition));
 
                 assertThat(getIcebergResult())
                         .containsExactlyInAnyOrder("Record(20250305, 15, 1, 1)");
@@ -440,13 +438,19 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        // The old metadata.json is removed when the new metadata.json is created.
-        for (int i = 1; i <= 4; i++) {
+        // The old metadata.json is removed when the new metadata.json is created
+        // depending on the old metadata retention configuration.
+        for (int i = 1; i <= 3; i++) {
             unusedFiles.add(pathFactory.toMetadataPath(i).toString());
         }
 
         for (String path : unusedFiles) {
             assertThat(fileIO.exists(new Path(path))).isFalse();
+        }
+
+        // Check existence of retained Iceberg metadata.json files
+        for (int i = 4; i <= 5; i++) {
+            assertThat(fileIO.exists(new Path(pathFactory.toMetadataPath(i).toString()))).isTrue();
         }
 
         // Test all existing Iceberg snapshots are valid.
@@ -961,6 +965,8 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
+        options.set(IcebergOptions.METADATA_DELETE_AFTER_COMMIT, true);
+        options.set(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX, 1);
         options.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofKibiBytes(8));
         Schema schema =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");
