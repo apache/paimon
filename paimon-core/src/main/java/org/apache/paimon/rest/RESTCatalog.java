@@ -52,6 +52,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RollbackTableBySnapshotIdRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -70,6 +71,7 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
+import org.apache.paimon.rest.responses.RollbackTableResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -379,6 +381,29 @@ public class RESTCatalog implements Catalog {
         }
 
         return Optional.of(response.getSnapshot());
+    }
+
+    @Override
+    public boolean rollbackSnapshot(Identifier identifier, Long snapshotId)
+            throws TableNotExistException {
+        RollbackTableBySnapshotIdRequest request = new RollbackTableBySnapshotIdRequest(snapshotId);
+        RollbackTableResponse response;
+
+        try {
+            response =
+                    client.post(
+                            resourcePaths.rollbackTableBySnapshotId(
+                                    identifier.getDatabaseName(), identifier.getObjectName()),
+                            request,
+                            RollbackTableResponse.class,
+                            restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+
+        return response.isSuccess();
     }
 
     @Override

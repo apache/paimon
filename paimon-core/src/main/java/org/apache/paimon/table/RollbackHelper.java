@@ -42,8 +42,6 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.function.Predicate;
 
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
-
 /** Helper class for {@link Table#rollbackTo} including utils to clean snapshots. */
 public class RollbackHelper {
 
@@ -75,9 +73,10 @@ public class RollbackHelper {
     }
 
     /** Clean snapshots and tags whose id is larger than given snapshot's. */
-    public void cleanLargerThan(Snapshot retainedSnapshot) {
+    public void cleanLargerThan(long earliest, long latest, Snapshot retainedSnapshot) {
         // clean data files
-        List<Snapshot> cleanedSnapshots = cleanSnapshotsDataFiles(retainedSnapshot);
+        List<Snapshot> cleanedSnapshots =
+                cleanSnapshotsDataFiles(earliest, latest, retainedSnapshot);
         List<Changelog> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshot);
         List<Snapshot> cleanedTags = cleanTagsDataFiles(retainedSnapshot);
         Set<Long> cleanedIds = new HashSet<>();
@@ -104,19 +103,22 @@ public class RollbackHelper {
         }
     }
 
-    private List<Snapshot> cleanSnapshotsDataFiles(Snapshot retainedSnapshot) {
-        long earliest =
-                checkNotNull(
-                        snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
-        long latest =
-                checkNotNull(snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
+    private List<Snapshot> cleanSnapshotsDataFiles(
+            long earliest, long latest, Snapshot retainedSnapshot) {
+        //        long earliest =
+        //                checkNotNull(
+        //                        snapshotManager.earliestSnapshotId(), "Cannot find earliest
+        // snapshot.");
+        //        long latest =
+        //                checkNotNull(snapshotManager.latestSnapshotId(), "Cannot find latest
+        // snapshot.");
 
         // modify the latest hint
-        try {
-            snapshotManager.commitLatestHint(retainedSnapshot.id());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        //        try {
+        //            snapshotManager.commitLatestHint(retainedSnapshot.id());
+        //        } catch (IOException e) {
+        //            throw new UncheckedIOException(e);
+        //        }
 
         // delete snapshot files first, cannot be read now
         // it is possible that some snapshots have been expired

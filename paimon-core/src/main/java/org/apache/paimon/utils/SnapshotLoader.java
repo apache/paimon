@@ -29,5 +29,7 @@ public interface SnapshotLoader extends Serializable {
 
     Optional<Snapshot> load() throws IOException;
 
+    void rollback(long snapshotId) throws IOException;
+
     SnapshotLoader copyWithBranch(String branch);
 }

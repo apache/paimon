@@ -472,6 +472,12 @@ public abstract class AbstractCatalog implements Catalog {
         throw new UnsupportedOperationException();
     }
 
+    @Override
+    public boolean rollbackSnapshot(Identifier identifier, Long snapshotId)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
     /**
      * Create a {@link FormatTable} identified by the given {@link Identifier}.
      *

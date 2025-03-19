@@ -96,6 +96,18 @@ public class ResourcePaths {
                 "commit");
     }
 
+    public String rollbackTableBySnapshotId(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "commit",
+                "id");
+    }
+
     public String tableToken(String databaseName, String objectName) {
         return SLASH.join(
                 V1,

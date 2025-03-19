@@ -82,6 +82,7 @@ import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -546,8 +547,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager.snapshotExists(snapshotId),
                 "Rollback snapshot '%s' doesn't exist.",
                 snapshotId);
-
-        rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
+        snapshotManager.rollback(snapshotId);
+        if (snapshotManager.needCleanWhenRollback()) {
+            long earliest =
+                    checkNotNull(
+                            snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
+            long latest =
+                    checkNotNull(
+                            snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
+            rollbackHelper()
+                    .cleanLargerThan(earliest, latest, snapshotManager.snapshot(snapshotId));
+        }
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
@@ -674,14 +684,19 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
-        rollbackHelper().cleanLargerThan(taggedSnapshot);
+        SnapshotManager snapshotManager = snapshotManager();
+        long earliest =
+                checkNotNull(
+                        snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
+        long latest =
+                checkNotNull(snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
+        rollbackHelper().cleanLargerThan(earliest, latest, taggedSnapshot);
 
         try {
             // it is possible that the earliest snapshot is later than the rollback tag because of
             // snapshot expiration, in this case the `cleanLargerThan` method will delete all
             // snapshots, so we should write the tag file to snapshot directory and modify the
             // earliest hint
-            SnapshotManager snapshotManager = snapshotManager();
             if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
                 fileIO.writeFile(
                         snapshotManager().snapshotPath(taggedSnapshot.id()),

@@ -193,6 +193,28 @@ public class SnapshotManager implements Serializable {
         return earliestSnapshot(null);
     }
 
+    public void rollback(long snapshotId) {
+        if (snapshotLoader != null) {
+            try {
+                snapshotLoader.rollback(snapshotId);
+            } catch (UnsupportedOperationException ignored) {
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        } else {
+            // modify the latest hint
+            try {
+                commitLatestHint(snapshotId);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+    }
+
+    public boolean needCleanWhenRollback() {
+        return snapshotLoader == null;
+    }
+
     private @Nullable Snapshot earliestSnapshot(@Nullable Long stopSnapshotId) {
         Long snapshotId = earliestSnapshotId();
         if (snapshotId == null) {

@@ -531,6 +531,17 @@ public interface Catalog extends AutoCloseable {
     Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws Catalog.TableNotExistException;
 
+    /**
+     * rollback the snapshot of table identified by the given {@link Identifier} and snapshotId.
+     *
+     * @param identifier Path of the table
+     * @param snapshotId id of snapshot
+     * @return The requested snapshot of the table
+     * @throws Catalog.TableNotExistException if the target does not exist
+     */
+    boolean rollbackSnapshot(Identifier identifier, Long snapshotId)
+            throws Catalog.TableNotExistException;
+
     // ==================== Partition Modifications ==========================
 
     /**
