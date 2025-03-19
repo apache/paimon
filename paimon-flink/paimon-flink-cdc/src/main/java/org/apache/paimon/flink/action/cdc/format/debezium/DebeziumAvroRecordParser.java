@@ -22,9 +22,9 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractRecordParser;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
@@ -113,9 +113,9 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
 
     private void processRecord(
             GenericRecord record, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
-        RowType.Builder rowTypeBuilder = RowType.builder();
-        Map<String, String> rowData = this.extractRowData(record, rowTypeBuilder);
-        records.add(createRecord(rowKind, rowData, rowTypeBuilder.build().getFields()));
+        CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
+        Map<String, String> rowData = this.extractRowData(record, schemaBuilder);
+        records.add(createRecord(rowKind, rowData, schemaBuilder));
     }
 
     @Override
@@ -128,7 +128,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
     }
 
     private Map<String, String> extractRowData(
-            GenericRecord record, RowType.Builder rowTypeBuilder) {
+            GenericRecord record, CdcSchema.Builder schemaBuilder) {
         Schema payloadSchema = sanitizedSchema(record.getSchema());
 
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
@@ -155,10 +155,10 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
                             record.get(fieldName),
                             ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
-            rowTypeBuilder.field(fieldName, avroToPaimonDataType(schema));
+            schemaBuilder.column(fieldName, avroToPaimonDataType(schema));
         }
 
-        evalComputedColumns(resultMap, rowTypeBuilder);
+        evalComputedColumns(resultMap, schemaBuilder);
         return resultMap;
     }
 

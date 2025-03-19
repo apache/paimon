@@ -40,18 +40,6 @@ public class ForceUpLevel0Compaction implements CompactStrategy {
             return pick;
         }
 
-        // collect all level 0 files
-        int candidateCount = 0;
-        for (int i = candidateCount; i < runs.size(); i++) {
-            if (runs.get(i).level() > 0) {
-                break;
-            }
-            candidateCount++;
-        }
-
-        return candidateCount == 0
-                ? Optional.empty()
-                : Optional.of(
-                        universal.pickForSizeRatio(numLevels - 1, runs, candidateCount, true));
+        return universal.forcePickL0(numLevels, runs);
     }
 }

@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -1028,8 +1027,6 @@ public abstract class HiveCatalogITCaseBase {
         Identifier identifier = new Identifier("test_db", "t");
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         CatalogEnvironment catalogEnv = table.catalogEnvironment();
-        RenamingSnapshotCommit.Factory factory =
-                (RenamingSnapshotCommit.Factory) catalogEnv.commitFactory();
 
         AtomicInteger count = new AtomicInteger(0);
         List<Thread> threads = new ArrayList<>();
@@ -1046,8 +1043,9 @@ public abstract class HiveCatalogITCaseBase {
                             () -> {
                                 Lock lock =
                                         Lock.fromCatalog(
-                                                factory.lockFactory()
-                                                        .createLock(factory.lockContext()),
+                                                catalogEnv
+                                                        .lockFactory()
+                                                        .createLock(catalogEnv.lockContext()),
                                                 identifier);
                                 for (int j = 0; j < 10; j++) {
                                     try {

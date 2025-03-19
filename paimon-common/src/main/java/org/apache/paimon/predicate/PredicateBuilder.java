@@ -247,6 +247,7 @@ public class PredicateBuilder {
                 return ((Number) o).intValue();
             case FLOAT:
                 return ((Number) o).floatValue();
+            case CHAR:
             case VARCHAR:
                 return BinaryString.fromString(o.toString());
             case DATE:

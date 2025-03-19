@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -52,6 +53,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     protected final CatalogLoader catalogLoader;
     protected Catalog catalog;
     private boolean caseSensitive;
+    private TypeMapping typeMapping;
 
     private static final List<DataTypeRoot> STRING_TYPES =
             Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
@@ -71,8 +73,10 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final List<DataTypeRoot> TIMESTAMP_TYPES =
             Arrays.asList(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE);
 
-    protected UpdatedDataFieldsProcessFunctionBase(CatalogLoader catalogLoader) {
+    protected UpdatedDataFieldsProcessFunctionBase(
+            CatalogLoader catalogLoader, TypeMapping typeMapping) {
         this.catalogLoader = catalogLoader;
+        this.typeMapping = typeMapping;
     }
 
     /**
@@ -129,7 +133,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                             + " does not exist in table. This is unexpected.");
             DataType oldType = schema.fields().get(idx).type();
             DataType newType = updateColumnType.newDataType();
-            switch (canConvert(oldType, newType)) {
+            switch (canConvert(oldType, newType, typeMapping)) {
                 case CONVERT:
                     catalog.alterTable(identifier, schemaChange, false);
                     break;
@@ -144,6 +148,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnComment) {
             catalog.alterTable(identifier, schemaChange, false);
+        } else if (schemaChange instanceof SchemaChange.UpdateComment) {
+            catalog.alterTable(identifier, schemaChange, false);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported schema change class "
@@ -153,7 +159,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         }
     }
 
-    public static ConvertAction canConvert(DataType oldType, DataType newType) {
+    public static ConvertAction canConvert(
+            DataType oldType, DataType newType, TypeMapping typeMapping) {
         if (oldType.equalsIgnoreNullable(newType)) {
             return ConvertAction.CONVERT;
         }
@@ -164,6 +171,13 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             return DataTypeChecks.getLength(oldType) <= DataTypeChecks.getLength(newType)
                     ? ConvertAction.CONVERT
                     : ConvertAction.IGNORE;
+        }
+
+        // object can always be converted to string
+        if ((oldIdx < 0 && newIdx >= 0)
+                && typeMapping.containsMode(
+                        TypeMapping.TypeMappingMode.ALLOW_NON_STRING_TO_STRING)) {
+            return ConvertAction.CONVERT;
         }
 
         oldIdx = BINARY_TYPES.indexOf(oldType.getTypeRoot());
@@ -207,15 +221,21 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     }
 
     protected List<SchemaChange> extractSchemaChanges(
-            SchemaManager schemaManager, List<DataField> updatedDataFields) {
-        RowType oldRowType = schemaManager.latest().get().logicalRowType();
+            SchemaManager schemaManager, CdcSchema updatedSchema) {
+        TableSchema oldTableSchema = schemaManager.latest().get();
+        RowType oldRowType = oldTableSchema.logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();
         for (DataField oldField : oldRowType.getFields()) {
             oldFields.put(oldField.name(), oldField);
         }
 
+        boolean allowDecimalTypeChange =
+                this.typeMapping == null
+                        || !this.typeMapping.containsMode(
+                                TypeMapping.TypeMappingMode.DECIMAL_NO_CHANGE);
+
         List<SchemaChange> result = new ArrayList<>();
-        for (DataField newField : updatedDataFields) {
+        for (DataField newField : updatedSchema.fields()) {
             String newFieldName = StringUtils.toLowerCaseIfNeed(newField.name(), caseSensitive);
             if (oldFields.containsKey(newFieldName)) {
                 DataField oldField = oldFields.get(newFieldName);
@@ -232,6 +252,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                                         new String[] {newFieldName}, newField.description()));
                     }
                 } else {
+                    if (oldField.type().is(DataTypeRoot.DECIMAL) && !allowDecimalTypeChange) {
+                        continue;
+                    }
                     // update column type
                     result.add(SchemaChange.updateColumnType(newFieldName, newField.type()));
                     // update column comment
@@ -248,6 +271,12 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                                 newFieldName, newField.type(), newField.description(), null));
             }
         }
+
+        if (updatedSchema.comment() != null
+                && !updatedSchema.comment().equals(oldTableSchema.comment())) {
+            // update table comment
+            result.add(SchemaChange.updateComment(updatedSchema.comment()));
+        }
         return result;
     }
 
@@ -260,8 +289,8 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     }
 
     /**
-     * Return type of {@link UpdatedDataFieldsProcessFunction#canConvert(DataType, DataType)}. This
-     * enum indicates the action to perform.
+     * Return type of {@link UpdatedDataFieldsProcessFunction#canConvert}. This enum indicates the
+     * action to perform.
      */
     public enum ConvertAction {
 

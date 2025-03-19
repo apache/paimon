@@ -41,6 +41,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -70,7 +71,6 @@ import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
 import static org.apache.paimon.operation.FileStoreTestUtils.partitionedData;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -630,7 +630,7 @@ public class FileDeletionTest {
         List<ManifestFileMeta> newManifests =
                 Arrays.asList(newAddManifests.get(0), newDeleteManifests.get(0));
 
-        String newManifestListName = manifestList.write(newManifests);
+        String newManifestListName = manifestList.write(newManifests).getKey();
 
         fileIO.rename(
                 pathFactory.toManifestListPath(newManifestListName),
@@ -647,6 +647,7 @@ public class FileDeletionTest {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
+        ChangelogManager changelogManager = store.changelogManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         BinaryRow partition = gen.getPartition(gen.next());
@@ -674,7 +675,8 @@ public class FileDeletionTest {
         // action: expire snapshot 1 -> delete tag1 -> expire snapshot 2
         // result: exist A & B (because of tag2)
         ExpireSnapshots expireSnapshots =
-                new ExpireSnapshotsImpl(snapshotManager, store.newSnapshotDeletion(), tagManager);
+                new ExpireSnapshotsImpl(
+                        snapshotManager, changelogManager, store.newSnapshotDeletion(), tagManager);
         expireSnapshots
                 .config(
                         ExpireConfig.builder()
@@ -799,7 +801,6 @@ public class FileDeletionTest {
                     Snapshot.CommitKind.APPEND,
                     store.snapshotManager().latestSnapshot(),
                     mustConflictCheck(),
-                    DEFAULT_MAIN_BRANCH,
                     null);
         }
     }

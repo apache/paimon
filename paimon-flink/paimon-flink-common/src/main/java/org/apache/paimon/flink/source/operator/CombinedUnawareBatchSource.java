@@ -62,13 +62,16 @@ public class CombinedUnawareBatchSource
         extends CombinedCompactorSource<MultiTableUnawareAppendCompactionTask> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CombinedUnawareBatchSource.class);
+    private final Map<String, String> tableOptions;
 
     public CombinedUnawareBatchSource(
             CatalogLoader catalogLoader,
             Pattern includingPattern,
             Pattern excludingPattern,
-            Pattern databasePattern) {
+            Pattern databasePattern,
+            Map<String, String> tableOptions) {
         super(catalogLoader, includingPattern, excludingPattern, databasePattern, false);
+        this.tableOptions = tableOptions;
     }
 
     @Override
@@ -90,7 +93,8 @@ public class CombinedUnawareBatchSource
                             includingPattern,
                             excludingPattern,
                             databasePattern,
-                            isStreaming);
+                            isStreaming,
+                            tableOptions);
         }
 
         @Override
@@ -126,10 +130,15 @@ public class CombinedUnawareBatchSource
             Pattern includingPattern,
             Pattern excludingPattern,
             Pattern databasePattern,
+            Map<String, String> tableOptions,
             @Nullable Duration partitionIdleTime) {
         CombinedUnawareBatchSource combinedUnawareBatchSource =
                 new CombinedUnawareBatchSource(
-                        catalogLoader, includingPattern, excludingPattern, databasePattern);
+                        catalogLoader,
+                        includingPattern,
+                        excludingPattern,
+                        databasePattern,
+                        tableOptions);
         MultiTableCompactionTaskTypeInfo compactionTaskTypeInfo =
                 new MultiTableCompactionTaskTypeInfo();
 

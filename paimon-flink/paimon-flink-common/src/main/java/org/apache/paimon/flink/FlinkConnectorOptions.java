@@ -372,14 +372,6 @@ public class FlinkConnectorOptions {
                             "You can specify time interval for partition, for example, "
                                     + "daily partition is '1 d', hourly partition is '1 h'.");
 
-    public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
-            key("partition.idle-time-to-report-statistic")
-                    .durationType()
-                    .defaultValue(Duration.ofHours(1))
-                    .withDescription(
-                            "Set a time duration when a partition has no new data after this time duration, "
-                                    + "start to report the partition statistics to hms.");
-
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("sink.clustering.by-columns")
                     .stringType()
@@ -459,6 +451,13 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Bounded mode for Paimon consumer. "
                                     + "By default, Paimon automatically selects bounded mode based on the mode of the Flink job.");
+
+    public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
+            key("postpone.default-bucket-num")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription(
+                            "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

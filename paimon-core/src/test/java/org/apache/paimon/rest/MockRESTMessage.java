@@ -21,13 +21,10 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
-import org.apache.paimon.rest.requests.AlterPartitionsRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
-import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
-import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -85,7 +82,15 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("a", "b");
         options.put(COMMENT_PROP, "comment");
-        return new GetDatabaseResponse(UUID.randomUUID().toString(), name, options);
+        return new GetDatabaseResponse(
+                UUID.randomUUID().toString(),
+                name,
+                options,
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     public static ListDatabasesResponse listDatabasesResponse(String name) {
@@ -140,18 +145,10 @@ public class MockRESTMessage {
         return new AlterTableRequest(getChanges());
     }
 
-    public static CreatePartitionsRequest createPartitionRequest() {
-        return new CreatePartitionsRequest(ImmutableList.of(Collections.singletonMap("pt", "1")));
-    }
-
-    public static DropPartitionsRequest dropPartitionsRequest() {
-        return new DropPartitionsRequest(ImmutableList.of(Collections.singletonMap("pt", "1")));
-    }
-
     public static ListPartitionsResponse listPartitionsResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
-        Partition partition = new Partition(spec, 1, 1, 1, 1);
+        Partition partition = new Partition(spec, 1, 1, 1, 1, false);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
@@ -230,11 +227,17 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
-        return new GetTableResponse(UUID.randomUUID().toString(), "", 1, schema(options));
-    }
-
-    public static AlterPartitionsRequest alterPartitionsRequest() {
-        return new AlterPartitionsRequest(ImmutableList.of(partition()));
+        return new GetTableResponse(
+                UUID.randomUUID().toString(),
+                "",
+                false,
+                1,
+                schema(options),
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     public static CreateViewRequest createViewRequest(String name) {
@@ -243,7 +246,15 @@ public class MockRESTMessage {
     }
 
     public static GetViewResponse getViewResponse() {
-        return new GetViewResponse(UUID.randomUUID().toString(), "", viewSchema());
+        return new GetViewResponse(
+                UUID.randomUUID().toString(),
+                "",
+                viewSchema(),
+                "owner",
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated");
     }
 
     public static ListViewsResponse listViewsResponse() {
@@ -261,14 +272,15 @@ public class MockRESTMessage {
                         new DataField(0, "f0", new IntType()),
                         new DataField(1, "f1", new IntType()));
         return new ViewSchema(
-                new RowType(fields),
-                Collections.singletonMap("pt", "1"),
+                fields,
+                "select * from t1",
+                Collections.emptyMap(),
                 "comment",
-                "select * from t1");
+                Collections.singletonMap("pt", "1"));
     }
 
     private static Partition partition() {
-        return new Partition(Collections.singletonMap("pt", "1"), 1, 1, 1, 1);
+        return new Partition(Collections.singletonMap("pt", "1"), 1, 1, 1, 1, false);
     }
 
     private static Schema schema(Map<String, String> options) {

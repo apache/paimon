@@ -30,7 +30,6 @@ org.apache.paimon.flink.action.ExpireTagsActionFactory
 org.apache.paimon.flink.action.ReplaceTagActionFactory
 org.apache.paimon.flink.action.ResetConsumerActionFactory
 org.apache.paimon.flink.action.MigrateTableActionFactory
-org.apache.paimon.flink.action.MigrateFileActionFactory
 org.apache.paimon.flink.action.MigrateDatabaseActionFactory
 org.apache.paimon.flink.action.RemoveOrphanFilesActionFactory
 org.apache.paimon.flink.action.QueryServiceActionFactory
@@ -45,6 +44,7 @@ org.apache.paimon.flink.action.RewriteFileIndexActionFactory
 org.apache.paimon.flink.action.ExpireSnapshotsActionFactory
 org.apache.paimon.flink.action.RemoveUnexistingFilesActionFactory
 org.apache.paimon.flink.action.ClearConsumerActionFactory
+org.apache.paimon.flink.action.RescaleActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
@@ -66,7 +66,6 @@ org.apache.paimon.flink.procedure.RollbackToTimestampProcedure
 org.apache.paimon.flink.procedure.RollbackToWatermarkProcedure
 org.apache.paimon.flink.procedure.MigrateTableProcedure
 org.apache.paimon.flink.procedure.MigrateDatabaseProcedure
-org.apache.paimon.flink.procedure.MigrateFileProcedure
 org.apache.paimon.flink.procedure.RemoveOrphanFilesProcedure
 org.apache.paimon.flink.procedure.QueryServiceProcedure
 org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure
@@ -87,3 +86,4 @@ org.apache.paimon.flink.procedure.RefreshObjectTableProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingFilesProcedure
 org.apache.paimon.flink.procedure.ClearConsumersProcedure
 org.apache.paimon.flink.procedure.MigrateIcebergTableProcedure
+org.apache.paimon.flink.procedure.RescaleProcedure

@@ -685,7 +685,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     partitions.flatMap {
       partition =>
         dvMaintainerFactory
-          .createOrRestore(table.snapshotManager().latestSnapshotId(), partition)
+          .createOrRestore(table.snapshotManager().latestSnapshot(), partition)
           .deletionVectors()
           .asScala
     }.toMap

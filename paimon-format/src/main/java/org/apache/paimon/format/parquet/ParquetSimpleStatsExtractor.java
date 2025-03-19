@@ -67,15 +67,15 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
     }
 
     @Override
-    public SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException {
-        return extractWithFileInfo(fileIO, path).getLeft();
+    public SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException {
+        return extractWithFileInfo(fileIO, path, length).getLeft();
     }
 
     @Override
-    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
-            throws IOException {
+    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
+            FileIO fileIO, Path path, long length) throws IOException {
         Pair<Map<String, Statistics<?>>, FileInfo> statsPair =
-                ParquetUtil.extractColumnStats(fileIO, path);
+                ParquetUtil.extractColumnStats(fileIO, path, length);
         SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
         return Pair.of(
                 IntStream.range(0, rowType.getFieldCount())

@@ -109,7 +109,7 @@ The Hadoop configuration has to have an entry for the required file system imple
 
 For Alluxio support add the following entry into the core-site.xml file:
 
-```shell
+```xml
 <property>
   <name>fs.alluxio.impl</name>
   <value>alluxio.hadoop.FileSystem</value>
@@ -255,6 +255,15 @@ Please note that:
 
 {{< /tab >}}
 {{< /tabs >}}
+
+If you environment has jindo sdk dependencies, you can use Jindo Fs to connect OSS. Jindo has better read and write efficiency.
+
+{{< stable >}}
+Download [paimon-jindo-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-jindo/{{< version >}}/paimon-jindo-{{< version >}}.jar).
+{{< /stable >}}
+{{< unstable >}}
+Download [paimon-jindo-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-jindo/{{< version >}}/).
+{{< /unstable >}}
 
 ## S3
 

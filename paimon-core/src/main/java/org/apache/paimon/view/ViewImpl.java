@@ -19,6 +19,7 @@
 package org.apache.paimon.view;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -26,6 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 import javax.annotation.Nullable;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -39,12 +41,13 @@ public class ViewImpl implements View {
 
     public ViewImpl(
             Identifier identifier,
-            RowType rowType,
+            List<DataField> fields,
             String query,
+            Map<String, String> dialects,
             @Nullable String comment,
             Map<String, String> options) {
         this.identifier = identifier;
-        this.viewSchema = new ViewSchema(query, comment, options, rowType);
+        this.viewSchema = new ViewSchema(fields, query, dialects, comment, options);
     }
 
     @Override
@@ -59,12 +62,17 @@ public class ViewImpl implements View {
 
     @Override
     public RowType rowType() {
-        return this.viewSchema.rowType();
+        return new RowType(false, this.viewSchema.fields());
     }
 
     @Override
     public String query() {
         return this.viewSchema.query();
+    }
+
+    @Override
+    public Map<String, String> dialects() {
+        return this.viewSchema.dialects();
     }
 
     @Override
@@ -81,7 +89,13 @@ public class ViewImpl implements View {
     public View copy(Map<String, String> dynamicOptions) {
         Map<String, String> newOptions = new HashMap<>(options());
         newOptions.putAll(dynamicOptions);
-        return new ViewImpl(identifier, rowType(), query(), this.viewSchema.comment(), newOptions);
+        return new ViewImpl(
+                identifier,
+                viewSchema.fields(),
+                query(),
+                dialects(),
+                viewSchema.comment(),
+                newOptions);
     }
 
     @Override

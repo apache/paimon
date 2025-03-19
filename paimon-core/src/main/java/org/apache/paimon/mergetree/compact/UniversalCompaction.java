@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Universal Compaction Style is a compaction style, targeting the use cases requiring lower write
@@ -50,6 +51,9 @@ public class UniversalCompaction implements CompactStrategy {
     @Nullable private final Long opCompactionInterval;
     @Nullable private Long lastOptimizedCompaction;
 
+    @Nullable private final Integer maxLookupCompactInterval;
+    @Nullable private final AtomicInteger lookupCompactTriggerCount;
+
     public UniversalCompaction(int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger) {
         this(maxSizeAmp, sizeRatio, numRunCompactionTrigger, null);
     }
@@ -59,11 +63,23 @@ public class UniversalCompaction implements CompactStrategy {
             int sizeRatio,
             int numRunCompactionTrigger,
             @Nullable Duration opCompactionInterval) {
+        this(maxSizeAmp, sizeRatio, numRunCompactionTrigger, opCompactionInterval, null);
+    }
+
+    public UniversalCompaction(
+            int maxSizeAmp,
+            int sizeRatio,
+            int numRunCompactionTrigger,
+            @Nullable Duration opCompactionInterval,
+            @Nullable Integer maxLookupCompactInterval) {
         this.maxSizeAmp = maxSizeAmp;
         this.sizeRatio = sizeRatio;
         this.numRunCompactionTrigger = numRunCompactionTrigger;
         this.opCompactionInterval =
                 opCompactionInterval == null ? null : opCompactionInterval.toMillis();
+        this.maxLookupCompactInterval = maxLookupCompactInterval;
+        this.lookupCompactTriggerCount =
+                maxLookupCompactInterval == null ? null : new AtomicInteger(0);
     }
 
     @Override
@@ -107,7 +123,42 @@ public class UniversalCompaction implements CompactStrategy {
             return Optional.ofNullable(pickForSizeRatio(maxLevel, runs, candidateCount));
         }
 
+        // 4 checking if a forced L0 compact should be triggered
+        if (maxLookupCompactInterval != null && lookupCompactTriggerCount != null) {
+            lookupCompactTriggerCount.getAndIncrement();
+            if (lookupCompactTriggerCount.compareAndSet(maxLookupCompactInterval, 0)) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Universal compaction due to max lookup compaction interval {}.",
+                            maxLookupCompactInterval);
+                }
+                return forcePickL0(numLevels, runs);
+            } else {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Skip universal compaction due to lookup compaction trigger count {} is less than the max interval {}.",
+                            lookupCompactTriggerCount.get(),
+                            maxLookupCompactInterval);
+                }
+            }
+        }
+
         return Optional.empty();
+    }
+
+    Optional<CompactUnit> forcePickL0(int numLevels, List<LevelSortedRun> runs) {
+        // collect all level 0 files
+        int candidateCount = 0;
+        for (int i = candidateCount; i < runs.size(); i++) {
+            if (runs.get(i).level() > 0) {
+                break;
+            }
+            candidateCount++;
+        }
+
+        return candidateCount == 0
+                ? Optional.empty()
+                : Optional.of(pickForSizeRatio(numLevels - 1, runs, candidateCount, true));
     }
 
     @VisibleForTesting

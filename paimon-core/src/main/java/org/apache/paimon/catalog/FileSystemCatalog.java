@@ -94,7 +94,8 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void alterDatabaseImpl(String name, List<PropertyChange> changes) {
+    protected void alterDatabaseImpl(String name, List<PropertyChange> changes)
+            throws DatabaseNotExistException {
         throw new UnsupportedOperationException("Alter database is not supported.");
     }
 
@@ -111,9 +112,12 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         Path path = getTableLocation(identifier);
         uncheck(() -> fileIO.delete(path, true));
+        for (Path externalPath : externalPaths) {
+            uncheck(() -> fileIO.delete(externalPath, true));
+        }
     }
 
     @Override

@@ -28,10 +28,11 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 /** Response for getting table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetTableResponse implements RESTResponse {
+public class GetTableResponse extends BaseResourceAuditResponse implements RESTResponse {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
+    private static final String FIELD_IS_EXTERNAL = "isExternal";
     private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_SCHEMA = "schema";
 
@@ -40,6 +41,9 @@ public class GetTableResponse implements RESTResponse {
 
     @JsonProperty(FIELD_NAME)
     private final String name;
+
+    @JsonProperty(FIELD_IS_EXTERNAL)
+    private final boolean isExternal;
 
     @JsonProperty(FIELD_SCHEMA_ID)
     private final long schemaId;
@@ -51,10 +55,18 @@ public class GetTableResponse implements RESTResponse {
     public GetTableResponse(
             @JsonProperty(FIELD_ID) String id,
             @JsonProperty(FIELD_NAME) String name,
+            @JsonProperty(FIELD_IS_EXTERNAL) boolean isExternal,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
-            @JsonProperty(FIELD_SCHEMA) Schema schema) {
+            @JsonProperty(FIELD_SCHEMA) Schema schema,
+            @JsonProperty(FIELD_OWNER) String owner,
+            @JsonProperty(FIELD_CREATED_AT) long createdAt,
+            @JsonProperty(FIELD_CREATED_BY) String createdBy,
+            @JsonProperty(FIELD_UPDATED_AT) long updatedAt,
+            @JsonProperty(FIELD_UPDATED_BY) String updatedBy) {
+        super(owner, createdAt, createdBy, updatedAt, updatedBy);
         this.id = id;
         this.name = name;
+        this.isExternal = isExternal;
         this.schemaId = schemaId;
         this.schema = schema;
     }
@@ -67,6 +79,11 @@ public class GetTableResponse implements RESTResponse {
     @JsonGetter(FIELD_NAME)
     public String getName() {
         return this.name;
+    }
+
+    @JsonGetter(FIELD_IS_EXTERNAL)
+    public boolean isExternal() {
+        return isExternal;
     }
 
     @JsonGetter(FIELD_SCHEMA_ID)

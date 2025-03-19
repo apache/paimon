@@ -24,6 +24,11 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
+import java.io.UncheckedIOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /** Util for REST. */
@@ -47,9 +52,15 @@ public class RESTUtil {
     }
 
     public static Map<String, String> merge(
-            Map<String, String> target, Map<String, String> updates) {
+            Map<String, String> targets, Map<String, String> updates) {
+        if (targets == null) {
+            targets = Maps.newHashMap();
+        }
+        if (updates == null) {
+            updates = Maps.newHashMap();
+        }
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-        for (Map.Entry<String, String> entry : target.entrySet()) {
+        for (Map.Entry<String, String> entry : targets.entrySet()) {
             if (!updates.containsKey(entry.getKey())) {
                 builder.put(entry.getKey(), entry.getValue());
             }
@@ -57,5 +68,29 @@ public class RESTUtil {
         updates.forEach(builder::put);
 
         return builder.build();
+    }
+
+    public static String encodeString(String toEncode) {
+        Preconditions.checkArgument(toEncode != null, "Invalid string to encode: null");
+        try {
+            return URLEncoder.encode(toEncode, StandardCharsets.UTF_8.name());
+        } catch (UnsupportedEncodingException e) {
+            throw new UncheckedIOException(
+                    String.format(
+                            "Failed to URL encode '%s': UTF-8 encoding is not supported", toEncode),
+                    e);
+        }
+    }
+
+    public static String decodeString(String encoded) {
+        Preconditions.checkArgument(encoded != null, "Invalid string to decode: null");
+        try {
+            return URLDecoder.decode(encoded, StandardCharsets.UTF_8.name());
+        } catch (UnsupportedEncodingException e) {
+            throw new UncheckedIOException(
+                    String.format(
+                            "Failed to URL decode '%s': UTF-8 encoding is not supported", encoded),
+                    e);
+        }
     }
 }

@@ -39,6 +39,7 @@
         <module>paimon-s3-impl</module>
         <module>paimon-cosn</module>
         <module>paimon-cosn-impl</module>
+        <module>paimon-jindo</module>
     </modules>
 
     <properties>

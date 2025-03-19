@@ -28,7 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 /** Response for getting view. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetViewResponse implements RESTResponse {
+public class GetViewResponse extends BaseResourceAuditResponse implements RESTResponse {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
@@ -47,7 +47,13 @@ public class GetViewResponse implements RESTResponse {
     public GetViewResponse(
             @JsonProperty(FIELD_ID) String id,
             @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_SCHEMA) ViewSchema schema) {
+            @JsonProperty(FIELD_SCHEMA) ViewSchema schema,
+            @JsonProperty(FIELD_OWNER) String owner,
+            @JsonProperty(FIELD_CREATED_AT) long createdAt,
+            @JsonProperty(FIELD_CREATED_BY) String createdBy,
+            @JsonProperty(FIELD_UPDATED_AT) long updatedAt,
+            @JsonProperty(FIELD_UPDATED_BY) String updatedBy) {
+        super(owner, createdAt, createdBy, updatedAt, updatedBy);
         this.id = id;
         this.name = name;
         this.schema = schema;

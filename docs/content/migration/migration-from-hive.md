@@ -30,100 +30,79 @@ Apache Hive supports ORC, Parquet file formats that could be migrated to Paimon.
 When migrating data to a paimon table, the origin table will be permanently disappeared. So please back up your data if you
 still need the original table. The migrated table will be [append table]({{< ref "append-table/overview" >}}).
 
-Now, we can use paimon hive catalog with Migrate Table Procedure and Migrate File Procedure to totally migrate a table from hive to paimon.
+Now, we can use paimon hive catalog with Migrate Table Procedure to totally migrate a table from hive to paimon.
 At the same time, you can use paimon hive catalog with Migrate Database Procedure to fully synchronize all tables in the database to paimon.
 
 * Migrate Table Procedure: Paimon table does not exist, use the procedure upgrade hive table to paimon table. Hive table will disappear after action done.
 * Migrate Database Procedure: Paimon table does not exist, use the procedure upgrade all hive tables in database to paimon table. All hive tables will disappear after action done.
-* Migrate File Procedure:  Paimon table already exists, use the procedure to migrate files from hive table to paimon table. **Notice that, Hive table will also disappear after action done.**
 
 These three actions now support file format of hive "orc" and "parquet" and "avro".
 
 <span style="color: red; "> **We highly recommend to back up hive table data before migrating, because migrating action is not atomic. If been interrupted while migrating, you may lose your data.** </span>
 
-## Example for Migration
+## Migrate Hive Table
 
-**Migrate Hive Table**
-
-Command: <br>
-
-***CALL <font color="green">sys.migrate_table</font>(&#39;hive&#39;, &#39;&lt;hive_database&gt;.&lt;hive_tablename&gt;&#39;, &#39;&lt;paimon_tableconf&gt;&#39;);***
-
-**Example**
-
+{{< tabs "migrate table" >}}
+{{< tab "Flink SQL" >}}
 ```sql
-CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:9083', 'warehouse'='/path/to/warehouse/');
+CREATE CATALOG PAIMON WITH (
+   'type'='paimon',
+   'metastore' = 'hive',
+   'uri' = 'thrift://localhost:9083',
+   'warehouse'='/path/to/warehouse/');
 
 USE CATALOG PAIMON;
 
-CALL sys.migrate_table(connector => 'hive', source_table => 'default.hivetable', options => 'file.format=orc');
-```
-After invoke, "hivetable" will totally convert to paimon format. Writing and reading the table by old "hive way" will fail.
-We can add our table properties while importing by sys.migrate_table('<database>.<tablename>', '<tableproperties>').
-<tableproperties> here should be separated by ",".  For example:
-
-```sql
 CALL sys.migrate_table(
-    connector => 'hive', 
-    source_table => 'my_db.wait_to_upgrate', 
-    options => 'file.format=orc,read.batch-size=2096,write-only=true'
-);
+    connector => 'hive',
+    source_table => 'default.hivetable',
+    -- You can specify the target table, and if the target table already exists
+    -- the file will be migrated directly to it
+    -- target_table => 'default.paimontarget',
+    -- You can specify delete_origin is false, this won't delete hivetable
+    -- delete_origin => false,
+    options => 'file.format=orc');
 ```
-
-If your flink version is below 1.17, you can use flink action to achieve this:
+{{< /tab >}}
+{{< tab "Flink Action" >}}
 ```bash
-<FLINK_HOME>/bin/flink run \
-/path/to/paimon-flink-action-{{< version >}}.jar \
-migrate_table
---warehouse <warehouse-path> \
---source_type hive \
---table <database.table-name> \
-[--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
-[--options <paimon-table-conf  [,paimon-table-conf ...]> ]
-```
-
-Example:
-```bash
-<FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar migrate_table \
+<FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar \
+migrate_table \
 --warehouse /path/to/warehouse \
 --catalog_conf uri=thrift://localhost:9083 \
 --catalog_conf metastore=hive \
 --source_type hive \
---table default.hive_or_paimon \
+--table default.hive_or_paimon
 ```
+{{< /tab >}}
+{{< /tabs >}}
 
-**Migrate Hive Database**
+After invoke, "hivetable" will totally convert to paimon format. Writing and reading the table by old "hive way" will fail.
 
-Command: <br>
+## Migrate Hive Database
 
-***CALL <font color="green">sys.migrate_database</font>(&#39;hive&#39;, &#39;&lt;hive_database&gt;&#39;, &#39;&lt;paimon_tableconf&gt;&#39;);***
-
-**Example**
-
+{{< tabs "migrate database" >}}
+{{< tab "Flink SQL" >}}
 ```sql
-CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:9083', 'warehouse'='/path/to/warehouse/');
+CREATE CATALOG PAIMON WITH (
+   'type'='paimon', 
+   'metastore' = 'hive', 
+   'uri' = 'thrift://localhost:9083', 
+   'warehouse'='/path/to/warehouse/');
 
 USE CATALOG PAIMON;
 
-CALL sys.migrate_database(connector => 'hive', source_database => 'default', options => 'file.format=orc');
-```
-After invoke, all tables in "default" database will totally convert to paimon format. Writing and reading the table by old "hive way" will fail.
-We can add our table properties while importing by sys.migrate_database('<database>', '<tableproperties>').
-<tableproperties> here should be separated by ",".  For example:
-
-```sql
 CALL sys.migrate_database(
-    connector => 'hive', 
-    source_database => 'my_db', 
-    options => 'file.format=orc,read.batch-size=2096,write-only=true'
-);
+    connector => 'hive',
+    source_database => 'default',
+    options => 'file.format=orc');
 ```
-
-If your flink version is below 1.17, you can use flink action to achieve this:
+{{< /tab >}}
+{{< tab "Flink Action" >}}
 ```bash
 <FLINK_HOME>/bin/flink run \
 /path/to/paimon-flink-action-{{< version >}}.jar \
-migrate_databse
+migrate_databse \
 --warehouse <warehouse-path> \
 --source_type hive \
 --database <database> \
@@ -138,23 +117,9 @@ Example:
 --catalog_conf uri=thrift://localhost:9083 \
 --catalog_conf metastore=hive \
 --source_type hive \
---database default \
+--database default
 ```
+{{< /tab >}}
+{{< /tabs >}}
 
-**Migrate Hive File**
-
-Command: <br>
-
-***CALL <font color="green">sys.migrate_file</font>(&#39;hive&#39;, &#39;&lt;hive_database&gt;.&lt;hive_table_name&gt;&#39;, &#39;&lt;paimon_database&gt;.&lt;paimon_tablename&gt;&#39;);***
-
-**Example**
-
-```sql
-CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:9083', 'warehouse'='/path/to/warehouse/');
-
-USE CATALOG PAIMON;
-
-CALL sys.migrate_file(connector => 'hive', source_table => 'default.hivetable', target_table => 'default.paimontable');
-```
-After invoke, "hivetable" will disappear. And all files will be moved and renamed to paimon directory. "paimontable" here must have the same
-partition keys with "hivetable", and "paimontable" should be in unaware-bucket mode.
+After invoke, all tables in "default" database will totally convert to paimon format. Writing and reading the table by old "hive way" will fail.

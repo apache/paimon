@@ -99,7 +99,7 @@ public class CompactProcedure extends ProcedureBase {
             if (checkCompactStrategy(compactStrategy)) {
                 action.withFullCompaction(compactStrategy.trim().equalsIgnoreCase(FULL));
             }
-            jobName = "Compact Job";
+            jobName = "Compact Job : " + identifier.getFullName();
         } else if (!isNullOrWhitespaceOnly(orderStrategy)
                 && !isNullOrWhitespaceOnly(orderByColumns)) {
             Preconditions.checkArgument(
@@ -113,7 +113,7 @@ public class CompactProcedure extends ProcedureBase {
                                     tableConf)
                             .withOrderStrategy(orderStrategy)
                             .withOrderColumns(orderByColumns.split(","));
-            jobName = "Sort Compact Job";
+            jobName = "Sort Compact Job : " + identifier.getFullName();
         } else {
             throw new IllegalArgumentException(
                     "You must specify 'order strategy' and 'order by columns' both.");

@@ -19,7 +19,6 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.partition.Partition;
-import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -30,20 +29,42 @@ import java.util.List;
 
 /** Response for listing partitions. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListPartitionsResponse implements RESTResponse {
+public class ListPartitionsResponse implements PagedResponse<Partition> {
 
     public static final String FIELD_PARTITIONS = "partitions";
+
+    private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
 
     @JsonProperty(FIELD_PARTITIONS)
     private final List<Partition> partitions;
 
-    @JsonCreator
+    @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
+    private final String nextPageToken;
+
     public ListPartitionsResponse(@JsonProperty(FIELD_PARTITIONS) List<Partition> partitions) {
+        this(partitions, null);
+    }
+
+    @JsonCreator
+    public ListPartitionsResponse(
+            @JsonProperty(FIELD_PARTITIONS) List<Partition> partitions,
+            @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
         this.partitions = partitions;
+        this.nextPageToken = nextPageToken;
     }
 
     @JsonGetter(FIELD_PARTITIONS)
     public List<Partition> getPartitions() {
         return partitions;
+    }
+
+    @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
+    public String getNextPageToken() {
+        return this.nextPageToken;
+    }
+
+    @Override
+    public List<Partition> data() {
+        return getPartitions();
     }
 }

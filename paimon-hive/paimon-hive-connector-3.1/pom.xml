@@ -35,6 +35,7 @@ under the License.
 
     <properties>
         <hive.version>3.1.2</hive.version>
+        <hiverunner.version>6.1.0</hiverunner.version>
         <jackson.version>2.13.3</jackson.version>
     </properties>
 
@@ -109,6 +110,13 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
+            <artifactId>flink-json</artifactId>
+            <version>${test.flink.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-orc</artifactId>
             <version>${test.flink.version}</version>
             <scope>test</scope>
@@ -170,7 +178,7 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>com.klarna</groupId>
+            <groupId>io.github.hiverunner</groupId>
             <artifactId>hiverunner</artifactId>
             <version>${hiverunner.version}</version>
             <scope>test</scope>
@@ -226,6 +234,10 @@ under the License.
                 </exclusion>
                 <exclusion>
                     <artifactId>hadoop-mapreduce-client-core</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>hadoop-mapreduce-client-common</artifactId>
                     <groupId>org.apache.hadoop</groupId>
                 </exclusion>
                 <exclusion>

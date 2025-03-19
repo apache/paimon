@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -41,6 +42,9 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.SnapshotTest.newChangelogManager;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -53,7 +57,7 @@ public class SnapshotManagerTest {
     @Test
     public void testSnapshotPath() {
         SnapshotManager snapshotManager =
-                new SnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
+                newSnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
         for (int i = 0; i < 20; i++) {
             assertThat(snapshotManager.snapshotPath(i))
                     .isEqualTo(new Path(tempDir.toString() + "/snapshot/snapshot-" + i));
@@ -125,7 +129,7 @@ public class SnapshotManagerTest {
                 // pick a random time equal to one of the snapshots
                 time = millis.get(random.nextInt(numSnapshots));
             }
-            Long actual = snapshotManager.earlierThanTimeMills(time, false);
+            Long actual = TimeTravelUtil.earlierThanTimeMills(snapshotManager, null, time, false);
 
             if (millis.get(numSnapshots - 1) < time) {
                 if (isRaceCondition && millis.size() == 1) {
@@ -203,7 +207,7 @@ public class SnapshotManagerTest {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
@@ -239,10 +243,13 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.laterOrEqualWatermark(millis + 999)).isNull();
     }
 
-    private Snapshot createSnapshotWithMillis(long id, long millis) {
+    public static Snapshot createSnapshotWithMillis(long id, long millis) {
         return new Snapshot(
                 id,
                 0L,
+                null,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -263,6 +270,9 @@ public class SnapshotManagerTest {
         return new Snapshot(
                 id,
                 0L,
+                null,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -289,6 +299,9 @@ public class SnapshotManagerTest {
                         null,
                         null,
                         null,
+                        null,
+                        null,
+                        null,
                         0L,
                         Snapshot.CommitKind.APPEND,
                         millis,
@@ -304,13 +317,16 @@ public class SnapshotManagerTest {
     public void testLatestSnapshotOfUser() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 100 snapshots using user "lastCommitUser"
         for (long i = 0; i < 100; i++) {
             Snapshot snapshot =
                     new Snapshot(
                             i,
                             0L,
+                            null,
+                            null,
+                            null,
                             null,
                             null,
                             null,
@@ -353,13 +369,16 @@ public class SnapshotManagerTest {
     public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
         Path path = new Path(tempDir.toString());
-        SnapshotManager snapshotManager = new SnapshotManager(localFileIO, path);
+        SnapshotManager snapshotManager = newSnapshotManager(localFileIO, path);
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot =
                     new Snapshot(
                             i,
                             0L,
+                            null,
+                            null,
+                            null,
                             null,
                             null,
                             null,
@@ -449,12 +468,14 @@ public class SnapshotManagerTest {
     public void testLongLivedChangelog() throws Exception {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        ChangelogManager changelogManager =
+                newChangelogManager(localFileIO, new Path(tempDir.toString()));
         long millis = 1L;
         for (long i = 1; i <= 5; i++) {
             Changelog changelog = createChangelogWithMillis(i, millis + i * 1000);
             localFileIO.tryToWriteAtomic(
-                    snapshotManager.longLivedChangelogPath(i), changelog.toJson());
+                    changelogManager.longLivedChangelogPath(i), changelog.toJson());
         }
 
         for (long i = 6; i <= 10; i++) {
@@ -462,19 +483,18 @@ public class SnapshotManagerTest {
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
 
-        Assertions.assertThat(snapshotManager.earliestLongLivedChangelogId()).isEqualTo(1);
-        Assertions.assertThat(snapshotManager.latestChangelogId()).isEqualTo(10);
-        Assertions.assertThat(snapshotManager.latestLongLivedChangelogId()).isEqualTo(5);
+        Assertions.assertThat(changelogManager.earliestLongLivedChangelogId()).isEqualTo(1);
+        Assertions.assertThat(changelogManager.latestLongLivedChangelogId()).isEqualTo(5);
         Assertions.assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
         Assertions.assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
-        Assertions.assertThat(snapshotManager.changelog(1)).isNotNull();
+        Assertions.assertThat(changelogManager.changelog(1)).isNotNull();
     }
 
     @Test
     public void testCommitChangelogWhenSameChangelogCommitTwice() throws IOException {
         FileIO localFileIO = LocalFileIO.create();
-        SnapshotManager snapshotManager =
-                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        ChangelogManager snapshotManager =
+                newChangelogManager(localFileIO, new Path(tempDir.toString()));
         long id = 1L;
         Changelog changelog = createChangelogWithMillis(id, 1L);
         snapshotManager.commitChangelog(changelog, id);
@@ -492,7 +512,7 @@ public class SnapshotManagerTest {
         private boolean deleteEarliestSnapshot = false;
 
         public TestSnapshotManager(FileIO fileIO, Path tablePath, boolean isRaceCondition) {
-            super(fileIO, tablePath);
+            super(fileIO, tablePath, DEFAULT_MAIN_BRANCH, null, null);
             this.isRaceCondition = isRaceCondition;
         }
 

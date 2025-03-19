@@ -99,7 +99,7 @@ public abstract class SimpleColStatsExtractorTest {
 
         SimpleStatsExtractor extractor = format.createStatsExtractor(rowType, stats).get();
         assertThat(extractor).isNotNull();
-        SimpleColStats[] actual = extractor.extract(fileIO, path);
+        SimpleColStats[] actual = extractor.extract(fileIO, path, fileIO.getFileSize(path));
         for (int i = 0; i < expected.length; i++) {
             expected[i] = regenerate(expected[i], rowType.getTypeAt(i));
         }

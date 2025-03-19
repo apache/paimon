@@ -32,10 +32,14 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.utils.DateTimeUtils.formatLocalDateTime;
+import static org.apache.paimon.utils.DateTimeUtils.toLocalDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CoreOptions#INCREMENTAL_BETWEEN_TIMESTAMP}. */
@@ -56,9 +60,11 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
 
+        String timestampEarliest0 = formatLocalDateTime(LocalDateTime.now().minusSeconds(1), 3);
         Long timestampEarliest = System.currentTimeMillis();
+        String timestampEarliestString = formatLocalDateTime(toLocalDateTime(timestampEarliest), 3);
         // snapshot 1: append
         write(
                 table,
@@ -75,6 +81,8 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                 GenericRow.of(1, 4, 1),
                 GenericRow.of(2, 1, 2));
         Long timestampSnapshot2 = snapshotManager.snapshot(2).timeMillis();
+        String timestampSnapshot2String =
+                formatLocalDateTime(toLocalDateTime(timestampSnapshot2), 3);
 
         // snapshot 3: compact
         compact(table, row(1), 0);
@@ -90,6 +98,8 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         // snapshot 5: append
         write(table, GenericRow.of(1, 1, 4), GenericRow.of(1, 2, 4), GenericRow.of(2, 1, 4));
         Long timestampSnapshot4 = snapshotManager.snapshot(5).timeMillis();
+        String timestampSnapshot4String =
+                formatLocalDateTime(toLocalDateTime(timestampSnapshot4), 3);
 
         // snapshot 6: append
         write(table, GenericRow.of(1, 1, 5), GenericRow.of(1, 2, 5), GenericRow.of(2, 1, 5));
@@ -100,6 +110,15 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                         Pair.of(
                                 INCREMENTAL_BETWEEN_TIMESTAMP,
                                 String.format("%s,%s", timestampEarliest - 1, timestampEarliest)));
+
+        assertThat(result1).isEmpty();
+        result1 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format(
+                                        "%s,%s", timestampEarliest0, timestampEarliestString)));
         assertThat(result1).isEmpty();
 
         List<InternalRow> result2 =
@@ -115,6 +134,21 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                         GenericRow.of(1, 3, 1),
                         GenericRow.of(1, 4, 1),
                         GenericRow.of(2, 1, 2));
+        result2 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format(
+                                        "%s,%s",
+                                        timestampEarliestString, timestampSnapshot2String)));
+        assertThat(result2)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 2),
+                        GenericRow.of(1, 2, 2),
+                        GenericRow.of(1, 3, 1),
+                        GenericRow.of(1, 4, 1),
+                        GenericRow.of(2, 1, 2));
 
         List<InternalRow> result3 =
                 read(
@@ -122,6 +156,20 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                         Pair.of(
                                 INCREMENTAL_BETWEEN_TIMESTAMP,
                                 String.format("%s,%s", timestampSnapshot2, timestampSnapshot4)));
+        assertThat(result3)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 4),
+                        GenericRow.of(1, 2, 4),
+                        GenericRow.of(2, 1, 4),
+                        GenericRow.of(2, 2, 1));
+        result3 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format(
+                                        "%s,%s",
+                                        timestampSnapshot2String, timestampSnapshot4String)));
         assertThat(result3)
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, 4),
@@ -145,7 +193,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
 
         // snapshot 1: append
         write(table, GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 1), GenericRow.of(1, 3, 1));
@@ -183,7 +231,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
 
         // snapshot 1: append
         write(
@@ -240,7 +288,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
         Long timestampEarliest = System.currentTimeMillis();
         // snapshot 1: append
         write(

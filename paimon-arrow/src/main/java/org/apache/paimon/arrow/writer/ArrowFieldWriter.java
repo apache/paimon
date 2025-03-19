@@ -45,7 +45,7 @@ public abstract class ArrowFieldWriter {
      *
      * @param columnVector Which holds the paimon data.
      * @param pickedInColumn Which rows is picked to write. Pick all if null. This is used to adapt
-     *     deletion vector.
+     *     to deletion vector.
      * @param startIndex From where to start writing.
      * @param batchRows How many rows to write.
      */

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.sink.TableFilter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
@@ -44,10 +45,12 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 
 /** Base {@link Action} for synchronizing into one Paimon database. */
 public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
+    protected boolean eagerInit = false;
     protected boolean mergeShards = true;
     protected MultiTablesSinkMode mode = COMBINED;
     protected String tablePrefix = "";
@@ -58,6 +61,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected String includingTables = ".*";
     protected List<String> partitionKeys = new ArrayList<>();
     protected List<String> primaryKeys = new ArrayList<>();
+    protected List<ComputedColumn> computedColumns = new ArrayList<>();
     @Nullable protected String excludingTables;
     protected String includingDbs = ".*";
     @Nullable protected String excludingDbs;
@@ -78,6 +82,11 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     public SyncDatabaseActionBase mergeShards(boolean mergeShards) {
         this.mergeShards = mergeShards;
+        return this;
+    }
+
+    public SyncDatabaseActionBase eagerInit(boolean eagerInit) {
+        this.eagerInit = eagerInit;
         return this;
     }
 
@@ -165,10 +174,15 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         return this;
     }
 
+    public SyncDatabaseActionBase withComputedColumnArgs(List<String> computedColumnArgs) {
+        this.computedColumns = buildComputedColumns(computedColumnArgs, Collections.emptyList());
+        return this;
+    }
+
     @Override
     protected FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> recordParse() {
         return syncJobHandler.provideRecordParser(
-                Collections.emptyList(), typeMapping, metadataConverters);
+                this.computedColumns, typeMapping, metadataConverters);
     }
 
     public SyncDatabaseActionBase withPartitionKeyMultiple(
@@ -227,14 +241,31 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
     protected void buildSink(
             DataStream<RichCdcMultiplexRecord> input,
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory) {
+
+        List<String> whiteList = new ArrayList<>(tableMapping.values());
+        List<String> prefixList = new ArrayList<>(dbPrefix.values());
+        prefixList.add(tablePrefix);
+        List<String> suffixList = new ArrayList<>(dbSuffix.values());
+        suffixList.add(tableSuffix);
+
         new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
                 .withInput(input)
                 .withParserFactory(parserFactory)
                 .withCatalogLoader(catalogLoader())
+                .withTypeMapping(typeMapping)
                 .withDatabase(database)
                 .withTables(tables)
                 .withMode(mode)
                 .withTableOptions(tableConfig)
+                .withEagerInit(eagerInit)
+                .withTableFilter(
+                        new TableFilter(
+                                database,
+                                whiteList,
+                                prefixList,
+                                suffixList,
+                                includingTables,
+                                excludingTables))
                 .build();
     }
 }

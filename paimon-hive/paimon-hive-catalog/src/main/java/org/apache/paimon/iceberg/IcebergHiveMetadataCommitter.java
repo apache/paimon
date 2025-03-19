@@ -50,7 +50,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.iceberg.AbstractIcebergCommitCallback.catalogDatabasePath;
+import static org.apache.paimon.iceberg.IcebergCommitCallback.catalogDatabasePath;
 
 /**
  * {@link IcebergMetadataCommitter} to commit Iceberg metadata to Hive metastore, so the table can

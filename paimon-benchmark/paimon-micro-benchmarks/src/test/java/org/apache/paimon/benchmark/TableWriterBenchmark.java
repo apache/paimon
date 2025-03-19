@@ -19,6 +19,7 @@
 package org.apache.paimon.benchmark;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -104,6 +105,21 @@ public class TableWriterBenchmark extends TableBenchmark {
          */
     }
 
+    @Test
+    public void testParquetLookupCompaction() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET);
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        innerTest("parquet", options);
+        /*
+         * OpenJDK 64-Bit Server VM 11.0.24+0 on Mac OS X 14.5
+         * Apple M3 Pro
+         * parquet:         Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
+         * -------------------------------------------------------------------------------
+         * parquet_write     31918 / 32666             94.0          10639.3       1.0X
+         */
+    }
+
     public void innerTest(String name, Options options) throws Exception {
         options.set(CoreOptions.BUCKET, 1);
         Table table = createTable(options, "T");
@@ -119,6 +135,7 @@ public class TableWriterBenchmark extends TableBenchmark {
                 () -> {
                     BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
                     BatchTableWrite write = writeBuilder.newWrite();
+                    write.withIOManager(new IOManagerImpl(tempFile.toString()));
                     BatchTableCommit commit = writeBuilder.newCommit();
                     for (int i = 0; i < valuesPerIteration; i++) {
                         try {

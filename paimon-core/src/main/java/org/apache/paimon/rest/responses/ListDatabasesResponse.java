@@ -18,8 +18,6 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.rest.RESTResponse;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -29,20 +27,41 @@ import java.util.List;
 
 /** Response for listing databases. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListDatabasesResponse implements RESTResponse {
+public class ListDatabasesResponse implements PagedResponse<String> {
 
     private static final String FIELD_DATABASES = "databases";
+    private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
 
     @JsonProperty(FIELD_DATABASES)
     private final List<String> databases;
 
-    @JsonCreator
+    @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
+    private final String nextPageToken;
+
     public ListDatabasesResponse(@JsonProperty(FIELD_DATABASES) List<String> databases) {
+        this(databases, null);
+    }
+
+    @JsonCreator
+    public ListDatabasesResponse(
+            @JsonProperty(FIELD_DATABASES) List<String> databases,
+            @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
         this.databases = databases;
+        this.nextPageToken = nextPageToken;
     }
 
     @JsonGetter(FIELD_DATABASES)
     public List<String> getDatabases() {
         return this.databases;
+    }
+
+    @Override
+    public String getNextPageToken() {
+        return this.nextPageToken;
+    }
+
+    @Override
+    public List<String> data() {
+        return this.getDatabases();
     }
 }

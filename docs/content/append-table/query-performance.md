@@ -30,17 +30,17 @@ under the License.
 
 Paimon by default records the maximum and minimum values of each field in the manifest file.
 
-In the query, according to the `WHERE` condition of the query, according to the statistics in the manifest do files
-filtering, if the filtering effect is good, the query would have been minutes of the query will be accelerated to
+In the query, according to the `WHERE` condition of the query, together with the statistics in the manifest we can
+perform file filtering. If the filtering effect is good, the query that would have cost minutes will be accelerated to
 milliseconds to complete the execution.
 
-Often the data distribution is not always effective filtering, so if we can sort the data by the field in `WHERE` condition?
-You can take a look at [Flink COMPACT Action]({{< ref "maintenance/dedicated-compaction#sort-compact" >}}) or
+Often the data distribution is not always ideal for filtering, so can we sort the data by the field in `WHERE` condition?
+You can take a look at [Flink COMPACT Action]({{< ref "maintenance/dedicated-compaction#sort-compact" >}}),
 [Flink COMPACT Procedure]({{< ref "flink/procedures" >}}) or [Spark COMPACT Procedure]({{< ref "spark/procedures" >}}).
 
 ## Data Skipping By File Index
 
-You can use file index too, it filters files by index on the read side.
+You can use file index too, it filters files by indexing on the reading side.
 
 ```sql
 CREATE TABLE <PAIMON_TABLE> (<COLUMN> <COLUMN_TYPE> , ...) WITH (
@@ -49,10 +49,10 @@ CREATE TABLE <PAIMON_TABLE> (<COLUMN> <COLUMN_TYPE> , ...) WITH (
 );
 ```
 
-Define `file-index.bloom-filter.columns`, Data file index is an external index file and Paimon will create its corresponding index file for each file. If the index
-file is too small, it will be stored directly in the manifest, otherwise in the directory of the data file. Each data file
-corresponds to an index file, which has a separate file definition and can contain different types of indexes with
-multiple columns.
+Define `file-index.bloom-filter.columns`, Data file index is an external index file and Paimon will create its
+corresponding index file for each file. If the index file is too small, it will be stored directly in the manifest,
+otherwise in the directory of the data file. Each data file corresponds to an index file, which has a separate file
+definition and can contain different types of indexes with multiple columns.
 
 Different file indexes may be efficient in different scenarios. For example bloom filter may speed up query in point lookup
 scenario. Using a bitmap may consume more space but can result in greater accuracy.
@@ -63,7 +63,7 @@ scenario. Using a bitmap may consume more space but can result in greater accura
 * `file-index.bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
 
 `Bitmap`:
-* `file-index.bitmap.columns`: specify the columns that need bitmap index.
+* `file-index.bitmap.columns`: specify the columns that need bitmap index. See [Index Bitmap]({{< ref "concepts/spec/fileindex#index-bitmap" >}}).
 
 `Bit-Slice Index Bitmap`
 * `file-index.bsi.columns`: specify the columns that need bsi index.

@@ -71,13 +71,13 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
     }
 
     @Override
-    public SimpleColStats[] extract(FileIO fileIO, Path path) throws IOException {
-        return extractWithFileInfo(fileIO, path).getLeft();
+    public SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException {
+        return extractWithFileInfo(fileIO, path, length).getLeft();
     }
 
     @Override
-    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
-            throws IOException {
+    public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
+            FileIO fileIO, Path path, long length) throws IOException {
         try (Reader reader =
                 OrcReaderFactory.createReader(new Configuration(false), fileIO, path, null)) {
             long rowCount = reader.getNumberOfRows();

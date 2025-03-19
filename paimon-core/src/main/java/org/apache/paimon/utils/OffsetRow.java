@@ -41,6 +41,10 @@ public class OffsetRow implements InternalRow {
         this.offset = offset;
     }
 
+    public InternalRow getOriginalRow() {
+        return row;
+    }
+
     public OffsetRow replace(InternalRow row) {
         this.row = row;
         return this;

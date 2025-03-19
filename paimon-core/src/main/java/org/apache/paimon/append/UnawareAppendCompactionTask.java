@@ -79,7 +79,7 @@ public class UnawareAppendCompactionTask {
             UnawareAppendDeletionFileMaintainer dvIndexFileMaintainer =
                     AppendDeletionFileMaintainer.forUnawareAppend(
                             table.store().newIndexFileHandler(),
-                            table.snapshotManager().latestSnapshotId(),
+                            table.snapshotManager().latestSnapshot(),
                             partition);
             compactAfter.addAll(
                     write.compactRewrite(

@@ -69,6 +69,7 @@ public class CdcActionCommonUtils {
     public static final String COMPUTED_COLUMN = "computed_column";
     public static final String METADATA_COLUMN = "metadata_column";
     public static final String MULTIPLE_TABLE_PARTITION_KEYS = "multiple_table_partition_keys";
+    public static final String EAGER_INIT = "eager_init";
 
     public static void assertSchemaCompatible(
             TableSchema paimonSchema, List<DataField> sourceTableFields) {
@@ -91,7 +92,8 @@ public class CdcActionCommonUtils {
                 return false;
             }
             DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
+            if (UpdatedDataFieldsProcessFunction.canConvert(
+                            field.type(), type, TypeMapping.defaultMapping())
                     != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
                 LOG.info(
                         "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",

@@ -82,19 +82,21 @@ This documentation is a guide for downloading Paimon Jars.
 
 {{< unstable >}}
 
-| Version    | Jar                                                                                                                     |
-|------------|-------------------------------------------------------------------------------------------------------------------------|
-| paimon-oss | [paimon-oss-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-oss/{{< version >}}/) |
-| paimon-s3  | [paimon-s3-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-s3/{{< version >}}/)   |
+| Version      | Jar                                                                                                                         |
+|--------------|-----------------------------------------------------------------------------------------------------------------------------|
+| paimon-oss   | [paimon-oss-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-oss/{{< version >}}/)     |
+| paimon-jindo | [paimon-jindo-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-jindo/{{< version >}}/) |
+| paimon-s3    | [paimon-s3-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-s3/{{< version >}}/)       |
 
 {{< /unstable >}}
 
 {{< stable >}}
 
-| Version    | Jar                                                                                                                                                |
-|------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| paimon-oss | [paimon-oss-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar) |
-| paimon-s3  | [paimon-s3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-s3/{{< version >}}/paimon-s3-{{< version >}}.jar)    |
+| Version      | Jar                                                                                                                                                      |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| paimon-oss   | [paimon-oss-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar)       |
+| paimon-jindo | [paimon-jindo-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-jindo/{{< version >}}/paimon-jindo-{{< version >}}.jar) |
+| paimon-s3    | [paimon-s3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-s3/{{< version >}}/paimon-s3-{{< version >}}.jar)          |
 
 {{< /stable >}}
 

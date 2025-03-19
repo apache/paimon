@@ -117,7 +117,10 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
+import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
+import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -667,7 +670,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         SnapshotManager snapshotManager =
-                new SnapshotManager(FileIOFinder.find(tablePath), table.location());
+                newSnapshotManager(FileIOFinder.find(tablePath), table.location());
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         assertThat(latestSnapshotId).isNotNull();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -1111,7 +1114,7 @@ public abstract class FileStoreTableTestBase {
             // snapshot 2
             write.write(rowData(2, 20, 200L));
             commit.commit(1, write.prepareCommit(false, 2));
-            SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+            SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), tablePath);
             // The snapshot 1 is expired.
             assertThat(snapshotManager.snapshotExists(1)).isFalse();
             table.createTag("test-tag-2", 1);
@@ -1186,7 +1189,7 @@ public abstract class FileStoreTableTestBase {
 
         // verify snapshot in test-branch is equal to snapshot 2
         SnapshotManager snapshotManager =
-                new SnapshotManager(new TraceableFileIO(), tablePath, "test-branch");
+                newSnapshotManager(new TraceableFileIO(), tablePath, "test-branch");
         Snapshot branchSnapshot =
                 Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
@@ -1266,6 +1269,22 @@ public abstract class FileStoreTableTestBase {
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'branch1' doesn't exist."));
+
+        // test delete fallback branch
+        table.createBranch("fallback");
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put("scan.fallback-branch", "fallback");
+        FileStoreTable table1 = table.copy(dynamicOptions);
+        assertThatThrownBy(() -> table1.deleteBranch("fallback"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "can not delete the fallback branch. "
+                                        + "branchName to be deleted is fallback. you have set 'scan.fallback-branch' = 'fallback'. "
+                                        + "you should reset 'scan.fallback-branch' before deleting this branch."));
+
+        table.deleteBranch("fallback");
     }
 
     @Test
@@ -1334,7 +1353,7 @@ public abstract class FileStoreTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // verify snapshot in branch1 and main branch is same
-        SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), tablePath);
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
                         new TraceableFileIO(),
@@ -1474,6 +1493,7 @@ public abstract class FileStoreTableTestBase {
                 TestFileStore.getFilesInUse(
                         latestSnapshotId,
                         snapshotManager,
+                        table.changelogManager(),
                         table.fileIO(),
                         store.pathFactory(),
                         store.manifestListFactory().create(),
@@ -1484,8 +1504,8 @@ public abstract class FileStoreTableTestBase {
                         .filter(Files::isRegularFile)
                         .filter(p -> !p.getFileName().toString().startsWith("snapshot"))
                         .filter(p -> !p.getFileName().toString().startsWith("schema"))
-                        .filter(p -> !p.getFileName().toString().equals(SnapshotManager.LATEST))
-                        .filter(p -> !p.getFileName().toString().equals(SnapshotManager.EARLIEST))
+                        .filter(p -> !p.getFileName().toString().equals(LATEST))
+                        .filter(p -> !p.getFileName().toString().equals(EARLIEST))
                         .map(p -> new Path(TraceableFileIO.SCHEME + "://" + p.toString()))
                         .filter(p -> !filesInUse.contains(p))
                         .collect(Collectors.toList());

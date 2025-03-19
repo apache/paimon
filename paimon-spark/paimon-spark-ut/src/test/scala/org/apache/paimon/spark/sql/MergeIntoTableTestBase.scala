@@ -48,6 +48,28 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test(s"Paimon MergeInto: two paimon table") {
+    withTable("source", "target") {
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      createTable("source", "a INT, b INT, c STRING", Seq("a"))
+
+      spark.sql("INSERT INTO source values (1, 100, 'c11'), (3, 300, 'c33')")
+      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target
+                   |USING source
+                   |ON target.a = source.a
+                   |WHEN MATCHED THEN
+                   |UPDATE SET a = source.a, b = source.b, c = source.c
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a, b"),
+        Row(1, 100, "c11") :: Row(2, 20, "c2") :: Nil)
+    }
+  }
+
   test(s"Paimon MergeInto: only delete") {
     withTable("source", "target") {
 

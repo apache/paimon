@@ -67,6 +67,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
@@ -158,7 +159,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.snapshot(cpId, 1);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
-        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(LocalFileIO.create(), tablePath);
 
         // should create 10 snapshots
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(cpId);
@@ -596,7 +597,9 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
         StoreCommitter committer =
                 new StoreCommitter(
-                        table, commit, Committer.createContext("", metricGroup, true, false, null));
+                        table,
+                        commit,
+                        Committer.createContext("", metricGroup, true, false, null, 1, 1));
         committer.commit(Collections.singletonList(manifestCommittable));
         CommitterMetrics metrics = committer.getCommitterMetrics();
         assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(533);

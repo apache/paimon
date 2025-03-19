@@ -87,6 +87,7 @@ public class WriterOperatorTest {
         Options options = new Options();
         options.set("bucket", "1");
         options.set("write-buffer-size", "256 b");
+        options.set("write-buffer-spillable", "false");
         options.set("page-size", "32 b");
 
         FileStoreTable table =
@@ -243,6 +244,130 @@ public class WriterOperatorTest {
     }
 
     @Test
+    public void testGentleLookupWithFailure() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "k", "v"});
+
+        int lookupCompactMaxInterval = 5;
+
+        Options options = new Options();
+        options.set("bucket", "1");
+        options.set("changelog-producer", "lookup");
+        options.set(CoreOptions.LOOKUP_COMPACT, CoreOptions.LookupCompactMode.GENTLE);
+        options.set(CoreOptions.LOOKUP_COMPACT_MAX_INTERVAL, lookupCompactMaxInterval);
+
+        FileStoreTable fileStoreTable =
+                createFileStoreTable(
+                        rowType, Arrays.asList("pt", "k"), Collections.singletonList("k"), options);
+
+        RowDataStoreWriteOperator.Factory operatorFactory =
+                getAsyncLookupWriteOperatorFactory(fileStoreTable, false);
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(operatorFactory);
+
+        TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
+
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(serializer);
+        harness.open();
+
+        // write basic records
+        harness.processElement(GenericRow.of(1, 10, 100), 1);
+        harness.processElement(GenericRow.of(2, 20, 200), 2);
+        harness.processElement(GenericRow.of(3, 30, 300), 3);
+        harness.prepareSnapshotPreBarrier(1);
+        harness.snapshot(1, 10);
+        harness.notifyOfCompletedCheckpoint(1);
+        commitAll(harness, commit, 1);
+
+        harness.processElement(GenericRow.of(1, 10, 101), 11);
+        harness.processElement(GenericRow.of(3, 30, 301), 13);
+        harness.prepareSnapshotPreBarrier(2);
+        OperatorSubtaskState state = harness.snapshot(2, 20);
+        harness.notifyOfCompletedCheckpoint(2);
+        commitAll(harness, commit, 2);
+
+        // operator is closed due to failure
+        harness.close();
+
+        // restore operator to trigger gentle lookup compaction
+        operatorFactory = getAsyncLookupWriteOperatorFactory(fileStoreTable, true);
+        harness = createHarness(operatorFactory);
+        harness.setup(serializer);
+        harness.initializeState(state);
+        harness.open();
+
+        // write nothing, wait for compaction
+        harness.prepareSnapshotPreBarrier(3);
+        harness.snapshot(3, 30);
+        harness.notifyOfCompletedCheckpoint(3);
+        commitAll(harness, commit, 3);
+
+        harness.close();
+
+        // check gentle lookup compaction result, no data available
+        ReadBuilder readBuilder = fileStoreTable.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+        List<Split> splits = scan.plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+        List<String> actual = new ArrayList<>();
+        reader.forEachRemaining(
+                row ->
+                        actual.add(
+                                String.format(
+                                        "%s[%d, %d, %d]",
+                                        row.getRowKind().shortString(),
+                                        row.getInt(0),
+                                        row.getInt(1),
+                                        row.getInt(2))));
+        assertThat(actual).isEmpty();
+
+        // restore operator to force trigger gentle lookup compaction
+        operatorFactory = getAsyncLookupWriteOperatorFactory(fileStoreTable, true);
+        harness = createHarness(operatorFactory);
+        harness.setup(serializer);
+        harness.initializeState(state);
+        harness.open();
+
+        // force trigger gentle lookup compaction by max interval
+        // start count from 1, since the first lookup compact will be triggered when initialize
+        // AsyncLookupWriteOperator
+        for (int i = 1; i < lookupCompactMaxInterval; i++) {
+            long checkpointId = i + 3;
+            harness.prepareSnapshotPreBarrier(checkpointId);
+            harness.snapshot(checkpointId, i + 30);
+            harness.notifyOfCompletedCheckpoint(checkpointId);
+            commitAll(harness, commit, checkpointId);
+        }
+
+        harness.close();
+        commit.close();
+
+        // check all partition result
+        readBuilder = fileStoreTable.newReadBuilder();
+        scan = readBuilder.newStreamScan();
+        splits = scan.plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+        List<String> finalResult = new ArrayList<>();
+        reader.forEachRemaining(
+                row ->
+                        finalResult.add(
+                                String.format(
+                                        "%s[%d, %d, %d]",
+                                        row.getRowKind().shortString(),
+                                        row.getInt(0),
+                                        row.getInt(1),
+                                        row.getInt(2))));
+        assertThat(finalResult)
+                .containsExactlyInAnyOrder("+I[1, 10, 101]", "+I[2, 20, 200]", "+I[3, 30, 301]");
+    }
+
+    @Test
     public void testChangelog() throws Exception {
         testChangelog(false);
     }
@@ -332,6 +457,7 @@ public class WriterOperatorTest {
         Options options = new Options();
         options.set("bucket", "1");
         options.set("write-buffer-size", "256 b");
+        options.set("write-buffer-spillable", "false");
         options.set("page-size", "32 b");
 
         FileStoreTable fileStoreTable =

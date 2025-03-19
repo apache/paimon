@@ -165,7 +165,7 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>com.klarna</groupId>
+            <groupId>io.github.hiverunner</groupId>
             <artifactId>hiverunner</artifactId>
             <version>${hiverunner.version}</version>
             <scope>test</scope>
@@ -254,6 +254,97 @@ under the License.
                 <exclusion>
                     <groupId>com.google.protobuf</groupId>
                     <artifactId>protobuf-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>tez-dag</artifactId>
+                    <groupId>org.apache.tez</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>tez-common</artifactId>
+                    <groupId>org.apache.tez</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>tez-mapreduce</artifactId>
+                    <groupId>org.apache.tez</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <artifactId>tez-dag</artifactId>
+            <groupId>org.apache.tez</groupId>
+            <version>${tez.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <artifactId>hadoop-yarn-client</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>hadoop-yarn-server-common</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>hadoop-yarn-server-web-proxy</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>hadoop-yarn-common</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>slf4j-log4j12</artifactId>
+                    <groupId>org.slf4j</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>protobuf-java</artifactId>
+                    <groupId>com.google.protobuf</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <artifactId>tez-common</artifactId>
+            <groupId>org.apache.tez</groupId>
+            <version>${tez.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <artifactId>hadoop-yarn-common</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>slf4j-log4j12</artifactId>
+                    <groupId>org.slf4j</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>protobuf-java</artifactId>
+                    <groupId>com.google.protobuf</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <artifactId>tez-mapreduce</artifactId>
+            <groupId>org.apache.tez</groupId>
+            <version>${tez.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <artifactId>hadoop-mapreduce-client-common</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>hadoop-yarn-client</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>hadoop-yarn-common</artifactId>
+                    <groupId>org.apache.hadoop</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>protobuf-java</artifactId>
+                    <groupId>com.google.protobuf</groupId>
                 </exclusion>
             </exclusions>
         </dependency>

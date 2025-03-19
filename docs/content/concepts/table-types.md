@@ -145,7 +145,7 @@ directory structure.
 
 Format Table is enabled by default, you can disable it by configuring Catalog option: `'format-table.enabled'`.
 
-Currently only support `CSV`, `Parquet`, `ORC` formats.
+Currently only support `CSV`, `Parquet`, `ORC`, `JSON` formats.
 
 {{< tabs "format-table" >}}
 {{< tab "Flink-CSV" >}}
@@ -193,6 +193,30 @@ CREATE TABLE my_parquet_table (
     a INT,
     b STRING
 ) USING parquet
+```
+
+{{< /tab >}}
+
+{{< tab "Flink-JSON" >}}
+
+```sql
+CREATE TABLE my_json_table (
+    a INT,
+    b STRING
+) WITH (
+    'type'='format-table',
+    'file.format'='json'
+)
+```
+{{< /tab >}}
+
+{{< tab "Spark-JSON" >}}
+
+```sql
+CREATE TABLE my_json_table (
+    a INT,
+    b STRING
+) USING json
 ```
 
 {{< /tab >}}

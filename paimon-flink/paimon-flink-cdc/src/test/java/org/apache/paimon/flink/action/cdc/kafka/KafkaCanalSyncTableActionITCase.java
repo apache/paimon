@@ -49,6 +49,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC_PATTERN;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.DECIMAL_NO_CHANGE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1147,5 +1148,40 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     @Timeout(60)
     public void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(CANAL);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testDecimalNoChange() throws Exception {
+        String topic = "decimal-no-change";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/canal/table/typenochange/canal-data-3.txt");
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        CatalogOptions.CASE_SENSITIVE.key(), "false"))
+                        .withTypeMappingModes(DECIMAL_NO_CHANGE.configString())
+                        .build();
+        runActionWithDefaultEnv(action);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.DECIMAL(10, 2)},
+                        new String[] {"k", "v"});
+        waitForResult(
+                Collections.singletonList("+I[1, 1.20]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("k"));
+        writeRecordsToKafka(topic, "kafka/canal/table/typenochange/canal-data-4.txt");
+        waitForResult(
+                Arrays.asList("+I[1, 1.20]", "+I[2, 2.30]"),
+                getFileStoreTable(tableName),
+                rowType, // should not change
+                Collections.singletonList("k"));
     }
 }

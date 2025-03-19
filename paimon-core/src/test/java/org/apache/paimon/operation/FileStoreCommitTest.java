@@ -85,6 +85,7 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
+import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -165,7 +166,7 @@ public class FileStoreCommitTest {
         testRandomConcurrentNoConflict(1, false, CoreOptions.ChangelogProducer.NONE);
         SnapshotManager snapshotManager = createStore(false, 1).snapshotManager();
         Path snapshotDir = snapshotManager.snapshotDirectory();
-        Path latest = new Path(snapshotDir, SnapshotManager.LATEST);
+        Path latest = new Path(snapshotDir, LATEST);
 
         assertThat(new LocalFileIO().exists(latest)).isTrue();
 
@@ -186,7 +187,7 @@ public class FileStoreCommitTest {
         Path firstSnapshotPath = snapshotManager.snapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
         LocalFileIO.create().deleteQuietly(firstSnapshotPath);
         // this test succeeds if this call does not fail
-        try (FileStoreCommit commit = store.newCommit(UUID.randomUUID().toString())) {
+        try (FileStoreCommit commit = store.newCommit(UUID.randomUUID().toString(), null)) {
             commit.filterCommitted(Collections.singletonList(new ManifestCommittable(999L)));
         }
     }
@@ -207,7 +208,7 @@ public class FileStoreCommitTest {
         }
 
         // all commit identifiers should be filtered out
-        try (FileStoreCommit commit = store.newCommit(user)) {
+        try (FileStoreCommit commit = store.newCommit(user, null)) {
             assertThat(
                             commit.filterCommitted(
                                     commitIdentifiers.stream()
@@ -740,7 +741,7 @@ public class FileStoreCommitTest {
 
         // assert part1
         List<IndexManifestEntry> part1Index =
-                indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part1);
+                indexFileHandler.scanEntries(snapshot, HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
         IndexManifestEntry indexManifestEntry =
@@ -755,7 +756,7 @@ public class FileStoreCommitTest {
 
         // assert part2
         List<IndexManifestEntry> part2Index =
-                indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part2);
+                indexFileHandler.scanEntries(snapshot, HASH_INDEX, part2);
         assertThat(part2Index.size()).isEqualTo(1);
         assertThat(part2Index.get(0).bucket()).isEqualTo(2);
         assertThat(indexFileHandler.readHashIndexList(part2Index.get(0).indexFile()))
@@ -767,7 +768,7 @@ public class FileStoreCommitTest {
         snapshot = store.snapshotManager().latestSnapshot();
 
         // assert update part1
-        part1Index = indexFileHandler.scanEntries(snapshot.id(), HASH_INDEX, part1);
+        part1Index = indexFileHandler.scanEntries(snapshot, HASH_INDEX, part1);
         assertThat(part1Index.size()).isEqualTo(2);
 
         indexManifestEntry =
@@ -781,7 +782,7 @@ public class FileStoreCommitTest {
                 .containsExactlyInAnyOrder(6, 8);
 
         // assert scan one bucket
-        Optional<IndexFileMeta> file = indexFileHandler.scanHashIndex(snapshot.id(), part1, 0);
+        Optional<IndexFileMeta> file = indexFileHandler.scanHashIndex(snapshot, part1, 0);
         assertThat(file).isPresent();
         assertThat(indexFileHandler.readHashIndexList(file.get())).containsExactlyInAnyOrder(1, 4);
 
@@ -790,9 +791,9 @@ public class FileStoreCommitTest {
         store.overwriteData(
                 Collections.singletonList(record1), gen::getPartition, kv -> 0, new HashMap<>());
         snapshot = store.snapshotManager().latestSnapshot();
-        file = indexFileHandler.scanHashIndex(snapshot.id(), part1, 0);
+        file = indexFileHandler.scanHashIndex(snapshot, part1, 0);
         assertThat(file).isEmpty();
-        file = indexFileHandler.scanHashIndex(snapshot.id(), part2, 2);
+        file = indexFileHandler.scanHashIndex(snapshot, part2, 2);
         assertThat(file).isPresent();
 
         // overwrite all partitions
@@ -800,7 +801,7 @@ public class FileStoreCommitTest {
         store.overwriteData(
                 Collections.singletonList(record1), gen::getPartition, kv -> 0, new HashMap<>());
         snapshot = store.snapshotManager().latestSnapshot();
-        file = indexFileHandler.scanHashIndex(snapshot.id(), part2, 2);
+        file = indexFileHandler.scanHashIndex(snapshot, part2, 2);
         assertThat(file).isEmpty();
     }
 

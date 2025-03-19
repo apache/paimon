@@ -29,6 +29,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
@@ -163,6 +164,21 @@ public class TableCommitImpl implements InnerTableCommit {
     public void truncateTable() {
         checkCommitted();
         commit.truncateTable(COMMIT_IDENTIFIER);
+    }
+
+    @Override
+    public void truncatePartitions(List<Map<String, String>> partitionSpecs) {
+        commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER);
+    }
+
+    @Override
+    public void updateStatistics(Statistics statistics) {
+        commit.commitStatistics(statistics, COMMIT_IDENTIFIER);
+    }
+
+    @Override
+    public void compactManifests() {
+        commit.compactManifest();
     }
 
     private void checkCommitted() {

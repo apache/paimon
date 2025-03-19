@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -50,6 +51,8 @@ public interface SnapshotReader {
     Integer parallelism();
 
     SnapshotManager snapshotManager();
+
+    ChangelogManager changelogManager();
 
     ManifestsReader manifestsReader();
 

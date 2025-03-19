@@ -64,7 +64,7 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            rowType = (RowType) rowType.notNull();
+            rowType = rowType.notNull();
         }
 
         PositionOutputStream out = fileIO.newOutputStream(file, false);
@@ -75,7 +75,8 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         writer.close();
         out.close();
 
-        try (ParquetFileReader reader = ParquetUtil.getParquetReader(fileIO, file)) {
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(fileIO, file, fileIO.getFileSize(file))) {
             ParquetMetadata parquetMetadata = reader.getFooter();
             List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
             for (BlockMetaData blockMetaData : blockMetaDataList) {

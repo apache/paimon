@@ -22,8 +22,11 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 
+import java.util.ArrayList;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EAGER_INIT;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_DBS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_DBS;
@@ -63,7 +66,8 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
                 .excludingDbs(params.get(EXCLUDING_DBS))
                 .withPartitionKeyMultiple(
                         optionalConfigMapList(params, MULTIPLE_TABLE_PARTITION_KEYS))
-                .withPartitionKeys();
+                .withPartitionKeys()
+                .eagerInit(Boolean.valueOf(params.get(EAGER_INIT)));
 
         if (params.has(PARTITION_KEYS)) {
             action.withPartitionKeys(params.get(PARTITION_KEYS).split(","));
@@ -76,6 +80,11 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
         if (params.has(TYPE_MAPPING)) {
             String[] options = params.get(TYPE_MAPPING).split(",");
             action.withTypeMapping(TypeMapping.parse(options));
+        }
+
+        if (params.has(COMPUTED_COLUMN)) {
+            action.withComputedColumnArgs(
+                    new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
         }
     }
 }

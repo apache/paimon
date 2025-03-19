@@ -22,7 +22,9 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.FlinkWriteSink;
+import org.apache.paimon.flink.sink.TableFilter;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -74,10 +76,14 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     //     Paimon tables. 2) in multiplex sink where it is used to
     //     initialize different writers to multiple tables.
     private CatalogLoader catalogLoader;
+    private TypeMapping typeMapping;
+
     // database to sync, currently only support single database
     private String database;
+    private boolean eagerInit;
     private MultiTablesSinkMode mode;
     private String commitUser;
+    private TableFilter tableFilter;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -122,6 +128,21 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withEagerInit(boolean eagerInit) {
+        this.eagerInit = eagerInit;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withTableFilter(TableFilter tableFilter) {
+        this.tableFilter = tableFilter;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withTypeMapping(TypeMapping typeMapping) {
+        this.typeMapping = typeMapping;
+        return this;
+    }
+
     public void build() {
         Preconditions.checkNotNull(input);
         Preconditions.checkNotNull(parserFactory);
@@ -154,7 +175,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         parsed,
                         CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
                 .keyBy(t -> t.f0)
-                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
+                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader, typeMapping))
                 .name("Schema Evolution");
 
         DataStream<CdcMultiplexRecord> converted =
@@ -168,7 +189,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
-                        catalogLoader, committerCpu, committerMemory, commitUser);
+                        catalogLoader,
+                        committerCpu,
+                        committerMemory,
+                        commitUser,
+                        eagerInit,
+                        tableFilter);
         sink.sinkFrom(partitioned);
     }
 
@@ -196,13 +222,14 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
             DataStream<Void> schemaChangeProcessFunction =
                     SingleOutputStreamOperatorUtils.getSideOutput(
                                     parsed,
-                                    CdcMultiTableParsingProcessFunction
-                                            .createUpdatedDataFieldsOutputTag(table.name()))
+                                    CdcMultiTableParsingProcessFunction.createSchameChangeOutputTag(
+                                            table.name()))
                             .process(
                                     new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(table.fileIO(), table.location()),
                                             Identifier.create(database, table.name()),
-                                            catalogLoader))
+                                            catalogLoader,
+                                            typeMapping))
                             .name("Schema Evolution");
             schemaChangeProcessFunction.getTransformation().setParallelism(1);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);

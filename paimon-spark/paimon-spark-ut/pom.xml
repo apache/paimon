@@ -33,7 +33,7 @@ under the License.
 
     <properties>
         <spark.version>${paimon-spark-common.spark.version}</spark.version>
-        <jackson.version>${paimon.shade.jackson.version}</jackson.version>
+        <jackson.version>2.15.2</jackson.version>
     </properties>
 
     <dependencies>
@@ -156,6 +156,13 @@ under the License.
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java</artifactId>
             <version>${protobuf-java.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>mockwebserver</artifactId>
+            <version>${okhttp.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

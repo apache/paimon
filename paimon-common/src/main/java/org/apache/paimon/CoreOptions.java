@@ -104,7 +104,9 @@ public class CoreOptions implements Serializable {
                                     .text("Bucket number for file store.")
                                     .linebreak()
                                     .text(
-                                            "It should either be equal to -1 (dynamic bucket mode), or it must be greater than 0 (fixed bucket mode).")
+                                            "It should either be equal to -1 (dynamic bucket mode), "
+                                                    + "-2 (postpone bucket mode), "
+                                                    + "or it must be greater than 0 (fixed bucket mode).")
                                     .build());
 
     @Immutable
@@ -477,7 +479,7 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .noDefaultValue()
                     .withDescription(
-                            "Whether the write buffer can be spillable. Enabled by default when using object storage.");
+                            "Whether the write buffer can be spillable. Enabled by default when using object storage or when 'target-file-size' is greater than 'write-buffer-size'.");
 
     public static final ConfigOption<Boolean> WRITE_BUFFER_FOR_APPEND =
             key("write-buffer-for-append")
@@ -1083,6 +1085,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Initial buckets for a partition in assigner operator for dynamic bucket mode.");
 
+    public static final ConfigOption<Integer> DYNAMIC_BUCKET_MAX_BUCKETS =
+            key("dynamic-bucket.max-buckets")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "Max buckets for a partition in dynamic bucket mode, It should "
+                                    + "either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).");
+
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
             key("dynamic-bucket.assigner-parallelism")
                     .intType()
@@ -1265,6 +1275,24 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.");
+
+    public static final ConfigOption<PartitionSinkStrategy> PARTITION_SINK_STRATEGY =
+            key("partition.sink-strategy")
+                    .enumType(PartitionSinkStrategy.class)
+                    .defaultValue(PartitionSinkStrategy.NONE)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "This is only for partitioned unaware-buckets append table, and the purpose is to reduce small files and improve write performance."
+                                                    + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
+                                    .list(
+                                            text(
+                                                    "none: Rebalanced or Forward partitioning, this is the default behavior,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism."),
+                                            text(
+                                                    "hash: Hash the partitions value,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."))
+                                    .build());
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
@@ -1513,6 +1541,21 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "When need to lookup, commit will wait for compaction by lookup.");
 
+    public static final ConfigOption<LookupCompactMode> LOOKUP_COMPACT =
+            key("lookup-compact")
+                    .enumType(LookupCompactMode.class)
+                    .defaultValue(LookupCompactMode.RADICAL)
+                    .withDescription("Lookup compact mode used for lookup compaction.");
+
+    public static final ConfigOption<Integer> LOOKUP_COMPACT_MAX_INTERVAL =
+            key("lookup-compact.max-interval")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The max interval for a gentle mode lookup compaction to be triggered. For every interval, "
+                                    + "a forced lookup compaction will be performed to flush L0 files to higher level. "
+                                    + "This option is only valid when lookup-compact mode is gentle.");
+
     public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
             key("delete-file.thread-num")
                     .intType()
@@ -1556,6 +1599,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Enable data file thin mode to avoid duplicate columns storage.");
+
+    public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
+            key("partition.idle-time-to-report-statistic")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription(
+                            "Set a time duration when a partition has no new data after this time duration, "
+                                    + "start to report the partition statistics to hms.");
 
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
@@ -1817,7 +1868,7 @@ public class CoreOptions implements Serializable {
         if (keyString == null) {
             return Collections.emptyList();
         }
-        return Arrays.asList(keyString.split(","));
+        return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
     }
 
     public boolean fieldCollectAggDistinct(String fieldName) {
@@ -1947,9 +1998,14 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_BUFFER_SIZE).getBytes();
     }
 
-    public boolean writeBufferSpillable(boolean usingObjectStore, boolean isStreaming) {
+    public boolean writeBufferSpillable(
+            boolean usingObjectStore, boolean isStreaming, boolean hasPrimaryKey) {
         // if not streaming mode, we turn spillable on by default.
-        return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
+        return options.getOptional(WRITE_BUFFER_SPILLABLE)
+                .orElse(
+                        usingObjectStore
+                                || !isStreaming
+                                || targetFileSize(hasPrimaryKey) > writeBufferSize());
     }
 
     public MemorySize writeBufferSpillDiskSize() {
@@ -1958,6 +2014,10 @@ public class CoreOptions implements Serializable {
 
     public boolean useWriteBufferForAppend() {
         return options.get(WRITE_BUFFER_FOR_APPEND);
+    }
+
+    public PartitionSinkStrategy partitionSinkStrategy() {
+        return options.get(PARTITION_SINK_STRATEGY);
     }
 
     public int writeMaxWritersToSpill() {
@@ -2189,21 +2249,42 @@ public class CoreOptions implements Serializable {
 
     public Pair<String, String> incrementalBetween() {
         String str = options.get(INCREMENTAL_BETWEEN);
-        if (str == null) {
-            str = options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
-            if (str == null) {
-                return null;
-            }
-        }
-
         String[] split = str.split(",");
         if (split.length != 2) {
             throw new IllegalArgumentException(
-                    "The incremental-between or incremental-between-timestamp  must specific start(exclusive) and end snapshot or timestamp,"
+                    "The incremental-between must specific start(exclusive) and end snapshot,"
                             + " for example, 'incremental-between'='5,10' means changes between snapshot 5 and snapshot 10. But is: "
                             + str);
         }
         return Pair.of(split[0], split[1]);
+    }
+
+    public Pair<Long, Long> incrementalBetweenTimestamp() {
+        String str = options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
+        String[] split = str.split(",");
+        if (split.length != 2) {
+            throw new IllegalArgumentException(
+                    "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
+                            + str);
+        }
+
+        try {
+            return Pair.of(Long.parseLong(split[0]), Long.parseLong(split[1]));
+        } catch (NumberFormatException nfe) {
+            try {
+                long startTimestamp =
+                        DateTimeUtils.parseTimestampData(split[0], 3, TimeZone.getDefault())
+                                .getMillisecond();
+                long endTimestamp =
+                        DateTimeUtils.parseTimestampData(split[1], 3, TimeZone.getDefault())
+                                .getMillisecond();
+                return Pair.of(startTimestamp, endTimestamp);
+            } catch (Exception e) {
+                throw new IllegalArgumentException(
+                        "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: "
+                                + str);
+            }
+        }
     }
 
     public IncrementalBetweenScanMode incrementalBetweenScanMode() {
@@ -2224,6 +2305,10 @@ public class CoreOptions implements Serializable {
 
     public Integer dynamicBucketInitialBuckets() {
         return options.get(DYNAMIC_BUCKET_INITIAL_BUCKETS);
+    }
+
+    public Integer dynamicBucketMaxBuckets() {
+        return options.get(DYNAMIC_BUCKET_MAX_BUCKETS);
     }
 
     public Integer dynamicBucketAssignerParallelism() {
@@ -2503,6 +2588,23 @@ public class CoreOptions implements Serializable {
         }
 
         return options.get(LOOKUP_WAIT);
+    }
+
+    public boolean laziedLookup() {
+        return needLookup()
+                && (!options.get(LOOKUP_WAIT) || LookupCompactMode.GENTLE.equals(lookupCompact()));
+    }
+
+    public LookupCompactMode lookupCompact() {
+        return options.get(LOOKUP_COMPACT);
+    }
+
+    public int lookupCompactMaxInterval() {
+        Integer maxInterval = options.get(LOOKUP_COMPACT_MAX_INTERVAL);
+        if (maxInterval == null) {
+            maxInterval = MathUtils.multiplySafely(numSortedRunCompactionTrigger(), 2);
+        }
+        return Math.max(numSortedRunCompactionTrigger(), maxInterval);
     }
 
     public boolean asyncFileWrite() {
@@ -2985,7 +3087,10 @@ public class CoreOptions implements Serializable {
     /** The period format options for tag creation. */
     public enum TagPeriodFormatter implements DescribedEnum {
         WITH_DASHES("with_dashes", "Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'"),
-        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'");
+        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'"),
+        WITHOUT_DASHES_AND_SPACES(
+                "without_dashes_and_spaces",
+                "Dates and hours without dashes and spaces, e.g., 'yyyyMMddHH'");
 
         private final String value;
         private final String description;
@@ -3265,5 +3370,24 @@ public class CoreOptions implements Serializable {
 
             throw new IllegalArgumentException("cannot match type: " + orderType + " for ordering");
         }
+    }
+
+    /** The compact mode for lookup compaction. */
+    public enum LookupCompactMode {
+        /**
+         * Lookup compaction will use ForceUpLevel0Compaction strategy to radically compact new
+         * files.
+         */
+        RADICAL,
+
+        /** Lookup compaction will use UniversalCompaction strategy to gently compact new files. */
+        GENTLE
+    }
+
+    /** Partition strategy for unaware bucket partitioned append only table. */
+    public enum PartitionSinkStrategy {
+        NONE,
+        HASH
+        // TODO : Supports range-partition strategy.
     }
 }

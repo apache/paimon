@@ -90,10 +90,18 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
                         + "'fields.v.aggregate-function'='sum')");
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
 
+        // merge by sort buffer
         sql("INSERT INTO T VALUES (1, 1), (2, 2), (1, 3), (1, 4), (1, 5)");
         assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 13), Row.of(2, 2));
-
         iterator.close();
+
+        // merge by compaction
+        sql("INSERT INTO T VALUES (1, 3), (2, 2), (3, 1)");
+        sql("INSERT INTO T VALUES (1, 2), (2, 2), (3, 2)");
+        sql("INSERT INTO T VALUES (1, 1), (2, 2), (3, 3)");
+
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 19), Row.of(2, 8), Row.of(3, 6));
     }
 
     @Test

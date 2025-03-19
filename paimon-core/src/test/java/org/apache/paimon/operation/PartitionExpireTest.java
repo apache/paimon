@@ -29,7 +29,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -115,13 +115,14 @@ public class PartitionExpireTest {
                                 table.store()
                                         .newCommit(
                                                 createCommitUser(
-                                                        table.coreOptions().toConfiguration()))) {
+                                                        table.coreOptions().toConfiguration()),
+                                                null)) {
                             commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
                         }
                     }
 
                     @Override
-                    public void alterPartitions(List<Partition> partitions)
+                    public void alterPartitions(List<PartitionStatistics> partitions)
                             throws Catalog.TableNotExistException {}
 
                     @Override
@@ -133,7 +134,7 @@ public class PartitionExpireTest {
                 };
 
         CatalogEnvironment env =
-                new CatalogEnvironment(null, null, null, null) {
+                new CatalogEnvironment(null, null, null, null, null) {
 
                     @Override
                     public PartitionHandler partitionHandler() {
@@ -365,7 +366,8 @@ public class PartitionExpireTest {
     }
 
     private PartitionExpire newExpire() {
-        return newExpireTable().store().newPartitionExpire("");
+        FileStoreTable table = newExpireTable();
+        return table.store().newPartitionExpire("", table);
     }
 
     private FileStoreTable newExpireTable() {

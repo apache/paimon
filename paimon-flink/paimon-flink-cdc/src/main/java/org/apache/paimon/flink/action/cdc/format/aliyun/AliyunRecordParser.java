@@ -22,29 +22,26 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.AbstractJsonRecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
+import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.flink.api.java.tuple.Tuple3;
 
 import javax.annotation.Nullable;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
@@ -64,10 +61,8 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  */
 public class AliyunRecordParser extends AbstractJsonRecordParser {
 
-    private static final Logger LOG = LoggerFactory.getLogger(AliyunRecordParser.class);
-
     private static final String FIELD_IS_DDL = "ddl";
-    private static final String FIELD_TYPE = "op";
+    private static final String FIELD_OPERATION = "op";
 
     private static final String OP_UPDATE_BEFORE = "UPDATE_BEFORE";
     private static final String OP_UPDATE_AFTER = "UPDATE_AFTER";
@@ -81,6 +76,9 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
 
     private static final String FIELD_SCHEMA = "schema";
     private static final String FIELD_PK = "primaryKey";
+
+    private static final String FIELD_NAME = "name";
+    private static final String FIELD_TYPE = "type";
 
     @Override
     protected boolean isDDL() {
@@ -131,10 +129,10 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
         JsonNode payload = root.get(FIELD_PAYLOAD);
         checkNotNull(payload, FIELD_PAYLOAD);
 
-        String type = payload.get(FIELD_TYPE).asText();
+        String type = payload.get(FIELD_OPERATION).asText();
 
-        RowKind rowKind = null;
-        String field = null;
+        RowKind rowKind;
+        String field;
         switch (type) {
             case OP_UPDATE_BEFORE:
                 rowKind = RowKind.UPDATE_BEFORE;
@@ -168,18 +166,32 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
     }
 
     @Override
-    protected Map<String, String> extractRowData(JsonNode record, RowType.Builder rowTypeBuilder) {
+    protected Map<String, String> extractRowData(JsonNode record, CdcSchema.Builder schemaBuilder) {
 
         Map<String, Object> recordMap =
                 JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData = new HashMap<>();
 
-        fillDefaultTypes(record, rowTypeBuilder);
+        JsonNode schemaNode = root.get(FIELD_SCHEMA);
+        checkNotNull(schemaNode, FIELD_SCHEMA);
+        ArrayNode typeNodes = getNodeAs(schemaNode, FIELD_COLUMN, ArrayNode.class);
+        checkNotNull(typeNodes, FIELD_COLUMN);
+
+        for (int i = 0; i < typeNodes.size(); i++) {
+            JsonNode typeNode = typeNodes.get(i);
+            String originalName = typeNode.get(FIELD_NAME).asText();
+            String originalType = typeNode.get(FIELD_TYPE).asText();
+            Tuple3<String, Integer, Integer> typeInfo = MySqlTypeUtils.getTypeInfo(originalType);
+            DataType paimonDataType =
+                    MySqlTypeUtils.toDataType(typeInfo.f0, typeInfo.f1, typeInfo.f2, typeMapping);
+            schemaBuilder.column(originalName, paimonDataType);
+        }
+
         for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
             rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
         }
 
-        evalComputedColumns(rowData, rowTypeBuilder);
+        evalComputedColumns(rowData, schemaBuilder);
         return rowData;
     }
 
@@ -223,38 +235,5 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
             return null;
         }
         return databaseNode.asText();
-    }
-
-    private Map<JsonNode, JsonNode> matchOldRecords(ArrayNode newData, ArrayNode oldData) {
-        return IntStream.range(0, newData.size())
-                .boxed()
-                .collect(Collectors.toMap(newData::get, oldData::get));
-    }
-
-    private String transformValue(@Nullable String oldValue, String shortType, String mySqlType) {
-        if (oldValue == null) {
-            return null;
-        }
-
-        if (MySqlTypeUtils.isSetType(shortType)) {
-            return AliyunFieldParser.convertSet(oldValue, mySqlType);
-        }
-
-        if (MySqlTypeUtils.isEnumType(shortType)) {
-            return AliyunFieldParser.convertEnum(oldValue, mySqlType);
-        }
-
-        if (MySqlTypeUtils.isGeoType(shortType)) {
-            try {
-                byte[] wkb =
-                        AliyunFieldParser.convertGeoType2WkbArray(
-                                oldValue.getBytes(StandardCharsets.ISO_8859_1));
-                return MySqlTypeUtils.convertWkbArray(wkb);
-            } catch (Exception e) {
-                throw new IllegalArgumentException(
-                        String.format("Failed to convert %s to geometry JSON.", oldValue), e);
-            }
-        }
-        return oldValue;
     }
 }

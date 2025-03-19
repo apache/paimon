@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
@@ -50,6 +51,7 @@ public class CdcSinkBuilder<T> {
     private Table table = null;
     private Identifier identifier = null;
     private CatalogLoader catalogLoader = null;
+    private TypeMapping typeMapping = null;
 
     @Nullable private Integer parallelism;
 
@@ -83,6 +85,11 @@ public class CdcSinkBuilder<T> {
         return this;
     }
 
+    public CdcSinkBuilder<T> withTypeMapping(TypeMapping typeMapping) {
+        this.typeMapping = typeMapping;
+        return this;
+    }
+
     public DataStreamSink<?> build() {
         Preconditions.checkNotNull(input, "Input DataStream can not be null.");
         Preconditions.checkNotNull(parserFactory, "Event ParserFactory can not be null.");
@@ -105,12 +112,13 @@ public class CdcSinkBuilder<T> {
 
         DataStream<Void> schemaChangeProcessFunction =
                 SingleOutputStreamOperatorUtils.getSideOutput(
-                                parsed, CdcParsingProcessFunction.NEW_DATA_FIELD_LIST_OUTPUT_TAG)
+                                parsed, CdcParsingProcessFunction.SCHEMA_CHANGE_OUTPUT_TAG)
                         .process(
                                 new UpdatedDataFieldsProcessFunction(
                                         new SchemaManager(dataTable.fileIO(), dataTable.location()),
                                         identifier,
-                                        catalogLoader))
+                                        catalogLoader,
+                                        typeMapping))
                         .name("Schema Evolution");
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);

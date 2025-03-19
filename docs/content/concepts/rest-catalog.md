@@ -1,5 +1,5 @@
 ---
-title: "RESTCatalog"
+title: "REST Catalog"
 weight: 5
 type: docs
 aliases:
@@ -25,64 +25,98 @@ under the License.
 -->
 
 # RESTCatalog
+
 ## Overview
 
-Paimon REST Catalog provides a lightweight implementation to access the catalog service. Paimon could access the catalog service through a catalog server which implements REST API.You can see all APIs in [REST API](https://github.com/apache/paimon/blob/master/paimon-open-api/rest-catalog-open-api.yaml).
+Paimon REST Catalog provides a lightweight implementation to access the catalog service. Paimon could access the
+catalog service through a catalog server which implements REST API. You can see all APIs in [REST API](https://github.com/apache/paimon/blob/master/paimon-open-api/rest-catalog-open-api.yaml).
 
 {{< img src="/img/rest-catalog.svg">}}
 
 ## Key Features
 
 1. User Defined Technology-Specific Logic Implementation
-  - All technology-specific logic within the catalog server. 
-  - This ensures that the user can define logic that could be owned by the user.
+   - All technology-specific logic within the catalog server. 
+   - This ensures that the user can define logic that could be owned by the user.
 2. Decoupled Architecture
-  - The REST Catalog interacts with the catalog server through a well-defined REST API. 
-  - This decoupling allows for independent evolution and scaling of the catalog server and clients.
+   - The REST Catalog interacts with the catalog server through a well-defined REST API. 
+   - This decoupling allows for independent evolution and scaling of the catalog server and clients.
 3. Language Agnostic
-  - Developers can implement the catalog server in any programming language, provided that it adheres to the specified REST API.
-  - This flexibility enables teams to utilize their existing tech stacks and expertise.
+   - Developers can implement the catalog server in any programming language, provided that it adheres to the specified REST API.
+   - This flexibility enables teams to utilize their existing tech stacks and expertise.
 4. Support for Any Catalog Backend
-  - Paimon REST Catalog is designed to work with any catalog backend. 
-  - As long as they implement the relevant APIs, they can seamlessly integrate with Paimon REST Catalog.
+   - REST Catalog is designed to work with any catalog backend. 
+   - As long as they implement the relevant APIs, they can seamlessly integrate with REST Catalog.
 
 ## Usage
+
 - Bear token
+
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
-'type' = 'paimon',
-'uri' = '<catalog server url>',
-'metastore' = 'rest',
-'token.provider' = 'bear'
-'token' = '<token>'
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'bear'
+    'token' = '<token>'
 );
 ```
+
 - DLF ak
+
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
-'type' = 'paimon',
-'uri' = '<catalog server url>',
-'metastore' = 'rest',
-'token.provider' = 'dlf',
-'dlf.accessKeyId'='<accessKeyId>',
-'dlf.accessKeySecret'='<accessKeySecret>',
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.access-key-id'='<access-key-id>',
+    'dlf.access-key-secret'='<access-key-secret>',
 );
 ```
-- DLF token path
+
+- DLF sts token
+
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
-'type' = 'paimon',
-'uri' = '<catalog server url>',
-'metastore' = 'rest',
-'token.provider' = 'dlf',
-'dlf.token-path' = '<token-path>'
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.access-key-id'='<access-key-id>',
+    'dlf.access-key-secret'='<access-key-secret>',
+    'dlf.security-token'='<security-token>'
 );
 ```
+
+- DLF sts token path
+
+```sql
+CREATE CATALOG `paimon-rest-catalog`
+WITH (
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.token-path' = 'my_token_path_in_disk'
+);
+```
+
+{{< hint info >}}
+The `'warehouse'` is your catalog instance name on the server, not the path.
+{{< /hint >}}
 
 ## Conclusion
 
-Paimon REST Catalog offers adaptable solution for accessing the catalog service. According to [REST API](https://github.com/apache/paimon/blob/master/paimon-open-api/rest-catalog-open-api.yaml) is decoupled from the catalog service.
-Technology-specific Logic is encapsulated on the catalog server. At the same time, the catalog server supports any backend and languages.
+REST Catalog offers adaptable solution for accessing the catalog service. According to [REST API](https://github.com/apache/paimon/blob/master/paimon-open-api/rest-catalog-open-api.yaml) is decoupled
+from the catalog service.
+
+Technology-specific Logic is encapsulated on the catalog server. At the same time, the catalog server supports any
+backend and languages.

@@ -355,9 +355,7 @@ public class UnawareAppendTableCompactionCoordinator {
                 synchronized (this) {
                     maintainer =
                             AppendDeletionFileMaintainer.forUnawareAppend(
-                                    indexFileHandler,
-                                    snapshotManager.latestSnapshotId(),
-                                    partition);
+                                    indexFileHandler, snapshotManager.latestSnapshot(), partition);
                 }
                 cache.put(partition, maintainer);
             }

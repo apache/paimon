@@ -18,8 +18,6 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.rest.RESTResponse;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -29,20 +27,41 @@ import java.util.List;
 
 /** Response for listing tables. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListTablesResponse implements RESTResponse {
+public class ListTablesResponse implements PagedResponse<String> {
 
     private static final String FIELD_TABLES = "tables";
+    private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
 
     @JsonProperty(FIELD_TABLES)
     private final List<String> tables;
 
-    @JsonCreator
+    @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
+    private final String nextPageToken;
+
     public ListTablesResponse(@JsonProperty(FIELD_TABLES) List<String> tables) {
+        this(tables, null);
+    }
+
+    @JsonCreator
+    public ListTablesResponse(
+            @JsonProperty(FIELD_TABLES) List<String> tables,
+            @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
         this.tables = tables;
+        this.nextPageToken = nextPageToken;
     }
 
     @JsonGetter(FIELD_TABLES)
     public List<String> getTables() {
         return this.tables;
+    }
+
+    @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
+    public String getNextPageToken() {
+        return this.nextPageToken;
+    }
+
+    @Override
+    public List<String> data() {
+        return getTables();
     }
 }

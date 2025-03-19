@@ -102,7 +102,6 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     @Override
     protected RecordWriter<InternalRow> createWriter(
-            @Nullable Long snapshotId,
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoredFiles,
@@ -125,7 +124,7 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
                 pathFactory.createDataFilePathFactory(partition, bucket),
                 restoreIncrement,
                 options.useWriteBufferForAppend() || forceBufferSpill,
-                options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode)
+                options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode, false)
                         || forceBufferSpill,
                 options.fileCompression(),
                 options.spillCompressOptions(),

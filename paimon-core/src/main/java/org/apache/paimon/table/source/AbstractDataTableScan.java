@@ -47,6 +47,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -65,7 +66,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
-public abstract class AbstractDataTableScan implements DataTableScan {
+abstract class AbstractDataTableScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
 
@@ -130,6 +131,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
 
     protected StartingScanner createStartingScanner(boolean isStreaming) {
         SnapshotManager snapshotManager = snapshotReader.snapshotManager();
+        ChangelogManager changelogManager = snapshotReader.changelogManager();
         CoreOptions.StreamScanMode type =
                 options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         switch (type) {
@@ -149,6 +151,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
             if (consumer.isPresent()) {
                 return new ContinuousFromSnapshotStartingScanner(
                         snapshotManager,
+                        changelogManager,
                         consumer.get().nextSnapshot(),
                         options.changelogLifecycleDecoupled());
             }
@@ -178,6 +181,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                 return isStreaming
                         ? new ContinuousFromTimestampStartingScanner(
                                 snapshotManager,
+                                changelogManager,
                                 startupMillis,
                                 options.changelogLifecycleDecoupled())
                         : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
@@ -189,6 +193,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                     return isStreaming
                             ? new ContinuousFromSnapshotStartingScanner(
                                     snapshotManager,
+                                    changelogManager,
                                     options.scanSnapshotId(),
                                     options.changelogLifecycleDecoupled())
                             : new StaticFromSnapshotStartingScanner(
@@ -288,11 +293,11 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                 return new IncrementalStartingScanner(snapshotManager, startId, endId, scanMode);
             }
         } else if (conf.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)) {
-            Pair<String, String> incrementalBetween = options.incrementalBetween();
+            Pair<Long, Long> incrementalBetween = options.incrementalBetweenTimestamp();
             return new IncrementalTimeStampStartingScanner(
                     snapshotManager,
-                    Long.parseLong(incrementalBetween.getLeft()),
-                    Long.parseLong(incrementalBetween.getRight()),
+                    incrementalBetween.getLeft(),
+                    incrementalBetween.getRight(),
                     scanMode);
         } else if (conf.contains(CoreOptions.INCREMENTAL_TO_AUTO_TAG)) {
             String endTag = options.incrementalToAutoTag();

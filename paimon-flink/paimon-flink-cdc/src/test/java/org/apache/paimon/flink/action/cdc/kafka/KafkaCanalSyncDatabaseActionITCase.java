@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
@@ -583,8 +585,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                                 IllegalArgumentException.class,
                                 "Cannot synchronize record when database name or table name is unknown. "
                                         + "Invalid record is:\n"
-                                        + "{databaseName=null, tableName=null, fields=[`k` STRING, `v0` STRING, `v1` STRING], "
-                                        + "primaryKeys=[], cdcRecord=+I {v0=five, k=5, v1=50}}"));
+                                        + "{databaseName=null, tableName=null, cdcSchema=Schema{fields=[`k` STRING, `v0` STRING, `v1` STRING], primaryKeys=[], comment=null}, cdcRecord=+I {v0=five, k=5, v1=50}}"));
     }
 
     @Test
@@ -641,6 +642,98 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 table2,
                 rowType2,
                 Collections.singletonList("k"));
+    }
+
+    @Test
+    @Timeout(120)
+    public void testExpressionNow() throws Exception {
+        final String topic = "expression-now";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-1.txt");
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withPrimaryKeys("k")
+                        .withComputedColumnArgs(
+                                Arrays.asList("etl_create_time=now()", "etl_update_time=now()"))
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        waitingTables("t1");
+
+        FileStoreTable table1 = getFileStoreTable("t1");
+        assertThat(table1.primaryKeys()).containsExactly("k");
+
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.TIMESTAMP(3),
+                            DataTypes.TIMESTAMP(3)
+                        },
+                        new String[] {"k", "v1", "etl_create_time", "etl_update_time"});
+
+        // INSERT
+        waitForResult(
+                true,
+                Collections.singletonList(
+                        "\\+I\\[1, A, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                table1,
+                rowType1,
+                Collections.singletonList("k"));
+
+        List<InternalRow> data = getData("t1");
+        Timestamp createTime1 = data.get(0).getTimestamp(2, 3);
+        Timestamp updateTime1 = data.get(0).getTimestamp(3, 3);
+
+        assertThat(createTime1.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
+        assertThat(updateTime1.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
+
+        Thread.sleep(1000);
+
+        // UPDATE1
+        writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-2.txt");
+        waitForResult(
+                true,
+                Collections.singletonList(
+                        "\\+I\\[1, B, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                table1,
+                rowType1,
+                Collections.singletonList("k"));
+
+        data = getData("t1");
+        Timestamp createTime2 = data.get(0).getTimestamp(2, 3);
+        Timestamp updateTime2 = data.get(0).getTimestamp(3, 3);
+
+        assertThat(createTime2.toLocalDateTime()).isAfter(createTime1.toLocalDateTime());
+        assertThat(updateTime2.toLocalDateTime()).isAfter(updateTime1.toLocalDateTime());
+        assertThat(updateTime2.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
+
+        Thread.sleep(1000);
+
+        // UPDATE2
+        writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-3.txt");
+        waitForResult(
+                true,
+                Collections.singletonList(
+                        "\\+I\\[1, C, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}, \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]"),
+                table1,
+                rowType1,
+                Collections.singletonList("k"));
+
+        data = getData("t1");
+        Timestamp createTime3 = data.get(0).getTimestamp(2, 3);
+        Timestamp updateTime3 = data.get(0).getTimestamp(3, 3);
+
+        assertThat(createTime3.toLocalDateTime()).isAfter(createTime1.toLocalDateTime());
+        assertThat(updateTime3.toLocalDateTime()).isAfter(updateTime2.toLocalDateTime());
+        assertThat(updateTime3.toLocalDateTime()).isBefore(Timestamp.now().toLocalDateTime());
     }
 
     @Test

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.OrderType;
+import org.apache.paimon.CoreOptions.PartitionSinkStrategy;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -134,7 +135,7 @@ public class FlinkSinkBuilder {
     }
 
     /** Set sink parallelism. */
-    public FlinkSinkBuilder parallelism(int parallelism) {
+    public FlinkSinkBuilder parallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
         return this;
     }
@@ -234,7 +235,11 @@ public class FlinkSinkBuilder {
         BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
             case HASH_FIXED:
-                return buildForFixedBucket(input);
+                if (table.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
+                    return buildPostponeBucketSink(input);
+                } else {
+                    return buildForFixedBucket(input);
+                }
             case HASH_DYNAMIC:
                 return buildDynamicBucketSink(input, false);
             case CROSS_PARTITION:
@@ -246,7 +251,7 @@ public class FlinkSinkBuilder {
         }
     }
 
-    protected DataStream<InternalRow> mapToInternalRow(
+    public static DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
         SingleOutputStreamOperator<InternalRow> result =
                 input.transform(
@@ -291,10 +296,24 @@ public class FlinkSinkBuilder {
         return sink.sinkFrom(partitioned);
     }
 
+    private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
+        return new PostponeBucketWriteSink(table, overwritePartition).sinkFrom(input, parallelism);
+    }
+
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {
         checkArgument(
                 table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
+
+        if (!table.partitionKeys().isEmpty()
+                && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
+            input =
+                    partition(
+                            input,
+                            new RowDataHashPartitionChannelComputer(table.schema()),
+                            parallelism);
+        }
+
         return new RowUnawareBucketSink(table, overwritePartition, logSinkFunction, parallelism)
                 .sinkFrom(input);
     }

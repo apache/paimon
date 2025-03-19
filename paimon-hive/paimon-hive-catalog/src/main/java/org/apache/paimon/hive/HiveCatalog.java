@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
@@ -37,6 +38,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -90,6 +92,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -447,13 +450,12 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void alterPartitions(
-            Identifier identifier, List<org.apache.paimon.partition.Partition> partitions)
+    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {
         TableSchema tableSchema = this.loadTableSchema(identifier);
         if (!tableSchema.partitionKeys().isEmpty()
                 && new CoreOptions(tableSchema.options()).partitionedTableInMetastore()) {
-            for (org.apache.paimon.partition.Partition partition : partitions) {
+            for (PartitionStatistics partition : partitions) {
                 Map<String, String> spec = partition.spec();
                 List<String> partitionValues =
                         tableSchema.partitionKeys().stream()
@@ -559,7 +561,8 @@ public class HiveCatalog extends AbstractCatalog {
                                             recordCount,
                                             fileSizeInBytes,
                                             fileCount,
-                                            lastFileCreationTime);
+                                            lastFileCreationTime,
+                                            false);
                                 })
                         .collect(Collectors.toList());
             } catch (Exception e) {
@@ -703,6 +706,7 @@ public class HiveCatalog extends AbstractCatalog {
             throws TableNotExistException {
         return new TableMetadata(
                 loadTableSchema(identifier, table),
+                isExternalTable(table),
                 identifier.getFullName() + "." + table.getCreateTime());
     }
 
@@ -748,7 +752,13 @@ public class HiveCatalog extends AbstractCatalog {
         RowType rowType = HiveTableUtils.createRowType(table);
         Map<String, String> options = new HashMap<>(table.getParameters());
         String comment = options.remove(COMMENT_PROP);
-        return new ViewImpl(identifier, rowType, table.getViewExpandedText(), comment, options);
+        return new ViewImpl(
+                identifier,
+                rowType.getFields(),
+                table.getViewExpandedText(),
+                Collections.emptyMap(),
+                comment,
+                options);
     }
 
     @Override
@@ -845,6 +855,35 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public PagedList<View> listViewDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken)
+            throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            return new PagedList<>(Collections.emptyList(), null);
+        }
+        getDatabase(databaseName);
+
+        PagedList<String> pagedViewNames = listViewsPaged(databaseName, maxResults, pageToken);
+        return new PagedList<>(
+                pagedViewNames.getElements().stream()
+                        .map(
+                                viewName -> {
+                                    try {
+                                        return getView(Identifier.create(databaseName, viewName));
+                                    } catch (ViewNotExistException ignored) {
+                                        LOG.warn(
+                                                "view {}.{} does not exist",
+                                                databaseName,
+                                                viewName);
+                                        return null;
+                                    }
+                                })
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()),
+                pagedViewNames.getNextPageToken());
+    }
+
+    @Override
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
         try {
@@ -913,7 +952,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
             boolean externalTable = isExternalTable(getHmsTable(identifier));
             clients.execute(
@@ -938,6 +977,11 @@ public class HiveCatalog extends AbstractCatalog {
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
+                }
+                for (Path externalPath : externalPaths) {
+                    if (fileIO.exists(externalPath)) {
+                        fileIO.deleteDirectoryQuietly(externalPath);
+                    }
                 }
             } catch (Exception ee) {
                 LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
@@ -1360,6 +1404,8 @@ public class HiveCatalog extends AbstractCatalog {
                 return "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe";
             case ORC:
                 return "org.apache.hadoop.hive.ql.io.orc.OrcSerde";
+            case JSON:
+                return "org.apache.hive.hcatalog.data.JsonSerDe";
         }
         return SERDE_CLASS_NAME;
     }
@@ -1370,6 +1416,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case JSON:
                 return "org.apache.hadoop.mapred.TextInputFormat";
             case PARQUET:
                 return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat";
@@ -1385,6 +1432,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         switch (provider) {
             case CSV:
+            case JSON:
                 return "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat";
             case PARQUET:
                 return "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat";

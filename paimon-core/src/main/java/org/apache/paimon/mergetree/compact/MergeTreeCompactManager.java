@@ -27,6 +27,7 @@ import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
@@ -63,6 +64,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
     @Nullable private final DeletionVectorsMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
+    private final boolean needLookup;
+
+    @Nullable private final RecordLevelExpire recordLevelExpire;
 
     public MergeTreeCompactManager(
             ExecutorService executor,
@@ -74,7 +78,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter,
             @Nullable DeletionVectorsMaintainer dvMaintainer,
-            boolean lazyGenDeletionFile) {
+            boolean lazyGenDeletionFile,
+            boolean needLookup,
+            @Nullable RecordLevelExpire recordLevelExpire) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -85,8 +91,10 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.metricsReporter = metricsReporter;
         this.dvMaintainer = dvMaintainer;
         this.lazyGenDeletionFile = lazyGenDeletionFile;
+        this.recordLevelExpire = recordLevelExpire;
+        this.needLookup = needLookup;
 
-        MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
+        MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 
     @Override
@@ -103,7 +111,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Override
     public void addNewFile(DataFileMeta file) {
         levels.addLevel0File(file);
-        MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
+        MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 
     @Override
@@ -125,7 +133,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                         "Trigger forced full compaction. Picking from the following runs\n{}",
                         runs);
             }
-            optionalUnit = CompactStrategy.pickFullCompaction(levels.numberOfLevels(), runs);
+            optionalUnit =
+                    CompactStrategy.pickFullCompaction(
+                            levels.numberOfLevels(), runs, recordLevelExpire);
         } else {
             if (taskFuture != null) {
                 return;
@@ -198,7 +208,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                         dropDelete,
                         levels.maxLevel(),
                         metricsReporter,
-                        compactDfSupplier);
+                        compactDfSupplier,
+                        recordLevelExpire);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Pick these files (name, level, size) for compaction: {}",
@@ -230,7 +241,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                 r.after());
                     }
                     levels.update(r.before(), r.after());
-                    MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
+                    MetricUtils.safeCall(this::reportMetrics, LOG);
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
                                 "Levels in compact manager updated. Current runs are\n{}",
@@ -240,9 +251,18 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         return result;
     }
 
-    private void reportLevel0FileCount() {
+    @Override
+    public boolean compactNotCompleted() {
+        // If it is a lookup compaction, we should ensure that all level 0 files are consumed, so
+        // here we need to make the outside think that we still need to do unfinished compact
+        // working
+        return super.compactNotCompleted() || (needLookup && !levels().level0().isEmpty());
+    }
+
+    private void reportMetrics() {
         if (metricsReporter != null) {
             metricsReporter.reportLevel0FileCount(levels.level0().size());
+            metricsReporter.reportTotalFileSize(levels.totalFileSize());
         }
     }
 
@@ -252,5 +272,10 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         if (metricsReporter != null) {
             MetricUtils.safeCall(metricsReporter::unregister, LOG);
         }
+    }
+
+    @VisibleForTesting
+    public CompactStrategy getStrategy() {
+        return strategy;
     }
 }

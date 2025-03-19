@@ -179,6 +179,56 @@ public class MergeTreeCompactManagerTest {
                 Collections.singletonList(new LevelMinMax(2, 1, 10)));
     }
 
+    @Test
+    public void testIsCompacting() {
+        List<LevelMinMax> inputs =
+                Arrays.asList(
+                        new LevelMinMax(0, 1, 3),
+                        new LevelMinMax(1, 1, 5),
+                        new LevelMinMax(1, 6, 7));
+        List<DataFileMeta> files = new ArrayList<>();
+
+        for (int i = 0; i < inputs.size(); i++) {
+            LevelMinMax minMax = inputs.get(i);
+            files.add(minMax.toFile(i));
+        }
+
+        Levels levels = new Levels(comparator, files, 3);
+
+        MergeTreeCompactManager lookupManager =
+                new MergeTreeCompactManager(
+                        service,
+                        levels,
+                        testStrategy(),
+                        comparator,
+                        2,
+                        Integer.MAX_VALUE,
+                        new TestRewriter(true),
+                        null,
+                        null,
+                        false,
+                        true,
+                        null);
+
+        MergeTreeCompactManager defaultManager =
+                new MergeTreeCompactManager(
+                        service,
+                        levels,
+                        testStrategy(),
+                        comparator,
+                        2,
+                        Integer.MAX_VALUE,
+                        new TestRewriter(true),
+                        null,
+                        null,
+                        false,
+                        false,
+                        null);
+
+        assertThat(lookupManager.compactNotCompleted()).isTrue();
+        assertThat(defaultManager.compactNotCompleted()).isFalse();
+    }
+
     private void innerTest(List<LevelMinMax> inputs, List<LevelMinMax> expected)
             throws ExecutionException, InterruptedException {
         innerTest(inputs, expected, testStrategy(), true);
@@ -207,7 +257,9 @@ public class MergeTreeCompactManagerTest {
                         new TestRewriter(expectedDropDelete),
                         null,
                         null,
-                        false);
+                        false,
+                        false,
+                        null);
         manager.triggerCompaction(false);
         manager.getCompactionResult(true);
         List<LevelMinMax> outputs =

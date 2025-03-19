@@ -21,6 +21,7 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -391,6 +392,11 @@ public class PredicateTest {
         Integer[] nullCount = {null};
         assertThat(predicate.test(row)).isEqualTo(true);
         assertThat(predicate.test(10, min, max, new GenericArray(nullCount))).isEqualTo(true);
+
+        PredicateBuilder builder2 = new PredicateBuilder(RowType.of(new CharType()));
+        Predicate predicate2 = builder2.endsWith(0, fromString("bcc"));
+        assertThat(predicate2.test(row)).isEqualTo(true);
+        assertThat(predicate2.test(10, min, max, new GenericArray(nullCount))).isEqualTo(true);
     }
 
     @Test

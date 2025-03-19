@@ -94,7 +94,7 @@ If you want to achieve ultimate compaction performance, you can consider using r
 This a tradeoff.
 
 Enable row storage through the following options:
-```shell
+```properties
 file.format = avro
 metadata.stats-mode = none
 ```
@@ -119,7 +119,7 @@ checkpoint timeout is 10 minutes.
 
 If you expect stability even in this case, you can turn up the checkpoint timeout, for example:
 
-```shell
+```properties
 execution.checkpointing.timeout = 60 min
 ```
 
@@ -142,11 +142,11 @@ There are three main places in Paimon writer that takes up memory:
   * To disable dictionary encoding for all fields in ORC format, set `orc.dictionary.key.threshold='0'`. Additionally,set `orc.column.encoding.direct='field1,field2'` to disable dictionary encoding for specific columns.
 
 If your Flink job does not rely on state, please avoid using managed memory, which you can control with the following Flink parameter:
-```shell
+```properties
 taskmanager.memory.managed.size=1m
 ```
 Or you can use Flink managed memory for your write buffer to avoid OOM, set table property:
-```shell
+```properties
 sink.use-managed-memory-allocator=true
 ```
 
@@ -160,3 +160,4 @@ You can use fine-grained-resource-management of Flink to increase committer heap
 1. Configure Flink Configuration `cluster.fine-grained-resource-management.enabled: true`. (This is default after Flink 1.18)
 2. Configure Paimon Table Options: `sink.committer-memory`, for example 300 MB, depends on your `TaskManager`.
    (`sink.committer-cpu` is also supported)
+3. If you use Flink batch job write data into Paimon or run dedicated compaction, Configure Flink Configuration `fine-grained.shuffle-mode.all-blocking: true`.

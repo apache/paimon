@@ -106,13 +106,9 @@ public abstract class E2eTestBase {
                         .withStartupTimeout(Duration.ofMinutes(3))
                         .withLocalCompose(true);
         if (withKafka) {
-            List<String> kafkaServices = Arrays.asList("zookeeper", "kafka");
-            services.addAll(kafkaServices);
-            for (String s : kafkaServices) {
-                environment.withLogConsumer(s + "-1", new Slf4jLogConsumer(LOG));
-            }
-            environment.waitingFor(
-                    "kafka-1", buildWaitStrategy(".*Recorded new ZK controller.*", 2));
+            services.add("kafka");
+            environment.withLogConsumer("kafka-1", new Slf4jLogConsumer(LOG));
+            environment.waitingFor("kafka-1", buildWaitStrategy(".*Kafka Server started.*", 1));
         }
         if (withHive) {
             List<String> hiveServices =

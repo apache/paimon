@@ -133,6 +133,11 @@ public class Levels {
         return level0.isEmpty() ? -1 : 0;
     }
 
+    public long totalFileSize() {
+        return level0.stream().mapToLong(DataFileMeta::fileSize).sum()
+                + levels.stream().mapToLong(SortedRun::totalSize).sum();
+    }
+
     public List<DataFileMeta> allFiles() {
         List<DataFileMeta> files = new ArrayList<>();
         List<LevelSortedRun> runs = levelSortedRuns();

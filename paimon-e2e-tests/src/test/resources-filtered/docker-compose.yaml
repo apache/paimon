@@ -25,7 +25,7 @@ services:
   # ----------------------------------------
 
   jobmanager:
-    image: apache/flink:${test.flink.version}-java8
+    image: apache/flink:${test.flink.version}-${test.java.version}
     volumes:
       - testdata:/test-data
       - /tmp/paimon-e2e-tests-jars:/jars
@@ -49,7 +49,7 @@ services:
       - "8081"
 
   taskmanager:
-    image: apache/flink:${test.flink.version}-java8
+    image: apache/flink:${test.flink.version}-${test.java.version}
     volumes:
       - testdata:/test-data
       - /tmp/paimon-e2e-tests-jars:/jars
@@ -76,18 +76,6 @@ services:
   # Kafka services
   # ----------------------------------------
 
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.8.0
-    networks:
-      testnetwork:
-        aliases:
-          - zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    expose:
-      - "2181"
-
   kafka:
     image: confluentinc/cp-kafka:7.8.0
     networks:
@@ -95,20 +83,26 @@ services:
         aliases:
           - kafka
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://kafka:9092'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       KAFKA_TRANSACTION_MAX_TIMEOUT_MS: 7200000
       # Disable log deletion to prevent records from being deleted during test run
       KAFKA_LOG_RETENTION_MS: -1
+      CLUSTER_ID: Pkv3OFSRNQcNATKEMDV9Ql
     expose:
       - "9092"
-    depends_on:
-      - zookeeper
 
   # ----------------------------------------
   # Hive services, copied and modified from https://github.com/big-data-europe/docker-hive

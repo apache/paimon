@@ -42,10 +42,11 @@ Paimon also supports reading some hidden metadata columns, currently supporting 
 - `__paimon_file_path`: the file path of the record.
 - `__paimon_partition`: the partition of the record.
 - `__paimon_bucket`: the bucket of the record.
+- `__paimon_row_index`: the row index of the record.
 
 ```sql
--- read all columns and the corresponding file path, partition, bucket of the record
-SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket FROM t;
+-- read all columns and the corresponding file path, partition, bucket, rowIndex of the record
+SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
 
 ### Batch Time Travel
@@ -99,6 +100,7 @@ SELECT * FROM paimon_incremental_query('tableName', 12, 20);
 
 -- read the incremental data between ts 1692169900000 and ts 1692169900000.
 SELECT * FROM paimon_incremental_between_timestamp('tableName', '1692169000000', '1692169900000');
+SELECT * FROM paimon_incremental_between_timestamp('tableName', '2025-03-12 00:00:00', '2025-03-12 00:08:00');
 
 -- read the incremental data to tag '2024-12-04'.
 -- Paimon will find an earlier tag and return changes between them.

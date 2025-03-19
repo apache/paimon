@@ -110,4 +110,15 @@ public class MathUtils {
             return Integer.MAX_VALUE;
         }
     }
+
+    /**
+     * Safely multiply the given int value by another int value, ensuring that no overflow occurs.
+     */
+    public static int multiplySafely(int a, int b) {
+        try {
+            return Math.multiplyExact(a, b);
+        } catch (ArithmeticException e) {
+            return Integer.MAX_VALUE;
+        }
+    }
 }

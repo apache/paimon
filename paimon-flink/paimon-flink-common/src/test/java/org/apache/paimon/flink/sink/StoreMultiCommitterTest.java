@@ -72,6 +72,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
+import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
@@ -81,6 +82,7 @@ class StoreMultiCommitterTest {
     private Path warehouse;
     private CatalogLoader catalogLoader;
     private Catalog catalog;
+    private String databaseName;
     private Identifier firstTable;
     private Identifier secondTable;
     private Path firstTablePath;
@@ -99,7 +101,7 @@ class StoreMultiCommitterTest {
     public void beforeEach() throws Exception {
         initialCommitUser = UUID.randomUUID().toString();
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
-        String databaseName = "test_db";
+        databaseName = "test_db";
         firstTable = Identifier.create(databaseName, "test_table1");
         secondTable = Identifier.create(databaseName, "test_table2");
 
@@ -289,10 +291,9 @@ class StoreMultiCommitterTest {
         testHarness.snapshot(cpId, 1);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
-        SnapshotManager snapshotManager1 =
-                new SnapshotManager(LocalFileIO.create(), firstTablePath);
+        SnapshotManager snapshotManager1 = newSnapshotManager(LocalFileIO.create(), firstTablePath);
         SnapshotManager snapshotManager2 =
-                new SnapshotManager(LocalFileIO.create(), secondTablePath);
+                newSnapshotManager(LocalFileIO.create(), secondTablePath);
 
         // should create 10 snapshots for first table
         assertThat(snapshotManager1.latestSnapshotId()).isEqualTo(cpId);

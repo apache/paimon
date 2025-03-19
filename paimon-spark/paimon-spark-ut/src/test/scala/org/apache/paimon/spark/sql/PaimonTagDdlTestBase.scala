@@ -142,4 +142,20 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
     spark.sql("alter table T rename tag `tag-1` to `tag-2`")
     checkAnswer(spark.sql("show tags T"), Row("tag-2"))
   }
+
+  test("Tag creation: batch creation mode") {
+    spark.sql("""CREATE TABLE T (id INT, name STRING)
+                |USING PAIMON
+                |TBLPROPERTIES (
+                |'file.format' = 'avro',
+                |'tag.automatic-creation'='batch',
+                |'tag.batch.customized-name'  = 'haha')""".stripMargin)
+    spark.sql("insert into T values(1, 'a')")
+    assertResult(1)(loadTable("T").tagManager().tagObjects().size())
+    assertResult("haha")(loadTable("T").tagManager().tagObjects().get(0).getRight)
+    spark.sql("insert into T values(1, 'a')")
+    // tag overwrite
+    assertResult(1)(loadTable("T").tagManager().tagObjects().size())
+    assertResult("haha")(loadTable("T").tagManager().tagObjects().get(0).getRight)
+  }
 }

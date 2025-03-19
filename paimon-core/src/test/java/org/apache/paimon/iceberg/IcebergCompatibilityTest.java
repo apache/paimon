@@ -19,6 +19,7 @@
 package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -191,6 +192,68 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
+    public void testDropPartition() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt1", "pt2", "k", "v"});
+
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Arrays.asList("pt1", "pt2"),
+                        Arrays.asList("pt1", "pt2", "k"),
+                        1,
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(BinaryString.fromString("20250304"), 15, 1, 1));
+        write.write(GenericRow.of(BinaryString.fromString("20250304"), 16, 1, 1));
+        write.write(GenericRow.of(BinaryString.fromString("20250305"), 15, 1, 1));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(20250304, 15, 1, 1)",
+                        "Record(20250304, 16, 1, 1)",
+                        "Record(20250305, 15, 1, 1)");
+
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path path = new Path(tempDir.toString());
+
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path)) {
+            Identifier paimonIdentifier = Identifier.create("mydb", "t");
+            if (ThreadLocalRandom.current().nextBoolean()) {
+                // delete the second-level partition
+                Map<String, String> partition = new HashMap<>();
+                partition.put("pt1", "20250304");
+                partition.put("pt2", "16");
+                commit.truncatePartitions(Collections.singletonList(partition));
+
+                assertThat(getIcebergResult())
+                        .containsExactlyInAnyOrder(
+                                "Record(20250304, 15, 1, 1)", "Record(20250305, 15, 1, 1)");
+            } else {
+                // delete the first-level partition
+                Map<String, String> partition = new HashMap<>();
+                partition.put("pt1", "20250304");
+                commit.truncatePartitions(Collections.singletonList(partition));
+
+                assertThat(getIcebergResult())
+                        .containsExactlyInAnyOrder("Record(20250305, 15, 1, 1)");
+            }
+        }
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testRetryCreateMetadata() throws Exception {
         RowType rowType =
                 RowType.of(
@@ -213,7 +276,7 @@ public class IcebergCompatibilityTest {
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
         List<CommitMessage> commitMessages2 = write.prepareCommit(true, 2);
         commit.commit(2, commitMessages2);
-        assertThat(table.latestSnapshotId()).hasValue(3L);
+        assertThat(table.latestSnapshot()).isPresent().map(Snapshot::id).hasValue(3L);
 
         IcebergPathFactory pathFactory =
                 new IcebergPathFactory(new Path(table.location(), "metadata"));
@@ -375,13 +438,19 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        // The old metadata.json is removed when the new metadata.json is created.
-        for (int i = 1; i <= 4; i++) {
+        // The old metadata.json is removed when the new metadata.json is created
+        // depending on the old metadata retention configuration.
+        for (int i = 1; i <= 3; i++) {
             unusedFiles.add(pathFactory.toMetadataPath(i).toString());
         }
 
         for (String path : unusedFiles) {
             assertThat(fileIO.exists(new Path(path))).isFalse();
+        }
+
+        // Check existence of retained Iceberg metadata.json files
+        for (int i = 4; i <= 5; i++) {
+            assertThat(fileIO.exists(new Path(pathFactory.toMetadataPath(i).toString()))).isTrue();
         }
 
         // Test all existing Iceberg snapshots are valid.
@@ -896,6 +965,8 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
+        options.set(IcebergOptions.METADATA_DELETE_AFTER_COMMIT, true);
+        options.set(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX, 1);
         options.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofKibiBytes(8));
         Schema schema =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");

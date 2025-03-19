@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataField;
@@ -37,14 +38,14 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * A {@link ProcessFunction} to handle schema changes. New schema is represented by a list of {@link
- * DataField}s.
+ * A {@link ProcessFunction} to handle schema changes. New schema is represented by a {@link
+ * CdcSchema}.
  *
  * <p>NOTE: To avoid concurrent schema changes, the parallelism of this {@link ProcessFunction} must
  * be 1.
  */
 public class UpdatedDataFieldsProcessFunction
-        extends UpdatedDataFieldsProcessFunctionBase<List<DataField>, Void> {
+        extends UpdatedDataFieldsProcessFunctionBase<CdcSchema, Void> {
 
     private final SchemaManager schemaManager;
 
@@ -53,28 +54,34 @@ public class UpdatedDataFieldsProcessFunction
     private Set<FieldIdentifier> latestFields;
 
     public UpdatedDataFieldsProcessFunction(
-            SchemaManager schemaManager, Identifier identifier, CatalogLoader catalogLoader) {
-        super(catalogLoader);
+            SchemaManager schemaManager,
+            Identifier identifier,
+            CatalogLoader catalogLoader,
+            TypeMapping typeMapping) {
+        super(catalogLoader, typeMapping);
         this.schemaManager = schemaManager;
         this.identifier = identifier;
         this.latestFields = new HashSet<>();
     }
 
     @Override
-    public void processElement(
-            List<DataField> updatedDataFields, Context context, Collector<Void> collector)
+    public void processElement(CdcSchema updatedSchema, Context context, Collector<Void> collector)
             throws Exception {
         List<DataField> actualUpdatedDataFields =
-                updatedDataFields.stream()
+                updatedSchema.fields().stream()
                         .filter(
                                 dataField ->
                                         !latestDataFieldContain(new FieldIdentifier(dataField)))
                         .collect(Collectors.toList());
-        if (CollectionUtils.isEmpty(actualUpdatedDataFields)) {
+        if (CollectionUtils.isEmpty(actualUpdatedDataFields) && updatedSchema.comment() == null) {
             return;
         }
-        for (SchemaChange schemaChange :
-                extractSchemaChanges(schemaManager, actualUpdatedDataFields)) {
+        CdcSchema actualUpdatedSchema =
+                new CdcSchema(
+                        actualUpdatedDataFields,
+                        updatedSchema.primaryKeys(),
+                        updatedSchema.comment());
+        for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, actualUpdatedSchema)) {
             applySchemaChange(schemaManager, schemaChange, identifier);
         }
         /*

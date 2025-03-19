@@ -34,6 +34,13 @@ paths:
         - config
       summary: Get Config
       operationId: getConfig
+      parameters:
+        - name: warehouse
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Warehouse location or identifier to request from the service
       responses:
         "200":
           description: OK
@@ -53,6 +60,17 @@ paths:
         - name: prefix
           in: path
           required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
           schema:
             type: string
       responses:
@@ -208,6 +226,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -241,6 +270,43 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/table-details:
+    get:
+      tags:
+        - table
+      summary: List table details
+      operationId: listTableDetails
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTableDetailsResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}:
@@ -339,6 +405,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: Success, no content
@@ -350,7 +421,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/rename:
+  /v1/{prefix}/tables/rename:
     post:
       tags:
         - table
@@ -389,7 +460,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/commit:
+  /v1/{prefix}/databases/{database}/tables/{table}/commit:
     post:
       tags:
         - table
@@ -402,6 +473,11 @@ paths:
           schema:
             type: string
         - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
           in: path
           required: true
           schema:
@@ -469,12 +545,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/partitions:
+  /v1/{prefix}/databases/{database}/tables/{table}/snapshot:
     get:
       tags:
-        - partition
-      summary: List partitions
-      operationId: listPartitions
+        - table
+      summary: Get table snapshot
+      operationId: getTableSnapshot
       parameters:
         - name: prefix
           in: path
@@ -497,120 +573,55 @@ paths:
           content:
             application/json:
               schema:
+                $ref: '#/components/schemas/GetTableSnapshotResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions:
+    get:
+      tags:
+        - partition
+      summary: List partitions
+      operationId: listPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
                 $ref: '#/components/schemas/ListPartitionsResponse'
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
-    post:
-      tags:
-        - partition
-      summary: Create partitions
-      operationId: createPartitions
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreatePartitionsRequest'
-      responses:
-        "200":
-          description: Success, no content
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
-    post:
-      tags:
-        - partition
-      summary: Drop partitions
-      operationId: dropPartitions
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DropPartitionsRequest'
-      responses:
-        "200":
-          description: Success, no content
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/partitions/alter:
-    post:
-      tags:
-        - partition
-      summary: Alter partitions
-      operationId: alterPartitions
-      parameters:
-        - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: table
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AlterPartitionsRequest'
-      responses:
-        "200":
-          description: Success, no content
         "404":
           description: Resource not found
           content:
@@ -623,7 +634,7 @@ paths:
     post:
       tags:
         - partition
-      summary: MarkDone partitions
+      summary: MarkDone partitions, for non-existent partitions, partitions will be created directly
       operationId: markDonePartitions
       parameters:
         - name: prefix
@@ -657,6 +668,167 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/branches:
+    get:
+      tags:
+        - branch
+      summary: List branches
+      operationId: listBranches
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListBranchesResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    post:
+      tags:
+        - branch
+      summary: Create branch
+      operationId: createBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}:
+    delete:
+      tags:
+        - branch
+      summary: Drop branch
+      operationId: dropBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
+    post:
+      tags:
+        - branch
+      summary: forward branch
+      operationId: forwardBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForwardBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
   /v1/{prefix}/databases/{database}/views:
     get:
       tags:
@@ -672,6 +844,17 @@ paths:
         - name: database
           in: path
           required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
           schema:
             type: string
       responses:
@@ -713,6 +896,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/view-details:
+    get:
+      tags:
+        - view
+      summary: List view details
+      operationId: listViewDetails
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: path
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: path
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListViewDetailsResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/views/{view}:
@@ -784,7 +1004,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/views/rename:
+  /v1/{prefix}/views/rename:
     post:
       tags:
         - view
@@ -792,11 +1012,6 @@ paths:
       operationId: renameView
       parameters:
         - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
           in: path
           required: true
           schema:
@@ -995,12 +1210,24 @@ components:
           type: string
         name:
           type: string
+        isExternal:
+          type: boolean
         schemaId:
           type: integer
           format: int64
         schema:
           $ref: '#/components/schemas/Schema'
         uuid:
+          type: string
+        owner:
+          type: string
+        createdAt:
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          format: int64
+        updatedBy:
           type: string
     SchemaChange:
       anyOf:
@@ -1147,6 +1374,10 @@ components:
           $ref: '#/components/schemas/Identifier'
         snapshot:
           $ref: '#/components/schemas/Snapshot'
+        statistics:
+          type: array
+          items:
+            $ref: '#/components/schemas/PartitionStatistics'
     Snapshot:
       type: object
       properties:
@@ -1198,6 +1429,23 @@ components:
           format: int64
         statistics:
           type: string
+    TableSnapshot:
+      type: object
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+        recordCount:
+          type: integer
+          format: int64
+        fileSizeInBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        lastFileCreationTime:
+          type: integer
+          format: int64
     CommitTableResponse:
       type: object
       properties:
@@ -1213,6 +1461,11 @@ components:
         expiresAt:
           type: integer
           format: int64
+    GetTableSnapshotResponse:
+      type: object
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/TableSnapshot'
     AlterDatabaseRequest:
       type: object
       properties:
@@ -1253,6 +1506,8 @@ components:
           type: array
           items:
             type: string
+        nextPageToken:
+          type: string
     GetDatabaseResponse:
       type: object
       properties:
@@ -1264,6 +1519,16 @@ components:
           type: object
           additionalProperties:
             type: string
+        owner:
+          type: string
+        createdAt:
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          format: int64
+        updatedBy:
+          type: string
     ListTablesResponse:
       type: object
       properties:
@@ -1271,6 +1536,17 @@ components:
           type: array
           items:
             type: string
+        nextPageToken:
+          type: string
+    ListTableDetailsResponse:
+      type: object
+      properties:
+        tableDetails:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetTableResponse'
+        nextPageToken:
+          type: string
     ConfigResponse:
       type: object
       properties:
@@ -1289,6 +1565,28 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
+          nextPageToken:
+            type: string
+    CreateBranchRequest:
+      type: object
+      properties:
+        branch:
+          type: string
+        fromTag:
+          nullable: true
+          type: string
+    ForwardBranchRequest:
+      type: object
+      properties:
+        branch:
+          type: string
+    ListBranchesResponse:
+      type: object
+      properties:
+        branches:
+          type: array
+          items:
+            type: string
     GetViewResponse:
       type: object
       properties:
@@ -1298,6 +1596,16 @@ components:
           type: string
         schema:
           $ref: '#/components/schemas/ViewSchema'
+        owner:
+          type: string
+        createdAt:
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          format: int64
+        updatedBy:
+          type: string
     ListViewsResponse:
       type: object
       properties:
@@ -1305,20 +1613,56 @@ components:
           type: array
           items:
             type: string
+          nextPageToken:
+            type: string
+    ListViewDetailsResponse:
+      type: object
+      properties:
+        viewDetails:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetViewResponse'
+        nextPageToken:
+          type: string
     ViewSchema:
       type: object
       properties:
-        rowType:
-          $ref: '#/components/schemas/RowType'
-        options:
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        query:
+          type: string
+        dialects:
           type: object
           additionalProperties:
             type: string
         comment:
           type: string
-        query:
-          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     Partition:
+      type: object
+      properties:
+        spec:
+          type: object
+        recordCount:
+          type: integer
+          format: int64
+        fileSizeInBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        lastFileCreationTime:
+          type: integer
+          format: int64
+        done:
+          type: boolean
+    PartitionStatistics:
       type: object
       properties:
         spec:

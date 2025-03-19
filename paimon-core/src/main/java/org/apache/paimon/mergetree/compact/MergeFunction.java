@@ -44,4 +44,6 @@ public interface MergeFunction<T> {
 
     /** Get current merged value. */
     T getResult();
+
+    boolean requireCopy();
 }

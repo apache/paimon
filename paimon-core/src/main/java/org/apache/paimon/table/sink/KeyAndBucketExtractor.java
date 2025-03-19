@@ -21,6 +21,9 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.types.RowKind;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -31,6 +34,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * @param <T> type of record
  */
 public interface KeyAndBucketExtractor<T> {
+    Logger LOG = LoggerFactory.getLogger(KeyAndBucketExtractor.class);
 
     void setRecord(T record);
 

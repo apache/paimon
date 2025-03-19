@@ -70,7 +70,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEM
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
-import static org.apache.paimon.flink.utils.ParallelismUtils.setParallelism;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract sink of paimon. */
@@ -142,7 +141,7 @@ public abstract class FlinkSink<T> implements Serializable {
             }
         }
 
-        if (coreOptions.needLookup() && !coreOptions.prepareCommitWaitCompaction()) {
+        if (coreOptions.laziedLookup()) {
             return (table, commitUser, state, ioManager, memoryPool, metricGroup) -> {
                 assertNoSinkMaterializer.run();
                 return new AsyncLookupSinkWrite(
@@ -227,7 +226,7 @@ public abstract class FlinkSink<T> implements Serializable {
                                         hasSinkMaterializer(input)),
                                 commitUser));
         if (parallelism == null) {
-            setParallelism(written, input.getParallelism(), false);
+            forwardParallelism(written, input);
         } else {
             written.setParallelism(parallelism);
         }
@@ -243,7 +242,7 @@ public abstract class FlinkSink<T> implements Serializable {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
 
-        if (options.get(PRECOMMIT_COMPACT)) {
+        if (!table.primaryKeys().isEmpty() && options.get(PRECOMMIT_COMPACT)) {
             SingleOutputStreamOperator<Committable> newWritten =
                     written.transform(
                                     "Changelog Compact Coordinator",
@@ -262,7 +261,7 @@ public abstract class FlinkSink<T> implements Serializable {
         return written;
     }
 
-    protected DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
+    public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
         ReadableConfig conf = env.getConfiguration();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
