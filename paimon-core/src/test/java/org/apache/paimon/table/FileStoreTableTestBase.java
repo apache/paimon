@@ -196,8 +196,6 @@ public abstract class FileStoreTableTestBase {
     public void before() throws Exception {
         identifier = Identifier.create("default", "table_test");
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
-        // tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString()  +
-        // String.format("/%s.db/%s", identifier.getDatabaseName(), identifier.getTableName()));
         commitUser = UUID.randomUUID().toString();
     }
 
@@ -510,7 +508,7 @@ public abstract class FileStoreTableTestBase {
         commit.abort(messages);
 
         FileStatus[] files =
-                LocalFileIO.create().listStatus(new Path(tablePath + "/pt=1/bucket-0"));
+                LocalFileIO.create().listStatus(new Path(getTablePath() + "/pt=1/bucket-0"));
         assertThat(files).isEmpty();
         write.close();
         commit.close();
@@ -673,7 +671,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         SnapshotManager snapshotManager =
-                newSnapshotManager(FileIOFinder.find(tablePath), table.location());
+                newSnapshotManager(FileIOFinder.find(getTablePath()), table.location());
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         assertThat(latestSnapshotId).isNotNull();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -862,7 +860,7 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(getTablePath().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(14);
     }
@@ -888,7 +886,7 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(getTablePath().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(15);
         // table-path
@@ -940,7 +938,7 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(getTablePath().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(16);
         // case 0 plus 1:
@@ -981,7 +979,7 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(getTablePath().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(23);
         // case 0 plus 7:
@@ -1037,7 +1035,7 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(getTablePath().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(16);
         // rollback snapshot case 0 plus 1:
@@ -1084,7 +1082,7 @@ public abstract class FileStoreTableTestBase {
         table.createTag("test-tag", 2);
 
         // verify that tag file exist
-        TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+        TagManager tagManager = new TagManager(new TraceableFileIO(), getTablePath());
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
@@ -1108,7 +1106,7 @@ public abstract class FileStoreTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
             table.createTag("test-tag", 1);
             // verify that tag file exist
-            TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+            TagManager tagManager = new TagManager(new TraceableFileIO(), getTablePath());
             assertThat(tagManager.tagExists("test-tag")).isTrue();
             // verify that test-tag is equal to snapshot 1
             Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
@@ -1117,7 +1115,8 @@ public abstract class FileStoreTableTestBase {
             // snapshot 2
             write.write(rowData(2, 20, 200L));
             commit.commit(1, write.prepareCommit(false, 2));
-            SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), tablePath);
+            SnapshotManager snapshotManager =
+                    newSnapshotManager(new TraceableFileIO(), getTablePath());
             // The snapshot 1 is expired.
             assertThat(snapshotManager.snapshotExists(1)).isFalse();
             table.createTag("test-tag-2", 1);
@@ -1140,7 +1139,7 @@ public abstract class FileStoreTableTestBase {
             // snapshot 2
             write.write(rowData(1, 10, 100L));
             commit.commit(1, write.prepareCommit(false, 2));
-            TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+            TagManager tagManager = new TagManager(new TraceableFileIO(), getTablePath());
             table.createTag("test-tag", 1);
             // verify that tag file exist
             assertThat(tagManager.tagExists("test-tag")).isTrue();
@@ -1169,7 +1168,7 @@ public abstract class FileStoreTableTestBase {
         table.createTag("test-tag", 2);
 
         // verify that tag file exist
-        TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+        TagManager tagManager = new TagManager(new TraceableFileIO(), getTablePath());
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
@@ -1192,14 +1191,14 @@ public abstract class FileStoreTableTestBase {
 
         // verify snapshot in test-branch is equal to snapshot 2
         SnapshotManager snapshotManager =
-                newSnapshotManager(new TraceableFileIO(), tablePath, "test-branch");
+                newSnapshotManager(new TraceableFileIO(), getTablePath(), "test-branch");
         Snapshot branchSnapshot =
                 Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
         SchemaManager schemaManager =
-                new SchemaManager(new TraceableFileIO(), tablePath, "test-branch");
+                new SchemaManager(new TraceableFileIO(), getTablePath(), "test-branch");
         TableSchema branchSchema =
                 TableSchema.fromPath(new TraceableFileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);

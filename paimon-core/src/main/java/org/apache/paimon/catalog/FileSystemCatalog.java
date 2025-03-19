@@ -106,7 +106,6 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public TableSchema loadTableSchema(Identifier identifier) throws TableNotExistException {
-        System.out.println("location----" + getTableLocation(identifier));
         return tableSchemaInFileSystem(
                         getTableLocation(identifier), identifier.getBranchNameOrDefault())
                 .orElseThrow(() -> new TableNotExistException(identifier));
@@ -123,7 +122,6 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public void createTableImpl(Identifier identifier, Schema schema) {
-        System.out.println("createTableImpl----" + identifier.getFullName());
         SchemaManager schemaManager = schemaManager(identifier);
         try {
             runWithLock(identifier, () -> uncheck(() -> schemaManager.createTable(schema)));
