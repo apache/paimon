@@ -48,7 +48,7 @@ public class CatalogBranchManager implements BranchManager {
                     try {
                         func.accept(catalog);
                         return null;
-                    } catch (SupportsBranches.BranchNotExistException e) {
+                    } catch (Catalog.BranchNotExistException e) {
                         throw new IllegalArgumentException(
                                 String.format("Branch name '%s' doesn't exist.", e.branch()));
                     }

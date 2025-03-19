@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -55,12 +56,10 @@ public class AppendOnlyFileStoreTableUseRESTCatalogTest extends FileStoreTableTe
     protected CatalogEnvironment catalogEnvironment;
     protected Catalog catalog;
     protected RESTCatalog restCatalog;
-    protected Identifier identifier = Identifier.create("default", "test");
 
     @BeforeEach
     public void before() throws Exception {
         super.before();
-        // tablePath = new Path(tablePath.toString() + "/default.db/test");
         String dataPath = tempDir.toUri().toString();
         String restWarehouse = UUID.randomUUID().toString();
         String initToken = UUID.randomUUID().toString();
@@ -85,8 +84,13 @@ public class AppendOnlyFileStoreTableUseRESTCatalogTest extends FileStoreTableTe
         catalog = new RESTCatalog(CatalogContext.create(options));
         catalog.createDatabase(identifier.getDatabaseName(), true);
         catalogEnvironment =
-                new CatalogEnvironment(
-                        identifier, null, restCatalog.catalogLoader(), null, null, true, true);
+                new CatalogEnvironment(identifier, null, restCatalog.catalogLoader(), null, null);
+    }
+
+    @BeforeEach
+    public void after() throws Exception {
+        super.after();
+        catalog.dropTable(identifier, true);
     }
 
     @Override
@@ -137,5 +141,14 @@ public class AppendOnlyFileStoreTableUseRESTCatalogTest extends FileStoreTableTe
                                 ""));
         catalog.createTable(identifier, tableSchema.toSchema(), true);
         return (FileStoreTable) restCatalog.getTable(identifier);
+    }
+
+    @Override
+    protected Path getTablePath() throws Exception {
+        return new Path(
+                super.getTablePath()
+                        + String.format(
+                                "/%s.db/%s",
+                                identifier.getDatabaseName(), identifier.getTableName()));
     }
 }

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestFileStore;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -83,7 +84,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -190,15 +190,19 @@ public abstract class FileStoreTableTestBase {
 
     protected Path tablePath;
     protected String commitUser;
+    protected Identifier identifier;
 
     @BeforeEach
     public void before() throws Exception {
+        identifier = Identifier.create("default", "table_test");
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        // tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString()  +
+        // String.format("/%s.db/%s", identifier.getDatabaseName(), identifier.getTableName()));
         commitUser = UUID.randomUUID().toString();
     }
 
     @AfterEach
-    public void after() throws IOException {
+    public void after() throws Exception {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
@@ -1349,7 +1353,7 @@ public abstract class FileStoreTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // verify snapshot in branch1 and main branch is same
-        SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), tablePath);
+        SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), getTablePath());
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
                         new TraceableFileIO(),
@@ -1359,7 +1363,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(branchSnapshot.equals(snapshot)).isTrue();
 
         // verify schema in branch1 and main branch is same
-        SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
+        SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), getTablePath());
         TableSchema branchSchema =
                 TableSchema.fromPath(
                         new TraceableFileIO(),
@@ -1827,6 +1831,10 @@ public abstract class FileStoreTableTestBase {
             String branch, Consumer<Options> configure) throws Exception;
 
     protected abstract FileStoreTable overwriteTestFileStoreTable() throws Exception;
+
+    protected Path getTablePath() throws Exception {
+        return tablePath;
+    }
 
     private static InternalRow overwriteRow(Object... values) {
         return GenericRow.of(
