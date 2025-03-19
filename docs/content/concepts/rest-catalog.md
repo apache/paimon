@@ -109,8 +109,23 @@ WITH (
 );
 ```
 
+- DLF sts token using aliyun ecs role
+```sql
+CREATE CATALOG `paimon-rest-catalog`
+WITH (
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.token-loader' = 'ecs'
+    'dlf.token-ecs-role-name' = 'my_ecs_role_name'
+);
+```
+
 {{< hint info >}}
 The `'warehouse'` is your catalog instance name on the server, not the path.
+The `'dlf.token-ecs-role-name'` is an optional parameter，dlf token loader can automatically obtain it through ecs metadata service. More information about ecs role can be found [here](https://help.aliyun.com/zh/ecs/user-guide/attach-an-instance-ram-role-to-an-ecs-instance?spm=a2c4g.11186623.0.0.7e774adcRAJ0wK).
 {{< /hint >}}
 
 ## Conclusion
