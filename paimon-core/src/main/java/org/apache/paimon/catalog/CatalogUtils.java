@@ -55,6 +55,7 @@ import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
@@ -180,6 +181,12 @@ public class CatalogUtils {
 
         TableMetadata metadata = metadataLoader.load(identifier);
         TableSchema schema = metadata.schema();
+        String branchName = identifier.getBranchNameOrDefault();
+        if (!DEFAULT_MAIN_BRANCH.equals(branchName) && schema != null) {
+            Options branchOptions = new Options(schema.options());
+            branchOptions.set(CoreOptions.BRANCH, branchName);
+            schema = schema.copy(branchOptions.toMap());
+        }
         CoreOptions options = CoreOptions.fromMap(schema.options());
 
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;

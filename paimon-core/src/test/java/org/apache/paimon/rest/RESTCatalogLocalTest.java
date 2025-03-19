@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test REST Catalog on Mocked REST server. */
-class MockRESTCatalogTest extends RESTCatalogTestBase {
+class RESTCatalogLocalTest extends RESTCatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
     private String initToken = "init_token";

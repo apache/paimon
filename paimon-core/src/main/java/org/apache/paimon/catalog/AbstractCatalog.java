@@ -129,7 +129,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean allowCustomTablePath() {
-        return false;
+        return true;
     }
 
     @Override
@@ -556,15 +556,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
         Optional<TableSchema> schema = new SchemaManager(fileIO, tablePath, branchName).latest();
-        if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
-            schema =
-                    schema.map(
-                            s -> {
-                                Options branchOptions = new Options(s.options());
-                                branchOptions.set(CoreOptions.BRANCH, branchName);
-                                return s.copy(branchOptions.toMap());
-                            });
-        }
         schema.ifPresent(s -> s.options().put(PATH.key(), tablePath.toString()));
         return schema;
     }

@@ -41,8 +41,13 @@ public class CatalogBranchManager implements BranchManager {
     private void executePost(ThrowingConsumer<SupportsBranches, Exception> func) {
         executeGet(
                 catalog -> {
-                    func.accept(catalog);
-                    return null;
+                    try {
+                        func.accept(catalog);
+                        return null;
+                    } catch (SupportsBranches.BranchNotExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Branch name '%s' doesn't exist.", e.branch()));
+                    }
                 });
     }
 

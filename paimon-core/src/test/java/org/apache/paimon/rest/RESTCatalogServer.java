@@ -229,6 +229,10 @@ public class RESTCatalogServer {
                 String token = request.getHeaders().get(AUTHORIZATION_HEADER_KEY);
                 RESTResponse response;
                 try {
+                    System.out.println(
+                            String.format(
+                                    "path [%s], method [%s]",
+                                    request.getPath(), request.getMethod()));
                     Map<String, String> headers = getHeader(request);
                     String[] paths = request.getPath().split("\\?");
                     String resourcePath = paths[0];
@@ -279,10 +283,6 @@ public class RESTCatalogServer {
                                 resources.length == 2 && resources[1].startsWith("tables");
                         boolean isTableDetails =
                                 resources.length == 2 && resources[1].startsWith("table-details");
-                        boolean isViewRename =
-                                resources.length == 3
-                                        && "views".equals(resources[1])
-                                        && "rename".equals(resources[2]);
                         boolean isView =
                                 resources.length == 3
                                         && "views".equals(resources[1])
@@ -336,6 +336,10 @@ public class RESTCatalogServer {
                                         ? Identifier.create(
                                                 databaseName, RESTUtil.decodeString(resources[2]))
                                         : null;
+                        System.out.println(
+                                String.format(
+                                        "ideentifier [%s]",
+                                        identifier != null ? identifier.getFullName() : "empty"));
                         if (identifier != null && "tables".equals(resources[1])) {
                             if (!identifier.isSystemTable()
                                     && !tableMetadataStore.containsKey(identifier.getFullName())) {
@@ -705,7 +709,7 @@ public class RESTCatalogServer {
                         tableMetadata =
                                 createTableMetadata(
                                         requestBody.getIdentifier(),
-                                        1L,
+                                        0L,
                                         requestBody.getSchema(),
                                         UUID.randomUUID().toString(),
                                         false);
@@ -985,6 +989,14 @@ public class RESTCatalogServer {
                     if (resources.length == 6) {
                         branch = RESTUtil.decodeString(resources[4]);
                         branchManager.fastForward(branch);
+                        branchIdentifier =
+                                new Identifier(
+                                        identifier.getDatabaseName(),
+                                        identifier.getTableName(),
+                                        branch);
+                        tableSnapshotStore.put(
+                                identifier.getFullName(),
+                                tableSnapshotStore.get(branchIdentifier.getFullName()));
                     } else {
                         CreateBranchRequest requestBody =
                                 OBJECT_MAPPER.readValue(data, CreateBranchRequest.class);
@@ -1000,6 +1012,9 @@ public class RESTCatalogServer {
                                         identifier.getDatabaseName(),
                                         identifier.getTableName(),
                                         requestBody.branch());
+                        tableSnapshotStore.put(
+                                branchIdentifier.getFullName(),
+                                tableSnapshotStore.get(identifier.getFullName()));
                         tableMetadataStore.put(
                                 branchIdentifier.getFullName(),
                                 tableMetadataStore.get(identifier.getFullName()));

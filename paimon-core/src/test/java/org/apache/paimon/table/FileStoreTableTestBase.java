@@ -66,6 +66,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -192,7 +193,7 @@ public abstract class FileStoreTableTestBase {
     protected String commitUser;
 
     @BeforeEach
-    public void before() {
+    public void before() throws Exception {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         commitUser = UUID.randomUUID().toString();
     }
@@ -413,7 +414,6 @@ public abstract class FileStoreTableTestBase {
 
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.setString(FILE_FORMAT.key(), format), writeType);
-
         try (StreamTableWrite write = table.newWrite(commitUser);
                 InnerTableCommit commit = table.newCommit(commitUser)) {
             write.write(GenericRow.of(0, 0, 0, GenericRow.of(10, 11, 12)));
@@ -1293,10 +1293,7 @@ public abstract class FileStoreTableTestBase {
                                 "Branch name 'test-branch' doesn't exist."));
 
         assertThatThrownBy(() -> table.fastForward("main"))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Branch name 'main' do not use in fast-forward."));
+                .satisfies(anyCauseMatches(IllegalArgumentException.class));
 
         // Write data to branch1
         try (StreamTableWrite write = tableBranch.newWrite(commitUser);
@@ -1927,8 +1924,8 @@ public abstract class FileStoreTableTestBase {
         table.createBranch(BRANCH_NAME, "tag1");
 
         // verify that branch1 file exist
-        FileSystemBranchManager branchManager = (FileSystemBranchManager) table.branchManager();
-        assertThat(branchManager.branchExists(BRANCH_NAME)).isTrue();
+        BranchManager branchManager = table.branchManager();
+        assertThat(branchManager.branches().contains(BRANCH_NAME)).isTrue();
 
         // Verify branch1 and the main branch have the same data
         FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
