@@ -238,7 +238,7 @@ public class TimeTravelUtil {
         }
     }
 
-    public static void checkRescaleBucketForIncrementalTagQuery(
+    public static void checkRescaleBucketForIncrementalDiffQuery(
             SchemaManager schemaManager, Snapshot start, Snapshot end) {
         if (start.schemaId() != end.schemaId()) {
             int startBucketNumber = bucketNumber(schemaManager, start.schemaId());
@@ -248,7 +248,7 @@ public class TimeTravelUtil {
                         start.id(),
                         end.id(),
                         String.format(
-                                "The bucket number of two tags are different (%s, %s), which is not supported in incremental tag query.",
+                                "The bucket number of two snapshots are different (%s, %s), which is not supported in incremental diff query.",
                                 startBucketNumber, endBucketNumber));
             }
         }

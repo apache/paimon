@@ -42,8 +42,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link IncrementalStartingScanner}. */
-public class IncrementalStartingScannerTest extends ScannerTestBase {
+/** Tests for {@link IncrementalDeltaStartingScanner}. */
+public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
 
     @Test
     public void testScan() throws Exception {
@@ -110,14 +110,14 @@ public class IncrementalStartingScannerTest extends ScannerTestBase {
         assertThatNoException()
                 .isThrownBy(
                         () ->
-                                new IncrementalStartingScanner(
+                                new IncrementalDeltaStartingScanner(
                                                 snapshotManager, 0, 4, ScanMode.DELTA)
                                         .scan(snapshotReader));
 
         // Starting snapshotId must less than ending snapshotId.
         assertThatThrownBy(
                         () ->
-                                new IncrementalStartingScanner(
+                                new IncrementalDeltaStartingScanner(
                                                 snapshotManager, 4, 3, ScanMode.DELTA)
                                         .scan(snapshotReader))
                 .satisfies(
@@ -127,7 +127,7 @@ public class IncrementalStartingScannerTest extends ScannerTestBase {
 
         assertThatThrownBy(
                         () ->
-                                new IncrementalStartingScanner(
+                                new IncrementalDeltaStartingScanner(
                                                 snapshotManager, 1, 5, ScanMode.DELTA)
                                         .scan(snapshotReader))
                 .satisfies(

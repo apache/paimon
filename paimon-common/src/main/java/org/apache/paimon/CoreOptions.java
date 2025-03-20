@@ -2925,7 +2925,8 @@ public class CoreOptions implements Serializable {
                 "auto",
                 "Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files."),
         DELTA("delta", "Scan newly changed files between snapshots."),
-        CHANGELOG("changelog", "Scan changelog files between snapshots.");
+        CHANGELOG("changelog", "Scan changelog files between snapshots."),
+        DIFF("diff", "Get diff by comparing data of end snapshot with data of start snapshot.");
 
         private final String value;
         private final String description;
@@ -2943,26 +2944,6 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
-        }
-
-        public String getValue() {
-            return value;
-        }
-
-        @VisibleForTesting
-        public static IncrementalBetweenScanMode fromValue(String value) {
-            for (IncrementalBetweenScanMode formatType : IncrementalBetweenScanMode.values()) {
-                if (formatType.value.equals(value)) {
-                    return formatType;
-                }
-            }
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid format type %s, only support [%s]",
-                            value,
-                            StringUtils.join(
-                                    Arrays.stream(IncrementalBetweenScanMode.values()).iterator(),
-                                    ",")));
         }
     }
 

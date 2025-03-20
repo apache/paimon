@@ -35,24 +35,25 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** {@link StartingScanner} for incremental changes by tag. */
-public class IncrementalTagStartingScanner extends AbstractStartingScanner {
+/** Get incremental data by {@link SnapshotReader#readIncrementalDiff}. */
+public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
 
-    private static final Logger LOG = LoggerFactory.getLogger(IncrementalTagStartingScanner.class);
+    private static final Logger LOG = LoggerFactory.getLogger(IncrementalDiffStartingScanner.class);
 
     private final Snapshot start;
     private final Snapshot end;
 
-    public IncrementalTagStartingScanner(
+    public IncrementalDiffStartingScanner(
             SnapshotManager snapshotManager, Snapshot start, Snapshot end) {
         super(snapshotManager);
         this.start = start;
         this.end = end;
         this.startingSnapshotId = start.id();
 
-        TimeTravelUtil.checkRescaleBucketForIncrementalTagQuery(
+        TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
                 new SchemaManager(
                         snapshotManager.fileIO(),
                         snapshotManager.tablePath(),
@@ -66,7 +67,60 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
         return StartingScanner.fromPlan(reader.withSnapshot(end).readIncrementalDiff(start));
     }
 
-    public static AbstractStartingScanner create(
+    public static IncrementalDiffStartingScanner betweenTags(
+            Tag startTag,
+            Tag endTag,
+            SnapshotManager snapshotManager,
+            Pair<String, String> incrementalBetween) {
+        Snapshot start = startTag.trimToSnapshot();
+        Snapshot end = endTag.trimToSnapshot();
+
+        LOG.info(
+                "{} start and end are parsed to tag with snapshot id {} to {}.",
+                INCREMENTAL_BETWEEN.key(),
+                start.id(),
+                end.id());
+
+        checkArgument(
+                end.id() > start.id(),
+                "Tag end %s with snapshot id %s should be larger than tag start %s with snapshot id %s",
+                incrementalBetween.getRight(),
+                end.id(),
+                incrementalBetween.getLeft(),
+                start.id());
+
+        return new IncrementalDiffStartingScanner(snapshotManager, start, end);
+    }
+
+    public static IncrementalDiffStartingScanner betweenSnapshotIds(
+            long startId, long endId, SnapshotManager snapshotManager) {
+        checkArgument(
+                endId > startId,
+                "Ending snapshotId should be larger than starting snapshotId %s.",
+                endId,
+                startId);
+
+        Snapshot start = snapshotManager.snapshot(startId);
+        Snapshot end = snapshotManager.snapshot(endId);
+        return new IncrementalDiffStartingScanner(snapshotManager, start, end);
+    }
+
+    public static IncrementalDiffStartingScanner betweenTimestamps(
+            long startTimestamp, long endTimestamp, SnapshotManager snapshotManager) {
+        Snapshot startSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
+        if (startSnapshot == null) {
+            startSnapshot = snapshotManager.earliestSnapshot();
+        }
+
+        Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
+        if (endSnapshot == null) {
+            endSnapshot = snapshotManager.latestSnapshot();
+        }
+
+        return new IncrementalDiffStartingScanner(snapshotManager, startSnapshot, endSnapshot);
+    }
+
+    public static AbstractStartingScanner toEndAutoTag(
             SnapshotManager snapshotManager, String endTagName, CoreOptions options) {
         TagPeriodHandler periodHandler = TagPeriodHandler.create(options);
         checkArgument(
@@ -104,6 +158,6 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
         LOG.info("Found start tag {} .", periodHandler.timeToTag(previousTags.get(0).getRight()));
         Snapshot start = previousTags.get(0).getLeft().trimToSnapshot();
 
-        return new IncrementalTagStartingScanner(snapshotManager, start, end);
+        return new IncrementalDiffStartingScanner(snapshotManager, start, end);
     }
 }
