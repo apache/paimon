@@ -141,6 +141,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public boolean rollbackSnapshot(Identifier identifier, Long snapshotId)
+            throws TableNotExistException {
+        return wrapped.rollbackSnapshot(identifier, snapshotId);
+    }
+
+    @Override
     public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
         wrapped.createBranch(identifier, branch, fromTag);

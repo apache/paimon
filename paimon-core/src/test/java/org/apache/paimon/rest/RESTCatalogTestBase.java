@@ -42,6 +42,8 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
@@ -868,6 +870,25 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         createTable(noSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         snapshot = catalog.loadSnapshot(noSnapshotTableIdentifier);
         assertThat(snapshot).isEmpty();
+    }
+
+    @Test
+    public void testTableRollback() throws Exception {
+        Identifier identifier = Identifier.create("test_rollback", "table_for_rollback");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        StreamTableWrite write = table.newWrite("commitUser");
+        StreamTableCommit commit = table.newCommit("commitUser");
+        for (int i = 0; i < 10; i++) {
+            GenericRow record = GenericRow.of(i);
+            write.write(record);
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+        commit.close();
+        table.rollbackTo(4);
+        assertThat(table.snapshotManager().snapshot(4))
+                .isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
     }
 
     @Test

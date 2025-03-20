@@ -104,7 +104,7 @@ public class ResourcePaths {
                 encodeString(databaseName),
                 TABLES,
                 encodeString(objectName),
-                "commit",
+                "rollback",
                 "id");
     }
 
