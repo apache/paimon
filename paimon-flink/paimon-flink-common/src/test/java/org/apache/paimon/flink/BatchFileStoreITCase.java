@@ -30,6 +30,7 @@ import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -734,5 +735,42 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testEmptyTableIncrementalBetweenTimestamp() {
         assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();
+    }
+
+    @Test
+    public void testIncrementScanMode() throws Exception {
+        sql(
+                "CREATE TABLE test_scan_mode (id INT PRIMARY KEY NOT ENFORCED, v STRING) WITH ('changelog-producer' = 'lookup')");
+
+        // snapshot 1,2
+        sql("INSERT INTO test_scan_mode VALUES (1, 'A')");
+        // snapshot 3,4
+        sql("INSERT INTO test_scan_mode VALUES (2, 'B')");
+
+        // snapshot 5,6
+        String dataId =
+                TestValuesTableFactory.registerData(
+                        Collections.singletonList(Row.ofKind(RowKind.DELETE, 2, "B")));
+        sEnv.executeSql(
+                "CREATE TEMPORARY TABLE source (id INT, v STRING) "
+                        + "WITH ('connector' = 'values', 'bounded' = 'true', 'data-id' = '"
+                        + dataId
+                        + "')");
+        sEnv.executeSql("INSERT INTO test_scan_mode SELECT * FROM source").await();
+
+        //  snapshot 7,8
+        sql("INSERT INTO test_scan_mode VALUES (3, 'C')");
+
+        List<Row> result =
+                sql(
+                        "SELECT * FROM `test_scan_mode$audit_log` "
+                                + "/*+ OPTIONS('incremental-between'='1,8','incremental-between-scan-mode'='diff') */");
+        assertThat(result).containsExactlyInAnyOrder(Row.of("+I", 3, "C"));
+
+        result =
+                sql(
+                        "SELECT * FROM `test_scan_mode$audit_log` "
+                                + "/*+ OPTIONS('incremental-between'='1,8','incremental-between-scan-mode'='delta') */");
+        assertThat(result).containsExactlyInAnyOrder(Row.of("-D", 2, "B"), Row.of("+I", 3, "C"));
     }
 }
