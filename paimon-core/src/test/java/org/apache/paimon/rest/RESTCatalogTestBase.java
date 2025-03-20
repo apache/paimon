@@ -887,12 +887,19 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         }
         write.close();
         commit.close();
-        table.rollbackTo(4);
-        assertThat(table.snapshotManager().snapshot(4))
+        long rollbackToSnapshotId = 4;
+        table.rollbackTo(rollbackToSnapshotId);
+        assertThat(table.snapshotManager().snapshot(rollbackToSnapshotId))
                 .isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
-        assertThrows(IllegalArgumentException.class, () -> table.rollbackTo(5));
-        table.rollbackTo("tag-3");
-        Snapshot tagSnapshot = table.tagManager().getOrThrow("tag-3").trimToSnapshot();
+        assertThat(table.tagManager().tagExists("tag-" + (rollbackToSnapshotId + 2))).isFalse();
+        assertThat(table.snapshotManager().snapshotExists(rollbackToSnapshotId + 1)).isFalse();
+
+        assertThrows(
+                IllegalArgumentException.class, () -> table.rollbackTo(rollbackToSnapshotId + 1));
+
+        String rollbackToTagName = "tag-" + (rollbackToSnapshotId - 1);
+        table.rollbackTo(rollbackToTagName);
+        Snapshot tagSnapshot = table.tagManager().getOrThrow(rollbackToTagName).trimToSnapshot();
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
     }
 
