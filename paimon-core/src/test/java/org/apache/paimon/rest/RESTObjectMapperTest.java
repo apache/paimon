@@ -261,8 +261,8 @@ public class RESTObjectMapperTest {
                 MockRESTMessage.rollbackTableRequestBySnapshot(snapshotId);
         String rollbackTableRequestBySnapshotStr =
                 OBJECT_MAPPER.writeValueAsString(rollbackTableRequestBySnapshot);
-        TableRollbackToInstant.RollBackSnapshot rollbackTableRequestParseData =
-                (TableRollbackToInstant.RollBackSnapshot)
+        TableRollbackToInstant.RollbackSnapshot rollbackTableRequestParseData =
+                (TableRollbackToInstant.RollbackSnapshot)
                         OBJECT_MAPPER
                                 .readValue(
                                         rollbackTableRequestBySnapshotStr,
@@ -274,8 +274,8 @@ public class RESTObjectMapperTest {
                 MockRESTMessage.rollbackTableRequestByTag(tagName);
         String rollbackTableRequestByTagStr =
                 OBJECT_MAPPER.writeValueAsString(rollbackTableRequestByTag);
-        TableRollbackToInstant.RollBackTag rollbackTableRequestByTagParseData =
-                (TableRollbackToInstant.RollBackTag)
+        TableRollbackToInstant.RollbackTag rollbackTableRequestByTagParseData =
+                (TableRollbackToInstant.RollbackTag)
                         OBJECT_MAPPER
                                 .readValue(rollbackTableRequestByTagStr, RollbackTableRequest.class)
                                 .getTableRollbackToInstant();

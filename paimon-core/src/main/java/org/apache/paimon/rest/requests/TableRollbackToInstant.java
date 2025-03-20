@@ -33,23 +33,23 @@ import java.io.Serializable;
         property = TableRollbackToInstant.Types.FIELD_TYPE)
 @JsonSubTypes({
     @JsonSubTypes.Type(
-            value = TableRollbackToInstant.RollBackSnapshot.class,
+            value = TableRollbackToInstant.RollbackSnapshot.class,
             name = TableRollbackToInstant.Types.SNAPSHOT),
     @JsonSubTypes.Type(
-            value = TableRollbackToInstant.RollBackTag.class,
+            value = TableRollbackToInstant.RollbackTag.class,
             name = TableRollbackToInstant.Types.TAG)
 })
 public interface TableRollbackToInstant extends Serializable {
 
     static TableRollbackToInstant snapshot(Long snapshotId) {
-        return new RollBackSnapshot(snapshotId);
+        return new RollbackSnapshot(snapshotId);
     }
 
     static TableRollbackToInstant tag(String tagName) {
-        return new RollBackTag(tagName);
+        return new RollbackTag(tagName);
     }
 
-    final class RollBackSnapshot implements TableRollbackToInstant {
+    final class RollbackSnapshot implements TableRollbackToInstant {
 
         private static final long serialVersionUID = 1L;
         private static final String FIELD_SNAPSHOT_ID = "snapshotId";
@@ -58,7 +58,7 @@ public interface TableRollbackToInstant extends Serializable {
         private final Long snapshotId;
 
         @JsonCreator
-        public RollBackSnapshot(@JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId) {
+        public RollbackSnapshot(@JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId) {
             this.snapshotId = snapshotId;
         }
 
@@ -68,7 +68,7 @@ public interface TableRollbackToInstant extends Serializable {
         }
     }
 
-    final class RollBackTag implements TableRollbackToInstant {
+    final class RollbackTag implements TableRollbackToInstant {
 
         private static final long serialVersionUID = 1L;
         private static final String FIELD_TAG_NAME = "tagName";
@@ -77,7 +77,7 @@ public interface TableRollbackToInstant extends Serializable {
         private final String tagName;
 
         @JsonCreator
-        public RollBackTag(@JsonProperty(FIELD_TAG_NAME) String tagName) {
+        public RollbackTag(@JsonProperty(FIELD_TAG_NAME) String tagName) {
             this.tagName = tagName;
         }
 

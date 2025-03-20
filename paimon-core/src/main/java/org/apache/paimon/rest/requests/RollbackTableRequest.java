@@ -29,18 +29,18 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackTableRequest implements RESTRequest {
 
-    private static final String FIELD_ROLLBACK_INSTANCE = "rollback";
+    private static final String FIELD_ROLLBACK_TO = "rollbackTo";
 
-    @JsonProperty(FIELD_ROLLBACK_INSTANCE)
+    @JsonProperty(FIELD_ROLLBACK_TO)
     private final TableRollbackToInstant tableRollbackToInstant;
 
     @JsonCreator
     public RollbackTableRequest(
-            @JsonProperty(FIELD_ROLLBACK_INSTANCE) TableRollbackToInstant tableRollbackToInstant) {
+            @JsonProperty(FIELD_ROLLBACK_TO) TableRollbackToInstant tableRollbackToInstant) {
         this.tableRollbackToInstant = tableRollbackToInstant;
     }
 
-    @JsonGetter(FIELD_ROLLBACK_INSTANCE)
+    @JsonGetter(FIELD_ROLLBACK_TO)
     public TableRollbackToInstant getTableRollbackToInstant() {
         return tableRollbackToInstant;
     }

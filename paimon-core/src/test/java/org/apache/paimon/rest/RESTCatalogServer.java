@@ -380,16 +380,16 @@ public class RESTCatalogServer {
                                 throw new Catalog.TableNotExistException(identifier);
                             }
                             if (requestBody.getTableRollbackToInstant()
-                                    instanceof TableRollbackToInstant.RollBackSnapshot) {
+                                    instanceof TableRollbackToInstant.RollbackSnapshot) {
                                 long snapshotId =
-                                        ((TableRollbackToInstant.RollBackSnapshot)
+                                        ((TableRollbackToInstant.RollbackSnapshot)
                                                         requestBody.getTableRollbackToInstant())
                                                 .getSnapshotId();
                                 return rollbackTableByIdHandle(identifier, snapshotId);
                             } else if (requestBody.getTableRollbackToInstant()
-                                    instanceof TableRollbackToInstant.RollBackTag) {
+                                    instanceof TableRollbackToInstant.RollbackTag) {
                                 String tagName =
-                                        ((TableRollbackToInstant.RollBackTag)
+                                        ((TableRollbackToInstant.RollbackTag)
                                                         requestBody.getTableRollbackToInstant())
                                                 .getTagName();
                                 return rollbackTableByTagNameHandle(identifier, tagName);

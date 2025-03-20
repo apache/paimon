@@ -236,7 +236,7 @@ public class SnapshotManager implements Serializable {
 
     public boolean needCleanWhenRollback() {
         if (snapshotLoader != null) {
-            return snapshotLoader.needCleanWhenRollback();
+            return snapshotLoader.needCleanAfterRollback();
         }
         return true;
     }
