@@ -108,7 +108,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     }
 
     def writeWithoutBucket(dataFrame: DataFrame): Dataset[Array[Byte]] = {
-      val schema = dataFrame.schema
       dataFrame.mapPartitions {
         iter =>
           {

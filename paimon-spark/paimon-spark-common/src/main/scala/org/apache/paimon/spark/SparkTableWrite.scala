@@ -21,12 +21,10 @@ package org.apache.paimon.spark
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer}
-import org.apache.paimon.types.{RowKind, RowType}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.{PaimonUtils, Row}
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
