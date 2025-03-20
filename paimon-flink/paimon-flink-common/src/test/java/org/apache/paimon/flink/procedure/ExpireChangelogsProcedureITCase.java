@@ -19,12 +19,16 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.ActionFactory;
+import org.apache.paimon.flink.action.ExpireChangelogsAction;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -67,7 +71,7 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
         sql("CALL sys.expire_changelogs(`table` => 'default.word_count', retain_max => 8)");
         checkChangelogs(changelogManager, 3, 6);
 
-        // older_than => timestamp of snapshot 7, max_deletes => 1, expected snapshots (3, 4, 5, 6)
+        // older_than => timestamp of snapshot 10, max_deletes => 1, expected snapshots (3, 4, 5, 6)
         Timestamp ts7 = new Timestamp(snapshotManager.latestSnapshot().timeMillis());
         sql(
                 "CALL sys.expire_changelogs(`table` => 'default.word_count', older_than => '"
@@ -184,6 +188,68 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
         checkBatchRead(40);
     }
 
+    @Test
+    public void testExpireChangelogsAction() throws Exception {
+        sql(
+                "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
+                        + " WITH ( 'num-sorted-run.compaction-trigger' = '9999', 'changelog-producer' = 'input', "
+                        + "'snapshot.num-retained.min' = '4', 'snapshot.num-retained.max' = '4', "
+                        + "'changelog.num-retained.min' = '10', 'changelog.num-retained.max' = '10' )");
+        FileStoreTable table = paimonTable("word_count");
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
+        SnapshotManager snapshotManager = table.snapshotManager();
+        ChangelogManager changelogManager = table.changelogManager();
+
+        // initially prepare 10 snapshots
+        for (int i = 0; i < 10; ++i) {
+            sql("INSERT INTO word_count VALUES ('" + i + "', " + i + ")");
+        }
+        // expected snapshots (7, 8, 9, 10)
+        checkSnapshots(snapshotManager, 7, 10);
+        // expected changelogs (1, 2, 3, 4, 5, 6)
+        checkChangelogs(changelogManager, 1, 6);
+
+        Timestamp ts5 = new Timestamp(changelogManager.changelog(5).timeMillis());
+
+        createAction(
+                        ExpireChangelogsAction.class,
+                        "expire_changelogs",
+                        "--warehouse",
+                        path,
+                        "--database",
+                        "default",
+                        "--table",
+                        "word_count",
+                        "--retain_max",
+                        "8",
+                        "--retain_min",
+                        "4",
+                        "--older_than",
+                        ts5.toString(),
+                        "--max_deletes",
+                        "3")
+                .withStreamExecutionEnvironment(env)
+                .run();
+        checkChangelogs(changelogManager, 4, 6);
+
+        // expire all
+        createAction(
+                        ExpireChangelogsAction.class,
+                        "expire_changelogs",
+                        "--warehouse",
+                        path,
+                        "--database",
+                        "default",
+                        "--table",
+                        "word_count",
+                        "--delete_all",
+                        "true")
+                .withStreamExecutionEnvironment(env)
+                .run();
+        checkAllDeleted(changelogManager);
+    }
+
     private void checkSnapshots(SnapshotManager sm, int earliest, int latest) throws IOException {
         assertThat(sm.snapshotCount()).isEqualTo(latest - earliest + 1);
         assertThat(sm.earliestSnapshotId()).isEqualTo(earliest);
@@ -220,5 +286,12 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
             expectedRows.add(Row.of(String.valueOf(i), i));
         }
         assertThat(rows).hasSameElementsAs(expectedRows);
+    }
+
+    private <T extends ActionBase> T createAction(Class<T> clazz, String... args) {
+        return ActionFactory.createAction(args)
+                .filter(clazz::isInstance)
+                .map(clazz::cast)
+                .orElseThrow(() -> new RuntimeException("Failed to create action"));
     }
 }
