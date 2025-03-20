@@ -473,7 +473,13 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackSnapshotBySnapshotId(Identifier identifier, Long snapshotId)
+    public boolean rollbackTableBySnapshotId(Identifier identifier, Long snapshotId)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean rollbackTableByTagName(Identifier identifier, String tagName)
             throws TableNotExistException {
         throw new UnsupportedOperationException();
     }

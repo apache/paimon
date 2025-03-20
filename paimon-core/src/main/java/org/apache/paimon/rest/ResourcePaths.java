@@ -27,15 +27,19 @@ import static org.apache.paimon.rest.RESTUtil.encodeString;
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
 
+    protected static final String V1 = "/v1";
+    protected static final String DATABASES = "databases";
+    protected static final String TABLES = "tables";
+    protected static final String PARTITIONS = "partitions";
+    protected static final String BRANCHES = "branches";
+    protected static final String VIEWS = "views";
+    protected static final String TABLE_DETAILS = "table-details";
+    protected static final String VIEW_DETAILS = "view-details";
+    protected static final String ROLLBACK = "rollbackBySnapshotId";
+    protected static final String SNAPSHOT_ID = "snapshot-id";
+    protected static final String TAG_NAME = "tag-name";
+
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
-    private static final String V1 = "/v1";
-    private static final String DATABASES = "databases";
-    private static final String TABLES = "tables";
-    private static final String PARTITIONS = "partitions";
-    private static final String BRANCHES = "branches";
-    private static final String VIEWS = "views";
-    private static final String TABLE_DETAILS = "table-details";
-    private static final String VIEW_DETAILS = "view-details";
 
     public static String config() {
         return String.format("%s/config", V1);
@@ -104,8 +108,20 @@ public class ResourcePaths {
                 encodeString(databaseName),
                 TABLES,
                 encodeString(objectName),
-                "rollback",
-                "id");
+                ROLLBACK,
+                SNAPSHOT_ID);
+    }
+
+    public String rollbackTableByTagName(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                ROLLBACK,
+                TAG_NAME);
     }
 
     public String tableToken(String databaseName, String objectName) {

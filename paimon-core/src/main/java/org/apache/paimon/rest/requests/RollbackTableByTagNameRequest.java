@@ -25,22 +25,22 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Request for rollback table by snapshotId. */
+/** Request for rollback table by tag name. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class RollbackTableBySnapshotIdRequest implements RESTRequest {
+public class RollbackTableByTagNameRequest implements RESTRequest {
 
-    private static final String FIELD_SNAPSHOT_ID = "snapshotId";
+    private static final String FIELD_TAG_NAME = "tagName";
 
-    @JsonProperty(FIELD_SNAPSHOT_ID)
-    private final Long snapshotId;
+    @JsonProperty(FIELD_TAG_NAME)
+    private final String tagName;
 
     @JsonCreator
-    public RollbackTableBySnapshotIdRequest(@JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId) {
-        this.snapshotId = snapshotId;
+    public RollbackTableByTagNameRequest(@JsonProperty(FIELD_TAG_NAME) String tagName) {
+        this.tagName = tagName;
     }
 
-    @JsonGetter(FIELD_SNAPSHOT_ID)
-    public Long getSnapshotId() {
-        return snapshotId;
+    @JsonGetter(FIELD_TAG_NAME)
+    public String getTagName() {
+        return tagName;
     }
 }

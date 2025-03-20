@@ -30,6 +30,7 @@ import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableBySnapshotIdRequest;
+import org.apache.paimon.rest.requests.RollbackTableByTagNameRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -439,12 +440,38 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/rollback/id")
-    public RollbackTableResponse rollbackTableById(
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/rollback/snapshot-id")
+    public RollbackTableResponse rollbackTableBySnapshotId(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
             @RequestBody RollbackTableBySnapshotIdRequest request) {
+        return new RollbackTableResponse(true);
+    }
+
+    @Operation(
+            summary = "Rollback table by tag name",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = RollbackTableResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/rollback/tag-name")
+    public RollbackTableResponse rollbackTableByTagName(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody RollbackTableByTagNameRequest request) {
         return new RollbackTableResponse(true);
     }
 

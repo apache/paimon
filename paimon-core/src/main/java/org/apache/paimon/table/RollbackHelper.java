@@ -73,11 +73,12 @@ public class RollbackHelper {
     }
 
     /** Clean snapshots and tags whose id is larger than given snapshot's. */
-    public void cleanLargerThan(long earliest, long latest, Snapshot retainedSnapshot) {
+    public void cleanLargerThan(long earliest, long latest, long retainedSnapshotId) {
         // clean data files
         List<Snapshot> cleanedSnapshots =
-                cleanSnapshotsDataFiles(earliest, latest, retainedSnapshot);
-        List<Changelog> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshot);
+                cleanSnapshotsDataFiles(earliest, latest, retainedSnapshotId);
+        List<Changelog> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshotId);
+        Snapshot retainedSnapshot = snapshotManager.snapshot(retainedSnapshotId);
         List<Snapshot> cleanedTags = cleanTagsDataFiles(retainedSnapshot);
         Set<Long> cleanedIds = new HashSet<>();
 
@@ -104,26 +105,11 @@ public class RollbackHelper {
     }
 
     private List<Snapshot> cleanSnapshotsDataFiles(
-            long earliest, long latest, Snapshot retainedSnapshot) {
-        //        long earliest =
-        //                checkNotNull(
-        //                        snapshotManager.earliestSnapshotId(), "Cannot find earliest
-        // snapshot.");
-        //        long latest =
-        //                checkNotNull(snapshotManager.latestSnapshotId(), "Cannot find latest
-        // snapshot.");
-
-        // modify the latest hint
-        //        try {
-        //            snapshotManager.commitLatestHint(retainedSnapshot.id());
-        //        } catch (IOException e) {
-        //            throw new UncheckedIOException(e);
-        //        }
-
+            long earliest, long latest, long retainedSnapshotId) {
         // delete snapshot files first, cannot be read now
         // it is possible that some snapshots have been expired
         List<Snapshot> toBeCleaned = new ArrayList<>();
-        long to = Math.max(earliest, retainedSnapshot.id() + 1);
+        long to = Math.max(earliest, retainedSnapshotId + 1);
         for (long i = latest; i >= to; i--) {
             // Ignore the non-existent snapshots
             if (snapshotManager.snapshotExists(i)) {
@@ -148,7 +134,7 @@ public class RollbackHelper {
         return toBeCleaned;
     }
 
-    private List<Changelog> cleanLongLivedChangelogDataFiles(Snapshot retainedSnapshot) {
+    private List<Changelog> cleanLongLivedChangelogDataFiles(long retainedSnapshotId) {
         Long earliest = changelogManager.earliestLongLivedChangelogId();
         Long latest = changelogManager.latestLongLivedChangelogId();
         if (earliest == null || latest == null) {
@@ -157,7 +143,7 @@ public class RollbackHelper {
 
         // it is possible that some snapshots have been expired
         List<Changelog> toBeCleaned = new ArrayList<>();
-        long to = Math.max(earliest, retainedSnapshot.id() + 1);
+        long to = Math.max(earliest, retainedSnapshotId + 1);
         for (long i = latest; i >= to; i--) {
             toBeCleaned.add(changelogManager.changelog(i));
         }

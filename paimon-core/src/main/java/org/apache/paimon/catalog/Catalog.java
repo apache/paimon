@@ -532,14 +532,25 @@ public interface Catalog extends AutoCloseable {
             throws Catalog.TableNotExistException;
 
     /**
-     * rollback the snapshot of table identified by the given {@link Identifier} and snapshotId.
+     * rollbackBySnapshotId table by the given {@link Identifier} and snapshotId.
      *
-     * @param identifier Path of the table
+     * @param identifier path of the table
      * @param snapshotId id of snapshot
-     * @return The requested snapshot of the table
+     * @return whether success
      * @throws Catalog.TableNotExistException if the target does not exist
      */
-    boolean rollbackSnapshotBySnapshotId(Identifier identifier, Long snapshotId)
+    boolean rollbackTableBySnapshotId(Identifier identifier, Long snapshotId)
+            throws Catalog.TableNotExistException;
+
+    /**
+     * rollbackBySnapshotId table by the given {@link Identifier} and tagName.
+     *
+     * @param identifier path of the table
+     * @param tagName name of tag
+     * @return whether success
+     * @throws Catalog.TableNotExistException if the target does not exist
+     */
+    boolean rollbackTableByTagName(Identifier identifier, String tagName)
             throws Catalog.TableNotExistException;
 
     // ==================== Partition Modifications ==========================

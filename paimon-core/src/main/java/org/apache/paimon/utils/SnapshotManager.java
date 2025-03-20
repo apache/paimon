@@ -51,6 +51,7 @@ import java.util.stream.LongStream;
 
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
@@ -205,6 +206,28 @@ public class SnapshotManager implements Serializable {
             // modify the latest hint
             try {
                 commitLatestHint(snapshotId);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+    }
+
+    public void rollback(String tagName, TagManager tagManager) {
+        if (snapshotLoader != null) {
+            try {
+                snapshotLoader.rollback(tagName);
+            } catch (UnsupportedOperationException ignored) {
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        } else {
+            // modify the latest hint
+            checkArgument(
+                    tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
+
+            Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
+            try {
+                commitLatestHint(taggedSnapshot.id());
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }

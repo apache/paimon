@@ -555,8 +555,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             long latest =
                     checkNotNull(
                             snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
-            rollbackHelper()
-                    .cleanLargerThan(earliest, latest, snapshotManager.snapshot(snapshotId));
+            rollbackHelper().cleanLargerThan(earliest, latest, snapshotId);
         }
     }
 
@@ -680,20 +679,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(String tagName) {
-        TagManager tagManager = tagManager();
-        checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
-
-        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
         SnapshotManager snapshotManager = snapshotManager();
         long earliest =
                 checkNotNull(
                         snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
         long latest =
                 checkNotNull(snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
-        rollbackHelper().cleanLargerThan(earliest, latest, taggedSnapshot);
-
+        TagManager tagManager = tagManager();
+        snapshotManager.rollback(tagName, tagManager);
+        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
+        if (snapshotManager.needCleanWhenRollback()) {
+            rollbackHelper().cleanLargerThan(earliest, latest, taggedSnapshot.id());
+        }
         try {
-            // it is possible that the earliest snapshot is later than the rollback tag because of
+            // it is possible that the earliest snapshot is later than the rollbackBySnapshotId tag
+            // because of
             // snapshot expiration, in this case the `cleanLargerThan` method will delete all
             // snapshots, so we should write the tag file to snapshot directory and modify the
             // earliest hint

@@ -508,12 +508,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
-  /v1/{prefix}/databases/{database}/tables/{table}/rollback/id:
+  /v1/{prefix}/databases/{database}/tables/{table}/rollback/snapshot-id:
     post:
       tags:
         - table
       summary: Rollback table by snapshot id
-      operationId: rollbackTableById
+      operationId: rollbackTableBySnapshotId
       parameters:
         - name: prefix
           in: path
@@ -535,6 +535,54 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RollbackTableBySnapshotIdRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RollbackTableResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/rollback/tag-name:
+    post:
+      tags:
+        - table
+      summary: Rollback table by tag name
+      operationId: rollbackTableByTagName
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackTableByTagNameRequest'
       responses:
         "200":
           description: OK
@@ -1430,6 +1478,11 @@ components:
         snapshotId:
           type: integer
           format: int64
+    RollbackTableByTagNameRequest:
+      type: object
+      properties:
+        tagName:
+          type: string
     Snapshot:
       type: object
       properties:

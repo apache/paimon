@@ -53,7 +53,18 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     @Override
     public void rollback(long snapshotId) throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            catalog.rollbackSnapshotBySnapshotId(identifier, snapshotId);
+            catalog.rollbackTableBySnapshotId(identifier, snapshotId);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void rollback(String tagName) throws IOException {
+        try (Catalog catalog = catalogLoader.load()) {
+            catalog.rollbackTableByTagName(identifier, tagName);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {

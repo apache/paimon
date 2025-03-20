@@ -279,7 +279,8 @@ public class RESTCatalogServer {
                         boolean isViewsDetails =
                                 resources.length == 2 && resources[1].startsWith("view-details");
                         boolean isTables =
-                                resources.length == 2 && resources[1].startsWith("tables");
+                                resources.length == 2
+                                        && resources[1].startsWith(ResourcePaths.TABLES);
                         boolean isTableDetails =
                                 resources.length == 2 && resources[1].startsWith("table-details");
                         boolean isView =
@@ -288,40 +289,40 @@ public class RESTCatalogServer {
                                         && !"rename".equals(resources[2]);
                         boolean isTable =
                                 resources.length == 3
-                                        && "tables".equals(resources[1])
+                                        && ResourcePaths.TABLES.equals(resources[1])
                                         && !"rename".equals(resources[2])
                                         && !"commit".equals(resources[2]);
                         boolean isTableToken =
                                 resources.length == 4
-                                        && "tables".equals(resources[1])
+                                        && ResourcePaths.TABLES.equals(resources[1])
                                         && "token".equals(resources[3]);
                         boolean isTableSnapshot =
                                 resources.length == 4
-                                        && "tables".equals(resources[1])
+                                        && ResourcePaths.TABLES.equals(resources[1])
                                         && "snapshot".equals(resources[3]);
                         boolean isCommitSnapshot =
                                 resources.length == 4
-                                        && "tables".equals(resources[1])
+                                        && ResourcePaths.TABLES.equals(resources[1])
                                         && "commit".equals(resources[3]);
-                        boolean isRollbackSnapshotById =
+                        boolean isRollbackTableSnapshotById =
                                 resources.length == 5
-                                        && "tables".equals(resources[1])
-                                        && "rollback".equals(resources[3])
-                                        && "id".equals(resources[4]);
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.ROLLBACK.equals(resources[3])
+                                        && ResourcePaths.SNAPSHOT_ID.equals(resources[4]);
                         boolean isPartitions =
                                 resources.length == 4
-                                        && "tables".equals(resources[1])
+                                        && ResourcePaths.TABLES.equals(resources[1])
                                         && resources[3].startsWith("partitions");
 
                         boolean isMarkDonePartitions =
                                 resources.length == 5
-                                        && "tables".equals(resources[1])
+                                        && ResourcePaths.TABLES.equals(resources[1])
                                         && "partitions".equals(resources[3])
                                         && "mark".equals(resources[4]);
 
                         boolean isBranches =
                                 resources.length >= 4
-                                        && "tables".equals(resources[1])
+                                        && ResourcePaths.TABLES.equals(resources[1])
                                         && "branches".equals(resources[3]);
                         Identifier identifier =
                                 resources.length >= 3
@@ -330,7 +331,7 @@ public class RESTCatalogServer {
                                         ? Identifier.create(
                                                 databaseName, RESTUtil.decodeString(resources[2]))
                                         : null;
-                        if (identifier != null && "tables".equals(resources[1])) {
+                        if (identifier != null && ResourcePaths.TABLES.equals(resources[1])) {
                             if (!identifier.isSystemTable()
                                     && !tableMetadataStore.containsKey(identifier.getFullName())) {
                                 throw new Catalog.TableNotExistException(identifier);
@@ -373,7 +374,7 @@ public class RESTCatalogServer {
                             return snapshotHandle(identifier);
                         } else if (isCommitSnapshot) {
                             return commitTableHandle(identifier, restAuthParameter.data());
-                        } else if (isRollbackSnapshotById) {
+                        } else if (isRollbackTableSnapshotById) {
                             return rollbackTableByIdHandle(identifier, restAuthParameter.data());
                         } else if (isTable) {
                             return tableHandle(
