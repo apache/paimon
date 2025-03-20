@@ -32,6 +32,7 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
@@ -171,6 +172,84 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         changelogDeletion.cleanEmptyDirectories();
         writeEarliestHintFile(endExclusiveId);
         return (int) (endExclusiveId - earliestId);
+    }
+
+    /** expire all separated changelogs, only used by ExpireChangelogsProcedure. */
+    public void expireAll() {
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        if (latestSnapshotId == null) {
+            // no snapshot, nothing to expire
+            return;
+        }
+
+        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        if (earliestSnapshotId == null) {
+            return;
+        }
+
+        Long latestChangelogId = changelogManager.latestLongLivedChangelogId();
+        if (latestChangelogId == null) {
+            return;
+        }
+        Long earliestChangelogId = changelogManager.earliestLongLivedChangelogId();
+        if (earliestChangelogId == null) {
+            return;
+        }
+
+        LOG.info(
+                "Read earliest and latest changelog for expire all. earliestChangelogId is {}, latestChangelogId is {}",
+                earliestChangelogId,
+                latestChangelogId);
+
+        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+
+        // files used by the earliest snapshot id should be skipped
+        Preconditions.checkArgument(
+                latestChangelogId < earliestSnapshotId,
+                "latest changelog id should be less than earliest snapshot id."
+                        + "please check your table!");
+        List<Snapshot> skippingSnapshots =
+                findSkippingTags(taggedSnapshots, earliestChangelogId, earliestSnapshotId);
+        skippingSnapshots.add(snapshotManager.snapshot(earliestSnapshotId));
+
+        Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
+        for (long id = earliestChangelogId; id <= latestChangelogId; id++) {
+
+            LOG.info("Ready to delete changelog files from changelog #" + id);
+
+            Changelog changelog;
+            try {
+                changelog = changelogManager.tryGetChangelog(id);
+            } catch (FileNotFoundException e) {
+                LOG.info("fail to get changelog #" + id);
+                continue;
+            }
+            Predicate<ExpireFileEntry> skipper;
+            try {
+                skipper = changelogDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
+            } catch (Exception e) {
+                LOG.info(
+                        String.format(
+                                "Skip cleaning data files of changelog '%s' due to failed to build skipping set.",
+                                id),
+                        e);
+                continue;
+            }
+
+            changelogDeletion.cleanUnusedDataFiles(changelog, skipper);
+            changelogDeletion.cleanUnusedManifests(changelog, manifestSkippSet);
+            changelogManager.fileIO().deleteQuietly(changelogManager.longLivedChangelogPath(id));
+        }
+
+        // try delete changelog hint file
+        try {
+            changelogManager.deleteEarliestHint();
+            changelogManager.deleteLatestHint();
+        } catch (Exception e) {
+            LOG.error("delete changelog hint file error.", e);
+        }
+
+        changelogDeletion.cleanEmptyDirectories();
     }
 
     private void writeEarliestHintFile(long earliest) {

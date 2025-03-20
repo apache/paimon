@@ -103,6 +103,11 @@ public class HintFileUtils {
         fileIO.delete(hintFile, false);
     }
 
+    public static void deleteEarliestHint(FileIO fileIO, Path dir) throws IOException {
+        Path hintFile = new Path(dir, EARLIEST);
+        fileIO.delete(hintFile, false);
+    }
+
     public static void commitHint(FileIO fileIO, long id, String fileName, Path dir)
             throws IOException {
         Path hintFile = new Path(dir, fileName);
