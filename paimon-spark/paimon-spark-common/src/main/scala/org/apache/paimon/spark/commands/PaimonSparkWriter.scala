@@ -98,8 +98,8 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite(inputSchema: StructType): SparkTableWrite =
-      new SparkTableWrite(writeBuilder, rowType, inputSchema, rowKindColIdx)
+    def newWrite(): SparkTableWrite =
+      new SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism
@@ -109,29 +109,26 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
     def writeWithoutBucket(dataFrame: DataFrame): Dataset[Array[Byte]] = {
       val schema = dataFrame.schema
-      dataFrame.queryExecution.toRdd
-        .mapPartitions {
-          iter =>
-            {
-              val write = newWrite(schema)
-              try {
-                iter.foreach(row => write.write(row))
-                write.finish()
-              } finally {
-                write.close()
-              }
+      dataFrame.mapPartitions {
+        iter =>
+          {
+            val write = newWrite()
+            try {
+              iter.foreach(row => write.write(row))
+              write.finish()
+            } finally {
+              write.close()
             }
-        }
-        .toDS()
+          }
+      }
     }
 
     def writeWithBucket(dataFrame: DataFrame): Dataset[Array[Byte]] = {
-      val schema = dataFrame.schema
-      dataFrame.queryExecution.toRdd
+      dataFrame
         .mapPartitions {
           iter =>
             {
-              val write = newWrite(schema)
+              val write = newWrite()
               try {
                 if (bucketColIdx >= 0) {
                   iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
@@ -144,7 +141,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
               }
             }
         }
-        .toDS()
     }
 
     def writeWithBucketProcessor(
@@ -159,14 +155,13 @@ case class PaimonSparkWriter(table: FileStoreTable) {
 
     def writeWithBucketAssigner(
         dataFrame: DataFrame,
-        funcFactory: () => InternalRow => Int): Dataset[Array[Byte]] = {
-      val schema = dataFrame.schema
-      dataFrame.queryExecution.toRdd
+        funcFactory: () => Row => Int): Dataset[Array[Byte]] = {
+      dataFrame
         .mapPartitions {
           iter =>
             {
               val assigner = funcFactory.apply()
-              val write = newWrite(schema)
+              val write = newWrite()
               try {
                 iter.foreach(row => write.write(row, assigner.apply(row)))
                 write.finish()
@@ -175,7 +170,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
               }
             }
         }
-    }.toDS()
+    }
 
     val written: Dataset[Array[Byte]] = bucketMode match {
       case CROSS_PARTITION =>
@@ -235,10 +230,8 @@ case class PaimonSparkWriter(table: FileStoreTable) {
                   table.coreOptions.dynamicBucketTargetRowNum,
                   table.coreOptions.dynamicBucketMaxBuckets
                 )
-              val wrapper =
-                new SparkInternalRowWrapper(-1, inputSchema, rowType.getFieldCount)
               row => {
-                val sparkRow = wrapper.replace(row)
+                val sparkRow = new SparkRow(rowType, row)
                 assigner.assign(
                   extractor.partition(sparkRow),
                   extractor.trimmedPrimaryKey(sparkRow).hashCode)
