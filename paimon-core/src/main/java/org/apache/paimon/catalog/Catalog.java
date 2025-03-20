@@ -532,7 +532,7 @@ public interface Catalog extends AutoCloseable {
             throws Catalog.TableNotExistException;
 
     /**
-     * rollbackBySnapshotId table by the given {@link Identifier} and snapshotId.
+     * rollback table by the given {@link Identifier} and snapshotId.
      *
      * @param identifier path of the table
      * @param snapshotId id of snapshot
@@ -543,7 +543,7 @@ public interface Catalog extends AutoCloseable {
             throws Catalog.TableNotExistException;
 
     /**
-     * rollbackBySnapshotId table by the given {@link Identifier} and tagName.
+     * rollback table by the given {@link Identifier} and tagName.
      *
      * @param identifier path of the table
      * @param tagName name of tag
@@ -552,6 +552,15 @@ public interface Catalog extends AutoCloseable {
      */
     boolean rollbackTableByTagName(Identifier identifier, String tagName)
             throws Catalog.TableNotExistException;
+
+    /**
+     * need clean after rollback table.
+     *
+     * @return whether need
+     */
+    default boolean needCleanAfterRollback() {
+        return true;
+    }
 
     // ==================== Partition Modifications ==========================
 

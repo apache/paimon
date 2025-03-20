@@ -692,7 +692,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             rollbackHelper().cleanLargerThan(earliest, latest, taggedSnapshot.id());
         }
         try {
-            // it is possible that the earliest snapshot is later than the rollbackBySnapshotId tag
+            // it is possible that the earliest snapshot is later than the rollback tag
             // because of
             // snapshot expiration, in this case the `cleanLargerThan` method will delete all
             // snapshots, so we should write the tag file to snapshot directory and modify the

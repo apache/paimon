@@ -194,48 +194,50 @@ public class SnapshotManager implements Serializable {
         return earliestSnapshot(null);
     }
 
-    public void rollback(long snapshotId) {
+    public boolean rollback(long snapshotId) {
         if (snapshotLoader != null) {
             try {
-                snapshotLoader.rollback(snapshotId);
+                return snapshotLoader.rollback(snapshotId);
             } catch (UnsupportedOperationException ignored) {
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        } else {
-            // modify the latest hint
-            try {
-                commitLatestHint(snapshotId);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
         }
+        // modify the latest hint
+        try {
+            commitLatestHint(snapshotId);
+            return true;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
-    public void rollback(String tagName, TagManager tagManager) {
+    public boolean rollback(String tagName, TagManager tagManager) {
         if (snapshotLoader != null) {
             try {
-                snapshotLoader.rollback(tagName);
+                return snapshotLoader.rollback(tagName);
             } catch (UnsupportedOperationException ignored) {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
-        } else {
-            // modify the latest hint
-            checkArgument(
-                    tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
+        }
+        // modify the latest hint
+        checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
 
-            Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
-            try {
-                commitLatestHint(taggedSnapshot.id());
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
+        try {
+            commitLatestHint(taggedSnapshot.id());
+            return true;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
     public boolean needCleanWhenRollback() {
-        return snapshotLoader == null;
+        if (snapshotLoader != null) {
+            return snapshotLoader.needCleanWhenRollback();
+        }
+        return true;
     }
 
     private @Nullable Snapshot earliestSnapshot(@Nullable Long stopSnapshotId) {

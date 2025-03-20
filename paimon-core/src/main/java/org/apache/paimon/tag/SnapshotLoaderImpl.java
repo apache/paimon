@@ -51,9 +51,9 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     }
 
     @Override
-    public void rollback(long snapshotId) throws IOException {
+    public boolean rollback(long snapshotId) throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            catalog.rollbackTableBySnapshotId(identifier, snapshotId);
+            return catalog.rollbackTableBySnapshotId(identifier, snapshotId);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -62,9 +62,20 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     }
 
     @Override
-    public void rollback(String tagName) throws IOException {
+    public boolean rollback(String tagName) throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            catalog.rollbackTableByTagName(identifier, tagName);
+            return catalog.rollbackTableByTagName(identifier, tagName);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public boolean needCleanWhenRollback() {
+        try (Catalog catalog = catalogLoader.load()) {
+            return catalog.needCleanAfterRollback();
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {

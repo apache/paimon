@@ -461,6 +461,11 @@ public class RESTCatalog implements Catalog {
         return response.isSuccess();
     }
 
+    @Override
+    public boolean needCleanAfterRollback() {
+        return false;
+    }
+
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         GetTableResponse response;
         try {

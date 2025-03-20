@@ -35,7 +35,7 @@ public class ResourcePaths {
     protected static final String VIEWS = "views";
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
-    protected static final String ROLLBACK = "rollbackBySnapshotId";
+    protected static final String ROLLBACK = "rollback";
     protected static final String SNAPSHOT_ID = "snapshot-id";
     protected static final String TAG_NAME = "tag-name";
 

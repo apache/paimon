@@ -233,10 +233,6 @@ public class RESTCatalogServer {
                 try {
                     Map<String, String> headers = getHeader(request);
                     String[] paths = request.getPath().split("\\?");
-                    System.out.println(
-                            String.format(
-                                    "method [%s] path [%s]",
-                                    request.getMethod(), request.getPath()));
                     String resourcePath = paths[0];
                     Map<String, String> parameters =
                             paths.length == 2 ? getParameters(paths[1]) : Collections.emptyMap();
