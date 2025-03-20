@@ -28,7 +28,7 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
-  /catalogs:
+  /v1/catalogs:
     post:
       tags:
         - Catalogs
@@ -91,7 +91,7 @@ paths:
                 $ref: '#/components/schemas/ListCatalogsResponse'
         '500':
           description: Internal Server Error
-  /catalogs/{name}:
+  /v1/catalogs/{name}:
     parameters:
       - name: name
         in: path
@@ -125,9 +125,9 @@ paths:
       tags:
         - Catalogs
       operationId: alterCatalog
-      summary: Update a catalog
+      summary: Alter a catalog
       description: |
-        Updates the catalog that matches the supplied name.
+        Alter the catalog that matches the supplied name.
       requestBody:
         content:
           application/json:
@@ -135,7 +135,7 @@ paths:
               $ref: '#/components/schemas/AlterCatalogRequest'
       responses:
         '200':
-          description: The catalog was successfully updated.
+          description: The catalog was successfully altered.
           content:
             application/json:
               schema:
