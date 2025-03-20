@@ -28,6 +28,140 @@ servers:
   - url: http://localhost:8080
     description: Server URL in Development environment
 paths:
+  /v1/catalogs:
+    post:
+      tags:
+        - Catalogs
+      operationId: createCatalog
+      summary: Create a catalog
+      description: |
+        Creates a new catalog instance.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCatalogRequest'
+      responses:
+        '200':
+          description: Success, no content
+        "409":
+          description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+    get:
+      tags:
+        - Catalogs
+      parameters:
+        - name: maxResults
+          in: query
+          description: |
+            Maximum number of catalogs to return.
+            - when set to a value greater than 0, the page length is the minimum of this value and a server configured value;
+            - when set to 0 or less than 0, the page length is set to a server configured value;
+          schema:
+            type: integer
+            format: int32
+            maximum: 100
+          required: false
+        - name: pageToken
+          in: query
+          description: |
+            Opaque pagination token to go to next page based on previous query.
+          schema:
+            type: string
+          required: false
+      operationId: listCatalogs
+      summary: List catalogs
+      description: |
+        Lists the available catalogs.
+      responses:
+        '200':
+          description: The catalog list was successfully retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListCatalogsResponse'
+        '500':
+          description: Internal Server Error
+  /v1/catalogs/{catalog}:
+    parameters:
+      - name: name
+        in: path
+        description: The name of the catalog.
+        required: true
+        schema:
+          type: string
+    get:
+      tags:
+        - Catalogs
+      operationId: getCatalog
+      summary: Get a catalog
+      description: |
+        Gets the specified catalog.
+      responses:
+        '200':
+          description: The catalog was successfully retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetCatalogResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    patch:
+      tags:
+        - Catalogs
+      operationId: alterCatalog
+      summary: Alter a catalog
+      description: |
+        Alter the catalog that matches the supplied name.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterCatalogRequest'
+      responses:
+        '200':
+          description: The catalog was successfully altered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlterCatalogResponse'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    delete:
+      tags:
+        - Catalogs
+      operationId: dropCatalog
+      summary: Drop a catalog
+      description: |
+        Drop the catalog that matches the supplied name.
+      responses:
+        '200':
+          description: Success, no content
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
   /v1/config:
     get:
       tags:
@@ -1040,6 +1174,85 @@ paths:
           description: Internal Server Error
 components:
   schemas:
+    CreateCatalogRequest:
+      type: object
+      properties:
+        name:
+          description: Name of catalog.
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+    ListCatalogsResponse:
+      type: object
+      properties:
+        catalogs:
+          description: An array of catalog information objects.
+          type: array
+          items:
+            $ref: '#/components/schemas/GetCatalogResponse'
+        nextPageToken:
+          type: string
+          description: |
+            Opaque token to retrieve the next page of results. Absent if there are no more pages.
+            pageToken should be set to this value for the next request (for the next page of results).
+    GetCatalogResponse:
+      type: object
+      properties:
+        id:
+          description: Unique identifier for the catalog.
+          type: string
+        name:
+          description: Name of catalog.
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        owner:
+          description: Username of current owner of catalog.
+          type: string
+        created_at:
+          description: Time at which this catalog was created, in epoch milliseconds.
+          type: integer
+          format: int64
+        created_by:
+          description: Username of catalog creator.
+          type: string
+        updated_at:
+          description: Time at which this catalog was last modified, in epoch milliseconds.
+          type: integer
+          format: int64
+        updated_by:
+          description: Username of user who last modified catalog.
+          type: string
+    AlterCatalogRequest:
+      type: object
+      properties:
+        removals:
+          type: array
+          items:
+            type: string
+        updates:
+          type: object
+          additionalProperties:
+            type: string
+    AlterCatalogResponse:
+      type: object
+      properties:
+        removed:
+          type: array
+          items:
+            type: string
+        updated:
+          type: array
+          items:
+            type: string
+        missing:
+          type: array
+          items:
+            type: string
     CreateDatabaseRequest:
       type: object
       properties:
