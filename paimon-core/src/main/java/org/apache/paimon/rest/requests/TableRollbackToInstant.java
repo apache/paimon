@@ -49,6 +49,7 @@ public interface TableRollbackToInstant extends Serializable {
         return new RollbackTag(tagName);
     }
 
+    /** snapshot instance for table rollback. */
     final class RollbackSnapshot implements TableRollbackToInstant {
 
         private static final long serialVersionUID = 1L;
@@ -68,6 +69,7 @@ public interface TableRollbackToInstant extends Serializable {
         }
     }
 
+    /** tag instance for table rollback. */
     final class RollbackTag implements TableRollbackToInstant {
 
         private static final long serialVersionUID = 1L;
@@ -87,6 +89,7 @@ public interface TableRollbackToInstant extends Serializable {
         }
     }
 
+    /** Types for table rollback： identify for table rollback. */
     class Types {
         public static final String FIELD_TYPE = "type";
         public static final String SNAPSHOT = "snapshot";
