@@ -384,7 +384,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackSnapshot(Identifier identifier, Long snapshotId)
+    public boolean rollbackSnapshotBySnapshotId(Identifier identifier, Long snapshotId)
             throws TableNotExistException {
         RollbackTableBySnapshotIdRequest request = new RollbackTableBySnapshotIdRequest(snapshotId);
         RollbackTableResponse response;
@@ -398,6 +398,10 @@ public class RESTCatalog implements Catalog {
                             RollbackTableResponse.class,
                             restAuthFunction);
         } catch (NoSuchResourceException e) {
+            if (e.resourceType() == ErrorResponseResourceType.SNAPSHOT) {
+                throw new IllegalArgumentException(
+                        String.format("Rollback snapshot '%s' doesn't exist.", snapshotId));
+            }
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);

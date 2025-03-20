@@ -889,6 +889,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         table.rollbackTo(4);
         assertThat(table.snapshotManager().snapshot(4))
                 .isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
+        assertThrows(IllegalArgumentException.class, () -> table.rollbackTo(5));
     }
 
     @Test

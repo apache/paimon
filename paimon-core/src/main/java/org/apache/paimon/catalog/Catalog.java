@@ -539,7 +539,7 @@ public interface Catalog extends AutoCloseable {
      * @return The requested snapshot of the table
      * @throws Catalog.TableNotExistException if the target does not exist
      */
-    boolean rollbackSnapshot(Identifier identifier, Long snapshotId)
+    boolean rollbackSnapshotBySnapshotId(Identifier identifier, Long snapshotId)
             throws Catalog.TableNotExistException;
 
     // ==================== Partition Modifications ==========================

@@ -141,9 +141,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackSnapshot(Identifier identifier, Long snapshotId)
+    public boolean rollbackSnapshotBySnapshotId(Identifier identifier, Long snapshotId)
             throws TableNotExistException {
-        return wrapped.rollbackSnapshot(identifier, snapshotId);
+        return wrapped.rollbackSnapshotBySnapshotId(identifier, snapshotId);
     }
 
     @Override

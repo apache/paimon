@@ -597,13 +597,29 @@ public class RESTCatalogServer {
         }
         FileStoreTable table = getFileTable(identifier);
         Snapshot snapshot = table.snapshot(requestBody.getSnapshotId());
-        table.rollbackTo(requestBody.getSnapshotId());
-        tableLatestSnapshotStore.put(
-                identifier.getFullName(),
-                tableWithSnapshotId2SnapshotStore.get(
-                        geTableFullNameWithSnapshotId(identifier, snapshot.id())));
-        RollbackTableResponse response = new RollbackTableResponse(true);
-        return mockResponse(response, 200);
+        String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshot.id());
+        if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
+            long latestSnapshotId = table.latestSnapshot().get().id();
+            if (latestSnapshotId > requestBody.getSnapshotId()) {
+                for (long i = requestBody.getSnapshotId() + 1; i < latestSnapshotId + 1; i++) {
+                    tableWithSnapshotId2SnapshotStore.remove(
+                            geTableFullNameWithSnapshotId(identifier, i));
+                }
+            }
+            table.rollbackTo(requestBody.getSnapshotId());
+            tableLatestSnapshotStore.put(
+                    identifier.getFullName(),
+                    tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
+            RollbackTableResponse response = new RollbackTableResponse(true);
+            return mockResponse(response, 200);
+        }
+        return mockResponse(
+                new ErrorResponse(
+                        ErrorResponseResourceType.SNAPSHOT,
+                        "" + requestBody.getSnapshotId(),
+                        "",
+                        404),
+                404);
     }
 
     private MockResponse databasesApiHandler(
