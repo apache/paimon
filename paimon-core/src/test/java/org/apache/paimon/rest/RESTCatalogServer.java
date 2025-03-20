@@ -50,6 +50,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableBySnapshotIdRequest;
+import org.apache.paimon.rest.requests.RollbackTableByTagNameRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -305,6 +306,11 @@ public class RESTCatalogServer {
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.ROLLBACK.equals(resources[3])
                                         && ResourcePaths.SNAPSHOT_ID.equals(resources[4]);
+                        boolean isRollbackTableByTagName =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.ROLLBACK.equals(resources[3])
+                                        && ResourcePaths.TAG_NAME.equals(resources[4]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -372,6 +378,9 @@ public class RESTCatalogServer {
                             return commitTableHandle(identifier, restAuthParameter.data());
                         } else if (isRollbackTableSnapshotById) {
                             return rollbackTableByIdHandle(identifier, restAuthParameter.data());
+                        } else if (isRollbackTableByTagName) {
+                            return rollbackTableByTagNameHandle(
+                                    identifier, restAuthParameter.data());
                         } else if (isTable) {
                             return tableHandle(
                                     restAuthParameter.method(),
@@ -616,6 +625,46 @@ public class RESTCatalogServer {
                         "" + requestBody.getSnapshotId(),
                         "",
                         404),
+                404);
+    }
+
+    private MockResponse rollbackTableByTagNameHandle(Identifier identifier, String data)
+            throws Exception {
+        RollbackTableByTagNameRequest requestBody =
+                OBJECT_MAPPER.readValue(data, RollbackTableByTagNameRequest.class);
+        if (noPermissionTables.contains(identifier.getFullName())) {
+            throw new Catalog.TableNoPermissionException(identifier);
+        }
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        FileStoreTable table = getFileTable(identifier);
+        boolean isExist = table.tagManager().tagExists(requestBody.getTagName());
+        if (isExist) {
+            table.tagManager().get(requestBody.getTagName());
+            Snapshot snapshot =
+                    table.tagManager().getOrThrow(requestBody.getTagName()).trimToSnapshot();
+            String identifierWithSnapshotId =
+                    geTableFullNameWithSnapshotId(identifier, snapshot.id());
+            if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
+                long latestSnapshotId = table.latestSnapshot().get().id();
+                if (latestSnapshotId > snapshot.id()) {
+                    for (long i = snapshot.id() + 1; i < latestSnapshotId + 1; i++) {
+                        tableWithSnapshotId2SnapshotStore.remove(
+                                geTableFullNameWithSnapshotId(identifier, i));
+                    }
+                }
+                table.rollbackTo(snapshot.id());
+                tableLatestSnapshotStore.put(
+                        identifier.getFullName(),
+                        tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
+                RollbackTableResponse response = new RollbackTableResponse(true);
+                return mockResponse(response, 200);
+            }
+        }
+        return mockResponse(
+                new ErrorResponse(
+                        ErrorResponseResourceType.TAG, "" + requestBody.getTagName(), "", 404),
                 404);
     }
 

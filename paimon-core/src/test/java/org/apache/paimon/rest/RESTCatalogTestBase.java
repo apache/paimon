@@ -883,6 +883,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
             GenericRow record = GenericRow.of(i);
             write.write(record);
             commit.commit(i, write.prepareCommit(false, i));
+            table.createTag("tag-" + i);
         }
         write.close();
         commit.close();
@@ -890,6 +891,9 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
         assertThat(table.snapshotManager().snapshot(4))
                 .isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
         assertThrows(IllegalArgumentException.class, () -> table.rollbackTo(5));
+        table.rollbackTo("tag-3");
+        Snapshot tagSnapshot = table.tagManager().getOrThrow("tag-3").trimToSnapshot();
+        assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
     }
 
     @Test
