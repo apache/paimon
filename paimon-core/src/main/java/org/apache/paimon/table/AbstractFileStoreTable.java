@@ -555,7 +555,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             long latest =
                     checkNotNull(
                             snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
-            rollbackHelper().cleanLargerThan(earliest, latest, snapshotId);
+            rollbackHelper()
+                    .cleanLargerThan(earliest, latest, snapshotManager.snapshot(snapshotId));
         }
     }
 
@@ -689,7 +690,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         snapshotManager.rollback(tagName, tagManager);
         Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
         if (snapshotManager.needCleanWhenRollback()) {
-            rollbackHelper().cleanLargerThan(earliest, latest, taggedSnapshot.id());
+            rollbackHelper().cleanLargerThan(earliest, latest, taggedSnapshot);
         }
         try {
             // it is possible that the earliest snapshot is later than the rollback tag

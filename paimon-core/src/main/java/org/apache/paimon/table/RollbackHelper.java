@@ -73,12 +73,11 @@ public class RollbackHelper {
     }
 
     /** Clean snapshots and tags whose id is larger than given snapshot's. */
-    public void cleanLargerThan(long earliest, long latest, long retainedSnapshotId) {
+    public void cleanLargerThan(long earliest, long latest, Snapshot retainedSnapshot) {
         // clean data files
         List<Snapshot> cleanedSnapshots =
-                cleanSnapshotsDataFiles(earliest, latest, retainedSnapshotId);
-        List<Changelog> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshotId);
-        Snapshot retainedSnapshot = snapshotManager.snapshot(retainedSnapshotId);
+                cleanSnapshotsDataFiles(earliest, latest, retainedSnapshot.id());
+        List<Changelog> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshot.id());
         List<Snapshot> cleanedTags = cleanTagsDataFiles(retainedSnapshot);
         Set<Long> cleanedIds = new HashSet<>();
 
