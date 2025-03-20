@@ -43,11 +43,7 @@ paths:
               $ref: '#/components/schemas/CreateCatalogRequest'
       responses:
         '200':
-          description: The new catalog was successfully created.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreateCatalogResponse'
+          description: Success, no content
         "409":
           description: Resource has exist
           content:
@@ -91,7 +87,7 @@ paths:
                 $ref: '#/components/schemas/ListCatalogsResponse'
         '500':
           description: Internal Server Error
-  /v1/catalogs/{name}:
+  /v1/catalogs/{catalog}:
     parameters:
       - name: name
         in: path
@@ -155,13 +151,6 @@ paths:
       summary: Drop a catalog
       description: |
         Drop the catalog that matches the supplied name.
-      parameters:
-        - name: cascade
-          in: query
-          description: Force deletion even if the catalog is not empty.
-          required: false
-          schema:
-            type: boolean
       responses:
         '200':
           description: Success, no content
@@ -1195,15 +1184,6 @@ components:
           type: object
           additionalProperties:
             type: string
-    CreateCatalogResponse:
-      type: object
-      properties:
-        name:
-          type: string
-        options:
-          type: object
-          additionalProperties:
-            type: string
     ListCatalogsResponse:
       type: object
       properties:
@@ -1220,6 +1200,9 @@ components:
     GetCatalogResponse:
       type: object
       properties:
+        id:
+          description: Unique identifier for the catalog.
+          type: string
         name:
           description: Name of catalog.
           type: string
@@ -1243,9 +1226,6 @@ components:
           format: int64
         updated_by:
           description: Username of user who last modified catalog.
-          type: string
-        id:
-          description: Unique identifier for the catalog.
           type: string
     AlterCatalogRequest:
       type: object
