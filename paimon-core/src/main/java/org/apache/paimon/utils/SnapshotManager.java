@@ -195,10 +195,11 @@ public class SnapshotManager implements Serializable {
         return earliestSnapshot(null);
     }
 
-    public boolean rollback(long snapshotId) {
+    public void rollback(long snapshotId) {
         if (snapshotLoader != null) {
             try {
-                return snapshotLoader.rollback(TableRollbackToInstant.snapshot(snapshotId));
+                snapshotLoader.rollback(TableRollbackToInstant.snapshot(snapshotId));
+                return;
             } catch (UnsupportedOperationException ignored) {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
@@ -207,16 +208,16 @@ public class SnapshotManager implements Serializable {
         // modify the latest hint
         try {
             commitLatestHint(snapshotId);
-            return true;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    public boolean rollback(String tagName, TagManager tagManager) {
+    public void rollback(String tagName, TagManager tagManager) {
         if (snapshotLoader != null) {
             try {
-                return snapshotLoader.rollback(TableRollbackToInstant.tag(tagName));
+                snapshotLoader.rollback(TableRollbackToInstant.tag(tagName));
+                return;
             } catch (UnsupportedOperationException ignored) {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
@@ -228,7 +229,6 @@ public class SnapshotManager implements Serializable {
         Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
         try {
             commitLatestHint(taggedSnapshot.id());
-            return true;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

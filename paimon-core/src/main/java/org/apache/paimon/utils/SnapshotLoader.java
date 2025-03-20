@@ -30,7 +30,7 @@ public interface SnapshotLoader extends Serializable {
 
     Optional<Snapshot> load() throws IOException;
 
-    boolean rollback(TableRollbackToInstant tableRollbackToInstant) throws IOException;
+    void rollback(TableRollbackToInstant tableRollbackToInstant) throws IOException;
 
     boolean needCleanAfterRollback();
 

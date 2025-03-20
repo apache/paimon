@@ -47,7 +47,6 @@ import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
-import org.apache.paimon.rest.responses.RollbackTableResponse;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.view.ViewSchema;
@@ -440,13 +439,11 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/rollback")
-    public RollbackTableResponse rollbackTable(
+    public void rollbackTable(
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @RequestBody RollbackTableRequest request) {
-        return new RollbackTableResponse(true);
-    }
+            @RequestBody RollbackTableRequest request) {}
 
     @Operation(
             summary = "Get table token",

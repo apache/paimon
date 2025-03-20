@@ -474,7 +474,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+    public void rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }

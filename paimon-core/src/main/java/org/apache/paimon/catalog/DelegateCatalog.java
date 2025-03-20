@@ -142,9 +142,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+    public void rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
             throws Catalog.TableNotExistException {
-        return wrapped.rollbackTo(identifier, tableRollbackToInstant);
+        wrapped.rollbackTo(identifier, tableRollbackToInstant);
     }
 
     @Override

@@ -537,11 +537,7 @@ paths:
               $ref: '#/components/schemas/RollbackTableRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RollbackTableResponse'
+          description: Success, no content
         "404":
           description: Resource not found
           content:

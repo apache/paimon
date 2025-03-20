@@ -52,9 +52,9 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     }
 
     @Override
-    public boolean rollback(TableRollbackToInstant tableRollbackToInstant) throws IOException {
+    public void rollback(TableRollbackToInstant tableRollbackToInstant) throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            return catalog.rollbackTo(identifier, tableRollbackToInstant);
+            catalog.rollbackTo(identifier, tableRollbackToInstant);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {

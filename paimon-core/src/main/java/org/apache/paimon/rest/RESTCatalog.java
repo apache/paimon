@@ -72,7 +72,6 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
-import org.apache.paimon.rest.responses.RollbackTableResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -409,18 +408,15 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+    public void rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
             throws Catalog.TableNotExistException {
         RollbackTableRequest request = new RollbackTableRequest(tableRollbackToInstant);
-        RollbackTableResponse response;
         try {
-            response =
-                    client.post(
-                            resourcePaths.rollbackTable(
-                                    identifier.getDatabaseName(), identifier.getObjectName()),
-                            request,
-                            RollbackTableResponse.class,
-                            restAuthFunction);
+            client.post(
+                    resourcePaths.rollbackTable(
+                            identifier.getDatabaseName(), identifier.getObjectName()),
+                    request,
+                    restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (e.resourceType() == ErrorResponseResourceType.SNAPSHOT) {
                 throw new IllegalArgumentException(
@@ -433,8 +429,6 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }
-
-        return response.isSuccess();
     }
 
     @Override

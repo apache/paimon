@@ -49,6 +49,7 @@ import java.util.Map;
 
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /** Test for {@link RESTObjectMapper}. */
 public class RESTObjectMapperTest {
@@ -268,8 +269,7 @@ public class RESTObjectMapperTest {
                                         rollbackTableRequestBySnapshotStr,
                                         RollbackTableRequest.class)
                                 .getTableRollbackToInstant();
-        assertEquals(rollbackTableRequestParseData.getSnapshotId(), snapshotId);
-
+        assertTrue(rollbackTableRequestParseData.getSnapshotId() == snapshotId);
         RollbackTableRequest rollbackTableRequestByTag =
                 MockRESTMessage.rollbackTableRequestByTag(tagName);
         String rollbackTableRequestByTagStr =

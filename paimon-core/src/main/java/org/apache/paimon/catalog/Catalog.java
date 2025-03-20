@@ -537,10 +537,9 @@ public interface Catalog extends AutoCloseable {
      *
      * @param identifier path of the table
      * @param tableRollbackToInstant rollback instance like snapshotId or tagName
-     * @return whether success
      * @throws Catalog.TableNotExistException if the target does not exist
      */
-    boolean rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+    void rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
             throws Catalog.TableNotExistException;
 
     /**

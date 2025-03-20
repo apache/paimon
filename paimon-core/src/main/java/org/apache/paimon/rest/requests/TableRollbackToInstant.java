@@ -56,15 +56,15 @@ public interface TableRollbackToInstant extends Serializable {
         private static final String FIELD_SNAPSHOT_ID = "snapshotId";
 
         @JsonProperty(FIELD_SNAPSHOT_ID)
-        private final Long snapshotId;
+        private final long snapshotId;
 
         @JsonCreator
-        public RollbackSnapshot(@JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId) {
+        public RollbackSnapshot(@JsonProperty(FIELD_SNAPSHOT_ID) long snapshotId) {
             this.snapshotId = snapshotId;
         }
 
         @JsonGetter(FIELD_SNAPSHOT_ID)
-        public Long getSnapshotId() {
+        public long getSnapshotId() {
             return snapshotId;
         }
     }

@@ -69,7 +69,6 @@ import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
-import org.apache.paimon.rest.responses.RollbackTableResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -610,9 +609,8 @@ public class RESTCatalogServer {
         Snapshot snapshot = table.snapshot(snapshotId);
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshot.id());
         if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-            boolean rollbackResult = rollbackTo(identifier, table, snapshot.id());
-            RollbackTableResponse response = new RollbackTableResponse(rollbackResult);
-            return mockResponse(response, 200);
+            rollbackTo(identifier, table, snapshot.id());
+            return new MockResponse().setResponseCode(200);
         }
         return mockResponse(
                 new ErrorResponse(ErrorResponseResourceType.SNAPSHOT, "" + snapshotId, "", 404),
@@ -629,16 +627,15 @@ public class RESTCatalogServer {
             String identifierWithSnapshotId =
                     geTableFullNameWithSnapshotId(identifier, snapshot.id());
             if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-                boolean rollbackResult = rollbackTo(identifier, table, snapshot.id());
-                RollbackTableResponse response = new RollbackTableResponse(rollbackResult);
-                return mockResponse(response, 200);
+                rollbackTo(identifier, table, snapshot.id());
+                return new MockResponse().setResponseCode(200);
             }
         }
         return mockResponse(
                 new ErrorResponse(ErrorResponseResourceType.TAG, "" + tagName, "", 404), 404);
     }
 
-    private boolean rollbackTo(Identifier identifier, FileStoreTable table, Long snapshotId) {
+    private void rollbackTo(Identifier identifier, FileStoreTable table, Long snapshotId) {
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
         long latestSnapshotId = table.latestSnapshot().get().id();
         if (latestSnapshotId > snapshotId) {
@@ -651,7 +648,6 @@ public class RESTCatalogServer {
         tableLatestSnapshotStore.put(
                 identifier.getFullName(),
                 tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
-        return true;
     }
 
     private MockResponse databasesApiHandler(
