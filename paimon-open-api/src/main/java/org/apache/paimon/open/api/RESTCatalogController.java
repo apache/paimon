@@ -32,7 +32,6 @@ import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -125,11 +124,7 @@ public class RESTCatalogController {
             summary = "Create Databases",
             tags = {"database"})
     @ApiResponses({
-        @ApiResponse(
-                responseCode = "200",
-                content = {
-                    @Content(schema = @Schema(implementation = CreateDatabaseResponse.class))
-                }),
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
                 responseCode = "409",
                 description = "Resource has exist",
@@ -139,11 +134,8 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases")
-    public CreateDatabaseResponse createDatabases(
-            @PathVariable String prefix, @RequestBody CreateDatabaseRequest request) {
-        Map<String, String> properties = new HashMap<>();
-        return new CreateDatabaseResponse("name", properties);
-    }
+    public void createDatabases(
+            @PathVariable String prefix, @RequestBody CreateDatabaseRequest request) {}
 
     @Operation(
             summary = "Get Database",
