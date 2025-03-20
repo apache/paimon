@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.requests;
+package org.apache.paimon.table;
+
+import org.apache.paimon.annotation.Public;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -26,31 +28,28 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTyp
 
 import java.io.Serializable;
 
-/** table rollback instance. */
+/** table rollback instant. */
+@Public
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.PROPERTY,
-        property = TableRollbackToInstant.Types.FIELD_TYPE)
+        property = Instant.Types.FIELD_TYPE)
 @JsonSubTypes({
-    @JsonSubTypes.Type(
-            value = TableRollbackToInstant.RollbackSnapshot.class,
-            name = TableRollbackToInstant.Types.SNAPSHOT),
-    @JsonSubTypes.Type(
-            value = TableRollbackToInstant.RollbackTag.class,
-            name = TableRollbackToInstant.Types.TAG)
+    @JsonSubTypes.Type(value = Instant.SnapshotInstant.class, name = Instant.Types.SNAPSHOT),
+    @JsonSubTypes.Type(value = Instant.TagInstant.class, name = Instant.Types.TAG)
 })
-public interface TableRollbackToInstant extends Serializable {
+public interface Instant extends Serializable {
 
-    static TableRollbackToInstant snapshot(Long snapshotId) {
-        return new RollbackSnapshot(snapshotId);
+    static Instant snapshot(Long snapshotId) {
+        return new SnapshotInstant(snapshotId);
     }
 
-    static TableRollbackToInstant tag(String tagName) {
-        return new RollbackTag(tagName);
+    static Instant tag(String tagName) {
+        return new TagInstant(tagName);
     }
 
-    /** snapshot instance for table rollback. */
-    final class RollbackSnapshot implements TableRollbackToInstant {
+    /** snapshot instant for table rollback. */
+    final class SnapshotInstant implements Instant {
 
         private static final long serialVersionUID = 1L;
         private static final String FIELD_SNAPSHOT_ID = "snapshotId";
@@ -59,7 +58,7 @@ public interface TableRollbackToInstant extends Serializable {
         private final long snapshotId;
 
         @JsonCreator
-        public RollbackSnapshot(@JsonProperty(FIELD_SNAPSHOT_ID) long snapshotId) {
+        public SnapshotInstant(@JsonProperty(FIELD_SNAPSHOT_ID) long snapshotId) {
             this.snapshotId = snapshotId;
         }
 
@@ -69,8 +68,8 @@ public interface TableRollbackToInstant extends Serializable {
         }
     }
 
-    /** tag instance for table rollback. */
-    final class RollbackTag implements TableRollbackToInstant {
+    /** tag instant for table rollback. */
+    final class TagInstant implements Instant {
 
         private static final long serialVersionUID = 1L;
         private static final String FIELD_TAG_NAME = "tagName";
@@ -79,7 +78,7 @@ public interface TableRollbackToInstant extends Serializable {
         private final String tagName;
 
         @JsonCreator
-        public RollbackTag(@JsonProperty(FIELD_TAG_NAME) String tagName) {
+        public TagInstant(@JsonProperty(FIELD_TAG_NAME) String tagName) {
             this.tagName = tagName;
         }
 

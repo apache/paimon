@@ -53,7 +53,6 @@ import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
-import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -75,6 +74,7 @@ import org.apache.paimon.rest.responses.PagedResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.system.SystemTableLoader;
@@ -408,9 +408,9 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+    public void rollbackTo(Identifier identifier, Instant instant)
             throws Catalog.TableNotExistException {
-        RollbackTableRequest request = new RollbackTableRequest(tableRollbackToInstant);
+        RollbackTableRequest request = new RollbackTableRequest(instant);
         try {
             client.post(
                     resourcePaths.rollbackTable(

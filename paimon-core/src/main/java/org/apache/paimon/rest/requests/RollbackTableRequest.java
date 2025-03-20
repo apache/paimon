@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.rest.RESTRequest;
+import org.apache.paimon.table.Instant;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -29,19 +30,18 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackTableRequest implements RESTRequest {
 
-    private static final String FIELD_ROLLBACK_TO = "rollbackTo";
+    private static final String FIELD_INSTANT = "instant";
 
-    @JsonProperty(FIELD_ROLLBACK_TO)
-    private final TableRollbackToInstant tableRollbackToInstant;
+    @JsonProperty(FIELD_INSTANT)
+    private final Instant instant;
 
     @JsonCreator
-    public RollbackTableRequest(
-            @JsonProperty(FIELD_ROLLBACK_TO) TableRollbackToInstant tableRollbackToInstant) {
-        this.tableRollbackToInstant = tableRollbackToInstant;
+    public RollbackTableRequest(@JsonProperty(FIELD_INSTANT) Instant instant) {
+        this.instant = instant;
     }
 
-    @JsonGetter(FIELD_ROLLBACK_TO)
-    public TableRollbackToInstant getTableRollbackToInstant() {
-        return tableRollbackToInstant;
+    @JsonGetter(FIELD_INSTANT)
+    public Instant getInstant() {
+        return instant;
     }
 }

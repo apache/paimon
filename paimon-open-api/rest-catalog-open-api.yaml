@@ -1423,15 +1423,15 @@ components:
     RollbackTableRequest:
       type: object
       properties:
-        rollback:
+        instant:
           type: object
           items:
-            $ref: '#/components/schemas/TableRollbackToInstant'
-    TableRollbackToInstant:
+            $ref: '#/components/schemas/Instant'
+    Instant:
       anyOf:
-        - $ref: '#/components/schemas/RollBackSnapshot'
-        - $ref: '#/components/schemas/RemoveOption'
-    RollBackSnapshot:
+        - $ref: '#/components/schemas/SnapshotInstant'
+        - $ref: '#/components/schemas/TagInstant'
+    SnapshotInstant:
       type: object
       properties:
         'type':
@@ -1440,7 +1440,7 @@ components:
         snapshotId:
           type: integer
           format: int64
-    RollBackTag:
+    TagInstant:
       type: object
       properties:
         'type':

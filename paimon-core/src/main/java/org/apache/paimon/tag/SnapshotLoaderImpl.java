@@ -22,7 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.rest.requests.TableRollbackToInstant;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.SnapshotLoader;
 
@@ -52,9 +52,9 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     }
 
     @Override
-    public void rollback(TableRollbackToInstant tableRollbackToInstant) throws IOException {
+    public void rollback(Instant instant) throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
-            catalog.rollbackTo(identifier, tableRollbackToInstant);
+            catalog.rollbackTo(identifier, instant);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {

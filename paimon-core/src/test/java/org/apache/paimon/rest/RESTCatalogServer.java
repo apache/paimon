@@ -50,7 +50,6 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
-import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -75,6 +74,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
@@ -378,18 +378,14 @@ public class RESTCatalogServer {
                             if (!tableMetadataStore.containsKey(identifier.getFullName())) {
                                 throw new Catalog.TableNotExistException(identifier);
                             }
-                            if (requestBody.getTableRollbackToInstant()
-                                    instanceof TableRollbackToInstant.RollbackSnapshot) {
+                            if (requestBody.getInstant() instanceof Instant.SnapshotInstant) {
                                 long snapshotId =
-                                        ((TableRollbackToInstant.RollbackSnapshot)
-                                                        requestBody.getTableRollbackToInstant())
+                                        ((Instant.SnapshotInstant) requestBody.getInstant())
                                                 .getSnapshotId();
                                 return rollbackTableByIdHandle(identifier, snapshotId);
-                            } else if (requestBody.getTableRollbackToInstant()
-                                    instanceof TableRollbackToInstant.RollbackTag) {
+                            } else if (requestBody.getInstant() instanceof Instant.TagInstant) {
                                 String tagName =
-                                        ((TableRollbackToInstant.RollbackTag)
-                                                        requestBody.getTableRollbackToInstant())
+                                        ((Instant.TagInstant) requestBody.getInstant())
                                                 .getTagName();
                                 return rollbackTableByTagNameHandle(identifier, tagName);
                             }

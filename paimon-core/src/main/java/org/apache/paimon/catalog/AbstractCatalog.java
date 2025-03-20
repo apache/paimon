@@ -28,13 +28,13 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
@@ -474,7 +474,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+    public void rollbackTo(Identifier identifier, Instant instant)
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }

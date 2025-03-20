@@ -32,7 +32,6 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
@@ -544,7 +543,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public void rollbackTo(long snapshotId) {
         SnapshotManager snapshotManager = snapshotManager();
         try {
-            snapshotManager.rollback(TableRollbackToInstant.snapshot(snapshotId));
+            snapshotManager.rollback(Instant.snapshot(snapshotId));
             return;
         } catch (UnsupportedOperationException ignore) {
         }
@@ -677,7 +676,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public void rollbackTo(String tagName) {
         SnapshotManager snapshotManager = snapshotManager();
         try {
-            snapshotManager.rollback(TableRollbackToInstant.tag(tagName));
+            snapshotManager.rollback(Instant.tag(tagName));
             return;
         } catch (UnsupportedOperationException ignore) {
 
