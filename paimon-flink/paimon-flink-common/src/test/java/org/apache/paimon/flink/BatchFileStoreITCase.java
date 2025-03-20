@@ -695,7 +695,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                     .satisfies(
                             anyCauseMatches(
                                     TimeTravelUtil.InconsistentTagBucketException.class,
-                                    "The bucket number of two tags are different (1, 2), which is not supported in incremental tag query."));
+                                    "The bucket number of two snapshots are different (1, 2), which is not supported in incremental diff query."));
         }
     }
 
