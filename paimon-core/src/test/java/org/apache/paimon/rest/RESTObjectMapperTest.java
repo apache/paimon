@@ -26,7 +26,6 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -82,17 +81,6 @@ public class RESTObjectMapperTest {
                 OBJECT_MAPPER.readValue(requestStr, CreateDatabaseRequest.class);
         assertEquals(request.getName(), parseData.getName());
         assertEquals(request.getOptions().size(), parseData.getOptions().size());
-    }
-
-    @Test
-    public void createDatabaseResponseParseTest() throws Exception {
-        String name = MockRESTMessage.databaseName();
-        CreateDatabaseResponse response = MockRESTMessage.createDatabaseResponse(name);
-        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
-        CreateDatabaseResponse parseData =
-                OBJECT_MAPPER.readValue(responseStr, CreateDatabaseResponse.class);
-        assertEquals(name, parseData.getName());
-        assertEquals(response.getOptions().size(), parseData.getOptions().size());
     }
 
     @Test

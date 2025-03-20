@@ -55,7 +55,6 @@ import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -207,11 +206,7 @@ public class RESTCatalog implements Catalog {
         checkNotSystemDatabase(name);
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         try {
-            client.post(
-                    resourcePaths.databases(),
-                    request,
-                    CreateDatabaseResponse.class,
-                    restAuthFunction);
+            client.post(resourcePaths.databases(), request, restAuthFunction);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new DatabaseAlreadyExistException(name);

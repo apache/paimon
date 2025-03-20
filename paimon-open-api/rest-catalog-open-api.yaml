@@ -234,11 +234,7 @@ paths:
               $ref: '#/components/schemas/CreateDatabaseRequest'
       responses:
         "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreateDatabaseResponse'
+          description: Success, no content
         "409":
           description: Resource has exist
           content:
@@ -1430,8 +1426,6 @@ components:
           format: int64
         schema:
           $ref: '#/components/schemas/Schema'
-        uuid:
-          type: string
         owner:
           type: string
         createdAt:

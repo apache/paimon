@@ -52,7 +52,6 @@ import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -571,7 +570,6 @@ public class RESTCatalogServer {
 
     private MockResponse databasesApiHandler(
             String method, String data, Map<String, String> parameters) throws Exception {
-        RESTResponse response;
         switch (method) {
             case "GET":
                 List<String> databases = new ArrayList<>(databaseStore.keySet());
@@ -586,8 +584,7 @@ public class RESTCatalogServer {
                 catalog.createDatabase(databaseName, false);
                 databaseStore.put(
                         databaseName, Database.of(databaseName, requestBody.getOptions(), null));
-                response = new CreateDatabaseResponse(databaseName, requestBody.getOptions());
-                return mockResponse(response, 200);
+                return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
         }

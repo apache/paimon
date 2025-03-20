@@ -27,7 +27,6 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -70,12 +69,6 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("a", "b");
         return new CreateDatabaseRequest(name, options);
-    }
-
-    public static CreateDatabaseResponse createDatabaseResponse(String name) {
-        Map<String, String> options = new HashMap<>();
-        options.put("a", "b");
-        return new CreateDatabaseResponse(name, options);
     }
 
     public static GetDatabaseResponse getDatabaseResponse(String name) {
