@@ -25,22 +25,23 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Request for rollback table by tag name. */
+/** Request for rollback table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class RollbackTableByTagNameRequest implements RESTRequest {
+public class RollbackTableRequest implements RESTRequest {
 
-    private static final String FIELD_TAG_NAME = "tagName";
+    private static final String FIELD_ROLLBACK_INSTANCE = "rollback";
 
-    @JsonProperty(FIELD_TAG_NAME)
-    private final String tagName;
+    @JsonProperty(FIELD_ROLLBACK_INSTANCE)
+    private final TableRollbackToInstant tableRollbackToInstant;
 
     @JsonCreator
-    public RollbackTableByTagNameRequest(@JsonProperty(FIELD_TAG_NAME) String tagName) {
-        this.tagName = tagName;
+    public RollbackTableRequest(
+            @JsonProperty(FIELD_ROLLBACK_INSTANCE) TableRollbackToInstant tableRollbackToInstant) {
+        this.tableRollbackToInstant = tableRollbackToInstant;
     }
 
-    @JsonGetter(FIELD_TAG_NAME)
-    public String getTagName() {
-        return tagName;
+    @JsonGetter(FIELD_ROLLBACK_INSTANCE)
+    public TableRollbackToInstant getTableRollbackToInstant() {
+        return tableRollbackToInstant;
     }
 }

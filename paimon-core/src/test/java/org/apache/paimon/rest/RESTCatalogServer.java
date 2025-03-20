@@ -49,8 +49,8 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
-import org.apache.paimon.rest.requests.RollbackTableBySnapshotIdRequest;
-import org.apache.paimon.rest.requests.RollbackTableByTagNameRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -301,16 +301,10 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "commit".equals(resources[3]);
-                        boolean isRollbackTableSnapshotById =
-                                resources.length == 5
+                        boolean isRollbackTable =
+                                resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
-                                        && ResourcePaths.ROLLBACK.equals(resources[3])
-                                        && ResourcePaths.SNAPSHOT_ID.equals(resources[4]);
-                        boolean isRollbackTableByTagName =
-                                resources.length == 5
-                                        && ResourcePaths.TABLES.equals(resources[1])
-                                        && ResourcePaths.ROLLBACK.equals(resources[3])
-                                        && ResourcePaths.TAG_NAME.equals(resources[4]);
+                                        && ResourcePaths.ROLLBACK.equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -376,11 +370,30 @@ public class RESTCatalogServer {
                             return snapshotHandle(identifier);
                         } else if (isCommitSnapshot) {
                             return commitTableHandle(identifier, restAuthParameter.data());
-                        } else if (isRollbackTableSnapshotById) {
-                            return rollbackTableByIdHandle(identifier, restAuthParameter.data());
-                        } else if (isRollbackTableByTagName) {
-                            return rollbackTableByTagNameHandle(
-                                    identifier, restAuthParameter.data());
+                        } else if (isRollbackTable) {
+                            RollbackTableRequest requestBody =
+                                    OBJECT_MAPPER.readValue(data, RollbackTableRequest.class);
+                            if (noPermissionTables.contains(identifier.getFullName())) {
+                                throw new Catalog.TableNoPermissionException(identifier);
+                            }
+                            if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+                                throw new Catalog.TableNotExistException(identifier);
+                            }
+                            if (requestBody.getTableRollbackToInstant()
+                                    instanceof TableRollbackToInstant.RollBackSnapshot) {
+                                long snapshotId =
+                                        ((TableRollbackToInstant.RollBackSnapshot)
+                                                        requestBody.getTableRollbackToInstant())
+                                                .getSnapshotId();
+                                return rollbackTableByIdHandle(identifier, snapshotId);
+                            } else if (requestBody.getTableRollbackToInstant()
+                                    instanceof TableRollbackToInstant.RollBackTag) {
+                                String tagName =
+                                        ((TableRollbackToInstant.RollBackTag)
+                                                        requestBody.getTableRollbackToInstant())
+                                                .getTagName();
+                                return rollbackTableByTagNameHandle(identifier, tagName);
+                            }
                         } else if (isTable) {
                             return tableHandle(
                                     restAuthParameter.method(),
@@ -591,81 +604,54 @@ public class RESTCatalogServer {
         return mockResponse(response, 200);
     }
 
-    private MockResponse rollbackTableByIdHandle(Identifier identifier, String data)
+    private MockResponse rollbackTableByIdHandle(Identifier identifier, long snapshotId)
             throws Exception {
-        RollbackTableBySnapshotIdRequest requestBody =
-                OBJECT_MAPPER.readValue(data, RollbackTableBySnapshotIdRequest.class);
-        if (noPermissionTables.contains(identifier.getFullName())) {
-            throw new Catalog.TableNoPermissionException(identifier);
-        }
-        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
-            throw new Catalog.TableNotExistException(identifier);
-        }
         FileStoreTable table = getFileTable(identifier);
-        Snapshot snapshot = table.snapshot(requestBody.getSnapshotId());
+        Snapshot snapshot = table.snapshot(snapshotId);
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshot.id());
         if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-            long latestSnapshotId = table.latestSnapshot().get().id();
-            if (latestSnapshotId > requestBody.getSnapshotId()) {
-                for (long i = requestBody.getSnapshotId() + 1; i < latestSnapshotId + 1; i++) {
-                    tableWithSnapshotId2SnapshotStore.remove(
-                            geTableFullNameWithSnapshotId(identifier, i));
-                }
-            }
-            table.rollbackTo(requestBody.getSnapshotId());
-            tableLatestSnapshotStore.put(
-                    identifier.getFullName(),
-                    tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
-            RollbackTableResponse response = new RollbackTableResponse(true);
+            boolean rollbackResult = rollbackTo(identifier, table, snapshot.id());
+            RollbackTableResponse response = new RollbackTableResponse(rollbackResult);
             return mockResponse(response, 200);
         }
         return mockResponse(
-                new ErrorResponse(
-                        ErrorResponseResourceType.SNAPSHOT,
-                        "" + requestBody.getSnapshotId(),
-                        "",
-                        404),
+                new ErrorResponse(ErrorResponseResourceType.SNAPSHOT, "" + snapshotId, "", 404),
                 404);
     }
 
-    private MockResponse rollbackTableByTagNameHandle(Identifier identifier, String data)
+    private MockResponse rollbackTableByTagNameHandle(Identifier identifier, String tagName)
             throws Exception {
-        RollbackTableByTagNameRequest requestBody =
-                OBJECT_MAPPER.readValue(data, RollbackTableByTagNameRequest.class);
-        if (noPermissionTables.contains(identifier.getFullName())) {
-            throw new Catalog.TableNoPermissionException(identifier);
-        }
-        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
-            throw new Catalog.TableNotExistException(identifier);
-        }
         FileStoreTable table = getFileTable(identifier);
-        boolean isExist = table.tagManager().tagExists(requestBody.getTagName());
+        boolean isExist = table.tagManager().tagExists(tagName);
         if (isExist) {
-            table.tagManager().get(requestBody.getTagName());
-            Snapshot snapshot =
-                    table.tagManager().getOrThrow(requestBody.getTagName()).trimToSnapshot();
+            table.tagManager().get(tagName);
+            Snapshot snapshot = table.tagManager().getOrThrow(tagName).trimToSnapshot();
             String identifierWithSnapshotId =
                     geTableFullNameWithSnapshotId(identifier, snapshot.id());
             if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-                long latestSnapshotId = table.latestSnapshot().get().id();
-                if (latestSnapshotId > snapshot.id()) {
-                    for (long i = snapshot.id() + 1; i < latestSnapshotId + 1; i++) {
-                        tableWithSnapshotId2SnapshotStore.remove(
-                                geTableFullNameWithSnapshotId(identifier, i));
-                    }
-                }
-                table.rollbackTo(snapshot.id());
-                tableLatestSnapshotStore.put(
-                        identifier.getFullName(),
-                        tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
-                RollbackTableResponse response = new RollbackTableResponse(true);
+                boolean rollbackResult = rollbackTo(identifier, table, snapshot.id());
+                RollbackTableResponse response = new RollbackTableResponse(rollbackResult);
                 return mockResponse(response, 200);
             }
         }
         return mockResponse(
-                new ErrorResponse(
-                        ErrorResponseResourceType.TAG, "" + requestBody.getTagName(), "", 404),
-                404);
+                new ErrorResponse(ErrorResponseResourceType.TAG, "" + tagName, "", 404), 404);
+    }
+
+    private boolean rollbackTo(Identifier identifier, FileStoreTable table, Long snapshotId) {
+        String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
+        long latestSnapshotId = table.latestSnapshot().get().id();
+        if (latestSnapshotId > snapshotId) {
+            for (long i = snapshotId + 1; i < latestSnapshotId + 1; i++) {
+                tableWithSnapshotId2SnapshotStore.remove(
+                        geTableFullNameWithSnapshotId(identifier, i));
+            }
+        }
+        table.rollbackTo(snapshotId);
+        tableLatestSnapshotStore.put(
+                identifier.getFullName(),
+                tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
+        return true;
     }
 
     private MockResponse databasesApiHandler(

@@ -26,6 +26,8 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -264,6 +266,14 @@ public class MockRESTMessage {
     public static GetTableTokenResponse getTableCredentialsResponse() {
         return new GetTableTokenResponse(
                 ImmutableMap.of("key", "value"), System.currentTimeMillis());
+    }
+
+    public static RollbackTableRequest rollbackTableRequestBySnapshot(long snapshotId) {
+        return new RollbackTableRequest(TableRollbackToInstant.snapshot(snapshotId));
+    }
+
+    public static RollbackTableRequest rollbackTableRequestByTag(String tagName) {
+        return new RollbackTableRequest(TableRollbackToInstant.tag(tagName));
     }
 
     private static ViewSchema viewSchema() {

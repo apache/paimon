@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -29,9 +30,7 @@ public interface SnapshotLoader extends Serializable {
 
     Optional<Snapshot> load() throws IOException;
 
-    boolean rollback(long snapshotId) throws IOException;
-
-    boolean rollback(String tagName) throws IOException;
+    boolean rollback(TableRollbackToInstant tableRollbackToInstant) throws IOException;
 
     boolean needCleanWhenRollback();
 

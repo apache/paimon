@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -473,14 +474,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackTableBySnapshotId(Identifier identifier, Long snapshotId)
-            throws TableNotExistException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean rollbackTableByTagName(Identifier identifier, String tagName)
-            throws TableNotExistException {
+    public boolean rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+            throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }
 

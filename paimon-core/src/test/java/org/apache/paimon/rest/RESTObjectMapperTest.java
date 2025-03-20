@@ -24,6 +24,8 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreateDatabaseResponse;
@@ -249,5 +251,34 @@ public class RESTObjectMapperTest {
                 OBJECT_MAPPER.readValue(responseStr, GetTableTokenResponse.class);
         assertEquals(response.getToken(), parseData.getToken());
         assertEquals(response.getExpiresAtMillis(), parseData.getExpiresAtMillis());
+    }
+
+    @Test
+    public void rollbackTableRequestParseTest() throws Exception {
+        Long snapshotId = 123L;
+        String tagName = "tagName";
+        RollbackTableRequest rollbackTableRequestBySnapshot =
+                MockRESTMessage.rollbackTableRequestBySnapshot(snapshotId);
+        String rollbackTableRequestBySnapshotStr =
+                OBJECT_MAPPER.writeValueAsString(rollbackTableRequestBySnapshot);
+        TableRollbackToInstant.RollBackSnapshot rollbackTableRequestParseData =
+                (TableRollbackToInstant.RollBackSnapshot)
+                        OBJECT_MAPPER
+                                .readValue(
+                                        rollbackTableRequestBySnapshotStr,
+                                        RollbackTableRequest.class)
+                                .getTableRollbackToInstant();
+        assertEquals(rollbackTableRequestParseData.getSnapshotId(), snapshotId);
+
+        RollbackTableRequest rollbackTableRequestByTag =
+                MockRESTMessage.rollbackTableRequestByTag(tagName);
+        String rollbackTableRequestByTagStr =
+                OBJECT_MAPPER.writeValueAsString(rollbackTableRequestByTag);
+        TableRollbackToInstant.RollBackTag rollbackTableRequestByTagParseData =
+                (TableRollbackToInstant.RollBackTag)
+                        OBJECT_MAPPER
+                                .readValue(rollbackTableRequestByTagStr, RollbackTableRequest.class)
+                                .getTableRollbackToInstant();
+        assertEquals(rollbackTableRequestByTagParseData.getTagName(), tagName);
     }
 }

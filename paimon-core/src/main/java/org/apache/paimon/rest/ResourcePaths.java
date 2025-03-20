@@ -36,8 +36,6 @@ public class ResourcePaths {
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
     protected static final String ROLLBACK = "rollback";
-    protected static final String SNAPSHOT_ID = "snapshot-id";
-    protected static final String TAG_NAME = "tag-name";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
 
@@ -100,7 +98,7 @@ public class ResourcePaths {
                 "commit");
     }
 
-    public String rollbackTableBySnapshotId(String databaseName, String objectName) {
+    public String rollbackTable(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
                 prefix,
@@ -108,20 +106,7 @@ public class ResourcePaths {
                 encodeString(databaseName),
                 TABLES,
                 encodeString(objectName),
-                ROLLBACK,
-                SNAPSHOT_ID);
-    }
-
-    public String rollbackTableByTagName(String databaseName, String objectName) {
-        return SLASH.join(
-                V1,
-                prefix,
-                DATABASES,
-                encodeString(databaseName),
-                TABLES,
-                encodeString(objectName),
-                ROLLBACK,
-                TAG_NAME);
+                ROLLBACK);
     }
 
     public String tableToken(String databaseName, String objectName) {

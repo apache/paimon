@@ -22,6 +22,7 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -141,15 +142,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackTableBySnapshotId(Identifier identifier, Long snapshotId)
-            throws TableNotExistException {
-        return wrapped.rollbackTableBySnapshotId(identifier, snapshotId);
-    }
-
-    @Override
-    public boolean rollbackTableByTagName(Identifier identifier, String tagName)
-            throws TableNotExistException {
-        return wrapped.rollbackTableByTagName(identifier, tagName);
+    public boolean rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+            throws Catalog.TableNotExistException {
+        return wrapped.rollbackTo(identifier, tableRollbackToInstant);
     }
 
     @Override

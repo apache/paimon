@@ -52,8 +52,8 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
-import org.apache.paimon.rest.requests.RollbackTableBySnapshotIdRequest;
-import org.apache.paimon.rest.requests.RollbackTableByTagNameRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
@@ -409,15 +409,14 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public boolean rollbackTableBySnapshotId(Identifier identifier, Long snapshotId)
-            throws TableNotExistException {
-        RollbackTableBySnapshotIdRequest request = new RollbackTableBySnapshotIdRequest(snapshotId);
+    public boolean rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
+            throws Catalog.TableNotExistException {
+        RollbackTableRequest request = new RollbackTableRequest(tableRollbackToInstant);
         RollbackTableResponse response;
-
         try {
             response =
                     client.post(
-                            resourcePaths.rollbackTableBySnapshotId(
+                            resourcePaths.rollbackTable(
                                     identifier.getDatabaseName(), identifier.getObjectName()),
                             request,
                             RollbackTableResponse.class,
@@ -425,33 +424,10 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             if (e.resourceType() == ErrorResponseResourceType.SNAPSHOT) {
                 throw new IllegalArgumentException(
-                        String.format("Rollback snapshot '%s' doesn't exist.", snapshotId));
-            }
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
-
-        return response.isSuccess();
-    }
-
-    @Override
-    public boolean rollbackTableByTagName(Identifier identifier, String tagName)
-            throws TableNotExistException {
-        RollbackTableByTagNameRequest request = new RollbackTableByTagNameRequest(tagName);
-        RollbackTableResponse response;
-        try {
-            response =
-                    client.post(
-                            resourcePaths.rollbackTableByTagName(
-                                    identifier.getDatabaseName(), identifier.getObjectName()),
-                            request,
-                            RollbackTableResponse.class,
-                            restAuthFunction);
-        } catch (NoSuchResourceException e) {
-            if (e.resourceType() == ErrorResponseResourceType.TAG) {
+                        String.format("Rollback snapshot '%s' doesn't exist.", e.resourceName()));
+            } else if (e.resourceType() == ErrorResponseResourceType.TAG) {
                 throw new IllegalArgumentException(
-                        String.format("Rollback tag '%s' doesn't exist.", tagName));
+                        String.format("Rollback tag '%s' doesn't exist.", e.resourceName()));
             }
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {

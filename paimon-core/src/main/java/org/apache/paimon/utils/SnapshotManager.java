@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
@@ -197,7 +198,7 @@ public class SnapshotManager implements Serializable {
     public boolean rollback(long snapshotId) {
         if (snapshotLoader != null) {
             try {
-                return snapshotLoader.rollback(snapshotId);
+                return snapshotLoader.rollback(TableRollbackToInstant.snapshot(snapshotId));
             } catch (UnsupportedOperationException ignored) {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
@@ -215,7 +216,7 @@ public class SnapshotManager implements Serializable {
     public boolean rollback(String tagName, TagManager tagManager) {
         if (snapshotLoader != null) {
             try {
-                return snapshotLoader.rollback(tagName);
+                return snapshotLoader.rollback(TableRollbackToInstant.tag(tagName));
             } catch (UnsupportedOperationException ignored) {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);

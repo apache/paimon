@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -532,25 +533,14 @@ public interface Catalog extends AutoCloseable {
             throws Catalog.TableNotExistException;
 
     /**
-     * rollback table by the given {@link Identifier} and snapshotId.
+     * rollback table by the given {@link Identifier} and tableRollbackToInstant.
      *
      * @param identifier path of the table
-     * @param snapshotId id of snapshot
+     * @param tableRollbackToInstant rollback instance like snapshotId or tagName
      * @return whether success
      * @throws Catalog.TableNotExistException if the target does not exist
      */
-    boolean rollbackTableBySnapshotId(Identifier identifier, Long snapshotId)
-            throws Catalog.TableNotExistException;
-
-    /**
-     * rollback table by the given {@link Identifier} and tagName.
-     *
-     * @param identifier path of the table
-     * @param tagName name of tag
-     * @return whether success
-     * @throws Catalog.TableNotExistException if the target does not exist
-     */
-    boolean rollbackTableByTagName(Identifier identifier, String tagName)
+    boolean rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
             throws Catalog.TableNotExistException;
 
     /**
