@@ -606,10 +606,9 @@ public class RESTCatalogServer {
     private MockResponse rollbackTableByIdHandle(Identifier identifier, long snapshotId)
             throws Exception {
         FileStoreTable table = getFileTable(identifier);
-        Snapshot snapshot = table.snapshot(snapshotId);
-        String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshot.id());
+        String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
         if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-            rollbackTo(identifier, table, snapshot.id());
+            rollbackTo(identifier, table, snapshotId);
             return new MockResponse().setResponseCode(200);
         }
         return mockResponse(

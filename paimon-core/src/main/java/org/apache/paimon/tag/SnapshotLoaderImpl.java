@@ -63,17 +63,6 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     }
 
     @Override
-    public boolean needCleanAfterRollback() {
-        try (Catalog catalog = catalogLoader.load()) {
-            return catalog.needCleanAfterRollback();
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
     public SnapshotLoader copyWithBranch(String branch) {
         return new SnapshotLoaderImpl(
                 catalogLoader,

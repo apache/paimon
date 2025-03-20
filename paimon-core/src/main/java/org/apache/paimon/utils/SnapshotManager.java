@@ -52,7 +52,6 @@ import java.util.stream.LongStream;
 
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
@@ -195,50 +194,16 @@ public class SnapshotManager implements Serializable {
         return earliestSnapshot(null);
     }
 
-    public void rollback(long snapshotId) {
+    public void rollback(TableRollbackToInstant tableRollbackToInstant) {
         if (snapshotLoader != null) {
             try {
-                snapshotLoader.rollback(TableRollbackToInstant.snapshot(snapshotId));
+                snapshotLoader.rollback(tableRollbackToInstant);
                 return;
-            } catch (UnsupportedOperationException ignored) {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
         }
-        // modify the latest hint
-        try {
-            commitLatestHint(snapshotId);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    public void rollback(String tagName, TagManager tagManager) {
-        if (snapshotLoader != null) {
-            try {
-                snapshotLoader.rollback(TableRollbackToInstant.tag(tagName));
-                return;
-            } catch (UnsupportedOperationException ignored) {
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-        // modify the latest hint
-        checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
-
-        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
-        try {
-            commitLatestHint(taggedSnapshot.id());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    public boolean needCleanWhenRollback() {
-        if (snapshotLoader != null) {
-            return snapshotLoader.needCleanAfterRollback();
-        }
-        return true;
+        throw new UnsupportedOperationException("rollback is not supported");
     }
 
     private @Nullable Snapshot earliestSnapshot(@Nullable Long stopSnapshotId) {

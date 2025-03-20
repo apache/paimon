@@ -32,6 +32,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.rest.requests.TableRollbackToInstant;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
@@ -82,7 +83,6 @@ import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
 abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -543,21 +543,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void rollbackTo(long snapshotId) {
         SnapshotManager snapshotManager = snapshotManager();
+        try {
+            snapshotManager.rollback(TableRollbackToInstant.snapshot(snapshotId));
+            return;
+        } catch (UnsupportedOperationException ignore) {
+        }
         checkArgument(
                 snapshotManager.snapshotExists(snapshotId),
                 "Rollback snapshot '%s' doesn't exist.",
                 snapshotId);
-        snapshotManager.rollback(snapshotId);
-        if (snapshotManager.needCleanWhenRollback()) {
-            long earliest =
-                    checkNotNull(
-                            snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
-            long latest =
-                    checkNotNull(
-                            snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
-            rollbackHelper()
-                    .cleanLargerThan(earliest, latest, snapshotManager.snapshot(snapshotId));
-        }
+        rollbackHelper().updateLatestAndCleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
@@ -681,20 +676,20 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void rollbackTo(String tagName) {
         SnapshotManager snapshotManager = snapshotManager();
-        long earliest =
-                checkNotNull(
-                        snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
-        long latest =
-                checkNotNull(snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
-        TagManager tagManager = tagManager();
-        snapshotManager.rollback(tagName, tagManager);
-        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
-        if (snapshotManager.needCleanWhenRollback()) {
-            rollbackHelper().cleanLargerThan(earliest, latest, taggedSnapshot);
-        }
         try {
-            // it is possible that the earliest snapshot is later than the rollback tag
-            // because of
+            snapshotManager.rollback(TableRollbackToInstant.tag(tagName));
+            return;
+        } catch (UnsupportedOperationException ignore) {
+
+        }
+        TagManager tagManager = tagManager();
+        checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
+
+        Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
+        rollbackHelper().updateLatestAndCleanLargerThan(taggedSnapshot);
+
+        try {
+            // it is possible that the earliest snapshot is later than the rollback tag because of
             // snapshot expiration, in this case the `cleanLargerThan` method will delete all
             // snapshots, so we should write the tag file to snapshot directory and modify the
             // earliest hint

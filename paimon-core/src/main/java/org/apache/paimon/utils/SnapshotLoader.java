@@ -32,7 +32,5 @@ public interface SnapshotLoader extends Serializable {
 
     void rollback(TableRollbackToInstant tableRollbackToInstant) throws IOException;
 
-    boolean needCleanAfterRollback();
-
     SnapshotLoader copyWithBranch(String branch);
 }

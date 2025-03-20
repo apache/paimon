@@ -425,11 +425,7 @@ public class RESTCatalogController {
             summary = "Rollback table",
             tags = {"table"})
     @ApiResponses({
-        @ApiResponse(
-                responseCode = "200",
-                content = {
-                    @Content(schema = @Schema(implementation = RollbackTableResponse.class))
-                }),
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",

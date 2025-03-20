@@ -542,15 +542,6 @@ public interface Catalog extends AutoCloseable {
     void rollbackTo(Identifier identifier, TableRollbackToInstant tableRollbackToInstant)
             throws Catalog.TableNotExistException;
 
-    /**
-     * need clean after rollback table.
-     *
-     * @return whether need
-     */
-    default boolean needCleanAfterRollback() {
-        return true;
-    }
-
     // ==================== Partition Modifications ==========================
 
     /**
