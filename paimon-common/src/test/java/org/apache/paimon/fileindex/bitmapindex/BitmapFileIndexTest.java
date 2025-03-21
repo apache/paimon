@@ -83,7 +83,8 @@ public class BitmapFileIndexTest {
     @Test
     public void testCompoundIndexResult() {
 
-        BitmapIndexResult bitmapIndexResult = new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(1, 3, 5));
+        BitmapIndexResult bitmapIndexResult =
+                new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(1, 3, 5));
         BitmapIndexResult bitmapEmptyResult = new BitmapIndexResult(RoaringBitmap32::bitmapOf);
 
         assert FileIndexResult.REMAIN.remain();
