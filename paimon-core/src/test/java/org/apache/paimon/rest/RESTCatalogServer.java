@@ -161,7 +161,7 @@ public class RESTCatalogServer {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        this.catalog = new FileSystemCatalog(fileIO, warehousePath, context.options());
+        this.catalog = new RestTestFileSystemCatalog(fileIO, warehousePath, context.options());
         this.dispatcher = initDispatcher(authProvider);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);

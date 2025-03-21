@@ -134,7 +134,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean allowCustomTablePath() {
-        return true;
+        return false;
     }
 
     @Override
