@@ -23,19 +23,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.FieldIdentifier;
-import org.apache.paimon.types.RowType;
 
-import org.apache.commons.collections.CollectionUtils;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
-
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * A {@link ProcessFunction} to handle schema changes. New schema is represented by a {@link
@@ -51,8 +41,6 @@ public class UpdatedDataFieldsProcessFunction
 
     private final Identifier identifier;
 
-    private Set<FieldIdentifier> latestFields;
-
     public UpdatedDataFieldsProcessFunction(
             SchemaManager schemaManager,
             Identifier identifier,
@@ -61,47 +49,13 @@ public class UpdatedDataFieldsProcessFunction
         super(catalogLoader, typeMapping);
         this.schemaManager = schemaManager;
         this.identifier = identifier;
-        this.latestFields = new HashSet<>();
     }
 
     @Override
     public void processElement(CdcSchema updatedSchema, Context context, Collector<Void> collector)
             throws Exception {
-        List<DataField> actualUpdatedDataFields =
-                updatedSchema.fields().stream()
-                        .filter(
-                                dataField ->
-                                        !latestDataFieldContain(new FieldIdentifier(dataField)))
-                        .collect(Collectors.toList());
-        if (CollectionUtils.isEmpty(actualUpdatedDataFields) && updatedSchema.comment() == null) {
-            return;
-        }
-        CdcSchema actualUpdatedSchema =
-                new CdcSchema(
-                        actualUpdatedDataFields,
-                        updatedSchema.primaryKeys(),
-                        updatedSchema.comment());
-        for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, actualUpdatedSchema)) {
+        for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, updatedSchema)) {
             applySchemaChange(schemaManager, schemaChange, identifier);
         }
-        /*
-         * Here, actualUpdatedDataFields cannot be used to update latestFields because there is a
-         * non-SchemaChange.AddColumn scenario. Otherwise, the previously existing fields cannot be
-         * modified again.
-         */
-        updateLatestFields();
-    }
-
-    private boolean latestDataFieldContain(FieldIdentifier dataField) {
-        return latestFields.stream().anyMatch(previous -> Objects.equals(previous, dataField));
-    }
-
-    private void updateLatestFields() {
-        RowType oldRowType = schemaManager.latest().get().logicalRowType();
-        Set<FieldIdentifier> fieldIdentifiers =
-                oldRowType.getFields().stream()
-                        .map(item -> new FieldIdentifier(item))
-                        .collect(Collectors.toSet());
-        latestFields = fieldIdentifiers;
     }
 }
