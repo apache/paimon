@@ -80,6 +80,7 @@ public class MockRESTMessage {
         return new GetDatabaseResponse(
                 UUID.randomUUID().toString(),
                 name,
+                "/tmp/",
                 options,
                 "owner",
                 System.currentTimeMillis(),
@@ -225,6 +226,7 @@ public class MockRESTMessage {
         return new GetTableResponse(
                 UUID.randomUUID().toString(),
                 "",
+                "/tmp/",
                 false,
                 1,
                 schema(options),

@@ -32,6 +32,7 @@ public class GetTableResponse extends BaseResourceAuditResponse implements RESTR
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
+    private static final String FIELD_PATH = "path";
     private static final String FIELD_IS_EXTERNAL = "isExternal";
     private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_SCHEMA = "schema";
@@ -41,6 +42,9 @@ public class GetTableResponse extends BaseResourceAuditResponse implements RESTR
 
     @JsonProperty(FIELD_NAME)
     private final String name;
+
+    @JsonProperty(FIELD_PATH)
+    private final String path;
 
     @JsonProperty(FIELD_IS_EXTERNAL)
     private final boolean isExternal;
@@ -55,6 +59,7 @@ public class GetTableResponse extends BaseResourceAuditResponse implements RESTR
     public GetTableResponse(
             @JsonProperty(FIELD_ID) String id,
             @JsonProperty(FIELD_NAME) String name,
+            @JsonProperty(FIELD_PATH) String path,
             @JsonProperty(FIELD_IS_EXTERNAL) boolean isExternal,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_SCHEMA) Schema schema,
@@ -66,6 +71,7 @@ public class GetTableResponse extends BaseResourceAuditResponse implements RESTR
         super(owner, createdAt, createdBy, updatedAt, updatedBy);
         this.id = id;
         this.name = name;
+        this.path = path;
         this.isExternal = isExternal;
         this.schemaId = schemaId;
         this.schema = schema;
@@ -79,6 +85,11 @@ public class GetTableResponse extends BaseResourceAuditResponse implements RESTR
     @JsonGetter(FIELD_NAME)
     public String getName() {
         return this.name;
+    }
+
+    @JsonGetter(FIELD_PATH)
+    public String getPath() {
+        return this.path;
     }
 
     @JsonGetter(FIELD_IS_EXTERNAL)

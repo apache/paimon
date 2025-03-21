@@ -176,6 +176,7 @@ public class RESTCatalogController {
         return new GetDatabaseResponse(
                 UUID.randomUUID().toString(),
                 "name",
+                "/tmp/",
                 options,
                 "owner",
                 System.currentTimeMillis(),
@@ -293,6 +294,7 @@ public class RESTCatalogController {
                 new GetTableResponse(
                         UUID.randomUUID().toString(),
                         "",
+                        "/tmp/",
                         false,
                         1,
                         new org.apache.paimon.schema.Schema(
@@ -340,6 +342,7 @@ public class RESTCatalogController {
         return new GetTableResponse(
                 UUID.randomUUID().toString(),
                 "",
+                "/tmp/",
                 false,
                 1,
                 new org.apache.paimon.schema.Schema(
