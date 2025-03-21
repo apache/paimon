@@ -482,15 +482,15 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     )
   }
 
-  private def repartitionByPartitionsAndBucket(ds: Dataset[Row]): Dataset[Row] = {
-    val inputSchema = ds.schema
+  private def repartitionByPartitionsAndBucket(df: DataFrame): DataFrame = {
+    val inputSchema = df.schema
     val partitionCols = tableSchema
       .partitionKeys()
       .asScala
       .map(tableSchema.fieldNames().indexOf(_))
       .map(x => col(inputSchema.fieldNames(x)))
       .toSeq
-    ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
+    df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
   }
 
   private def deserializeCommitMessage(
