@@ -601,6 +601,45 @@ All available procedures are listed below.
          CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/><br/>
       </td>
    </tr>
+   <tr>
+      <td>expire_changelogs</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.expire_changelogs(<br/>
+            `table` => 'identifier', <br/>
+            retain_max => 'retain_max', <br/>
+            retain_min => 'retain_min', <br/>
+            older_than => 'older_than', <br/>
+            max_deletes => 'max_deletes') <br/>
+            delete_all => 'delete_all') <br/><br/>
+         -- Use indexed argument<br/>
+         -- for Flink 1.18<br/>
+         CALL [catalog.]sys.expire_changelogs(table, retain_max, retain_min, older_than, max_deletes)<br/><br/>
+         CALL [catalog.]sys.expire_changelogs(table, delete_all)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL [catalog.]sys.expire_changelogs(table, retain_max, retain_min, older_than, max_deletes, delete_all)<br/><br/>
+      </td>
+      <td>
+         To expire changelogs. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>retain_max: the maximum number of completed changelogs to retain.</li>
+            <li>retain_min: the minimum number of completed changelogs to retain.</li>
+            <li>order_than: timestamp before which changelogs will be removed.</li>
+            <li>max_deletes: the maximum number of changelogs that can be deleted at once.</li>
+            <li>delete_all: whether to delete all separated changelogs.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/><br/>
+         CALL sys.expire_changelogs('default.T', 4, 2, '2024-01-01 12:00:00', 2)<br/><br/>
+         CALL sys.expire_changelogs('default.T', true)<br/><br/>
+         -- for Flink 1.19 and later<br/><br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', retain_max => 2)<br/><br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00')<br/><br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00', retain_min => 10)<br/><br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/><br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', delete_all => true)<br/><br/>
+      </td>
+   </tr>
 <tr>
       <td>expire_partitions</td>
       <td>

@@ -42,6 +42,7 @@ org.apache.paimon.flink.action.RenameTagActionFactory
 org.apache.paimon.flink.action.RepairActionFactory
 org.apache.paimon.flink.action.RewriteFileIndexActionFactory
 org.apache.paimon.flink.action.ExpireSnapshotsActionFactory
+org.apache.paimon.flink.action.ExpireChangelogsActionFactory
 org.apache.paimon.flink.action.RemoveUnexistingFilesActionFactory
 org.apache.paimon.flink.action.ClearConsumerActionFactory
 org.apache.paimon.flink.action.RescaleActionFactory
@@ -69,6 +70,7 @@ org.apache.paimon.flink.procedure.MigrateDatabaseProcedure
 org.apache.paimon.flink.procedure.RemoveOrphanFilesProcedure
 org.apache.paimon.flink.procedure.QueryServiceProcedure
 org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure
+org.apache.paimon.flink.procedure.ExpireChangelogsProcedure
 org.apache.paimon.flink.procedure.ExpirePartitionsProcedure
 org.apache.paimon.flink.procedure.PurgeFilesProcedure
 org.apache.paimon.flink.procedure.privilege.InitFileBasedPrivilegeProcedure
