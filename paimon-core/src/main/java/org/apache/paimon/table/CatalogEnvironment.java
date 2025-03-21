@@ -44,22 +44,25 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final CatalogLoader catalogLoader;
     @Nullable private final CatalogLockFactory lockFactory;
     @Nullable private final CatalogLockContext lockContext;
+    private final boolean supportsVersionManagement;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
             @Nullable String uuid,
             @Nullable CatalogLoader catalogLoader,
             @Nullable CatalogLockFactory lockFactory,
-            @Nullable CatalogLockContext lockContext) {
+            @Nullable CatalogLockContext lockContext,
+            boolean supportsVersionManagement) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
         this.lockFactory = lockFactory;
         this.lockContext = lockContext;
+        this.supportsVersionManagement = supportsVersionManagement;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null, null);
+        return new CatalogEnvironment(null, null, null, null, null, false);
     }
 
     @Nullable
@@ -81,13 +84,17 @@ public class CatalogEnvironment implements Serializable {
         return PartitionHandler.create(catalog, identifier);
     }
 
+    public boolean supportsVersionManagement() {
+        return supportsVersionManagement;
+    }
+
     @Nullable
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
         SnapshotCommit.Factory factory;
-        if (catalogLoader == null) {
-            factory = new RenamingSnapshotCommit.Factory(lockFactory, lockContext);
+        if (catalogLoader != null && supportsVersionManagement) {
+            factory = new CatalogSnapshotCommit.Factory(catalogLoader);
         } else {
-            factory = new CatalogSnapshotCommit.Factory(catalogLoader, lockFactory, lockContext);
+            factory = new RenamingSnapshotCommit.Factory(lockFactory, lockContext);
         }
         return factory.create(identifier, snapshotManager);
     }

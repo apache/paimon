@@ -1546,7 +1546,8 @@ public class RESTCatalogServer {
                             tableMetadata.uuid(),
                             catalog.catalogLoader(),
                             catalog.lockFactory().orElse(null),
-                            catalog.lockContext().orElse(null));
+                            catalog.lockContext().orElse(null),
+                            false);
             Path path = new Path(schema.options().get(PATH.key()));
             FileIO dataFileIO = catalog.fileIO();
             FileStoreTable table =

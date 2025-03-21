@@ -22,8 +22,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
 
 /** A {@link SnapshotCommit} using {@link Catalog} to commit. */
@@ -31,25 +29,18 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
 
     private final Catalog catalog;
     private final Identifier identifier;
-    private final RenamingSnapshotCommit renamingCommit;
 
-    public CatalogSnapshotCommit(
-            Catalog catalog, Identifier identifier, RenamingSnapshotCommit renamingCommit) {
+    public CatalogSnapshotCommit(Catalog catalog, Identifier identifier) {
         this.catalog = catalog;
         this.identifier = identifier;
-        this.renamingCommit = renamingCommit;
     }
 
     @Override
     public boolean commit(Snapshot snapshot, String branch, List<PartitionStatistics> statistics)
             throws Exception {
-        try {
-            Identifier newIdentifier =
-                    new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
-            return catalog.commitSnapshot(newIdentifier, snapshot, statistics);
-        } catch (UnsupportedOperationException e) {
-            return renamingCommit.commit(snapshot, branch, statistics);
-        }
+        Identifier newIdentifier =
+                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
+        return catalog.commitSnapshot(newIdentifier, snapshot, statistics);
     }
 
     @Override
@@ -63,24 +54,14 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
         private static final long serialVersionUID = 1L;
 
         private final CatalogLoader catalogLoader;
-        @Nullable private final CatalogLockFactory lockFactory;
-        @Nullable private final CatalogLockContext lockContext;
 
-        public Factory(
-                CatalogLoader catalogLoader,
-                @Nullable CatalogLockFactory lockFactory,
-                @Nullable CatalogLockContext lockContext) {
+        public Factory(CatalogLoader catalogLoader) {
             this.catalogLoader = catalogLoader;
-            this.lockFactory = lockFactory;
-            this.lockContext = lockContext;
         }
 
         @Override
         public SnapshotCommit create(Identifier identifier, SnapshotManager snapshotManager) {
-            RenamingSnapshotCommit renamingCommit =
-                    new RenamingSnapshotCommit.Factory(lockFactory, lockContext)
-                            .create(identifier, snapshotManager);
-            return new CatalogSnapshotCommit(catalogLoader.load(), identifier, renamingCommit);
+            return new CatalogSnapshotCommit(catalogLoader.load(), identifier);
         }
     }
 }

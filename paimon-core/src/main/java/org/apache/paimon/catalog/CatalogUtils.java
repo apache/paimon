@@ -194,7 +194,8 @@ public class CatalogUtils {
                         metadata.uuid(),
                         catalog.catalogLoader(),
                         lockFactory,
-                        lockContext);
+                        lockContext,
+                        catalog.supportsVersionManagement());
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
