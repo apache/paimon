@@ -36,6 +36,7 @@ under the License.
     <modules>
         <module>paimon-cluster-benchmark</module>
         <module>paimon-micro-benchmarks</module>
+        <module>paimon-spark-benchmark</module>
     </modules>
 
     <properties>
