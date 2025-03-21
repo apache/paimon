@@ -42,6 +42,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -50,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test REST Catalog on Mocked REST server. */
-class MockRESTCatalogTest extends RESTCatalogTestBase {
+class RESTCatalogLocalTest extends RESTCatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
     private final String initToken = "init_token";
@@ -83,6 +84,9 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
         options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
         options.set(RESTCatalogOptions.TOKEN, initToken);
         options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
+        options.set(
+                RESTTestFileIO.DATA_PATH_CONF_KEY,
+                dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
         this.restCatalog = new RESTCatalog(CatalogContext.create(options));
         this.catalog = restCatalog;
     }
@@ -184,8 +188,28 @@ class MockRESTCatalogTest extends RESTCatalogTestBase {
     }
 
     @Override
-    protected Catalog newRestCatalogWithDataToken() {
-        options.set(RESTTokenFileIO.DATA_TOKEN_ENABLED, true);
+    protected Catalog newRestCatalogWithDataToken() throws IOException {
+        String restWarehouse = UUID.randomUUID().toString();
+        this.config =
+                new ConfigResponse(
+                        ImmutableMap.of(
+                                RESTCatalogInternalOptions.PREFIX.key(),
+                                "paimon",
+                                "header." + serverDefineHeaderName,
+                                serverDefineHeaderValue,
+                                RESTTokenFileIO.DATA_TOKEN_ENABLED.key(),
+                                "true",
+                                CatalogOptions.WAREHOUSE.key(),
+                                restWarehouse),
+                        ImmutableMap.of());
+        this.authProvider = new BearTokenAuthProvider(initToken);
+        restCatalogServer =
+                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
+        restCatalogServer.start();
+        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        options.set(RESTCatalogOptions.TOKEN, initToken);
+        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
         options.set(
                 RESTTestFileIO.DATA_PATH_CONF_KEY,
                 dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));

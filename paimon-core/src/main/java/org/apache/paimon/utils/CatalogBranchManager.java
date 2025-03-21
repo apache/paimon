@@ -45,8 +45,19 @@ public class CatalogBranchManager implements BranchManager {
     private void executePost(ThrowingConsumer<Catalog, Exception> func) {
         executeGet(
                 catalog -> {
-                    func.accept(catalog);
-                    return null;
+                    try {
+                        func.accept(catalog);
+                        return null;
+                    } catch (Catalog.BranchNotExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Branch name '%s' doesn't exist.", e.branch()));
+                    } catch (Catalog.TagNotExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Tag '%s' doesn't exist.", e.tag()));
+                    } catch (Catalog.BranchAlreadyExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Branch name '%s' already exists..", e.branch()));
+                    }
                 });
     }
 
@@ -72,7 +83,11 @@ public class CatalogBranchManager implements BranchManager {
     @Override
     public void createBranch(String branchName, @Nullable String tagName) {
         try {
-            executePost(catalog -> catalog.createBranch(identifier, branchName, tagName));
+            executePost(
+                    catalog -> {
+                        BranchManager.validateBranch(branchName);
+                        catalog.createBranch(identifier, branchName, tagName);
+                    });
         } catch (UnsupportedOperationException e) {
             branchManager.createBranch(branchName, tagName);
         }
