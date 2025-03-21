@@ -132,30 +132,39 @@ public abstract class OrphanFilesClean implements Serializable {
             Consumer<Path> deletedFilesConsumer,
             Consumer<Long> deletedFilesLenInBytesConsumer) {
         for (String branch : branches) {
-            FileStoreTable branchTable = table.switchToBranch(branch);
-            SnapshotManager snapshotManager = branchTable.snapshotManager();
-            ChangelogManager changelogManager = branchTable.changelogManager();
-
-            // specially handle the snapshot directory
-            List<Pair<Path, Long>> nonSnapshotFiles =
-                    tryGetNonSnapshotFiles(snapshotManager.snapshotDirectory(), this::oldEnough);
-            nonSnapshotFiles.forEach(
-                    nonSnapshotFile ->
-                            cleanFile(
-                                    nonSnapshotFile,
-                                    deletedFilesConsumer,
-                                    deletedFilesLenInBytesConsumer));
-
-            // specially handle the changelog directory
-            List<Pair<Path, Long>> nonChangelogFiles =
-                    tryGetNonChangelogFiles(changelogManager.changelogDirectory(), this::oldEnough);
-            nonChangelogFiles.forEach(
-                    nonChangelogFile ->
-                            cleanFile(
-                                    nonChangelogFile,
-                                    deletedFilesConsumer,
-                                    deletedFilesLenInBytesConsumer));
+            cleanBranchSnapshotDir(branch, deletedFilesConsumer, deletedFilesLenInBytesConsumer);
         }
+    }
+
+    protected void cleanBranchSnapshotDir(
+            String branch,
+            Consumer<Path> deletedFilesConsumer,
+            Consumer<Long> deletedFilesLenInBytesConsumer) {
+        LOG.info("Start to clean snapshot directory of branch {}.", branch);
+        FileStoreTable branchTable = table.switchToBranch(branch);
+        SnapshotManager snapshotManager = branchTable.snapshotManager();
+        ChangelogManager changelogManager = branchTable.changelogManager();
+
+        // specially handle the snapshot directory
+        List<Pair<Path, Long>> nonSnapshotFiles =
+                tryGetNonSnapshotFiles(snapshotManager.snapshotDirectory(), this::oldEnough);
+        nonSnapshotFiles.forEach(
+                nonSnapshotFile ->
+                        cleanFile(
+                                nonSnapshotFile,
+                                deletedFilesConsumer,
+                                deletedFilesLenInBytesConsumer));
+
+        // specially handle the changelog directory
+        List<Pair<Path, Long>> nonChangelogFiles =
+                tryGetNonChangelogFiles(changelogManager.changelogDirectory(), this::oldEnough);
+        nonChangelogFiles.forEach(
+                nonChangelogFile ->
+                        cleanFile(
+                                nonChangelogFile,
+                                deletedFilesConsumer,
+                                deletedFilesLenInBytesConsumer));
+        LOG.info("End to clean snapshot directory of branch {}.", branch);
     }
 
     private List<Pair<Path, Long>> tryGetNonSnapshotFiles(
@@ -323,22 +332,44 @@ public abstract class OrphanFilesClean implements Serializable {
     /** List directories that contains data files and manifest files. */
     protected List<Path> listPaimonFileDirs() {
         FileStorePathFactory pathFactory = table.store().pathFactory();
+        return listPaimonFileDirs(
+                table.fullName(),
+                pathFactory.manifestPath().toString(),
+                pathFactory.indexPath().toString(),
+                pathFactory.statisticsPath().toString(),
+                pathFactory.dataFilePath().toString(),
+                partitionKeysNum,
+                table.store().options().dataFileExternalPaths());
+    }
 
+    protected List<Path> listPaimonFileDirs(
+            String tableName,
+            String manifestPath,
+            String indexPath,
+            String statisticsPath,
+            String dataFilePath,
+            int partitionKeysNum,
+            String dataFileExternalPaths) {
+        LOG.info("Start: listing paimon file directories for table [{}]", tableName);
+        long start = System.currentTimeMillis();
         List<Path> paimonFileDirs = new ArrayList<>();
 
-        paimonFileDirs.add(pathFactory.manifestPath());
-        paimonFileDirs.add(pathFactory.indexPath());
-        paimonFileDirs.add(pathFactory.statisticsPath());
-        paimonFileDirs.addAll(listFileDirs(pathFactory.dataFilePath(), partitionKeysNum));
+        paimonFileDirs.add(new Path(manifestPath));
+        paimonFileDirs.add(new Path(indexPath));
+        paimonFileDirs.add(new Path(statisticsPath));
+        paimonFileDirs.addAll(listFileDirs(new Path(dataFilePath), partitionKeysNum));
 
         // add external data paths
-        String dataFileExternalPaths = table.store().options().dataFileExternalPaths();
         if (dataFileExternalPaths != null) {
             String[] externalPathArr = dataFileExternalPaths.split(",");
             for (String externalPath : externalPathArr) {
                 paimonFileDirs.addAll(listFileDirs(new Path(externalPath), partitionKeysNum));
             }
         }
+        LOG.info(
+                "End list paimon file directories for table [{}] spend [{}] ms",
+                tableName,
+                System.currentTimeMillis() - start);
         return paimonFileDirs;
     }
 
