@@ -542,12 +542,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void rollbackTo(long snapshotId) {
         SnapshotManager snapshotManager = snapshotManager();
+        try {
+            snapshotManager.rollback(Instant.snapshot(snapshotId));
+            return;
+        } catch (UnsupportedOperationException ignore) {
+        }
         checkArgument(
                 snapshotManager.snapshotExists(snapshotId),
                 "Rollback snapshot '%s' doesn't exist.",
                 snapshotId);
-
-        rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
+        rollbackHelper().updateLatestAndCleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
@@ -670,18 +674,24 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(String tagName) {
+        SnapshotManager snapshotManager = snapshotManager();
+        try {
+            snapshotManager.rollback(Instant.tag(tagName));
+            return;
+        } catch (UnsupportedOperationException ignore) {
+
+        }
         TagManager tagManager = tagManager();
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
-        rollbackHelper().cleanLargerThan(taggedSnapshot);
+        rollbackHelper().updateLatestAndCleanLargerThan(taggedSnapshot);
 
         try {
             // it is possible that the earliest snapshot is later than the rollback tag because of
             // snapshot expiration, in this case the `cleanLargerThan` method will delete all
             // snapshots, so we should write the tag file to snapshot directory and modify the
             // earliest hint
-            SnapshotManager snapshotManager = snapshotManager();
             if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
                 fileIO.writeFile(
                         snapshotManager().snapshotPath(taggedSnapshot.id()),

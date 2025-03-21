@@ -25,6 +25,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -530,6 +531,15 @@ public interface Catalog extends AutoCloseable {
      */
     Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws Catalog.TableNotExistException;
+
+    /**
+     * rollback table by the given {@link Identifier} and instant.
+     *
+     * @param identifier path of the table
+     * @param instant like snapshotId or tagName
+     * @throws Catalog.TableNotExistException if the table does not exist
+     */
+    void rollbackTo(Identifier identifier, Instant instant) throws Catalog.TableNotExistException;
 
     // ==================== Partition Modifications ==========================
 

@@ -34,6 +34,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
@@ -469,6 +470,12 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Optional<TableSnapshot> loadSnapshot(Identifier identifier) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void rollbackTo(Identifier identifier, Instant instant)
+            throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }
 

@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.table.Instant;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -28,6 +29,8 @@ import java.util.Optional;
 public interface SnapshotLoader extends Serializable {
 
     Optional<Snapshot> load() throws IOException;
+
+    void rollback(Instant instant) throws IOException;
 
     SnapshotLoader copyWithBranch(String branch);
 }

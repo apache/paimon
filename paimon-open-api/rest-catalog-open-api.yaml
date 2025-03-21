@@ -42,7 +42,7 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateCatalogRequest'
       responses:
-        '200':
+        "200":
           description: Success, no content
         "409":
           description: Resource has exist
@@ -79,17 +79,23 @@ paths:
       description: |
         Lists the available catalogs.
       responses:
-        '200':
+        "200":
           description: The catalog list was successfully retrieved.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListCatalogsResponse'
-        '500':
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
           description: Internal Server Error
   /v1/catalogs/{catalog}:
     parameters:
-      - name: name
+      - name: catalog
         in: path
         description: The name of the catalog.
         required: true
@@ -103,19 +109,25 @@ paths:
       description: |
         Gets the specified catalog.
       responses:
-        '200':
+        "200":
           description: The catalog was successfully retrieved.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetCatalogResponse'
-        '404':
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
           description: Resource not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '500':
+        "500":
           description: Internal Server Error
     patch:
       tags:
@@ -130,19 +142,25 @@ paths:
             schema:
               $ref: '#/components/schemas/AlterCatalogRequest'
       responses:
-        '200':
+        "200":
           description: The catalog was successfully altered.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AlterCatalogResponse'
-        '404':
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
           description: Resource not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '500':
+        "500":
           description: Internal Server Error
     delete:
       tags:
@@ -152,15 +170,21 @@ paths:
       description: |
         Drop the catalog that matches the supplied name.
       responses:
-        '200':
+        "200":
           description: Success, no content
-        '404':
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
           description: Resource not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '500':
+        "500":
           description: Internal Server Error
   /v1/config:
     get:
@@ -182,6 +206,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases:
@@ -197,14 +227,12 @@ paths:
           schema:
             type: string
         - name: maxResults
-          in: path
-          required: false
+          in: query
           schema:
             type: integer
             format: int32
         - name: pageToken
-          in: path
-          required: false
+          in: query
           schema:
             type: string
       responses:
@@ -214,6 +242,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListDatabasesResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
     post:
@@ -235,6 +269,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: Resource has exist
           content:
@@ -267,6 +307,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetDatabaseResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -294,6 +340,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -331,6 +383,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AlterDatabaseResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -357,14 +415,12 @@ paths:
           schema:
             type: string
         - name: maxResults
-          in: path
-          required: false
+          in: query
           schema:
             type: integer
             format: int32
         - name: pageToken
-          in: path
-          required: false
+          in: query
           schema:
             type: string
       responses:
@@ -374,6 +430,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListTablesResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
     post:
@@ -400,6 +462,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/table-details:
@@ -420,14 +488,12 @@ paths:
           schema:
             type: string
         - name: maxResults
-          in: path
-          required: false
+          in: query
           schema:
             type: integer
             format: int32
         - name: pageToken
-          in: path
-          required: false
+          in: query
           schema:
             type: string
       responses:
@@ -437,6 +503,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListTableDetailsResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/tables/{table}:
@@ -468,6 +540,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetTableResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -511,6 +589,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: Resource has exist
           content:
@@ -549,6 +633,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/tables/rename:
@@ -563,11 +653,6 @@ paths:
           required: true
           schema:
             type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -576,6 +661,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -624,6 +715,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommitTableResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -632,6 +729,50 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
           description: Resource has exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+  /v1/{prefix}/databases/{database}/tables/{table}/rollback:
+    post:
+      tags:
+        - table
+      summary: Rollback table
+      operationId: rollbackTable
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackTableRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Resource not found
           content:
             application/json:
               schema:
@@ -667,6 +808,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetTableDataTokenResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -704,6 +851,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetTableSnapshotResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -735,14 +888,12 @@ paths:
           schema:
             type: string
         - name: maxResults
-          in: path
-          required: false
+          in: query
           schema:
             type: integer
             format: int32
         - name: pageToken
-          in: path
-          required: false
+          in: query
           schema:
             type: string
       responses:
@@ -752,6 +903,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListPartitionsResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -790,6 +947,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -827,6 +990,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListBranchesResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -864,6 +1033,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -902,6 +1077,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -945,6 +1126,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -977,14 +1164,12 @@ paths:
           schema:
             type: string
         - name: maxResults
-          in: path
-          required: false
+          in: query
           schema:
             type: integer
             format: int32
         - name: pageToken
-          in: path
-          required: false
+          in: query
           schema:
             type: string
       responses:
@@ -994,6 +1179,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListViewsResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
     post:
@@ -1020,6 +1211,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -1046,14 +1243,12 @@ paths:
           schema:
             type: string
         - name: maxResults
-          in: path
-          required: false
+          in: query
           schema:
             type: integer
             format: int32
         - name: pageToken
-          in: path
-          required: false
+          in: query
           schema:
             type: string
       responses:
@@ -1063,6 +1258,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListViewDetailsResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
   /v1/{prefix}/databases/{database}/views/{view}:
@@ -1094,6 +1295,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetViewResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -1126,6 +1333,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -1154,6 +1367,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Resource not found
           content:
@@ -1577,14 +1796,38 @@ components:
     CommitTableRequest:
       type: object
       properties:
-        identifier:
-          $ref: '#/components/schemas/Identifier'
         snapshot:
           $ref: '#/components/schemas/Snapshot'
         statistics:
           type: array
           items:
             $ref: '#/components/schemas/PartitionStatistics'
+    RollbackTableRequest:
+      type: object
+      properties:
+        instant:
+          $ref: '#/components/schemas/Instant'
+    Instant:
+      anyOf:
+        - $ref: '#/components/schemas/SnapshotInstant'
+        - $ref: '#/components/schemas/TagInstant'
+    SnapshotInstant:
+      type: object
+      properties:
+        'type':
+          type: string
+          enum: [ "snapshot" ]
+        snapshotId:
+          type: integer
+          format: int64
+    TagInstant:
+      type: object
+      properties:
+        'type':
+          type: string
+          enum: [ "tag" ]
+        tagName:
+          type: string
     Snapshot:
       type: object
       properties:
@@ -1772,8 +2015,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Partition'
-          nextPageToken:
-            type: string
+        nextPageToken:
+          type: string
     CreateBranchRequest:
       type: object
       properties:
@@ -1820,8 +2063,8 @@ components:
           type: array
           items:
             type: string
-          nextPageToken:
-            type: string
+        nextPageToken:
+          type: string
     ListViewDetailsResponse:
       type: object
       properties:
