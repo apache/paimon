@@ -87,7 +87,6 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     }
     val withInitBucketCol = bucketMode match {
       case BUCKET_UNAWARE => data
-      case HASH_FIXED if paimonExtensionEnabled => data
       case CROSS_PARTITION if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
         data
           .withColumn(ROW_KIND_COL, lit(RowKind.INSERT.toByteValue))
@@ -98,8 +97,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite(): SparkTableWrite =
-      new SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
+    def newWrite(): SparkTableWrite = new SparkTableWrite(writeBuilder, rowType, rowKindColIdx)
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism
@@ -123,23 +121,22 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     }
 
     def writeWithBucket(dataFrame: DataFrame): Dataset[Array[Byte]] = {
-      dataFrame
-        .mapPartitions {
-          iter =>
-            {
-              val write = newWrite()
-              try {
-                if (bucketColIdx >= 0) {
-                  iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
-                } else {
-                  iter.foreach(row => write.write(row))
-                }
-                write.finish()
-              } finally {
-                write.close()
+      dataFrame.mapPartitions {
+        iter =>
+          {
+            val write = newWrite()
+            try {
+              if (bucketColIdx >= 0) {
+                iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
+              } else {
+                iter.foreach(row => write.write(row))
               }
+              write.finish()
+            } finally {
+              write.close()
             }
-        }
+          }
+      }
     }
 
     def writeWithBucketProcessor(
@@ -155,20 +152,19 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     def writeWithBucketAssigner(
         dataFrame: DataFrame,
         funcFactory: () => Row => Int): Dataset[Array[Byte]] = {
-      dataFrame
-        .mapPartitions {
-          iter =>
-            {
-              val assigner = funcFactory.apply()
-              val write = newWrite()
-              try {
-                iter.foreach(row => write.write(row, assigner.apply(row)))
-                write.finish()
-              } finally {
-                write.close()
-              }
+      dataFrame.mapPartitions {
+        iter =>
+          {
+            val assigner = funcFactory.apply()
+            val write = newWrite()
+            try {
+              iter.foreach(row => write.write(row, assigner.apply(row)))
+              write.finish()
+            } finally {
+              write.close()
             }
-        }
+          }
+      }
     }
 
     val written: Dataset[Array[Byte]] = bucketMode match {
@@ -216,10 +212,8 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         if (table.snapshotManager().latestSnapshot() == null) {
           // bootstrap mode
           // Topology: input -> shuffle by special key & partition hash -> bucket-assigner
-          val inputDs = partitionByKey()
-          val inputSchema = inputDs.schema
           writeWithBucketAssigner(
-            inputDs,
+            partitionByKey(),
             () => {
               val extractor = new RowPartitionKeyExtractor(table.schema)
               val assigner =
@@ -272,8 +266,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           val args = Seq(lit(bucketNumber)) ++ bucketKeyCol
           val repartitioned =
             repartitionByPartitionsAndBucket(
-              data,
-              call_udf(BucketExpression.FIXED_BUCKET, args: _*))
+              data.withColumn(BUCKET_COL, call_udf(BucketExpression.FIXED_BUCKET, args: _*)))
           writeWithBucket(repartitioned)
         }
 
@@ -489,11 +482,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     )
   }
 
-  private def repartitionByPartitionsAndBucket(df: DataFrame): DataFrame = {
-    repartitionByPartitionsAndBucket(df, col(BUCKET_COL))
-  }
-
-  private def repartitionByPartitionsAndBucket(ds: Dataset[Row], bucket: Column): Dataset[Row] = {
+  private def repartitionByPartitionsAndBucket(ds: Dataset[Row]): Dataset[Row] = {
     val inputSchema = ds.schema
     val partitionCols = tableSchema
       .partitionKeys()
@@ -501,7 +490,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       .map(tableSchema.fieldNames().indexOf(_))
       .map(x => col(inputSchema.fieldNames(x)))
       .toSeq
-    ds.toDF().repartition(partitionCols ++ Seq(bucket): _*)
+    ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
   }
 
   private def deserializeCommitMessage(
