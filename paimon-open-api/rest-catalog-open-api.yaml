@@ -42,7 +42,7 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateCatalogRequest'
       responses:
-        '200':
+        "200":
           description: Success, no content
         "409":
           description: Resource has exist
@@ -79,17 +79,23 @@ paths:
       description: |
         Lists the available catalogs.
       responses:
-        '200':
+        "200":
           description: The catalog list was successfully retrieved.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListCatalogsResponse'
-        '500':
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
           description: Internal Server Error
   /v1/catalogs/{catalog}:
     parameters:
-      - name: name
+      - name: catalog
         in: path
         description: The name of the catalog.
         required: true
@@ -103,19 +109,25 @@ paths:
       description: |
         Gets the specified catalog.
       responses:
-        '200':
+        "200":
           description: The catalog was successfully retrieved.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetCatalogResponse'
-        '404':
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
           description: Resource not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '500':
+        "500":
           description: Internal Server Error
     patch:
       tags:
@@ -130,19 +142,25 @@ paths:
             schema:
               $ref: '#/components/schemas/AlterCatalogRequest'
       responses:
-        '200':
+        "200":
           description: The catalog was successfully altered.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AlterCatalogResponse'
-        '404':
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
           description: Resource not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '500':
+        "500":
           description: Internal Server Error
     delete:
       tags:
@@ -152,15 +170,21 @@ paths:
       description: |
         Drop the catalog that matches the supplied name.
       responses:
-        '200':
+        "200":
           description: Success, no content
-        '404':
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
           description: Resource not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '500':
+        "500":
           description: Internal Server Error
   /v1/config:
     get:
