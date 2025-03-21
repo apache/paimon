@@ -78,7 +78,6 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             if (options.needLookup()) {
                 mfFactory = LookupMergeFunction.wrap(mfFactory);
             }
-
             lazyStore =
                     new KeyValueFileStore(
                             fileIO(),
@@ -94,7 +93,9 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             extractor,
                             mfFactory,
                             name(),
-                            catalogEnvironment);
+                            catalogEnvironment,
+                            this::splitGenerator,
+                            this::nonPartitionFilterConsumer);
         }
         return lazyStore;
     }
