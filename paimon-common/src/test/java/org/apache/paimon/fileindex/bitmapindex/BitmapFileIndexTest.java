@@ -81,6 +81,29 @@ public class BitmapFileIndexTest {
     }
 
     @Test
+    public void testCompoundIndexResult() {
+
+        BitmapIndexResult bitmapIndexResult = new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(1, 3, 5));
+        BitmapIndexResult bitmapEmptyResult = new BitmapIndexResult(RoaringBitmap32::bitmapOf);
+
+        assert FileIndexResult.REMAIN.remain();
+        assert !FileIndexResult.SKIP.remain();
+
+        assert bitmapIndexResult.remain();
+        assert !bitmapEmptyResult.remain();
+
+        assert !bitmapIndexResult.and(FileIndexResult.SKIP).remain();
+        assert bitmapIndexResult.and(FileIndexResult.REMAIN).remain();
+        assert bitmapIndexResult.or(FileIndexResult.SKIP).remain();
+        assert bitmapIndexResult.or(FileIndexResult.REMAIN).remain();
+
+        assert !bitmapEmptyResult.and(FileIndexResult.SKIP).remain();
+        assert !bitmapEmptyResult.and(FileIndexResult.REMAIN).remain();
+        assert !bitmapEmptyResult.or(FileIndexResult.SKIP).remain();
+        assert bitmapEmptyResult.or(FileIndexResult.REMAIN).remain();
+    }
+
+    @Test
     public void testV1() throws Exception {
         testIntType(BitmapFileIndex.VERSION_1);
         testStringType(BitmapFileIndex.VERSION_1);
@@ -180,7 +203,7 @@ public class BitmapFileIndexTest {
         assert !reader.visitEqual(fieldRef, 2).remain();
     }
 
-    void testBooleanType(int version) throws Exception {
+    private void testBooleanType(int version) throws Exception {
         FieldRef fieldRef = new FieldRef(0, "", DataTypes.BOOLEAN());
         Object[] dataColumn = {Boolean.TRUE, Boolean.FALSE, Boolean.TRUE, Boolean.FALSE, null};
         FileIndexReader reader =
