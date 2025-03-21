@@ -59,7 +59,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.hadoop.ParquetOutputFormat;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -210,7 +209,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                             assertThat(r.getInt(1)).isEqualTo(10);
                             assertThat(r.getLong(2)).isEqualTo(100);
                         });
-        Assertions.assertThat(i.get()).isEqualTo(1000);
+        assertThat(i.get()).isEqualTo(1000);
     }
 
     @Test

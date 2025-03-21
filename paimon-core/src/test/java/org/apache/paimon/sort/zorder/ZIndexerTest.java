@@ -26,7 +26,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
@@ -34,6 +33,7 @@ import java.util.Arrays;
 import java.util.Random;
 
 import static org.apache.paimon.utils.RandomUtil.randomString;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ZIndexer}. */
 public class ZIndexerTest {
@@ -66,7 +66,7 @@ public class ZIndexerTest {
             byte[] expectedZOrder = ZOrderByteUtils.interleaveBits(zCache, 16);
 
             for (int j = 0; j < 16; j++) {
-                Assertions.assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
+                assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
             }
         }
     }
@@ -99,7 +99,7 @@ public class ZIndexerTest {
                     ZOrderByteUtils.interleaveBits(zCache, zCache.length * varTypeSize);
 
             for (int j = 0; j < zCache.length * varTypeSize; j++) {
-                Assertions.assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
+                assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
             }
         }
     }
@@ -132,7 +132,7 @@ public class ZIndexerTest {
                     ZOrderByteUtils.interleaveBits(zCache, zCache.length * varTypeSize);
 
             for (int j = 0; j < zCache.length * varTypeSize; j++) {
-                Assertions.assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
+                assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
             }
         }
     }

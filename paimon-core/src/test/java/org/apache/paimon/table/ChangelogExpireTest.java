@@ -28,13 +28,13 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.TraceableFileIO;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Test for changelog expire. */
 public class ChangelogExpireTest extends IndexFileExpireTableTest {
@@ -76,6 +76,6 @@ public class ChangelogExpireTest extends IndexFileExpireTableTest {
         ExpireSnapshotsImpl expireSnapshots =
                 (ExpireSnapshotsImpl) table.newExpireSnapshots().config(expireConfig);
         expireSnapshots.expireUntil(1, 7);
-        Assertions.assertThatCode(() -> expire.expireUntil(1, 6)).doesNotThrowAnyException();
+        assertThatCode(() -> expire.expireUntil(1, 6)).doesNotThrowAnyException();
     }
 }

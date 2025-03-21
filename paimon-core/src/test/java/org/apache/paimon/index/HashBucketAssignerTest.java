@@ -27,7 +27,6 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -141,13 +140,13 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         int hash = 18;
         for (int i = 0; i < 200; i++) {
             int bucket = assigner.assign(row(1), hash += 2);
-            Assertions.assertThat(bucket).isIn(0, 2);
+            assertThat(bucket).isIn(0, 2);
         }
         // partition 2
         hash = 12;
         for (int i = 0; i < 200; i++) {
             int bucket = assigner.assign(row(2), hash += 2);
-            Assertions.assertThat(bucket).isIn(0, 2);
+            assertThat(bucket).isIn(0, 2);
         }
     }
 
@@ -174,7 +173,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         int hash = 18;
         for (int i = 0; i < 200; i++) {
             int bucket = assigner0.assign(row(2), hash += 2);
-            Assertions.assertThat(bucket).isIn(0, 2);
+            assertThat(bucket).isIn(0, 2);
         }
 
         // assigner1: assign
@@ -188,7 +187,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         hash = 9;
         for (int i = 0; i < 200; i++) {
             int bucket = assigner1.assign(row(2), hash += 2);
-            Assertions.assertThat(bucket).isIn(1);
+            assertThat(bucket).isIn(1);
         }
     }
 
