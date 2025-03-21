@@ -126,11 +126,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           {
             val write = newWrite()
             try {
-              if (bucketColIdx >= 0) {
-                iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
-              } else {
-                iter.foreach(row => write.write(row))
-              }
+              iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
               write.finish()
             } finally {
               write.close()
