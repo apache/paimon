@@ -26,7 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.util.Map;
 
-/** Base class for database, table, view, audit */
+/** Base class for database, table, view, audit response. */
 public abstract class BaseResourceAuditResponse implements RESTResponse {
 
     public static final String FIELD_OWNER = "owner";
