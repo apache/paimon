@@ -871,13 +871,15 @@ public class RESTCatalog implements Catalog {
 
     private ViewImpl toView(String db, GetViewResponse response) {
         ViewSchema schema = response.getSchema();
+        Map<String, String> options = new HashMap<>(schema.options());
+        response.putAuditOptionsTo(options);
         return new ViewImpl(
                 Identifier.create(db, response.getName()),
                 schema.fields(),
                 schema.query(),
                 schema.dialects(),
                 schema.comment(),
-                schema.options());
+                options);
     }
 
     @Override
