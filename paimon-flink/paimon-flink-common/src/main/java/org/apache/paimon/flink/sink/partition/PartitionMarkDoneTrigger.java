@@ -111,11 +111,16 @@ public class PartitionMarkDoneTrigger {
     }
 
     public List<String> donePartitions(boolean endInput) {
-        return donePartitions(endInput, System.currentTimeMillis());
+        return donePartitions(endInput, System.currentTimeMillis(), false);
+    }
+
+    List<String> donePartitions(boolean endInput, long currentTimeMillis) {
+        return donePartitions(endInput, currentTimeMillis, false);
     }
 
     @VisibleForTesting
-    List<String> donePartitions(boolean endInput, long currentTimeMillis) {
+    List<String> donePartitions(
+            boolean endInput, long currentTimeMillis, boolean watermarkEnabled) {
         if (endInput && markDoneWhenEndInput) {
             return new ArrayList<>(pendingPartitions.keySet());
         }
@@ -131,11 +136,21 @@ public class PartitionMarkDoneTrigger {
             String partition = entry.getKey();
 
             long lastUpdateTime = entry.getValue();
-            long partitionStartTime =
-                    extractDateTime(partition)
-                            .atZone(ZoneId.systemDefault())
-                            .toInstant()
-                            .toEpochMilli();
+            long partitionStartTime;
+            if (watermarkEnabled) {
+                // watermark should be compared as UTC time
+                partitionStartTime =
+                        extractDateTime(partition)
+                                .atZone(ZoneId.of("UTC"))
+                                .toInstant()
+                                .toEpochMilli();
+            } else {
+                partitionStartTime =
+                        extractDateTime(partition)
+                                .atZone(ZoneId.systemDefault())
+                                .toInstant()
+                                .toEpochMilli();
+            }
             long partitionEndTime = partitionStartTime + timeInterval;
             lastUpdateTime = Math.max(lastUpdateTime, partitionEndTime);
 
