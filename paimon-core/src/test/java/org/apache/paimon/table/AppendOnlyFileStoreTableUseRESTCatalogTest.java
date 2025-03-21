@@ -56,6 +56,7 @@ import java.util.function.Consumer;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 
+/** test table when use rest catalog. */
 public class AppendOnlyFileStoreTableUseRESTCatalogTest extends FileStoreTableTestBase {
     protected CatalogEnvironment catalogEnvironment;
     protected Catalog catalog;

@@ -23,7 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
-/** test for rest catalog */
+/** test for rest catalog. */
 public class RestTestFileSystemCatalog extends FileSystemCatalog {
     public RestTestFileSystemCatalog(FileIO fileIO, Path warehouse, Options options) {
         super(fileIO, warehouse, options);
