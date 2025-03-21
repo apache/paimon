@@ -1901,11 +1901,6 @@ components:
       properties:
         success:
           type: boolean
-    RollbackTableResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
     GetTableDataTokenResponse:
       type: object
       properties:
