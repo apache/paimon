@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.catalog.Database;
 import org.apache.paimon.rest.RESTResponse;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -27,17 +26,14 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgn
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Map;
-import java.util.Optional;
-
-import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 
 /** Response for getting database. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetDatabaseResponse extends BaseResourceAuditResponse
-        implements RESTResponse, Database {
+public class GetDatabaseResponse extends AuditRESTResponse implements RESTResponse {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
+    private static final String FIELD_LOCATION = "location";
     private static final String FIELD_OPTIONS = "options";
 
     @JsonProperty(FIELD_ID)
@@ -46,6 +42,9 @@ public class GetDatabaseResponse extends BaseResourceAuditResponse
     @JsonProperty(FIELD_NAME)
     private final String name;
 
+    @JsonProperty(FIELD_LOCATION)
+    private final String location;
+
     @JsonProperty(FIELD_OPTIONS)
     private final Map<String, String> options;
 
@@ -53,6 +52,7 @@ public class GetDatabaseResponse extends BaseResourceAuditResponse
     public GetDatabaseResponse(
             @JsonProperty(FIELD_ID) String id,
             @JsonProperty(FIELD_NAME) String name,
+            @JsonProperty(FIELD_LOCATION) String location,
             @JsonProperty(FIELD_OPTIONS) Map<String, String> options,
             @JsonProperty(FIELD_OWNER) String owner,
             @JsonProperty(FIELD_CREATED_AT) long createdAt,
@@ -62,6 +62,7 @@ public class GetDatabaseResponse extends BaseResourceAuditResponse
         super(owner, createdAt, createdBy, updatedAt, updatedBy);
         this.id = id;
         this.name = name;
+        this.location = location;
         this.options = options;
     }
 
@@ -75,23 +76,13 @@ public class GetDatabaseResponse extends BaseResourceAuditResponse
         return name;
     }
 
+    @JsonGetter(FIELD_LOCATION)
+    public String getLocation() {
+        return location;
+    }
+
     @JsonGetter(FIELD_OPTIONS)
     public Map<String, String> getOptions() {
         return options;
-    }
-
-    @Override
-    public String name() {
-        return getName();
-    }
-
-    @Override
-    public Map<String, String> options() {
-        return getOptions();
-    }
-
-    @Override
-    public Optional<String> comment() {
-        return Optional.ofNullable(options.get(COMMENT_PROP));
     }
 }

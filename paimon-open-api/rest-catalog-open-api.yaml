@@ -1638,6 +1638,8 @@ components:
           type: string
         name:
           type: string
+        path:
+          type: string
         isExternal:
           type: boolean
         schemaId:
@@ -1964,6 +1966,8 @@ components:
         id:
           type: string
         name:
+          type: string
+        location:
           type: string
         options:
           type: object

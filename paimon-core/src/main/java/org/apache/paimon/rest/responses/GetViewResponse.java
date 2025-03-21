@@ -28,7 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 /** Response for getting view. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetViewResponse extends BaseResourceAuditResponse implements RESTResponse {
+public class GetViewResponse extends AuditRESTResponse implements RESTResponse {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";

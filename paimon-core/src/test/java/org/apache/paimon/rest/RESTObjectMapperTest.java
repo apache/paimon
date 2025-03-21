@@ -95,7 +95,6 @@ public class RESTObjectMapperTest {
                 OBJECT_MAPPER.readValue(responseStr, GetDatabaseResponse.class);
         assertEquals(name, parseData.getName());
         assertEquals(response.getOptions().size(), parseData.getOptions().size());
-        assertEquals(response.comment().get(), parseData.comment().get());
     }
 
     @Test
