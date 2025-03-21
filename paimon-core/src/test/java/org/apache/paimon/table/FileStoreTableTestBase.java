@@ -1524,10 +1524,8 @@ public abstract class FileStoreTableTestBase {
         for (int i = 1; i < latestSnapshotId - 1; i++) {
             assertThat(snapshotManager.snapshotExists(i)).isFalse();
         }
-        if (support()) {
-            for (Path file : unusedFileList) {
-                FileStoreTestUtils.assertPathNotExists(table.fileIO(), file);
-            }
+        for (Path file : unusedFileList) {
+            FileStoreTestUtils.assertPathNotExists(table.fileIO(), file);
         }
         assertThat(snapshotManager.snapshotExists(latestSnapshotId)).isTrue();
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(latestSnapshotId);
@@ -1603,7 +1601,7 @@ public abstract class FileStoreTableTestBase {
 
     @Test
     public void testSchemaPathOption() throws Exception {
-        if (support()) {
+        if (supportDefinePath()) {
             String fakePath = "fake path";
             FileStoreTable table =
                     createFileStoreTable(conf -> conf.set(CoreOptions.PATH, fakePath));
@@ -1836,7 +1834,7 @@ public abstract class FileStoreTableTestBase {
 
     protected abstract FileStoreTable overwriteTestFileStoreTable() throws Exception;
 
-    protected boolean support() {
+    protected boolean supportDefinePath() {
         return true;
     }
 

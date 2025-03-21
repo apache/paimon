@@ -64,7 +64,7 @@ public class AppendOnlyFileStoreTableUseRESTCatalogTest extends FileStoreTableTe
     @BeforeEach
     public void before() throws Exception {
         super.before();
-        String dataPath = tempDir.toUri().toString();
+        String dataPath = tablePath.toString();
         String restWarehouse = UUID.randomUUID().toString();
         String initToken = UUID.randomUUID().toString();
         ConfigResponse config =
@@ -156,7 +156,7 @@ public class AppendOnlyFileStoreTableUseRESTCatalogTest extends FileStoreTableTe
     }
 
     @Override
-    protected boolean support() {
+    protected boolean supportDefinePath() {
         return false;
     }
 

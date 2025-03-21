@@ -231,10 +231,6 @@ public class RESTCatalogServer {
                 String token = request.getHeaders().get(AUTHORIZATION_HEADER_KEY);
                 RESTResponse response;
                 try {
-                    System.out.println(
-                            String.format(
-                                    "path [%s], method [%s]",
-                                    request.getPath(), request.getMethod()));
                     Map<String, String> headers = getHeader(request);
                     String[] paths = request.getPath().split("\\?");
                     String resourcePath = paths[0];
