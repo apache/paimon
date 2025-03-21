@@ -18,34 +18,59 @@
 
 package org.apache.paimon.spark.aggregate
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.schema.SchemaManager
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.data.SparkInternalRow
-import org.apache.paimon.table.{DataTable, Table}
+import org.apache.paimon.stats.SimpleStatsEvolutions
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.utils.{InternalRowUtils, ProjectedRow}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.JoinedRow
-import org.apache.spark.sql.connector.expressions.{Expression, NamedReference}
-import org.apache.spark.sql.connector.expressions.aggregate.{AggregateFunc, Aggregation, CountStar}
-import org.apache.spark.sql.types.{DataType, LongType, StructField, StructType}
+import org.apache.spark.sql.connector.expressions.NamedReference
+import org.apache.spark.sql.connector.expressions.aggregate.{Aggregation, CountStar, Max, Min}
+import org.apache.spark.sql.execution.datasources.v2.V2ColumnUtils
+import org.apache.spark.sql.types.{DataType, StructField, StructType}
 
 import scala.collection.mutable
 
-class LocalAggregator(table: Table) {
+class LocalAggregator(table: FileStoreTable) {
+  private val rowType = table.rowType()
   private val partitionType = SparkTypeUtils.toPartitionType(table)
   private val groupByEvaluatorMap = new mutable.HashMap[InternalRow, Seq[AggFuncEvaluator[_]]]()
   private var requiredGroupByType: Seq[DataType] = _
   private var requiredGroupByIndexMapping: Seq[Int] = _
   private var aggFuncEvaluatorGetter: () => Seq[AggFuncEvaluator[_]] = _
   private var isInitialized = false
+  private lazy val simpleStatsEvolutions = {
+    val schemaManager = new SchemaManager(
+      table.fileIO(),
+      table.location(),
+      CoreOptions.branch(table.schema().options()))
+    new SimpleStatsEvolutions(sid => schemaManager.schema(sid).fields(), table.schema().id())
+  }
 
-  private def initialize(aggregation: Aggregation): Unit = {
+  def initialize(aggregation: Aggregation): Unit = {
     aggFuncEvaluatorGetter = () =>
       aggregation.aggregateExpressions().map {
         case _: CountStar => new CountStarEvaluator()
-        case _ => throw new UnsupportedOperationException()
+        case min: Min if V2ColumnUtils.extractV2Column(min.column).isDefined =>
+          val fieldName = V2ColumnUtils.extractV2Column(min.column).get
+          MinEvaluator(
+            rowType.getFieldIndex(fieldName),
+            rowType.getField(fieldName),
+            simpleStatsEvolutions)
+        case max: Max if V2ColumnUtils.extractV2Column(max.column).isDefined =>
+          val fieldName = V2ColumnUtils.extractV2Column(max.column).get
+          MaxEvaluator(
+            rowType.getFieldIndex(fieldName),
+            rowType.getField(fieldName),
+            simpleStatsEvolutions)
+        case _ =>
+          throw new UnsupportedOperationException()
       }
 
     requiredGroupByType = aggregation.groupByExpressions().map {
@@ -59,39 +84,6 @@ class LocalAggregator(table: Table) {
     }
 
     isInitialized = true
-  }
-
-  private def supportAggregateFunction(func: AggregateFunc): Boolean = {
-    func match {
-      case _: CountStar => true
-      case _ => false
-    }
-  }
-
-  private def supportGroupByExpressions(exprs: Array[Expression]): Boolean = {
-    // Support empty group by keys or group by partition column
-    exprs.forall {
-      case r: NamedReference =>
-        r.fieldNames.length == 1 && table.partitionKeys().contains(r.fieldNames().head)
-      case _ => false
-    }
-  }
-
-  def pushAggregation(aggregation: Aggregation): Boolean = {
-    if (!table.isInstanceOf[DataTable]) {
-      return false
-    }
-
-    if (
-      !supportGroupByExpressions(aggregation.groupByExpressions()) ||
-      aggregation.aggregateExpressions().isEmpty ||
-      aggregation.aggregateExpressions().exists(!supportAggregateFunction(_))
-    ) {
-      return false
-    }
-
-    initialize(aggregation)
-    true
   }
 
   private def requiredGroupByRow(partitionRow: BinaryRow): InternalRow = {
@@ -138,25 +130,4 @@ class LocalAggregator(table: Table) {
     }
     StructType.apply(groupByFields ++ aggResultFields)
   }
-}
-
-trait AggFuncEvaluator[T] {
-  def update(dataSplit: DataSplit): Unit
-  def result(): T
-  def resultType: DataType
-  def prettyName: String
-}
-
-class CountStarEvaluator extends AggFuncEvaluator[Long] {
-  private var _result: Long = 0L
-
-  override def update(dataSplit: DataSplit): Unit = {
-    _result += dataSplit.mergedRowCount()
-  }
-
-  override def result(): Long = _result
-
-  override def resultType: DataType = LongType
-
-  override def prettyName: String = "count_star"
 }
