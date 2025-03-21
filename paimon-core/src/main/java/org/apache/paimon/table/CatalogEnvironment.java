@@ -50,7 +50,8 @@ public class CatalogEnvironment implements Serializable {
             @Nullable String uuid,
             @Nullable CatalogLoader catalogLoader,
             @Nullable CatalogLockFactory lockFactory,
-            @Nullable CatalogLockContext lockContext) {
+            @Nullable CatalogLockContext lockContext,
+            boolean supportsVersionManagement) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;

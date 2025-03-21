@@ -136,6 +136,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsVersionManagement() {
+        return wrapped.supportsVersionManagement();
+    }
+
+    @Override
     public Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws TableNotExistException {
         return wrapped.loadSnapshot(identifier);
