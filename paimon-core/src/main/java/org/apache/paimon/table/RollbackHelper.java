@@ -74,10 +74,10 @@ public class RollbackHelper {
         this.tagDeletion = tagDeletion;
     }
 
-    /** Clean snapshots and tags whose id is larger than given snapshot's. */
-    public void cleanLargerThan(Snapshot retainedSnapshot) {
+    /** Clean snapshots and tags whose id is larger than given snapshot's and update latest hit. */
+    public void updateLatestAndCleanLargerThan(Snapshot retainedSnapshot) {
         // clean data files
-        List<Snapshot> cleanedSnapshots = cleanSnapshotsDataFiles(retainedSnapshot);
+        List<Snapshot> cleanedSnapshots = updateLatestAndCleanSnapshotsDataFiles(retainedSnapshot);
         List<Changelog> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshot);
         List<Snapshot> cleanedTags = cleanTagsDataFiles(retainedSnapshot);
         Set<Long> cleanedIds = new HashSet<>();
@@ -104,7 +104,7 @@ public class RollbackHelper {
         }
     }
 
-    private List<Snapshot> cleanSnapshotsDataFiles(Snapshot retainedSnapshot) {
+    private List<Snapshot> updateLatestAndCleanSnapshotsDataFiles(Snapshot retainedSnapshot) {
         long earliest =
                 checkNotNull(
                         snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
@@ -117,7 +117,6 @@ public class RollbackHelper {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-
         // delete snapshot files first, cannot be read now
         // it is possible that some snapshots have been expired
         List<Snapshot> toBeCleaned = new ArrayList<>();

@@ -24,6 +24,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.view.View;
@@ -138,6 +139,12 @@ public abstract class DelegateCatalog implements Catalog {
     public Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws TableNotExistException {
         return wrapped.loadSnapshot(identifier);
+    }
+
+    @Override
+    public void rollbackTo(Identifier identifier, Instant instant)
+            throws Catalog.TableNotExistException {
+        wrapped.rollbackTo(identifier, instant);
     }
 
     @Override

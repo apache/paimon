@@ -26,8 +26,8 @@ import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -38,6 +38,7 @@ import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -70,12 +71,6 @@ public class MockRESTMessage {
         Map<String, String> options = new HashMap<>();
         options.put("a", "b");
         return new CreateDatabaseRequest(name, options);
-    }
-
-    public static CreateDatabaseResponse createDatabaseResponse(String name) {
-        Map<String, String> options = new HashMap<>();
-        options.put("a", "b");
-        return new CreateDatabaseResponse(name, options);
     }
 
     public static GetDatabaseResponse getDatabaseResponse(String name) {
@@ -264,6 +259,14 @@ public class MockRESTMessage {
     public static GetTableTokenResponse getTableCredentialsResponse() {
         return new GetTableTokenResponse(
                 ImmutableMap.of("key", "value"), System.currentTimeMillis());
+    }
+
+    public static RollbackTableRequest rollbackTableRequestBySnapshot(long snapshotId) {
+        return new RollbackTableRequest(Instant.snapshot(snapshotId));
+    }
+
+    public static RollbackTableRequest rollbackTableRequestByTag(String tagName) {
+        return new RollbackTableRequest(Instant.tag(tagName));
     }
 
     private static ViewSchema viewSchema() {

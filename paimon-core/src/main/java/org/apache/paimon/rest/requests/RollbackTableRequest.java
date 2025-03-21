@@ -16,45 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.rest.RESTRequest;
+import org.apache.paimon.table.Instant;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.Map;
-
-/** Response for creating database. */
+/** Request for rollback table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class CreateDatabaseResponse implements RESTResponse {
+public class RollbackTableRequest implements RESTRequest {
 
-    private static final String FIELD_NAME = "name";
-    private static final String FIELD_OPTIONS = "options";
+    private static final String FIELD_INSTANT = "instant";
 
-    @JsonProperty(FIELD_NAME)
-    private final String name;
-
-    @JsonProperty(FIELD_OPTIONS)
-    private final Map<String, String> options;
+    @JsonProperty(FIELD_INSTANT)
+    private final Instant instant;
 
     @JsonCreator
-    public CreateDatabaseResponse(
-            @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
-        this.name = name;
-        this.options = options;
+    public RollbackTableRequest(@JsonProperty(FIELD_INSTANT) Instant instant) {
+        this.instant = instant;
     }
 
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return name;
-    }
-
-    @JsonGetter(FIELD_OPTIONS)
-    public Map<String, String> getOptions() {
-        return options;
+    @JsonGetter(FIELD_INSTANT)
+    public Instant getInstant() {
+        return instant;
     }
 }

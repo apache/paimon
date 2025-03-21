@@ -29,10 +29,10 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -90,6 +90,10 @@ public class RESTCatalogController {
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = ConfigResponse.class))}),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -110,6 +114,10 @@ public class RESTCatalogController {
                     @Content(schema = @Schema(implementation = ListDatabasesResponse.class))
                 }),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -125,11 +133,11 @@ public class RESTCatalogController {
             summary = "Create Databases",
             tags = {"database"})
     @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
-                responseCode = "200",
-                content = {
-                    @Content(schema = @Schema(implementation = CreateDatabaseResponse.class))
-                }),
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "409",
                 description = "Resource has exist",
@@ -139,11 +147,8 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema())})
     })
     @PostMapping("/v1/{prefix}/databases")
-    public CreateDatabaseResponse createDatabases(
-            @PathVariable String prefix, @RequestBody CreateDatabaseRequest request) {
-        Map<String, String> properties = new HashMap<>();
-        return new CreateDatabaseResponse("name", properties);
-    }
+    public void createDatabases(
+            @PathVariable String prefix, @RequestBody CreateDatabaseRequest request) {}
 
     @Operation(
             summary = "Get Database",
@@ -152,6 +157,10 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = GetDatabaseResponse.class))}),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -181,6 +190,10 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -200,6 +213,10 @@ public class RESTCatalogController {
                 content = {
                     @Content(schema = @Schema(implementation = AlterDatabaseResponse.class))
                 }),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -231,6 +248,10 @@ public class RESTCatalogController {
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = ListTablesResponse.class))}),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -253,6 +274,10 @@ public class RESTCatalogController {
                 content = {
                     @Content(schema = @Schema(implementation = ListTableDetailsResponse.class))
                 }),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
@@ -291,6 +316,10 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = GetTableResponse.class))}),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -332,6 +361,10 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -346,6 +379,10 @@ public class RESTCatalogController {
             tags = {"table"})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -367,6 +404,10 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -386,6 +427,10 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -404,6 +449,10 @@ public class RESTCatalogController {
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = CommitTableResponse.class))}),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -421,6 +470,30 @@ public class RESTCatalogController {
     }
 
     @Operation(
+            summary = "Rollback table",
+            tags = {"table"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema())})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/rollback")
+    public void rollbackTable(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String table,
+            @RequestBody RollbackTableRequest request) {}
+
+    @Operation(
             summary = "Get table token",
             tags = {"table"})
     @ApiResponses({
@@ -429,6 +502,10 @@ public class RESTCatalogController {
                 content = {
                     @Content(schema = @Schema(implementation = GetTableTokenResponse.class))
                 }),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -456,6 +533,10 @@ public class RESTCatalogController {
                     @Content(schema = @Schema(implementation = GetTableSnapshotResponse.class))
                 }),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -480,6 +561,10 @@ public class RESTCatalogController {
                 content = {
                     @Content(schema = @Schema(implementation = ListPartitionsResponse.class))
                 }),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -508,6 +593,10 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -532,6 +621,10 @@ public class RESTCatalogController {
                     @Content(schema = @Schema(implementation = ListBranchesResponse.class))
                 }),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -553,6 +646,10 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
@@ -568,6 +665,10 @@ public class RESTCatalogController {
             tags = {"branch"})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
@@ -585,6 +686,10 @@ public class RESTCatalogController {
             tags = {"branch"})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -607,6 +712,10 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = ListViewsResponse.class))}),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -632,6 +741,10 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = ListViewsResponse.class))}),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -677,6 +790,10 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -697,6 +814,10 @@ public class RESTCatalogController {
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = GetViewResponse.class))}),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
@@ -736,6 +857,10 @@ public class RESTCatalogController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
@@ -751,6 +876,10 @@ public class RESTCatalogController {
             tags = {"view"})
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "404",
                 description = "Resource not found",

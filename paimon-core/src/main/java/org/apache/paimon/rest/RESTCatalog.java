@@ -52,10 +52,10 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
-import org.apache.paimon.rest.responses.CreateDatabaseResponse;
 import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -73,6 +73,7 @@ import org.apache.paimon.rest.responses.PagedResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.system.SystemTableLoader;
@@ -207,11 +208,7 @@ public class RESTCatalog implements Catalog {
         checkNotSystemDatabase(name);
         CreateDatabaseRequest request = new CreateDatabaseRequest(name, properties);
         try {
-            client.post(
-                    resourcePaths.databases(),
-                    request,
-                    CreateDatabaseResponse.class,
-                    restAuthFunction);
+            client.post(resourcePaths.databases(), request, restAuthFunction);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new DatabaseAlreadyExistException(name);
@@ -403,6 +400,30 @@ public class RESTCatalog implements Catalog {
         }
 
         return response.isSuccess();
+    }
+
+    @Override
+    public void rollbackTo(Identifier identifier, Instant instant)
+            throws Catalog.TableNotExistException {
+        RollbackTableRequest request = new RollbackTableRequest(instant);
+        try {
+            client.post(
+                    resourcePaths.rollbackTable(
+                            identifier.getDatabaseName(), identifier.getObjectName()),
+                    request,
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            if (e.resourceType() == ErrorResponseResourceType.SNAPSHOT) {
+                throw new IllegalArgumentException(
+                        String.format("Rollback snapshot '%s' doesn't exist.", e.resourceName()));
+            } else if (e.resourceType() == ErrorResponseResourceType.TAG) {
+                throw new IllegalArgumentException(
+                        String.format("Rollback tag '%s' doesn't exist.", e.resourceName()));
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
     }
 
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
