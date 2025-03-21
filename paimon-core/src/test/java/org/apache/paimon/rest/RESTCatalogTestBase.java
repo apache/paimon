@@ -1124,7 +1124,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
                 true);
     }
 
-    protected abstract Catalog newRestCatalogWithDataToken();
+    protected abstract Catalog newRestCatalogWithDataToken() throws IOException;
 
     protected abstract void revokeTablePermission(Identifier identifier);
 

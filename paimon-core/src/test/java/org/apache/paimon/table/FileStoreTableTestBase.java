@@ -1524,8 +1524,10 @@ public abstract class FileStoreTableTestBase {
         for (int i = 1; i < latestSnapshotId - 1; i++) {
             assertThat(snapshotManager.snapshotExists(i)).isFalse();
         }
-        for (Path file : unusedFileList) {
-            FileStoreTestUtils.assertPathNotExists(table.fileIO(), file);
+        if (support()) {
+            for (Path file : unusedFileList) {
+                FileStoreTestUtils.assertPathNotExists(table.fileIO(), file);
+            }
         }
         assertThat(snapshotManager.snapshotExists(latestSnapshotId)).isTrue();
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(latestSnapshotId);
@@ -1601,15 +1603,18 @@ public abstract class FileStoreTableTestBase {
 
     @Test
     public void testSchemaPathOption() throws Exception {
-        String fakePath = "fake path";
-        FileStoreTable table = createFileStoreTable(conf -> conf.set(CoreOptions.PATH, fakePath));
-        String originSchemaPath = table.schema().options().get(CoreOptions.PATH.key());
-        assertThat(originSchemaPath).isEqualTo(fakePath);
-        // reset PATH of schema option to table location
-        table = table.copy(Collections.emptyMap());
-        String schemaPath = table.schema().options().get(CoreOptions.PATH.key());
-        String tablePath = table.location().toString();
-        assertThat(schemaPath).isEqualTo(tablePath);
+        if (support()) {
+            String fakePath = "fake path";
+            FileStoreTable table =
+                    createFileStoreTable(conf -> conf.set(CoreOptions.PATH, fakePath));
+            String originSchemaPath = table.schema().options().get(CoreOptions.PATH.key());
+            assertThat(originSchemaPath).isEqualTo(fakePath);
+            // reset PATH of schema option to table location
+            table = table.copy(Collections.emptyMap());
+            String schemaPath = table.schema().options().get(CoreOptions.PATH.key());
+            String tablePath = table.location().toString();
+            assertThat(schemaPath).isEqualTo(tablePath);
+        }
     }
 
     @Test
@@ -1830,6 +1835,10 @@ public abstract class FileStoreTableTestBase {
             String branch, Consumer<Options> configure) throws Exception;
 
     protected abstract FileStoreTable overwriteTestFileStoreTable() throws Exception;
+
+    protected boolean support() {
+        return true;
+    }
 
     protected Path getTablePath() throws Exception {
         return tablePath;

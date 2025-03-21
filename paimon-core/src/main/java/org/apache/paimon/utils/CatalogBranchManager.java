@@ -77,7 +77,19 @@ public class CatalogBranchManager implements BranchManager {
     @Override
     public void createBranch(String branchName, @Nullable String tagName) {
         try {
-            executePost(catalog -> catalog.createBranch(identifier, branchName, tagName));
+            executePost(
+                    catalog -> {
+                        try {
+                            validateBranch(branchName);
+                            catalog.createBranch(identifier, branchName, tagName);
+                        } catch (Catalog.TagNotExistException e) {
+                            throw new IllegalArgumentException(
+                                    String.format("Tag '%s' doesn't exist.", e.tag()));
+                        } catch (Catalog.BranchAlreadyExistException e) {
+                            throw new IllegalArgumentException(
+                                    String.format("Branch name '%s' already exists..", e.branch()));
+                        }
+                    });
         } catch (UnsupportedOperationException e) {
             branchManager.createBranch(branchName, tagName);
         }

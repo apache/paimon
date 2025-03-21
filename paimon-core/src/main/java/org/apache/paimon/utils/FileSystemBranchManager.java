@@ -74,7 +74,7 @@ public class FileSystemBranchManager implements BranchManager {
     @Override
     public void createBranch(String branchName) {
         validateBranch(branchName);
-
+        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
         try {
             TableSchema latestSchema = schemaManager.latest().get();
             copySchemasToBranch(branchName, latestSchema.id());
@@ -90,6 +90,7 @@ public class FileSystemBranchManager implements BranchManager {
     @Override
     public void createBranch(String branchName, String tagName) {
         validateBranch(branchName);
+        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
         Snapshot snapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
 
         try {
@@ -216,23 +217,6 @@ public class FileSystemBranchManager implements BranchManager {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private void validateBranch(String branchName) {
-        checkArgument(
-                !BranchManager.isMainBranch(branchName),
-                String.format(
-                        "Branch name '%s' is the default branch and cannot be used.",
-                        DEFAULT_MAIN_BRANCH));
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(branchName),
-                "Branch name '%s' is blank.",
-                branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
-        checkArgument(
-                !branchName.chars().allMatch(Character::isDigit),
-                "Branch name cannot be pure numeric string but is '%s'.",
-                branchName);
     }
 
     private void copySchemasToBranch(String branchName, long schemaId) throws IOException {

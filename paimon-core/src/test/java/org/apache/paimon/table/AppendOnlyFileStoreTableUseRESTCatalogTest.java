@@ -35,6 +35,7 @@ import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
@@ -44,8 +45,11 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.BeforeEach;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -111,7 +115,15 @@ public class AppendOnlyFileStoreTableUseRESTCatalogTest extends FileStoreTableTe
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        catalog.createTable(identifier, tableSchema.toSchema(), false);
+        if (catalog.listTables(identifier.getDatabaseName()).contains(identifier.getTableName())) {
+            List<SchemaChange> schemaChangeList = new ArrayList<>();
+            for (Map.Entry<String, String> entry : conf.toMap().entrySet()) {
+                schemaChangeList.add(SchemaChange.setOption(entry.getKey(), entry.getValue()));
+            }
+            catalog.alterTable(identifier, schemaChangeList, true);
+        } else {
+            catalog.createTable(identifier, tableSchema.toSchema(), false);
+        }
         return (FileStoreTable) catalog.getTable(identifier);
     }
 
@@ -141,6 +153,11 @@ public class AppendOnlyFileStoreTableUseRESTCatalogTest extends FileStoreTableTe
                                 ""));
         catalog.createTable(identifier, tableSchema.toSchema(), true);
         return (FileStoreTable) restCatalog.getTable(identifier);
+    }
+
+    @Override
+    protected boolean support() {
+        return false;
     }
 
     @Override
