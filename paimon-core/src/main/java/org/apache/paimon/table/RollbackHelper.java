@@ -74,7 +74,7 @@ public class RollbackHelper {
         this.tagDeletion = tagDeletion;
     }
 
-    /** Clean snapshots and tags whose id is larger than given snapshot's. */
+    /** Clean snapshots and tags whose id is larger than given snapshot's and update latest hit. */
     public void updateLatestAndCleanLargerThan(Snapshot retainedSnapshot) {
         // clean data files
         List<Snapshot> cleanedSnapshots = updateLatestAndCleanSnapshotsDataFiles(retainedSnapshot);

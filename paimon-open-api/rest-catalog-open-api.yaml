@@ -538,14 +538,14 @@ paths:
       responses:
         "200":
           description: Success, no content
-        "404":
-          description: Resource not found
+        "401":
+          description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: Resource has exist
+        "404":
+          description: Resource not found
           content:
             application/json:
               schema:

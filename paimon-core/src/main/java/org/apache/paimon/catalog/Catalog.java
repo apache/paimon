@@ -537,7 +537,7 @@ public interface Catalog extends AutoCloseable {
      *
      * @param identifier path of the table
      * @param instant like snapshotId or tagName
-     * @throws Catalog.TableNotExistException if the target does not exist
+     * @throws Catalog.TableNotExistException if the table does not exist
      */
     void rollbackTo(Identifier identifier, Instant instant) throws Catalog.TableNotExistException;
 

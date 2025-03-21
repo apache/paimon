@@ -431,6 +431,10 @@ public class RESTCatalogController {
                 description = "Resource not found",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
