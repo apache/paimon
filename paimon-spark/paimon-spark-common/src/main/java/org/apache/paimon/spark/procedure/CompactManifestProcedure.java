@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -28,6 +29,8 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+
+import java.util.HashMap;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -41,7 +44,10 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
 public class CompactManifestProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
-            new ProcedureParameter[] {ProcedureParameter.required("table", StringType)};
+            new ProcedureParameter[] {
+                ProcedureParameter.required("table", StringType),
+                ProcedureParameter.optional("options", StringType)
+            };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
@@ -67,7 +73,12 @@ public class CompactManifestProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
 
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
+        String options = args.isNullAt(1) ? null : args.getString(1);
+
         Table table = loadSparkTable(tableIdent).getTable();
+        HashMap<String, String> dynamicOptions = new HashMap<>();
+        ProcedureUtils.putAllOptions(dynamicOptions, options);
+        table = table.copy(dynamicOptions);
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.compactManifests();
