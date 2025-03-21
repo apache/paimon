@@ -28,7 +28,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
-import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.view.View;
 
 import javax.annotation.Nullable;
@@ -467,7 +466,8 @@ public interface Catalog extends AutoCloseable {
     // ==================== Version management methods ==========================
 
     /**
-     * Whether this catalog supports version management for tables. If not, corresponding methods will throw an {@link UnsupportedOperationException}, affect the following methods:
+     * Whether this catalog supports version management for tables. If not, corresponding methods
+     * will throw an {@link UnsupportedOperationException}, affect the following methods:
      *
      * <ul>
      *   <li>{@link #commitSnapshot(Identifier, Snapshot, List)}.
@@ -488,6 +488,8 @@ public interface Catalog extends AutoCloseable {
      * @param statistics statistics information of this change
      * @return Success or not
      * @throws Catalog.TableNotExistException if the target does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
      */
     boolean commitSnapshot(
             Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
@@ -499,6 +501,8 @@ public interface Catalog extends AutoCloseable {
      * @param identifier Path of the table
      * @return The requested snapshot of the table
      * @throws Catalog.TableNotExistException if the target does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
      */
     Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws Catalog.TableNotExistException;
@@ -509,6 +513,8 @@ public interface Catalog extends AutoCloseable {
      * @param identifier path of the table
      * @param instant like snapshotId or tagName
      * @throws Catalog.TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
      */
     void rollbackTo(Identifier identifier, Instant instant) throws Catalog.TableNotExistException;
 
@@ -523,6 +529,8 @@ public interface Catalog extends AutoCloseable {
      * @throws TableNotExistException if the table in identifier doesn't exist
      * @throws BranchAlreadyExistException if the branch already exists
      * @throws TagNotExistException if the tag doesn't exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
      */
     void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException;
@@ -533,6 +541,8 @@ public interface Catalog extends AutoCloseable {
      * @param identifier path of the table, cannot be system or branch name.
      * @param branch the branch name
      * @throws BranchNotExistException if the branch doesn't exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
      */
     void dropBranch(Identifier identifier, String branch) throws BranchNotExistException;
 
@@ -542,6 +552,8 @@ public interface Catalog extends AutoCloseable {
      * @param identifier path of the table, cannot be system or branch name.
      * @param branch the branch name
      * @throws BranchNotExistException if the branch doesn't exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
      */
     void fastForward(Identifier identifier, String branch) throws BranchNotExistException;
 
@@ -550,6 +562,8 @@ public interface Catalog extends AutoCloseable {
      *
      * @param identifier path of the table, cannot be system or branch name.
      * @throws TableNotExistException if the table in identifier doesn't exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
      */
     List<String> listBranches(Identifier identifier) throws TableNotExistException;
 

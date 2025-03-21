@@ -486,12 +486,12 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions) throws TableNotExistException {
-
-    }
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
 
     @Override
-    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions) throws TableNotExistException {
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
         Table table = getTable(identifier);
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.truncatePartitions(partitions);
@@ -501,9 +501,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions) throws TableNotExistException {
-
-    }
+    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
+            throws TableNotExistException {}
 
     /**
      * Create a {@link FormatTable} identified by the given {@link Identifier}.

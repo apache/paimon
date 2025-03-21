@@ -722,12 +722,15 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions) throws TableNotExistException {
-        // partitions of the REST Catalog server are automatically calculated and do not require special creating.
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        // partitions of the REST Catalog server are automatically calculated and do not require
+        // special creating.
     }
 
     @Override
-    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions) throws TableNotExistException {
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
         Table table = getTable(identifier);
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.truncatePartitions(partitions);
@@ -737,8 +740,10 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions) throws TableNotExistException {
-        // The partition statistics of the REST Catalog server are automatically calculated and do not require special reporting.
+    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
+            throws TableNotExistException {
+        // The partition statistics of the REST Catalog server are automatically calculated and do
+        // not require special reporting.
     }
 
     @Override
