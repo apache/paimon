@@ -29,7 +29,7 @@ import java.util.Map;
 
 /** Response for getting database. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetDatabaseResponse extends BaseResourceAuditResponse implements RESTResponse {
+public class GetDatabaseResponse extends AuditRESTResponse implements RESTResponse {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";

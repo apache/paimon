@@ -27,7 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import java.util.Map;
 
 /** Base class for database, table, view, audit response. */
-public abstract class BaseResourceAuditResponse implements RESTResponse {
+public abstract class AuditRESTResponse implements RESTResponse {
 
     public static final String FIELD_OWNER = "owner";
     public static final String FIELD_CREATED_AT = "createdAt";
@@ -51,7 +51,7 @@ public abstract class BaseResourceAuditResponse implements RESTResponse {
     private final String updatedBy;
 
     @JsonCreator
-    public BaseResourceAuditResponse(
+    public AuditRESTResponse(
             @JsonProperty(FIELD_OWNER) String owner,
             @JsonProperty(FIELD_CREATED_AT) long createdAt,
             @JsonProperty(FIELD_CREATED_BY) String createdBy,
@@ -89,7 +89,7 @@ public abstract class BaseResourceAuditResponse implements RESTResponse {
         return updatedBy;
     }
 
-    public void putAllTo(Map<String, String> options) {
+    public void putAuditOptionsTo(Map<String, String> options) {
         options.put(FIELD_OWNER, getOwner());
         options.put(FIELD_CREATED_BY, String.valueOf(getCreatedBy()));
         options.put(FIELD_CREATED_AT, String.valueOf(getCreatedAt()));

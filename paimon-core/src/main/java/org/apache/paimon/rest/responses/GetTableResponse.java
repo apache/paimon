@@ -28,7 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 /** Response for getting table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetTableResponse extends BaseResourceAuditResponse implements RESTResponse {
+public class GetTableResponse extends AuditRESTResponse implements RESTResponse {
 
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";

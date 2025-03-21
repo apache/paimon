@@ -106,7 +106,6 @@ import java.util.stream.Collectors;
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.catalog.Catalog.DB_LOCATION_PROP;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
@@ -235,7 +234,7 @@ public class RESTCatalog implements Catalog {
                             restAuthFunction);
             Map<String, String> options = new HashMap<>(response.getOptions());
             options.put(DB_LOCATION_PROP, response.getLocation());
-            response.putAllTo(options);
+            response.putAuditOptionsTo(options);
             return new Database.DatabaseImpl(name, options, options.get(COMMENT_PROP));
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(name);
@@ -464,7 +463,7 @@ public class RESTCatalog implements Catalog {
         TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
         Map<String, String> options = new HashMap<>(schema.options());
         options.put(PATH.key(), response.getPath());
-        response.putAllTo(options);
+        response.putAuditOptionsTo(options);
         Identifier identifier = Identifier.create(db, response.getName());
         if (identifier.getBranchName() != null) {
             options.put(BRANCH.key(), identifier.getBranchName());
