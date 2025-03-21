@@ -74,7 +74,6 @@ public class FileSystemBranchManager implements BranchManager {
     @Override
     public void createBranch(String branchName) {
         validateBranch(branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
         try {
             TableSchema latestSchema = schemaManager.latest().get();
             copySchemasToBranch(branchName, latestSchema.id());
@@ -90,7 +89,6 @@ public class FileSystemBranchManager implements BranchManager {
     @Override
     public void createBranch(String branchName, String tagName) {
         validateBranch(branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
         Snapshot snapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
 
         try {
@@ -206,6 +204,11 @@ public class FileSystemBranchManager implements BranchManager {
     public boolean branchExists(String branchName) {
         Path branchPath = branchPath(branchName);
         return fileExists(branchPath);
+    }
+
+    public void validateBranch(String branchName) {
+        BranchManager.validateBranch(branchName);
+        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
     }
 
     @Override

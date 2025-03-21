@@ -61,7 +61,7 @@ public interface BranchManager {
         return branch.equals(DEFAULT_MAIN_BRANCH);
     }
 
-    default void validateBranch(String branchName) {
+    static void validateBranch(String branchName) {
         checkArgument(
                 !BranchManager.isMainBranch(branchName),
                 String.format(

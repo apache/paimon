@@ -51,6 +51,12 @@ public class CatalogBranchManager implements BranchManager {
                     } catch (Catalog.BranchNotExistException e) {
                         throw new IllegalArgumentException(
                                 String.format("Branch name '%s' doesn't exist.", e.branch()));
+                    } catch (Catalog.TagNotExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Tag '%s' doesn't exist.", e.tag()));
+                    } catch (Catalog.BranchAlreadyExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Branch name '%s' already exists..", e.branch()));
                     }
                 });
     }
@@ -79,16 +85,8 @@ public class CatalogBranchManager implements BranchManager {
         try {
             executePost(
                     catalog -> {
-                        try {
-                            validateBranch(branchName);
-                            catalog.createBranch(identifier, branchName, tagName);
-                        } catch (Catalog.TagNotExistException e) {
-                            throw new IllegalArgumentException(
-                                    String.format("Tag '%s' doesn't exist.", e.tag()));
-                        } catch (Catalog.BranchAlreadyExistException e) {
-                            throw new IllegalArgumentException(
-                                    String.format("Branch name '%s' already exists..", e.branch()));
-                        }
+                        BranchManager.validateBranch(branchName);
+                        catalog.createBranch(identifier, branchName, tagName);
                     });
         } catch (UnsupportedOperationException e) {
             branchManager.createBranch(branchName, tagName);
