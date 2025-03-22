@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.StringUtils;
@@ -193,11 +194,13 @@ public interface Expression extends Serializable {
                     StringUtils.toLowerCaseIfNeed(referencedField, caseSensitive);
 
             DataType fieldType =
-                    checkNotNull(
-                            typeMapping.get(referencedFieldCheckForm),
-                            String.format(
-                                    "Referenced field '%s' is not in given fields: %s.",
-                                    referencedFieldCheckForm, typeMapping.keySet()));
+                    typeMapping.isEmpty()
+                            ? new VariantType()
+                            : checkNotNull(
+                                    typeMapping.get(referencedFieldCheckForm),
+                                    String.format(
+                                            "Referenced field '%s' is not in given fields: %s.",
+                                            referencedFieldCheckForm, typeMapping.keySet()));
             return new ReferencedField(referencedField, fieldType, literals);
         }
 
