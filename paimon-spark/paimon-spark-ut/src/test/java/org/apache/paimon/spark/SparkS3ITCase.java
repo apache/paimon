@@ -59,9 +59,15 @@ public class SparkS3ITCase {
     public static void startMetastoreAndSpark() {
         String path = MINIO_CONTAINER.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         warehousePath = new Path(path);
-        spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
-        spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
+        spark =
+                SparkSession.builder()
+                        .master("local[2]")
+                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
+                        .config("spark.sql.catalog.paimon.warehouse", warehousePath.toString())
+                        .config(
+                                "spark.sql.extensions",
+                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+                        .getOrCreate();
         MINIO_CONTAINER
                 .getS3ConfigOptions()
                 .forEach((k, v) -> spark.conf().set("spark.sql.catalog.paimon." + k, v));
