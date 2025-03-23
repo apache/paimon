@@ -3,7 +3,7 @@ title: "File Index"
 weight: 7
 type: docs
 aliases:
-- /concepts/spec/fileindex.html
+  - /concepts/spec/fileindex.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -83,15 +83,15 @@ redundant bytes:                  var bytes (for compatibility with later versio
 BODY:                             column index bytes + column index bytes + column index bytes + .......
 </pre>
 
-## Index: BloomFilter 
+## Index: BloomFilter
 
 Define `'file-index.bloom-filter.columns'`.
 
-Content of bloom filter index is simple: 
+Content of bloom filter index is simple:
 - numHashFunctions 4 bytes int, BIG_ENDIAN
 - bloom filter bytes
 
-This class use (64-bits) long hash. Store the num hash function (one integer) and bit set bytes only. Hash bytes type 
+This class use (64-bits) long hash. Store the num hash function (one integer) and bit set bytes only. Hash bytes type
 (like varchar, binary, etc.) using xx hash, hash numeric type by [specified number hash](http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm).
 
 ## Index: Bitmap

@@ -29,6 +29,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
 import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
+import org.apache.paimon.fileindex.dynamicbloomfilter.DynamicBloomFilterFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -586,6 +587,154 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                         .equal(1, BinaryString.fromString("b")))
                         .createReader(plan.splits());
         reader.forEachRemaining(row -> assertThat(row.getString(1).toString()).isEqualTo("b"));
+    }
+
+    @Test
+    public void testDynamicBloomFilterInDisk() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("index_column", DataTypes.STRING())
+                        .field("index_column2", DataTypes.INT())
+                        .field("index_column3", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + DynamicBloomFilterFileIndexFactory
+                                                    .DYNAMIC_BLOOM_FILTER
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "index_column, index_column2, index_column3");
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "50 B");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(GenericRow.of(1, BinaryString.fromString("a"), 2, 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("c"), 2, 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("b"), 2, 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+
+        TableScan.Plan plan =
+                table.newScan()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("b")))
+                        .plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(2);
+
+        RecordReader<InternalRow> reader =
+                table.newRead()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("b")))
+                        .createReader(plan.splits());
+        reader.forEachRemaining(row -> assertThat(row.getString(1).toString()).isEqualTo("b"));
+    }
+
+    @Test
+    public void testDynamicBloomFilterInMemory() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("index_column", DataTypes.STRING())
+                        .field("index_column2", DataTypes.INT())
+                        .field("index_column3", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + DynamicBloomFilterFileIndexFactory
+                                                    .DYNAMIC_BLOOM_FILTER
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "index_column, index_column2, index_column3");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + DynamicBloomFilterFileIndexFactory
+                                                    .DYNAMIC_BLOOM_FILTER
+                                            + ".index_column.items",
+                                    "150");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + DynamicBloomFilterFileIndexFactory
+                                                    .DYNAMIC_BLOOM_FILTER
+                                            + ".index_column.max_items",
+                                    "150");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + DynamicBloomFilterFileIndexFactory
+                                                    .DYNAMIC_BLOOM_FILTER
+                                            + ".index_column2.items",
+                                    "150");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + DynamicBloomFilterFileIndexFactory
+                                                    .DYNAMIC_BLOOM_FILTER
+                                            + ".index_column2.max_items",
+                                    "150");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + DynamicBloomFilterFileIndexFactory
+                                                    .DYNAMIC_BLOOM_FILTER
+                                            + ".index_column3.items",
+                                    "150");
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + DynamicBloomFilterFileIndexFactory
+                                                    .DYNAMIC_BLOOM_FILTER
+                                            + ".index_column3.max_items",
+                                    "150");
+                            options.set(FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "500 B");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(GenericRow.of(1, BinaryString.fromString("a"), 2, 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("c"), 2, 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("b"), 2, 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+
+        TableScan.Plan plan =
+                table.newScan()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("b")))
+                        .plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(1);
     }
 
     @Test
