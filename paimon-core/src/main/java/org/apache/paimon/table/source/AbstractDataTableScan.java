@@ -257,13 +257,28 @@ abstract class AbstractDataTableScan implements DataTableScan {
                                     incrementalBetween.getLeft(), incrementalBetween.getRight()));
                 }
 
+                checkArgument(
+                        endId >= startId,
+                        "Ending snapshotId should >= starting snapshotId %s.",
+                        endId,
+                        startId);
+
+                if (snapshotManager.earliestSnapshot() == null) {
+                    LOG.warn("There is currently no snapshot. Waiting for snapshot generation.");
+                    return new EmptyResultStartingScanner(snapshotManager);
+                }
+
+                if (startId == endId) {
+                    return new EmptyResultStartingScanner(snapshotManager);
+                }
+
                 CoreOptions.IncrementalBetweenScanMode scanMode =
                         options.incrementalBetweenScanMode();
                 return scanMode == DIFF
                         ? IncrementalDiffStartingScanner.betweenSnapshotIds(
                                 startId, endId, snapshotManager)
-                        : new IncrementalDeltaStartingScanner(
-                                snapshotManager, startId, endId, toSnapshotScanMode(scanMode));
+                        : IncrementalDeltaStartingScanner.betweenSnapshotIds(
+                                startId, endId, snapshotManager, toSnapshotScanMode(scanMode));
             }
         } else if (conf.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)) {
             Pair<Long, Long> incrementalBetween = options.incrementalBetweenTimestamp();
@@ -277,11 +292,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
             long startTimestamp = incrementalBetween.getLeft();
             long endTimestamp = incrementalBetween.getRight();
             checkArgument(
-                    endTimestamp > startTimestamp,
-                    "Ending timestamp %s should be larger than starting timestamp %s.",
+                    endTimestamp >= startTimestamp,
+                    "Ending timestamp %s should be >= starting timestamp %s.",
                     endTimestamp,
                     startTimestamp);
-            if (startTimestamp > latestSnapshot.timeMillis()
+
+            if (startTimestamp == endTimestamp
+                    || startTimestamp > latestSnapshot.timeMillis()
                     || endTimestamp < earliestSnapshot.timeMillis()) {
                 return new EmptyResultStartingScanner(snapshotManager);
             }
