@@ -94,7 +94,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
-public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
+public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
     @Test
     public void testMultipleWriters() throws Exception {
@@ -218,7 +218,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
 
-        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
         writeBranchData(tableBranch);
         List<Split> splits = toSplits(tableBranch.newSnapshotReader().read().dataSplits());
         TableRead read = tableBranch.newRead();
@@ -408,7 +408,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
 
-        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
         writeBranchData(tableBranch);
 
         List<Split> splits =
@@ -1192,44 +1192,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
-                                Collections.emptyList(),
-                                conf.toMap(),
-                                ""));
-        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
-    }
-
-    @Override
-    protected FileStoreTable createFileStoreTable(String branch, Consumer<Options> configure)
-            throws Exception {
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.BRANCH, branch);
-        configure.accept(conf);
-        if (!conf.contains(BUCKET_KEY) && conf.get(BUCKET) != -1) {
-            conf.set(BUCKET_KEY, "a");
-        }
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath, branch),
-                        new Schema(
-                                ROW_TYPE.getFields(),
-                                Collections.singletonList("pt"),
-                                Collections.emptyList(),
-                                conf.toMap(),
-                                ""));
-        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
-    }
-
-    @Override
-    protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
-                        new Schema(
-                                OVERWRITE_TEST_ROW_TYPE.getFields(),
-                                Arrays.asList("pt0", "pt1"),
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));

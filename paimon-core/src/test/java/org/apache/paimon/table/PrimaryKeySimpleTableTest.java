@@ -96,7 +96,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
@@ -124,19 +123,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
-public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
-
-    protected static final Function<InternalRow, String> COMPATIBILITY_BATCH_ROW_TO_STRING =
-            rowData ->
-                    rowData.getInt(0)
-                            + "|"
-                            + rowData.getInt(1)
-                            + "|"
-                            + rowData.getLong(2)
-                            + "|"
-                            + new String(rowData.getBinary(3))
-                            + "|"
-                            + new String(rowData.getBinary(4));
+public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @Test
     public void testMultipleWriters() throws Exception {
@@ -320,7 +307,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     public void testBranchBatchReadWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
-        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
         writeBranchData(tableBranch);
         List<Split> splits = toSplits(tableBranch.newSnapshotReader().read().dataSplits());
         TableRead read = tableBranch.newRead();
@@ -402,7 +389,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
 
-        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
         writeBranchData(tableBranch);
 
         List<Split> splits =
@@ -2210,21 +2197,49 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         }
     }
 
-    @Override
-    protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(BUCKET, 1);
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
-                        new Schema(
-                                OVERWRITE_TEST_ROW_TYPE.getFields(),
-                                Arrays.asList("pt0", "pt1"),
-                                Arrays.asList("pk", "pt0", "pt1"),
-                                conf.toMap(),
-                                ""));
-        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+    @Test
+    public void writeMultiplePartitions() throws Exception {
+        testWritePreemptMemory(false);
+    }
+
+    @Test
+    public void writeSinglePartition() throws Exception {
+        testWritePreemptMemory(true);
+    }
+
+    private void testWritePreemptMemory(boolean singlePartition) throws Exception {
+        // write
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            // Run with minimal memory to ensure a more intense preempt
+                            // Currently a writer needs at least one page
+                            int pages = 10;
+                            options.set(
+                                    CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(pages * 1024));
+                            options.set(CoreOptions.PAGE_SIZE, new MemorySize(1024));
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        Random random = new Random();
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 10_000; i++) {
+            GenericRow row = rowData(singlePartition ? 0 : random.nextInt(5), i, i * 10L);
+            write.write(row);
+            expected.add(BATCH_ROW_TO_STRING.apply(row));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // read
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        List<String> results = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            results.addAll(getResult(read, splits, binaryRow(i), 0, BATCH_ROW_TO_STRING));
+        }
+        assertThat(results).containsExactlyInAnyOrder(expected.toArray(new String[0]));
     }
 
     @Override
@@ -2243,33 +2258,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 options.toMap(),
                                 ""));
-        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
-    }
-
-    @Override
-    protected FileStoreTable createFileStoreTable(String branch, Consumer<Options> configure)
-            throws Exception {
-        return createFileStoreTable(branch, configure, ROW_TYPE);
-    }
-
-    private FileStoreTable createFileStoreTable(
-            String branch, Consumer<Options> configure, RowType rowType) throws Exception {
-        Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
-        options.set(BUCKET, 1);
-        options.set(BRANCH, branch);
-        configure.accept(options);
-        TableSchema latestSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath).latest().get();
-        TableSchema tableSchema =
-                new TableSchema(
-                        latestSchema.id(),
-                        latestSchema.fields(),
-                        latestSchema.highestFieldId(),
-                        latestSchema.partitionKeys(),
-                        latestSchema.primaryKeys(),
-                        options.toMap(),
-                        latestSchema.comment());
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 }

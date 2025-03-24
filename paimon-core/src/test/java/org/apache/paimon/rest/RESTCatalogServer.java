@@ -973,7 +973,7 @@ public class RESTCatalogServer {
                 response =
                         new GetTableResponse(
                                 tableMetadata.uuid(),
-                                identifier.getTableName(),
+                                identifier.getObjectName(),
                                 path,
                                 tableMetadata.isExternal(),
                                 tableMetadata.schema().id(),
@@ -1033,8 +1033,8 @@ public class RESTCatalogServer {
             case "GET":
                 List<Partition> partitions = new ArrayList<>();
                 for (Map.Entry<String, List<Partition>> entry : tablePartitionsStore.entrySet()) {
-                    String tableName = Identifier.fromString(entry.getKey()).getTableName();
-                    if (tableName.equals(tableIdentifier.getTableName())) {
+                    String objectName = Identifier.fromString(entry.getKey()).getObjectName();
+                    if (objectName.equals(tableIdentifier.getObjectName())) {
                         partitions.addAll(entry.getValue());
                     }
                 }

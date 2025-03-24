@@ -723,7 +723,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                 }
             }
 
-            Pair<Path, Boolean> result = pathExist(targetTable.fileIO(), paths);
+            Pair<Path, Boolean> result = pathExist(sourceTable.fileIO(), paths);
             assertThat(result.getRight()).isTrue();
             assertThat(targetTable.fileIO().getFileSize(filesPathInfo.getLeft()))
                     .isEqualTo(sourceTable.fileIO().getFileSize(result.getLeft()));

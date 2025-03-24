@@ -20,8 +20,6 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -45,7 +43,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.junit.jupiter.api.BeforeEach;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +53,7 @@ import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 
 /** test table in rest catalog. */
-public class AppendTableInRESTCatalogTest extends FileStoreTableTestBase {
+public class AppendTableInRESTCatalogTest extends SimpleTableTestBase {
     protected CatalogEnvironment catalogEnvironment;
     protected Catalog catalog;
     protected RESTCatalog restCatalog;
@@ -128,43 +125,7 @@ public class AppendTableInRESTCatalogTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(String branch, Consumer<Options> configure)
-            throws Exception {
-        if (!restCatalog.listBranches(identifier).contains(branch)) {
-            restCatalog.createBranch(identifier, branch, null);
-        }
-        Identifier branchIdentifier =
-                new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
-        return (FileStoreTable) restCatalog.getTable(branchIdentifier);
-    }
-
-    @Override
-    protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
-        Options conf = new Options();
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
-                        new Schema(
-                                OVERWRITE_TEST_ROW_TYPE.getFields(),
-                                Arrays.asList("pt0", "pt1"),
-                                Collections.emptyList(),
-                                conf.toMap(),
-                                ""));
-        catalog.createTable(identifier, tableSchema.toSchema(), true);
-        return (FileStoreTable) restCatalog.getTable(identifier);
-    }
-
-    @Override
     protected boolean supportDefinePath() {
         return false;
-    }
-
-    @Override
-    protected Path getTablePath() throws Exception {
-        return new Path(
-                super.getTablePath()
-                        + String.format(
-                                "/%s.db/%s",
-                                identifier.getDatabaseName(), identifier.getTableName()));
     }
 }

@@ -627,7 +627,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
             }
             commit.commit(write.prepareCommit());
         }
-        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+        assertThat(catalog.listPartitions(branchIdentifier).stream().map(Partition::spec))
                 .containsExactlyInAnyOrder(partitionSpecs.get(0), partitionSpecs.get(1));
     }
 

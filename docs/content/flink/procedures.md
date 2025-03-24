@@ -70,13 +70,13 @@ All available procedures are listed below.
             partition_idle_time => 'partition_idle_time',
             compact_strategy => 'compact_strategy') <br/><br/>
          -- Use indexed argument<br/>
-         CALL [catalog.]sys.compact('table') <br/><br/>
-         CALL [catalog.]sys.compact('table', 'partitions') <br/><br/> 
-         CALL [catalog.]sys.compact('table', 'order_strategy', 'order_by') <br/><br/>
-         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by') <br/><br/>
-         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options') <br/><br/>
-         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where') <br/><br/>
-         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where', 'partition_idle_time') <br/><br/>
+         CALL [catalog.]sys.compact('table') <br/>
+         CALL [catalog.]sys.compact('table', 'partitions') <br/>
+         CALL [catalog.]sys.compact('table', 'order_strategy', 'order_by') <br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by') <br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options') <br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where') <br/>
+         CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where', 'partition_idle_time') <br/>
          CALL [catalog.]sys.compact('table', 'partitions', 'order_strategy', 'order_by', 'options', 'where', 'partition_idle_time', 'compact_strategy') <br/><br/>
       </td>
       <td>
@@ -92,7 +92,7 @@ All available procedures are listed below.
       </td>
       <td>
          -- use partition filter <br/>
-         CALL sys.compact(`table` => 'default.T', partitions => 'p=0', order_strategy => 'zorder', order_by => 'a,b', options => 'sink.parallelism=4') <br/>
+         CALL sys.compact(`table` => 'default.T', partitions => 'p=0', order_strategy => 'zorder', order_by => 'a,b', options => 'sink.parallelism=4') <br/><br/>
          -- use partition predicate <br/>
          CALL sys.compact(`table` => 'default.T', `where` => 'dt>10 and h<20', order_strategy => 'zorder', order_by => 'a,b', options => 'sink.parallelism=4')
       </td>
@@ -110,14 +110,14 @@ All available procedures are listed below.
             partition_idle_time => 'partitionIdleTime',
             compact_strategy => 'compact_strategy') <br/><br/>
          -- Use indexed argument<br/>
-         CALL [catalog.]sys.compact_database() <br/><br/>
-         CALL [catalog.]sys.compact_database('includingDatabases') <br/><br/> 
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode') <br/><br/> 
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables') <br/><br/> 
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables') <br/><br/>
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions') <br/><br/>
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime')<br/><br/>
-         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime', 'compact_strategy')<br/><br/>
+         CALL [catalog.]sys.compact_database() <br/>
+         CALL [catalog.]sys.compact_database('includingDatabases') <br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode') <br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables') <br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables') <br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions') <br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime')<br/>
+         CALL [catalog.]sys.compact_database('includingDatabases', 'mode', 'includingTables', 'excludingTables', 'tableOptions', 'partitionIdleTime', 'compact_strategy')
       </td>
       <td>
          To compact databases. Arguments:
@@ -184,7 +184,7 @@ All available procedures are listed below.
       </td>
       <td>
          -- for Flink 1.18<br/>
-         CALL sys.create_tag_from_timestamp('default.T', 'my_tag', 1724404318750, '1 d')
+         CALL sys.create_tag_from_timestamp('default.T', 'my_tag', 1724404318750, '1 d')<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.create_tag_from_timestamp(`table` => 'default.T', `tag` => 'my_tag', `timestamp` => 1724404318750, time_retained => '1 d')
       </td>
@@ -207,7 +207,7 @@ All available procedures are listed below.
       </td>
       <td>
          -- for Flink 1.18<br/>
-         CALL sys.create_tag_from_watermark('default.T', 'my_tag', 1724404318750, '1 d')
+         CALL sys.create_tag_from_watermark('default.T', 'my_tag', 1724404318750, '1 d')<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.create_tag_from_watermark(`table` => 'default.T', `tag` => 'my_tag', `watermark` => 1724404318750, time_retained => '1 d')
       </td>
@@ -252,7 +252,7 @@ All available procedures are listed below.
          -- for Flink 1.18<br/>
          CALL sys.replace_tag('default.T', 'my_tag', 5, '1 d')<br/><br/>
          -- for Flink 1.19 and later<br/>
-         CALL sys.replace_tag(`table` => 'default.T', tag => 'my_tag', snapshot_id => 5, time_retained => '1 d')<br/><br/>
+         CALL sys.replace_tag(`table` => 'default.T', tag => 'my_tag', snapshot_id => 5, time_retained => '1 d')<br/>
       </td>
    </tr>
    <tr>
@@ -321,10 +321,10 @@ All available procedures are listed below.
          -- Use named argument<br/>
          CALL [catalog.]sys.remove_orphan_files(`table` => 'identifier', older_than => 'olderThan', dry_run => 'dryRun', mode => 'mode') <br/><br/>
          -- Use indexed argument<br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier')<br/><br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan')<br/><br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')<br/><br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism')<br/><br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier')<br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan')<br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')<br/>
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism')<br/>
          CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism','mode')
       </td>
       <td>
@@ -350,7 +350,7 @@ All available procedures are listed below.
          -- Use named argument<br/>
          CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier', dry_run => 'dryRun', parallelism => 'parallelism') <br/><br/>
          -- Use indexed argument<br/>
-         CALL [catalog.]sys.remove_unexisting_files('identifier')<br/><br/>
+         CALL [catalog.]sys.remove_unexisting_files('identifier')<br/>
          CALL [catalog.]sys.remove_unexisting_files('identifier', 'dryRun', 'parallelism')
       </td>
       <td>
@@ -362,9 +362,8 @@ All available procedures are listed below.
          Note that user is on his own risk using this procedure, which may cause data loss when used outside from the use cases listed in Java docs.
       </td>
       <td>
-        -- remove unexisting data files in the table `mydb.myt`
-        CALL sys.remove_unexisting_files(`table` => 'mydb.myt')
-        <br>
+        -- remove unexisting data files in the table `mydb.myt`<br/>
+        CALL sys.remove_unexisting_files(`table` => 'mydb.myt')<br/><br/>
         -- only check what files will be removed, but not really remove them (dry run)
         CALL sys.remove_unexisting_files(`table` => 'mydb.myt', `dry_run` = true)
       </td>
@@ -394,8 +393,8 @@ All available procedures are listed below.
          -- Use named argument<br/>
          CALL [catalog.]sys.clear_consumers(`table` => 'identifier', including_consumers => 'includingConsumers', excluding_consumers => 'excludingConsumers') <br/><br/>
          -- Use indexed argument<br/>
-         -- clear all consumers in the table
-         CALL [catalog.]sys.clear_consumers('identifier')
+         -- clear all consumers in the table<br/>
+         CALL [catalog.]sys.clear_consumers('identifier')<br/><br/>
          -- clear some consumers in the table (accept regular expression)<br/>
          CALL [catalog.]sys.clear_consumers('identifier', 'includingConsumers')<br/><br/>
          -- exclude some consumers (accept regular expression)<br/>
@@ -435,7 +434,7 @@ All available procedures are listed below.
       </td>
       <td>
          -- for Flink 1.18<br/>
-         CALL sys.rollback_to('default.T', 10)
+         CALL sys.rollback_to('default.T', 10)<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.rollback_to(`table` => 'default.T', snapshot_id => 10)
       </td>
@@ -457,7 +456,7 @@ All available procedures are listed below.
       </td>
       <td>
          -- for Flink 1.18<br/>
-         CALL sys.rollback_to_timestamp('default.T', 10)
+         CALL sys.rollback_to_timestamp('default.T', 10)<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.rollback_to_timestamp(`table` => 'default.T', timestamp => 1730292023000)
       </td>
@@ -479,7 +478,7 @@ All available procedures are listed below.
       </td>
       <td>
          -- for Flink 1.18<br/>
-         CALL sys.rollback_to_watermark('default.T', 1730292023000)
+         CALL sys.rollback_to_watermark('default.T', 1730292023000)<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.rollback_to_watermark(`table` => 'default.T', watermark => 1730292023000)
       </td>
@@ -500,7 +499,7 @@ All available procedures are listed below.
       </td>
       <td>
          -- for Flink 1.18<br/>
-         CALL sys.purge_files('default.T')
+         CALL sys.purge_files('default.T')<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.purge_files(`table` => 'default.T')
       </td>
@@ -524,7 +523,7 @@ All available procedures are listed below.
       </td>
       <td>
          -- for Flink 1.18<br/>
-         CALL sys.migrate_database('hive', 'db01', 'file.format=parquet', 6)
+         CALL sys.migrate_database('hive', 'db01', 'file.format=parquet', 6)<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL sys.migrate_database(connector => 'hive', source_database => 'db01', options => 'file.format=parquet', parallelism => 6)
       </td>
@@ -592,13 +591,13 @@ All available procedures are listed below.
             <li>max_deletes: the maximum number of snapshots that can be deleted at once.</li>
       </td>
       <td>
-         -- for Flink 1.18<br/><br/>
+         -- for Flink 1.18<br/>
          CALL sys.expire_snapshots('default.T', 2)<br/><br/>
-         -- for Flink 1.19 and later<br/><br/>
-         CALL sys.expire_snapshots(`table` => 'default.T', retain_max => 2)<br/><br/>
-         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00')<br/><br/>
-         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', retain_min => 10)<br/><br/>
-         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', retain_max => 2)<br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00')<br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', retain_min => 10)<br/>
+         CALL sys.expire_snapshots(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/>
       </td>
    </tr>
    <tr>
@@ -614,7 +613,7 @@ All available procedures are listed below.
             delete_all => 'delete_all') <br/><br/>
          -- Use indexed argument<br/>
          -- for Flink 1.18<br/>
-         CALL [catalog.]sys.expire_changelogs(table, retain_max, retain_min, older_than, max_deletes)<br/><br/>
+         CALL [catalog.]sys.expire_changelogs(table, retain_max, retain_min, older_than, max_deletes)<br/>
          CALL [catalog.]sys.expire_changelogs(table, delete_all)<br/><br/>
          -- for Flink 1.19 and later<br/>
          CALL [catalog.]sys.expire_changelogs(table, retain_max, retain_min, older_than, max_deletes, delete_all)<br/><br/>
@@ -629,15 +628,15 @@ All available procedures are listed below.
             <li>delete_all: whether to delete all separated changelogs.</li>
       </td>
       <td>
-         -- for Flink 1.18<br/><br/>
-         CALL sys.expire_changelogs('default.T', 4, 2, '2024-01-01 12:00:00', 2)<br/><br/>
+         -- for Flink 1.18<br/>
+         CALL sys.expire_changelogs('default.T', 4, 2, '2024-01-01 12:00:00', 2)<br/>
          CALL sys.expire_changelogs('default.T', true)<br/><br/>
-         -- for Flink 1.19 and later<br/><br/>
-         CALL sys.expire_changelogs(`table` => 'default.T', retain_max => 2)<br/><br/>
-         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00')<br/><br/>
-         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00', retain_min => 10)<br/><br/>
-         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/><br/>
-         CALL sys.expire_changelogs(`table` => 'default.T', delete_all => true)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', retain_max => 2)<br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00')<br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00', retain_min => 10)<br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', older_than => '2024-01-01 12:00:00', max_deletes => 10)<br/>
+         CALL sys.expire_changelogs(`table` => 'default.T', delete_all => true)<br/>
       </td>
    </tr>
 <tr>
@@ -655,9 +654,9 @@ All available procedures are listed below.
             <li>max_expires: The maximum of limited expired partitions, it is optional.</li>
       </td>
       <td>
-         -- for Flink 1.18<br/><br/>
+         -- for Flink 1.18<br/>
          CALL sys.expire_partitions('default.T', '1 d', 'yyyy-MM-dd', '$dt', 'values-time')<br/><br/>
-         -- for Flink 1.19 and later<br/><br/>
+         -- for Flink 1.19 and later<br/>
          CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd', expire_strategy => 'values-time')<br/>
          CALL sys.expire_partitions(`table` => 'default.T', expiration_time => '1 d', timestamp_formatter => 'yyyy-MM-dd HH:mm', timestamp_pattern => '$dt $hm', expire_strategy => 'values-time')<br/><br/>
       </td>
