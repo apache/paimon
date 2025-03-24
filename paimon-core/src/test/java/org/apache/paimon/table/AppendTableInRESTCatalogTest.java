@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
@@ -103,7 +102,6 @@ public class AppendTableInRESTCatalogTest extends FileStoreTableTestBase {
     protected FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
             throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
         configure.accept(conf);
         if (!conf.contains(BUCKET_KEY) && conf.get(BUCKET) != -1) {
             conf.set(BUCKET_KEY, "a");
@@ -143,7 +141,6 @@ public class AppendTableInRESTCatalogTest extends FileStoreTableTestBase {
     @Override
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
