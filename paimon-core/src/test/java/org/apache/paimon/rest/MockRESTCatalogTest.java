@@ -51,10 +51,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test REST Catalog on Mocked REST server. */
-class RESTCatalogMockTest extends RESTCatalogTestBase {
+class MockRESTCatalogTest extends RESTCatalogTest {
 
     private RESTCatalogServer restCatalogServer;
-    private final String initToken = "init_token";
     private final String serverDefineHeaderName = "test-header";
     private final String serverDefineHeaderValue = "test-value";
     private String dataPath;
@@ -66,6 +65,7 @@ class RESTCatalogMockTest extends RESTCatalogTestBase {
     public void setUp() throws Exception {
         super.setUp();
         dataPath = warehouse;
+        String initToken = "init_token";
         this.authProvider = new BearTokenAuthProvider(initToken);
         this.authMap =
                 ImmutableMap.of(

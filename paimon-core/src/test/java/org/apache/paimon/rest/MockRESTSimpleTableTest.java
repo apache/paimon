@@ -16,15 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table;
+package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.RESTCatalog;
-import org.apache.paimon.rest.RESTCatalogInternalOptions;
-import org.apache.paimon.rest.RESTCatalogOptions;
-import org.apache.paimon.rest.RESTCatalogServer;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -35,8 +31,8 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import java.io.IOException;
 import java.util.UUID;
 
-/** test table in rest catalog. */
-public class SimpleTableInRESTCatalogMockTest extends SimpleTableInRESTCatalogTestBase {
+/** Base simple table test in mock rest catalog. */
+public class MockRESTSimpleTableTest extends RESTSimpleTableTest {
 
     @Override
     protected RESTCatalog createRESTCatalog() throws IOException {

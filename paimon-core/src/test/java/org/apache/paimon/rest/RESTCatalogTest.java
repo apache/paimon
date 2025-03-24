@@ -87,7 +87,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Base test class for {@link RESTCatalog}. */
-public abstract class RESTCatalogTestBase extends CatalogTestBase {
+public abstract class RESTCatalogTest extends CatalogTestBase {
 
     protected ConfigResponse config;
     protected Options options = new Options();
