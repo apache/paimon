@@ -106,6 +106,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
@@ -603,7 +604,16 @@ public class RESTCatalogServer {
         FileStoreTable table = getFileTable(identifier);
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
         if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-            rollbackTo(identifier, table, snapshotId);
+            table =
+                    table.copy(
+                            Collections.singletonMap(
+                                    SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
+            long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+            table.rollbackTo(snapshotId);
+            cleanSnapshot(identifier, snapshotId, latestSnapshotId);
+            tableLatestSnapshotStore.put(
+                    identifier.getFullName(),
+                    tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
             return new MockResponse().setResponseCode(200);
         }
         return mockResponse(
@@ -616,12 +626,20 @@ public class RESTCatalogServer {
         FileStoreTable table = getFileTable(identifier);
         boolean isExist = table.tagManager().tagExists(tagName);
         if (isExist) {
-            table.tagManager().get(tagName);
             Snapshot snapshot = table.tagManager().getOrThrow(tagName).trimToSnapshot();
             String identifierWithSnapshotId =
                     geTableFullNameWithSnapshotId(identifier, snapshot.id());
             if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-                rollbackTo(identifier, table, snapshot.id());
+                table =
+                        table.copy(
+                                Collections.singletonMap(
+                                        SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
+                long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+                table.rollbackTo(tagName);
+                cleanSnapshot(identifier, snapshot.id(), latestSnapshotId);
+                tableLatestSnapshotStore.put(
+                        identifier.getFullName(),
+                        tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
                 return new MockResponse().setResponseCode(200);
             }
         }
@@ -629,19 +647,14 @@ public class RESTCatalogServer {
                 new ErrorResponse(ErrorResponseResourceType.TAG, "" + tagName, "", 404), 404);
     }
 
-    private void rollbackTo(Identifier identifier, FileStoreTable table, Long snapshotId) {
-        String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
-        long latestSnapshotId = table.latestSnapshot().get().id();
+    private void cleanSnapshot(Identifier identifier, Long snapshotId, Long latestSnapshotId)
+            throws IOException {
         if (latestSnapshotId > snapshotId) {
             for (long i = snapshotId + 1; i < latestSnapshotId + 1; i++) {
                 tableWithSnapshotId2SnapshotStore.remove(
                         geTableFullNameWithSnapshotId(identifier, i));
             }
         }
-        table.rollbackTo(snapshotId);
-        tableLatestSnapshotStore.put(
-                identifier.getFullName(),
-                tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
     }
 
     private MockResponse databasesApiHandler(
@@ -1060,6 +1073,14 @@ public class RESTCatalogServer {
                     if (resources.length == 6) {
                         branch = RESTUtil.decodeString(resources[4]);
                         branchManager.fastForward(branch);
+                        branchIdentifier =
+                                new Identifier(
+                                        identifier.getDatabaseName(),
+                                        identifier.getTableName(),
+                                        branch);
+                        tableLatestSnapshotStore.put(
+                                identifier.getFullName(),
+                                tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
                     } else {
                         CreateBranchRequest requestBody =
                                 OBJECT_MAPPER.readValue(data, CreateBranchRequest.class);
@@ -1075,6 +1096,9 @@ public class RESTCatalogServer {
                                         identifier.getDatabaseName(),
                                         identifier.getTableName(),
                                         requestBody.branch());
+                        tableLatestSnapshotStore.put(
+                                branchIdentifier.getFullName(),
+                                tableLatestSnapshotStore.get(identifier.getFullName()));
                         tableMetadataStore.put(
                                 branchIdentifier.getFullName(),
                                 tableMetadataStore.get(identifier.getFullName()));
@@ -1515,8 +1539,15 @@ public class RESTCatalogServer {
             Identifier identifier, long schemaId, Schema schema, String uuid, boolean isExternal) {
         Map<String, String> options = new HashMap<>(schema.options());
         Path path = catalog.getTableLocation(identifier);
-        String restPath =
-                path.toString().replaceFirst(LocalFileIOLoader.SCHEME, RESTFileIOTestLoader.SCHEME);
+        String restPath = path.toString();
+        if (this.configResponse
+                .getDefaults()
+                .getOrDefault(RESTTokenFileIO.DATA_TOKEN_ENABLED.key(), "false")
+                .equals("true")) {
+            restPath =
+                    path.toString()
+                            .replaceFirst(LocalFileIOLoader.SCHEME, RESTFileIOTestLoader.SCHEME);
+        }
         options.put(PATH.key(), restPath);
         TableSchema tableSchema =
                 new TableSchema(

@@ -40,8 +40,19 @@ public class CatalogBranchManager implements BranchManager {
     private void executePost(ThrowingConsumer<Catalog, Exception> func) {
         executeGet(
                 catalog -> {
-                    func.accept(catalog);
-                    return null;
+                    try {
+                        func.accept(catalog);
+                        return null;
+                    } catch (Catalog.BranchNotExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Branch name '%s' doesn't exist.", e.branch()));
+                    } catch (Catalog.TagNotExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Tag '%s' doesn't exist.", e.tag()));
+                    } catch (Catalog.BranchAlreadyExistException e) {
+                        throw new IllegalArgumentException(
+                                String.format("Branch name '%s' already exists..", e.branch()));
+                    }
                 });
     }
 
@@ -62,7 +73,11 @@ public class CatalogBranchManager implements BranchManager {
 
     @Override
     public void createBranch(String branchName, @Nullable String tagName) {
-        executePost(catalog -> catalog.createBranch(identifier, branchName, tagName));
+        executePost(
+                catalog -> {
+                    BranchManager.validateBranch(branchName);
+                    catalog.createBranch(identifier, branchName, tagName);
+                });
     }
 
     @Override
@@ -72,7 +87,11 @@ public class CatalogBranchManager implements BranchManager {
 
     @Override
     public void fastForward(String branchName) {
-        executePost(catalog -> catalog.fastForward(identifier, branchName));
+        executePost(
+                catalog -> {
+                    BranchManager.fastForwardValidate(branchName);
+                    catalog.fastForward(identifier, branchName);
+                });
     }
 
     @Override

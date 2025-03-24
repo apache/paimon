@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestFileStore;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -80,7 +81,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -180,16 +180,18 @@ public abstract class SimpleTableTestBase {
     @TempDir java.nio.file.Path tempDir;
 
     protected Path tablePath;
+    protected Identifier identifier;
     protected String commitUser;
 
     @BeforeEach
-    public void before() {
-        tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+    public void before() throws Exception {
+        identifier = Identifier.create("default", "table_test");
+        tablePath = new Path(String.format("%s://%s", TraceableFileIO.SCHEME, tempDir.toString()));
         commitUser = UUID.randomUUID().toString();
     }
 
     @AfterEach
-    public void after() throws IOException {
+    public void after() throws Exception {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
@@ -442,7 +444,8 @@ public abstract class SimpleTableTestBase {
         commit.abort(messages);
 
         FileStatus[] files =
-                LocalFileIO.create().listStatus(new Path(tablePath + "/pt=1/bucket-0"));
+                LocalFileIO.create()
+                        .listStatus(new Path(table.location().toString() + "/pt=1/bucket-0"));
         assertThat(files).isEmpty();
         write.close();
         commit.close();
@@ -586,7 +589,6 @@ public abstract class SimpleTableTestBase {
                             conf.set(SNAPSHOT_NUM_RETAINED_MIN, 3);
                             conf.set(SNAPSHOT_NUM_RETAINED_MAX, 3);
                         });
-
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
         for (int i = 0; i < 10; i++) {
@@ -605,7 +607,7 @@ public abstract class SimpleTableTestBase {
         }
 
         SnapshotManager snapshotManager =
-                newSnapshotManager(FileIOFinder.find(tablePath), table.location());
+                newSnapshotManager(FileIOFinder.find(table.location()), table.location());
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         assertThat(latestSnapshotId).isNotNull();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -794,7 +796,7 @@ public abstract class SimpleTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(table.location().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(14);
     }
@@ -820,7 +822,7 @@ public abstract class SimpleTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(table.location().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(15);
         // table-path
@@ -872,7 +874,7 @@ public abstract class SimpleTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(table.location().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(16);
         // case 0 plus 1:
@@ -913,7 +915,7 @@ public abstract class SimpleTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(table.location().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(23);
         // case 0 plus 7:
@@ -969,7 +971,7 @@ public abstract class SimpleTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                Files.walk(new File(table.location().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(16);
         // rollback snapshot case 0 plus 1:
@@ -1016,7 +1018,7 @@ public abstract class SimpleTableTestBase {
         table.createTag("test-tag", 2);
 
         // verify that tag file exist
-        TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+        TagManager tagManager = new TagManager(new TraceableFileIO(), table.location());
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
@@ -1040,7 +1042,7 @@ public abstract class SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
             table.createTag("test-tag", 1);
             // verify that tag file exist
-            TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+            TagManager tagManager = new TagManager(new TraceableFileIO(), table.location());
             assertThat(tagManager.tagExists("test-tag")).isTrue();
             // verify that test-tag is equal to snapshot 1
             Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
@@ -1049,7 +1051,8 @@ public abstract class SimpleTableTestBase {
             // snapshot 2
             write.write(rowData(2, 20, 200L));
             commit.commit(1, write.prepareCommit(false, 2));
-            SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), tablePath);
+            SnapshotManager snapshotManager =
+                    newSnapshotManager(new TraceableFileIO(), table.location());
             // The snapshot 1 is expired.
             assertThat(snapshotManager.snapshotExists(1)).isFalse();
             table.createTag("test-tag-2", 1);
@@ -1072,7 +1075,7 @@ public abstract class SimpleTableTestBase {
             // snapshot 2
             write.write(rowData(1, 10, 100L));
             commit.commit(1, write.prepareCommit(false, 2));
-            TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+            TagManager tagManager = new TagManager(new TraceableFileIO(), table.location());
             table.createTag("test-tag", 1);
             // verify that tag file exist
             assertThat(tagManager.tagExists("test-tag")).isTrue();
@@ -1087,7 +1090,6 @@ public abstract class SimpleTableTestBase {
     @Test
     public void testCreateBranch() throws Exception {
         FileStoreTable table = createFileStoreTable();
-
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser)) {
             // snapshot 1
@@ -1101,7 +1103,7 @@ public abstract class SimpleTableTestBase {
         table.createTag("test-tag", 2);
 
         // verify that tag file exist
-        TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+        TagManager tagManager = new TagManager(new TraceableFileIO(), table.location());
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
@@ -1124,14 +1126,14 @@ public abstract class SimpleTableTestBase {
 
         // verify snapshot in test-branch is equal to snapshot 2
         SnapshotManager snapshotManager =
-                newSnapshotManager(new TraceableFileIO(), tablePath, "test-branch");
+                newSnapshotManager(new TraceableFileIO(), table.location(), "test-branch");
         Snapshot branchSnapshot =
                 Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
         SchemaManager schemaManager =
-                new SchemaManager(new TraceableFileIO(), tablePath, "test-branch");
+                new SchemaManager(new TraceableFileIO(), table.location(), "test-branch");
         TableSchema branchSchema =
                 TableSchema.fromPath(new TraceableFileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
@@ -1288,7 +1290,8 @@ public abstract class SimpleTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // verify snapshot in branch1 and main branch is same
-        SnapshotManager snapshotManager = newSnapshotManager(new TraceableFileIO(), tablePath);
+        SnapshotManager snapshotManager =
+                newSnapshotManager(new TraceableFileIO(), table.location());
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
                         new TraceableFileIO(),
@@ -1298,7 +1301,7 @@ public abstract class SimpleTableTestBase {
         assertThat(branchSnapshot.equals(snapshot)).isTrue();
 
         // verify schema in branch1 and main branch is same
-        SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
+        SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), table.location());
         TableSchema branchSchema =
                 TableSchema.fromPath(
                         new TraceableFileIO(),
@@ -1533,19 +1536,6 @@ public abstract class SimpleTableTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestSnapshotId);
 
         commit.close();
-    }
-
-    @Test
-    public void testSchemaPathOption() throws Exception {
-        String fakePath = "fake path";
-        FileStoreTable table = createFileStoreTable(conf -> conf.set(CoreOptions.PATH, fakePath));
-        String originSchemaPath = table.schema().options().get(CoreOptions.PATH.key());
-        assertThat(originSchemaPath).isEqualTo(fakePath);
-        // reset PATH of schema option to table location
-        table = table.copy(Collections.emptyMap());
-        String schemaPath = table.schema().options().get(CoreOptions.PATH.key());
-        String tablePath = table.location().toString();
-        assertThat(schemaPath).isEqualTo(tablePath);
     }
 
     @Test

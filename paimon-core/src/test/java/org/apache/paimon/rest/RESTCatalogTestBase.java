@@ -961,6 +961,31 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
     }
 
     @Test
+    public void testBranchBatchRecordsWrite() throws Exception {
+        Identifier tableIdentifier = Identifier.create("my_db", "my_table");
+
+        Identifier tableBranchIdentifier =
+                new Identifier(
+                        tableIdentifier.getDatabaseName(),
+                        tableIdentifier.getTableName(),
+                        "branch1");
+        createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(tableIdentifier);
+        // write
+        batchWrite(tableTestWrite, Lists.newArrayList(12, 5, 18));
+        restCatalog.createBranch(tableIdentifier, tableBranchIdentifier.getBranchName(), null);
+        FileStoreTable branchTableTestWrite =
+                (FileStoreTable) catalog.getTable(tableBranchIdentifier);
+        batchWrite(branchTableTestWrite, Lists.newArrayList(1, 9, 2));
+        // read
+        List<String> result = batchRead(tableTestWrite);
+        List<String> branchResult = batchRead(branchTableTestWrite);
+        assertThat(result).containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]");
+        assertThat(branchResult)
+                .containsExactlyInAnyOrder("+I[5]", "+I[12]", "+I[18]", "+I[2]", "+I[1]", "+I[9]");
+    }
+
+    @Test
     void testBranches() throws Exception {
         String databaseName = "testBranchTable";
         catalog.dropDatabase(databaseName, true, true);
@@ -1099,7 +1124,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
                 true);
     }
 
-    protected abstract Catalog newRestCatalogWithDataToken();
+    protected abstract Catalog newRestCatalogWithDataToken() throws IOException;
 
     protected abstract void revokeTablePermission(Identifier identifier);
 

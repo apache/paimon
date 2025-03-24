@@ -74,7 +74,6 @@ public class FileSystemBranchManager implements BranchManager {
     @Override
     public void createBranch(String branchName) {
         validateBranch(branchName);
-
         try {
             TableSchema latestSchema = schemaManager.latest().get();
             copySchemasToBranch(branchName, latestSchema.id());
@@ -139,14 +138,7 @@ public class FileSystemBranchManager implements BranchManager {
 
     @Override
     public void fastForward(String branchName) {
-        checkArgument(
-                !branchName.equals(DEFAULT_MAIN_BRANCH),
-                "Branch name '%s' do not use in fast-forward.",
-                branchName);
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(branchName),
-                "Branch name '%s' is blank.",
-                branchName);
+        BranchManager.fastForwardValidate(branchName);
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
 
         Long earliestSnapshotId = snapshotManager.copyWithBranch(branchName).earliestSnapshotId();
@@ -207,6 +199,11 @@ public class FileSystemBranchManager implements BranchManager {
         return fileExists(branchPath);
     }
 
+    public void validateBranch(String branchName) {
+        BranchManager.validateBranch(branchName);
+        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
+    }
+
     @Override
     public List<String> branches() {
         try {
@@ -216,23 +213,6 @@ public class FileSystemBranchManager implements BranchManager {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private void validateBranch(String branchName) {
-        checkArgument(
-                !BranchManager.isMainBranch(branchName),
-                String.format(
-                        "Branch name '%s' is the default branch and cannot be used.",
-                        DEFAULT_MAIN_BRANCH));
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(branchName),
-                "Branch name '%s' is blank.",
-                branchName);
-        checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
-        checkArgument(
-                !branchName.chars().allMatch(Character::isDigit),
-                "Branch name cannot be pure numeric string but is '%s'.",
-                branchName);
     }
 
     private void copySchemasToBranch(String branchName, long schemaId) throws IOException {

@@ -24,6 +24,8 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Manager for {@code Branch}. */
 public interface BranchManager {
 
@@ -57,5 +59,32 @@ public interface BranchManager {
 
     static boolean isMainBranch(String branch) {
         return branch.equals(DEFAULT_MAIN_BRANCH);
+    }
+
+    static void validateBranch(String branchName) {
+        checkArgument(
+                !BranchManager.isMainBranch(branchName),
+                String.format(
+                        "Branch name '%s' is the default branch and cannot be used.",
+                        DEFAULT_MAIN_BRANCH));
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(branchName),
+                "Branch name '%s' is blank.",
+                branchName);
+        checkArgument(
+                !branchName.chars().allMatch(Character::isDigit),
+                "Branch name cannot be pure numeric string but is '%s'.",
+                branchName);
+    }
+
+    static void fastForwardValidate(String branchName) {
+        checkArgument(
+                !branchName.equals(DEFAULT_MAIN_BRANCH),
+                "Branch name '%s' do not use in fast-forward.",
+                branchName);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(branchName),
+                "Branch name '%s' is blank.",
+                branchName);
     }
 }
