@@ -42,7 +42,7 @@ This section introduce all available spark procedures about paimon.
       <td>
          To compact files. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>partitions: partition filter. "," means "AND"<br>";" means "OR".If you want to compact one partition with date=01 and day=01, you need to write 'date=01,day=01'. Left empty for all partitions. (Can't be used together with "where")</li>
+            <li>partitions: partition filter. the comma (",") represents "AND", the semicolon (";") represents "OR". If you want to compact one partition with date=01 and day=01, you need to write 'date=01,day=01'. Left empty for all partitions. (Can't be used together with "where")</li>
             <li>where: partition predicate. Left empty for all partitions. (Can't be used together with "partitions")</li>          
             <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
             <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
@@ -260,10 +260,9 @@ This section introduce all available spark procedures about paimon.
          Note that user is on his own risk using this procedure, which may cause data loss when used outside from the use cases listed in Java docs.
       </td>
       <td>
-        -- remove unexisting data files in the table `mydb.myt`
-        CALL sys.remove_unexisting_files(table => 'mydb.myt')
-        <br>
-        -- only check what files will be removed, but not really remove them (dry run)
+        -- remove unexisting data files in the table `mydb.myt`<br/>
+        CALL sys.remove_unexisting_files(table => 'mydb.myt')<br/><br/>
+        -- only check what files will be removed, but not really remove them (dry run)<br/>
         CALL sys.remove_unexisting_files(table => 'mydb.myt', dry_run = true)
       </td>
    </tr>
