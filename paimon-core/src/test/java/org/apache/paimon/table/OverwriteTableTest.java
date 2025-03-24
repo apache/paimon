@@ -31,7 +31,6 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -42,6 +41,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.table.SimpleTableTestBase.getResult;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
@@ -49,30 +49,50 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 /** Unit tests for overwrite table. */
 public class OverwriteTableTest extends TableTestBase {
 
-    private Table bucketsTable;
-
-    @BeforeEach
-    public void before() throws Exception {
-        Identifier identifier = identifier("T");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("pk", DataTypes.INT())
-                        .column("pt0", DataTypes.INT())
-                        .column("pt1", DataTypes.STRING())
-                        .column("v", DataTypes.STRING())
-                        .partitionKeys("pt0", "pt1")
-                        .build();
-        catalog.createTable(identifier, schema, true);
-    }
-
     @ParameterizedTest(name = "dynamic = {0}, partition={2}")
     @MethodSource("overwriteTestData")
-    public void testOverwriteNothing(
+    public void testOverwriteAppend(
             boolean dynamicPartitionOverwrite,
             List<InternalRow> overwriteData,
             Map<String, String> overwritePartition,
             List<String> expected)
             throws Exception {
+        innerTestOverwrite(
+                false, dynamicPartitionOverwrite, overwriteData, overwritePartition, expected);
+    }
+
+    @ParameterizedTest(name = "dynamic = {0}, partition={2}")
+    @MethodSource("overwriteTestData")
+    public void testOverwritePrimaryKey(
+            boolean dynamicPartitionOverwrite,
+            List<InternalRow> overwriteData,
+            Map<String, String> overwritePartition,
+            List<String> expected)
+            throws Exception {
+        innerTestOverwrite(
+                true, dynamicPartitionOverwrite, overwriteData, overwritePartition, expected);
+    }
+
+    private void innerTestOverwrite(
+            boolean withPrimaryKey,
+            boolean dynamicPartitionOverwrite,
+            List<InternalRow> overwriteData,
+            Map<String, String> overwritePartition,
+            List<String> expected)
+            throws Exception {
+        Identifier identifier = identifier("T");
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt0", DataTypes.INT())
+                        .column("pt1", DataTypes.STRING())
+                        .column("v", DataTypes.STRING())
+                        .partitionKeys("pt0", "pt1");
+        if (withPrimaryKey) {
+            builder = builder.primaryKey("pk", "pt0", "pt1");
+            builder.option(BUCKET.key(), "1");
+        }
+        catalog.createTable(identifier, builder.build(), true);
         Table originTable = catalog.getTable(identifier("T"));
         FileStoreTable table = (FileStoreTable) originTable;
         if (!dynamicPartitionOverwrite) {
