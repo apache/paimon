@@ -18,19 +18,10 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalog;
-import org.apache.paimon.rest.RESTCatalogInternalOptions;
-import org.apache.paimon.rest.RESTCatalogOptions;
-import org.apache.paimon.rest.RESTCatalogServer;
-import org.apache.paimon.rest.auth.AuthProvider;
-import org.apache.paimon.rest.auth.AuthProviderEnum;
-import org.apache.paimon.rest.auth.BearTokenAuthProvider;
-import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -38,61 +29,37 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
-
 import org.junit.jupiter.api.BeforeEach;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.function.Consumer;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 
-/** test table in rest catalog. */
-public class AppendTableInRESTCatalogTest extends SimpleTableTestBase {
-    protected CatalogEnvironment catalogEnvironment;
-    protected Catalog catalog;
+/** base test table in rest catalog. */
+public abstract class SimpleTableInRESTCatalogTestBase extends SimpleTableTestBase {
     protected RESTCatalog restCatalog;
+    protected String dataPath;
 
     @BeforeEach
     public void before() throws Exception {
         super.before();
-        String dataPath = tablePath.toString();
-        String restWarehouse = UUID.randomUUID().toString();
-        String initToken = UUID.randomUUID().toString();
-        ConfigResponse config =
-                new ConfigResponse(
-                        ImmutableMap.of(
-                                RESTCatalogInternalOptions.PREFIX.key(),
-                                "paimon",
-                                CatalogOptions.WAREHOUSE.key(),
-                                restWarehouse),
-                        ImmutableMap.of());
-        AuthProvider authProvider = new BearTokenAuthProvider(initToken);
-        RESTCatalogServer restCatalogServer =
-                new RESTCatalogServer(dataPath, authProvider, config, restWarehouse);
-        restCatalogServer.start();
-        Options options = new Options();
-        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        restCatalog = new RESTCatalog(CatalogContext.create(options));
-        catalog = new RESTCatalog(CatalogContext.create(options));
-        catalog.createDatabase(identifier.getDatabaseName(), true);
-        catalogEnvironment =
-                new CatalogEnvironment(
-                        identifier, null, restCatalog.catalogLoader(), null, null, true);
+        dataPath = tablePath.toString();
+        restCatalog = createRESTCatalog();
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
     }
+
+    protected abstract RESTCatalog createRESTCatalog() throws IOException;
 
     @BeforeEach
     public void after() throws Exception {
         super.after();
-        catalog.dropTable(identifier, true);
+        restCatalog.dropTable(identifier, true);
     }
 
     @Override
@@ -112,20 +79,28 @@ public class AppendTableInRESTCatalogTest extends SimpleTableTestBase {
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        if (catalog.listTables(identifier.getDatabaseName()).contains(identifier.getTableName())) {
+        if (restCatalog
+                .listTables(identifier.getDatabaseName())
+                .contains(identifier.getTableName())) {
             List<SchemaChange> schemaChangeList = new ArrayList<>();
             for (Map.Entry<String, String> entry : conf.toMap().entrySet()) {
                 schemaChangeList.add(SchemaChange.setOption(entry.getKey(), entry.getValue()));
             }
-            catalog.alterTable(identifier, schemaChangeList, true);
+            restCatalog.alterTable(identifier, schemaChangeList, true);
         } else {
-            catalog.createTable(identifier, tableSchema.toSchema(), false);
+            restCatalog.createTable(identifier, tableSchema.toSchema(), false);
         }
-        return (FileStoreTable) catalog.getTable(identifier);
+        return (FileStoreTable) restCatalog.getTable(identifier);
     }
 
     @Override
-    protected boolean supportDefinePath() {
-        return false;
+    protected FileStoreTable createBranchTable(String branch) throws Exception {
+        if (!restCatalog.listBranches(identifier).contains(branch)) {
+            restCatalog.createBranch(identifier, branch, null);
+        }
+        return (FileStoreTable)
+                restCatalog.getTable(
+                        new Identifier(
+                                identifier.getDatabaseName(), identifier.getTableName(), branch));
     }
 }

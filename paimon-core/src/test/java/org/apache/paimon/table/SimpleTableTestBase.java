@@ -186,14 +186,7 @@ public abstract class SimpleTableTestBase {
     @BeforeEach
     public void before() throws Exception {
         identifier = Identifier.create("default", "table_test");
-        tablePath =
-                new Path(
-                        String.format(
-                                "%s://%s/%s.db/%s",
-                                TraceableFileIO.SCHEME,
-                                tempDir.toString(),
-                                identifier.getDatabaseName(),
-                                identifier.getTableName()));
+        tablePath = new Path(String.format("%s://%s", TraceableFileIO.SCHEME, tempDir.toString()));
         commitUser = UUID.randomUUID().toString();
     }
 
@@ -803,7 +796,7 @@ public abstract class SimpleTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(table.location().toString()).toPath())
+                Files.walk(new File(table.location().toUri().getPath()).toPath())
                         .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(14);
     }
@@ -1546,21 +1539,6 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testSchemaPathOption() throws Exception {
-        if (supportDefinePath()) {
-            String fakePath = "fake path";
-            FileStoreTable table =
-                    createFileStoreTable(conf -> conf.set(CoreOptions.PATH, fakePath));
-            String originSchemaPath = table.schema().options().get(CoreOptions.PATH.key());
-            assertThat(originSchemaPath).isEqualTo(fakePath);
-            // reset PATH of schema option to table location
-            table = table.copy(Collections.emptyMap());
-            String schemaPath = table.schema().options().get(CoreOptions.PATH.key());
-            assertThat(schemaPath).isEqualTo(table.location().toString());
-        }
-    }
-
-    @Test
     public void testBranchWriteAndRead() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
@@ -1773,10 +1751,6 @@ public abstract class SimpleTableTestBase {
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {
         return new ArrayList<>(dataSplits);
-    }
-
-    protected boolean supportDefinePath() {
-        return true;
     }
 
     // create a branch which named branch1

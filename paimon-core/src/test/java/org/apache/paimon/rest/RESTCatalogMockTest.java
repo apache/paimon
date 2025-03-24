@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test REST Catalog on Mocked REST server. */
-class RESTCatalogLocalTest extends RESTCatalogTestBase {
+class RESTCatalogMockTest extends RESTCatalogTestBase {
 
     private RESTCatalogServer restCatalogServer;
     private final String initToken = "init_token";
@@ -188,7 +188,7 @@ class RESTCatalogLocalTest extends RESTCatalogTestBase {
     }
 
     @Override
-    protected Catalog newRestCatalogWithDataToken() throws IOException {
+    protected Catalog newRestCatalogEnableDataToken() throws IOException {
         String restWarehouse = UUID.randomUUID().toString();
         this.config =
                 new ConfigResponse(
