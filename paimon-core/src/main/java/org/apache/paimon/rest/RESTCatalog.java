@@ -44,6 +44,7 @@ import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
+import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -79,6 +80,7 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.view.DialectChange;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
@@ -895,6 +897,20 @@ public class RESTCatalog implements Catalog {
             }
         } catch (AlreadyExistsException e) {
             throw new ViewAlreadyExistException(toView);
+        }
+    }
+
+    @Override
+    public void alterView(Identifier identifier, DialectChange dialectChange)
+            throws ViewNotExistException {
+        try {
+            AlterViewRequest request = new AlterViewRequest(dialectChange);
+            client.post(
+                    resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
+                    request,
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            throw new ViewNotExistException(identifier);
         }
     }
 
