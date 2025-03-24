@@ -25,7 +25,6 @@ import org.apache.paimon.TestFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -78,8 +77,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
@@ -125,10 +122,12 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.params.provider.Arguments.arguments;
 
-/** Base test class for {@link FileStoreTable}. */
-public abstract class FileStoreTableTestBase {
+/**
+ * Base test class for simple table, simple representation means a fixed schema, see {@link
+ * #ROW_TYPE}.
+ */
+public abstract class SimpleTableTestBase {
 
     protected static final String BRANCH_NAME = "branch1";
 
@@ -144,14 +143,6 @@ public abstract class FileStoreTableTestBase {
                         DataTypes.MULTISET(DataTypes.VARCHAR(8))
                     },
                     new String[] {"pt", "a", "b", "c", "d", "e", "f"});
-
-    // for overwrite test
-    protected static final RowType OVERWRITE_TEST_ROW_TYPE =
-            RowType.of(
-                    new DataType[] {
-                        DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()
-                    },
-                    new String[] {"pk", "pt0", "pt1", "v"});
 
     protected static final int[] PROJECTION = new int[] {2, 1};
     protected static final Function<InternalRow, String> BATCH_ROW_TO_STRING =
@@ -275,62 +266,6 @@ public abstract class FileStoreTableTestBase {
                                 toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyElementsOf(expected);
-    }
-
-    @ParameterizedTest(name = "dynamic = {0}, partition={2}")
-    @MethodSource("overwriteTestData")
-    public void testOverwriteNothing(
-            boolean dynamicPartitionOverwrite,
-            List<InternalRow> overwriteData,
-            Map<String, String> overwritePartition,
-            List<String> expected)
-            throws Exception {
-        FileStoreTable table = overwriteTestFileStoreTable();
-        if (!dynamicPartitionOverwrite) {
-            table =
-                    table.copy(
-                            Collections.singletonMap(
-                                    CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false"));
-        }
-
-        // prepare data
-        // (1, 1, 'A', 'Hi'), (2, 1, 'A', 'Hello'), (3, 1, 'A', 'World'),
-        // (4, 1, 'B', 'To'), (5, 1, 'B', 'Apache'), (6, 1, 'B', 'Paimon')
-        // (7, 2, 'A', 'Test')
-        // (8, 2, 'B', 'Case')
-        try (StreamTableWrite write = table.newWrite(commitUser);
-                InnerTableCommit commit = table.newCommit(commitUser)) {
-            write.write(overwriteRow(1, 1, "A", "Hi"));
-            write.write(overwriteRow(2, 1, "A", "Hello"));
-            write.write(overwriteRow(3, 1, "A", "World"));
-            write.write(overwriteRow(4, 1, "B", "To"));
-            write.write(overwriteRow(5, 1, "B", "Apache"));
-            write.write(overwriteRow(6, 1, "B", "Paimon"));
-            write.write(overwriteRow(7, 2, "A", "Test"));
-            write.write(overwriteRow(8, 2, "B", "Case"));
-            commit.commit(0, write.prepareCommit(true, 0));
-        }
-
-        // overwrite data
-        try (StreamTableWrite write = table.newWrite(commitUser).withIgnorePreviousFiles(true);
-                InnerTableCommit commit = table.newCommit(commitUser)) {
-            for (InternalRow row : overwriteData) {
-                write.write(row);
-            }
-            commit.withOverwrite(overwritePartition).commit(1, write.prepareCommit(true, 1));
-        }
-
-        // validate
-        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
-        TableRead read = table.newRead();
-        assertThat(
-                        getResult(
-                                read,
-                                splits,
-                                row ->
-                                        DataFormatTestUtil.toStringNoRowKind(
-                                                row, OVERWRITE_TEST_ROW_TYPE)))
-                .hasSameElementsAs(expected);
     }
 
     @Test
@@ -1291,7 +1226,7 @@ public abstract class FileStoreTableTestBase {
     public void testFastForward() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
-        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
 
         // Verify branch1 and the main branch have the same data
         assertThat(
@@ -1619,7 +1554,7 @@ public abstract class FileStoreTableTestBase {
 
         generateBranch(table);
 
-        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
         // Write data to branch1
         try (StreamTableWrite write = tableBranch.newWrite(commitUser);
                 StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
@@ -1728,7 +1663,7 @@ public abstract class FileStoreTableTestBase {
         }
     }
 
-    protected List<String> getResult(
+    public static List<String> getResult(
             TableRead read,
             List<Split> splits,
             BinaryRow partition,
@@ -1738,7 +1673,7 @@ public abstract class FileStoreTableTestBase {
         return getResult(read, getSplitsFor(splits, partition, bucket), rowDataToString);
     }
 
-    protected List<String> getResult(
+    public static List<String> getResult(
             TableRead read, List<Split> splits, Function<InternalRow, String> rowDataToString)
             throws Exception {
         List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
@@ -1756,7 +1691,7 @@ public abstract class FileStoreTableTestBase {
         return result;
     }
 
-    private List<Split> getSplitsFor(List<Split> splits, BinaryRow partition, int bucket) {
+    private static List<Split> getSplitsFor(List<Split> splits, BinaryRow partition, int bucket) {
         List<Split> result = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = (DataSplit) split;
@@ -1808,12 +1743,9 @@ public abstract class FileStoreTableTestBase {
         return createFileStoreTable(conf -> conf.set(BUCKET, numOfBucket));
     }
 
-    protected FileStoreTable createFileStoreTable(String branch, int numOfBucket) throws Exception {
-        return createFileStoreTable(branch, conf -> conf.set(BUCKET, numOfBucket));
-    }
-
-    protected FileStoreTable createFileStoreTable(String branch) throws Exception {
-        return createFileStoreTable(branch, 1);
+    protected FileStoreTable createBranchTable(String branch) throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        return table.switchToBranch(branch);
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
@@ -1826,99 +1758,6 @@ public abstract class FileStoreTableTestBase {
 
     protected abstract FileStoreTable createFileStoreTable(
             Consumer<Options> configure, RowType rowType) throws Exception;
-
-    protected abstract FileStoreTable createFileStoreTable(
-            String branch, Consumer<Options> configure) throws Exception;
-
-    protected abstract FileStoreTable overwriteTestFileStoreTable() throws Exception;
-
-    private static InternalRow overwriteRow(Object... values) {
-        return GenericRow.of(
-                values[0],
-                values[1],
-                BinaryString.fromString((String) values[2]),
-                BinaryString.fromString((String) values[3]));
-    }
-
-    private static List<Arguments> overwriteTestData() {
-        // dynamic, overwrite data, overwrite partition, expected
-        return Arrays.asList(
-                // nothing happen
-                arguments(
-                        true,
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        Arrays.asList(
-                                "1, 1, A, Hi",
-                                "2, 1, A, Hello",
-                                "3, 1, A, World",
-                                "4, 1, B, To",
-                                "5, 1, B, Apache",
-                                "6, 1, B, Paimon",
-                                "7, 2, A, Test",
-                                "8, 2, B, Case")),
-                // delete all data
-                arguments(
-                        false,
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        Collections.emptyList()),
-                // specify one partition key
-                arguments(
-                        true,
-                        Arrays.asList(
-                                overwriteRow(1, 1, "A", "Where"), overwriteRow(2, 1, "A", "When")),
-                        Collections.singletonMap("pt0", "1"),
-                        Arrays.asList(
-                                "1, 1, A, Where",
-                                "2, 1, A, When",
-                                "4, 1, B, To",
-                                "5, 1, B, Apache",
-                                "6, 1, B, Paimon",
-                                "7, 2, A, Test",
-                                "8, 2, B, Case")),
-                arguments(
-                        false,
-                        Arrays.asList(
-                                overwriteRow(1, 1, "A", "Where"), overwriteRow(2, 1, "A", "When")),
-                        Collections.singletonMap("pt0", "1"),
-                        Arrays.asList(
-                                "1, 1, A, Where",
-                                "2, 1, A, When",
-                                "7, 2, A, Test",
-                                "8, 2, B, Case")),
-                // all dynamic
-                arguments(
-                        true,
-                        Arrays.asList(
-                                overwriteRow(4, 1, "B", "Where"),
-                                overwriteRow(5, 1, "B", "When"),
-                                overwriteRow(10, 2, "A", "Static"),
-                                overwriteRow(11, 2, "A", "Dynamic")),
-                        Collections.emptyMap(),
-                        Arrays.asList(
-                                "1, 1, A, Hi",
-                                "2, 1, A, Hello",
-                                "3, 1, A, World",
-                                "4, 1, B, Where",
-                                "5, 1, B, When",
-                                "10, 2, A, Static",
-                                "11, 2, A, Dynamic",
-                                "8, 2, B, Case")),
-                arguments(
-                        false,
-                        Arrays.asList(
-                                overwriteRow(4, 1, "B", "Where"),
-                                overwriteRow(5, 1, "B", "When"),
-                                overwriteRow(10, 2, "A", "Static"),
-                                overwriteRow(11, 2, "A", "Dynamic")),
-                        Collections.emptyMap(),
-                        Arrays.asList(
-                                "4, 1, B, Where",
-                                "5, 1, B, When",
-                                "10, 2, A, Static",
-                                "11, 2, A, Dynamic")));
-    }
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {
         return new ArrayList<>(dataSplits);
@@ -1947,7 +1786,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(branchManager.branchExists(BRANCH_NAME)).isTrue();
 
         // Verify branch1 and the main branch have the same data
-        FileStoreTable tableBranch = createFileStoreTable(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
         assertThat(
                         getResult(
                                 tableBranch.newRead(),
