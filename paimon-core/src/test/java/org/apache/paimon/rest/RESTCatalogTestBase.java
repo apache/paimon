@@ -779,7 +779,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     @Test
     void testRefreshFileIO() throws Exception {
-        this.catalog = newRestCatalogEnableDataToken();
+        this.catalog = newRestCatalogWithDataToken();
         List<Identifier> identifiers =
                 Lists.newArrayList(
                         Identifier.create("test_db_a", "test_table_a"),
@@ -799,7 +799,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     @Test
     void testRefreshFileIOWhenExpired() throws Exception {
-        this.catalog = newRestCatalogEnableDataToken();
+        this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
                 Identifier.create("test_data_token", "table_for_testing_date_token");
         RESTToken expiredDataToken =
@@ -905,7 +905,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     @Test
     public void testDataTokenExpired() throws Exception {
-        this.catalog = newRestCatalogEnableDataToken();
+        this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
                 Identifier.create("test_data_token", "table_for_expired_date_token");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
@@ -932,7 +932,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
 
     @Test
     public void testDataTokenUnExistInServer() throws Exception {
-        this.catalog = newRestCatalogEnableDataToken();
+        this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
                 Identifier.create("test_data_token", "table_for_un_exist_date_token");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
@@ -1124,7 +1124,7 @@ public abstract class RESTCatalogTestBase extends CatalogTestBase {
                 true);
     }
 
-    protected abstract Catalog newRestCatalogEnableDataToken() throws IOException;
+    protected abstract Catalog newRestCatalogWithDataToken() throws IOException;
 
     protected abstract void revokeTablePermission(Identifier identifier);
 

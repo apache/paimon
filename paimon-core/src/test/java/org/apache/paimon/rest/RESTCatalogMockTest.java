@@ -59,35 +59,21 @@ class RESTCatalogMockTest extends RESTCatalogTestBase {
     private final String serverDefineHeaderValue = "test-value";
     private String dataPath;
     private AuthProvider authProvider;
+    private Map<String, String> authMap;
 
     @BeforeEach
     @Override
     public void setUp() throws Exception {
         super.setUp();
         dataPath = warehouse;
-        String restWarehouse = UUID.randomUUID().toString();
-        this.config =
-                new ConfigResponse(
-                        ImmutableMap.of(
-                                RESTCatalogInternalOptions.PREFIX.key(),
-                                "paimon",
-                                "header." + serverDefineHeaderName,
-                                serverDefineHeaderValue,
-                                CatalogOptions.WAREHOUSE.key(),
-                                restWarehouse),
-                        ImmutableMap.of());
         this.authProvider = new BearTokenAuthProvider(initToken);
-        restCatalogServer =
-                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
-        restCatalogServer.start();
-        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        options.set(
-                RESTTestFileIO.DATA_PATH_CONF_KEY,
-                dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
-        this.restCatalog = new RESTCatalog(CatalogContext.create(options));
+        this.authMap =
+                ImmutableMap.of(
+                        RESTCatalogOptions.TOKEN.key(),
+                        initToken,
+                        RESTCatalogOptions.TOKEN_PROVIDER.key(),
+                        AuthProviderEnum.BEAR.identifier());
+        this.restCatalog = initCatalog(false);
         this.catalog = restCatalog;
     }
 
@@ -109,30 +95,24 @@ class RESTCatalogMockTest extends RESTCatalogTestBase {
 
     @Test
     void testDlfStSTokenAuth() throws Exception {
-        String restWarehouse = UUID.randomUUID().toString();
         String akId = "akId" + UUID.randomUUID();
         String akSecret = "akSecret" + UUID.randomUUID();
         String securityToken = "securityToken" + UUID.randomUUID();
         String region = "cn-hangzhou";
-        DLFAuthProvider authProvider =
-                DLFAuthProvider.buildAKToken(akId, akSecret, securityToken, region);
-        restCatalogServer =
-                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
-        restCatalogServer.start();
-        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.DLF.identifier());
-        options.set(RESTCatalogOptions.DLF_REGION, region);
-        options.set(RESTCatalogOptions.DLF_ACCESS_KEY_ID, akId);
-        options.set(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET, akSecret);
-        options.set(RESTCatalogOptions.DLF_SECURITY_TOKEN, securityToken);
-        RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
+        this.authProvider = DLFAuthProvider.buildAKToken(akId, akSecret, securityToken, region);
+        this.authMap =
+                ImmutableMap.of(
+                        RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
+                        RESTCatalogOptions.DLF_REGION.key(), region,
+                        RESTCatalogOptions.DLF_ACCESS_KEY_ID.key(), akId,
+                        RESTCatalogOptions.DLF_ACCESS_KEY_SECRET.key(), akSecret,
+                        RESTCatalogOptions.DLF_SECURITY_TOKEN.key(), securityToken);
+        RESTCatalog restCatalog = initCatalog(false);
         testDlfAuth(restCatalog);
     }
 
     @Test
     void testDlfStSTokenPathAuth() throws Exception {
-        String restWarehouse = UUID.randomUUID().toString();
         String region = "cn-hangzhou";
         String tokenPath = dataPath + UUID.randomUUID();
         generateTokenAndWriteToFile(tokenPath);
@@ -142,17 +122,13 @@ class RESTCatalogMockTest extends RESTCatalogTestBase {
                         new Options(
                                 ImmutableMap.of(
                                         RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
-        DLFAuthProvider authProvider =
-                DLFAuthProvider.buildRefreshToken(tokenLoader, 1000_000L, region);
-        restCatalogServer =
-                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
-        restCatalogServer.start();
-        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.DLF.identifier());
-        options.set(RESTCatalogOptions.DLF_REGION, region);
-        options.set(RESTCatalogOptions.DLF_TOKEN_PATH, tokenPath);
-        RESTCatalog restCatalog = new RESTCatalog(CatalogContext.create(options));
+        this.authProvider = DLFAuthProvider.buildRefreshToken(tokenLoader, 1000_000L, region);
+        this.authMap =
+                ImmutableMap.of(
+                        RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
+                        RESTCatalogOptions.DLF_REGION.key(), region,
+                        RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath);
+        RESTCatalog restCatalog = initCatalog(false);
         testDlfAuth(restCatalog);
         File file = new File(tokenPath);
         file.delete();
@@ -188,32 +164,8 @@ class RESTCatalogMockTest extends RESTCatalogTestBase {
     }
 
     @Override
-    protected Catalog newRestCatalogEnableDataToken() throws IOException {
-        String restWarehouse = UUID.randomUUID().toString();
-        this.config =
-                new ConfigResponse(
-                        ImmutableMap.of(
-                                RESTCatalogInternalOptions.PREFIX.key(),
-                                "paimon",
-                                "header." + serverDefineHeaderName,
-                                serverDefineHeaderValue,
-                                RESTTokenFileIO.DATA_TOKEN_ENABLED.key(),
-                                "true",
-                                CatalogOptions.WAREHOUSE.key(),
-                                restWarehouse),
-                        ImmutableMap.of());
-        this.authProvider = new BearTokenAuthProvider(initToken);
-        restCatalogServer =
-                new RESTCatalogServer(dataPath, authProvider, this.config, restWarehouse);
-        restCatalogServer.start();
-        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
-        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
-        options.set(RESTCatalogOptions.TOKEN, initToken);
-        options.set(RESTCatalogOptions.TOKEN_PROVIDER, AuthProviderEnum.BEAR.identifier());
-        options.set(
-                RESTTestFileIO.DATA_PATH_CONF_KEY,
-                dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME));
-        return new RESTCatalog(CatalogContext.create(options));
+    protected Catalog newRestCatalogWithDataToken() throws IOException {
+        return initCatalog(true);
     }
 
     @Override
@@ -257,5 +209,35 @@ class RESTCatalogMockTest extends RESTCatalogTestBase {
                 fileSizeInBytes,
                 fileCount,
                 lastFileCreationTime);
+    }
+
+    private RESTCatalog initCatalog(boolean enableDataToken) throws IOException {
+        String restWarehouse = UUID.randomUUID().toString();
+        this.config =
+                new ConfigResponse(
+                        ImmutableMap.of(
+                                RESTCatalogInternalOptions.PREFIX.key(),
+                                "paimon",
+                                "header." + serverDefineHeaderName,
+                                serverDefineHeaderValue,
+                                RESTTokenFileIO.DATA_TOKEN_ENABLED.key(),
+                                enableDataToken + "",
+                                CatalogOptions.WAREHOUSE.key(),
+                                restWarehouse),
+                        ImmutableMap.of());
+        restCatalogServer =
+                new RESTCatalogServer(dataPath, this.authProvider, this.config, restWarehouse);
+        restCatalogServer.start();
+        for (Map.Entry<String, String> entry : this.authMap.entrySet()) {
+            options.set(entry.getKey(), entry.getValue());
+        }
+        options.set(CatalogOptions.WAREHOUSE.key(), restWarehouse);
+        options.set(RESTCatalogOptions.URI, restCatalogServer.getUrl());
+        String path =
+                enableDataToken
+                        ? dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME)
+                        : dataPath;
+        options.set(RESTTestFileIO.DATA_PATH_CONF_KEY, path);
+        return new RESTCatalog(CatalogContext.create(options));
     }
 }
