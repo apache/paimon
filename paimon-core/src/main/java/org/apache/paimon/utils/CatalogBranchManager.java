@@ -73,13 +73,11 @@ public class CatalogBranchManager implements BranchManager {
 
     @Override
     public void createBranch(String branchName, @Nullable String tagName) {
-        try {
-            executePost(
-                    catalog -> {
-                        BranchManager.validateBranch(branchName);
-                        catalog.createBranch(identifier, branchName, tagName);
-                    });
-       
+        executePost(
+                catalog -> {
+                    BranchManager.validateBranch(branchName);
+                    catalog.createBranch(identifier, branchName, tagName);
+                });
     }
 
     @Override

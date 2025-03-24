@@ -608,8 +608,9 @@ public class RESTCatalogServer {
                     table.copy(
                             Collections.singletonMap(
                                     SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
+            long latestSnapshotId = table.snapshotManager().latestSnapshotId();
             table.rollbackTo(snapshotId);
-            cleanSnapshot(identifier, table, snapshotId);
+            cleanSnapshot(identifier, snapshotId, latestSnapshotId);
             tableLatestSnapshotStore.put(
                     identifier.getFullName(),
                     tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
@@ -633,8 +634,9 @@ public class RESTCatalogServer {
                         table.copy(
                                 Collections.singletonMap(
                                         SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
+                long latestSnapshotId = table.snapshotManager().latestSnapshotId();
                 table.rollbackTo(tagName);
-                cleanSnapshot(identifier, table, snapshot.id());
+                cleanSnapshot(identifier, snapshot.id(), latestSnapshotId);
                 tableLatestSnapshotStore.put(
                         identifier.getFullName(),
                         tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
@@ -645,10 +647,8 @@ public class RESTCatalogServer {
                 new ErrorResponse(ErrorResponseResourceType.TAG, "" + tagName, "", 404), 404);
     }
 
-    private void cleanSnapshot(Identifier identifier, FileStoreTable table, Long snapshotId)
+    private void cleanSnapshot(Identifier identifier, Long snapshotId, Long latestSnapshotId)
             throws IOException {
-        String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
-        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
         if (latestSnapshotId > snapshotId) {
             for (long i = snapshotId + 1; i < latestSnapshotId + 1; i++) {
                 tableWithSnapshotId2SnapshotStore.remove(
