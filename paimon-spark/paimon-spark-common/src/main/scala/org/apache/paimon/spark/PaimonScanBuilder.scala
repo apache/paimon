@@ -19,8 +19,8 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateBuilder}
-import org.apache.paimon.spark.aggregate.LocalAggregator
-import org.apache.paimon.table.Table
+import org.apache.paimon.spark.aggregate.{AggregatePushDownUtils, LocalAggregator}
+import org.apache.paimon.table.{FileStoreTable, Table}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.PaimonUtils
@@ -101,13 +101,12 @@ class PaimonScanBuilder(table: Table)
       return true
     }
 
-    // Only support when there is no post scan predicates.
-    if (hasPostScanPredicates) {
+    if (!table.isInstanceOf[FileStoreTable]) {
       return false
     }
 
-    val aggregator = new LocalAggregator(table)
-    if (!aggregator.pushAggregation(aggregation)) {
+    // Only support when there is no post scan predicates.
+    if (hasPostScanPredicates) {
       return false
     }
 
@@ -116,19 +115,26 @@ class PaimonScanBuilder(table: Table)
       val pushedPartitionPredicate = PredicateBuilder.and(pushedPaimonPredicates.toList.asJava)
       readBuilder.withFilter(pushedPartitionPredicate)
     }
-    val dataSplits =
+    val dataSplits = if (AggregatePushDownUtils.hasMinMaxAggregation(aggregation)) {
+      readBuilder.newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
+    } else {
       readBuilder.dropStats().newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
-    if (!dataSplits.forall(_.mergedRowCountAvailable())) {
-      return false
     }
-    dataSplits.foreach(aggregator.update)
-    localScan = Some(
-      PaimonLocalScan(
-        aggregator.result(),
-        aggregator.resultSchema(),
-        table,
-        pushedPaimonPredicates))
-    true
+    if (AggregatePushDownUtils.canPushdownAggregation(table, aggregation, dataSplits.toSeq)) {
+      val aggregator = new LocalAggregator(table.asInstanceOf[FileStoreTable])
+      aggregator.initialize(aggregation)
+      dataSplits.foreach(aggregator.update)
+      localScan = Some(
+        PaimonLocalScan(
+          aggregator.result(),
+          aggregator.resultSchema(),
+          table,
+          pushedPaimonPredicates)
+      )
+      true
+    } else {
+      false
+    }
   }
 
   override def build(): Scan = {

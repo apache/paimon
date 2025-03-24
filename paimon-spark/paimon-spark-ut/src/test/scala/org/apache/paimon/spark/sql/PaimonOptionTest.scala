@@ -21,7 +21,9 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.FileStoreTableFactory
 
-import org.apache.spark.sql.Row
+import org.apache.spark.SparkFunSuite
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.paimon.Utils
 import org.junit.jupiter.api.Assertions
 
 class PaimonOptionTest extends PaimonSparkTestBase {
@@ -200,6 +202,30 @@ class PaimonOptionTest extends PaimonSparkTestBase {
           .join(spark.read.format("paimon").load(table2.location().toString), "id"),
         Row(1) :: Row(2) :: Nil
       )
+    }
+  }
+}
+
+class PaimonConfigCheckTest extends SparkFunSuite {
+
+  test("Paimon Option: required confs check") {
+    for (checkConf <- Seq(true, false)) {
+      val spark = SparkSession
+        .builder()
+        .master("local[2]")
+        .config("spark.sql.catalog.paimon", "org.apache.paimon.spark.SparkCatalog")
+        .config("spark.sql.catalog.paimon.warehouse", Utils.createTempDir.getCanonicalPath)
+        .config("spark.paimon.requiredSparkConfsCheck.enabled", checkConf.toString)
+        .getOrCreate()
+      try {
+        if (checkConf) {
+          assertThrows[RuntimeException](spark.sql("USE paimon"))
+        } else {
+          spark.sql("USE paimon")
+        }
+      } finally {
+        spark.close()
+      }
     }
   }
 }

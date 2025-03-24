@@ -24,13 +24,16 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Map;
+
 /** Base class for database, table, view, audit response. */
-public abstract class BaseResourceAuditResponse implements RESTResponse {
-    protected static final String FIELD_OWNER = "owner";
-    protected static final String FIELD_CREATED_AT = "createdAt";
-    protected static final String FIELD_CREATED_BY = "createdBy";
-    protected static final String FIELD_UPDATED_AT = "updatedAt";
-    protected static final String FIELD_UPDATED_BY = "updatedBy";
+public abstract class AuditRESTResponse implements RESTResponse {
+
+    public static final String FIELD_OWNER = "owner";
+    public static final String FIELD_CREATED_AT = "createdAt";
+    public static final String FIELD_CREATED_BY = "createdBy";
+    public static final String FIELD_UPDATED_AT = "updatedAt";
+    public static final String FIELD_UPDATED_BY = "updatedBy";
 
     @JsonProperty(FIELD_OWNER)
     private final String owner;
@@ -48,7 +51,7 @@ public abstract class BaseResourceAuditResponse implements RESTResponse {
     private final String updatedBy;
 
     @JsonCreator
-    public BaseResourceAuditResponse(
+    public AuditRESTResponse(
             @JsonProperty(FIELD_OWNER) String owner,
             @JsonProperty(FIELD_CREATED_AT) long createdAt,
             @JsonProperty(FIELD_CREATED_BY) String createdBy,
@@ -84,5 +87,13 @@ public abstract class BaseResourceAuditResponse implements RESTResponse {
     @JsonGetter(FIELD_UPDATED_BY)
     public String getUpdatedBy() {
         return updatedBy;
+    }
+
+    public void putAuditOptionsTo(Map<String, String> options) {
+        options.put(FIELD_OWNER, getOwner());
+        options.put(FIELD_CREATED_BY, String.valueOf(getCreatedBy()));
+        options.put(FIELD_CREATED_AT, String.valueOf(getCreatedAt()));
+        options.put(FIELD_UPDATED_BY, String.valueOf(getUpdatedBy()));
+        options.put(FIELD_UPDATED_AT, String.valueOf(getUpdatedAt()));
     }
 }

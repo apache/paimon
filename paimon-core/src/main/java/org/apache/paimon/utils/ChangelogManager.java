@@ -170,6 +170,14 @@ public class ChangelogManager implements Serializable {
         return changelogs;
     }
 
+    public void deleteLatestHint() throws IOException {
+        HintFileUtils.deleteLatestHint(fileIO, changelogDirectory());
+    }
+
+    public void deleteEarliestHint() throws IOException {
+        HintFileUtils.deleteEarliestHint(fileIO, changelogDirectory());
+    }
+
     private static void collectSnapshots(Consumer<Path> pathConsumer, List<Path> paths)
             throws IOException {
         ExecutorService executor =

@@ -23,10 +23,12 @@ import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.{Column, SparkSession}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.types.StructType
@@ -65,6 +67,10 @@ trait SparkShim {
 
   // for variant
   def toPaimonVariant(o: Object): Variant
+
+  def toPaimonVariant(row: InternalRow, pos: Int): Variant
+
+  def toPaimonVariant(array: ArrayData, pos: Int): Variant
 
   def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean
 

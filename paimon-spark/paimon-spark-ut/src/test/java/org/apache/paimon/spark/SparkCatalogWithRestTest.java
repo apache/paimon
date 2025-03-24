@@ -84,6 +84,9 @@ public class SparkCatalogWithRestTest {
                         .config(
                                 "spark.sql.catalog.paimon.token.provider",
                                 AuthProviderEnum.BEAR.identifier())
+                        .config(
+                                "spark.sql.extensions",
+                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
                         .master("local[2]")
                         .getOrCreate();
 

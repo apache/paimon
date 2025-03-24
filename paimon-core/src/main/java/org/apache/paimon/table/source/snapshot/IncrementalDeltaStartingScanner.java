@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -52,15 +51,18 @@ import java.util.stream.LongStream;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** {@link StartingScanner} for incremental changes by snapshot. */
-public class IncrementalStartingScanner extends AbstractStartingScanner {
+/**
+ * Get incremental data by reading delta or changelog files from snapshots between start and end.
+ */
+public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
 
-    private static final Logger LOG = LoggerFactory.getLogger(IncrementalStartingScanner.class);
+    private static final Logger LOG =
+            LoggerFactory.getLogger(IncrementalDeltaStartingScanner.class);
 
     private final long endingSnapshotId;
     private final ScanMode scanMode;
 
-    public IncrementalStartingScanner(
+    public IncrementalDeltaStartingScanner(
             SnapshotManager snapshotManager, long start, long end, ScanMode scanMode) {
         super(snapshotManager);
         this.startingSnapshotId = start;
@@ -89,13 +91,13 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                             Snapshot snapshot = snapshotManager.snapshot(id);
                             switch (scanMode) {
                                 case DELTA:
-                                    if (snapshot.commitKind() != CommitKind.APPEND) {
+                                    if (snapshot.commitKind() != Snapshot.CommitKind.APPEND) {
                                         // ignore COMPACT and OVERWRITE
                                         return Collections.emptyList();
                                     }
                                     break;
                                 case CHANGELOG:
-                                    if (snapshot.commitKind() == CommitKind.OVERWRITE) {
+                                    if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
                                         // ignore OVERWRITE
                                         return Collections.emptyList();
                                     }
@@ -156,7 +158,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
      *
      * @return If the check passes return empty.
      */
-    public Optional<Result> checkScanSnapshotIdValidity() {
+    private Optional<Result> checkScanSnapshotIdValidity() {
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
 
@@ -184,5 +186,24 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                 latestSnapshotId);
 
         return Optional.empty();
+    }
+
+    public static IncrementalDeltaStartingScanner betweenTimestamps(
+            long startTimestamp,
+            long endTimestamp,
+            SnapshotManager snapshotManager,
+            ScanMode scanMode) {
+        Snapshot startingSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
+        Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
+        // if earliestSnapShot.timeMillis() > startTimestamp we should include the earliestSnapShot
+        long startId =
+                (startingSnapshot == null || earliestSnapshot.timeMillis() > startTimestamp)
+                        ? earliestSnapshot.id() - 1
+                        : startingSnapshot.id();
+
+        Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
+        long endId = endSnapshot == null ? snapshotManager.latestSnapshot().id() : endSnapshot.id();
+
+        return new IncrementalDeltaStartingScanner(snapshotManager, startId, endId, scanMode);
     }
 }

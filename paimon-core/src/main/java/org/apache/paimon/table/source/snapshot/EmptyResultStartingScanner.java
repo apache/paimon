@@ -23,7 +23,7 @@ import org.apache.paimon.utils.SnapshotManager;
 /** This scanner always return an empty result. */
 public class EmptyResultStartingScanner extends AbstractStartingScanner {
 
-    EmptyResultStartingScanner(SnapshotManager snapshotManager) {
+    public EmptyResultStartingScanner(SnapshotManager snapshotManager) {
         super(snapshotManager);
     }
 

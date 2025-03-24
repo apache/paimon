@@ -109,6 +109,7 @@ case class WriteIntoPaimonTable(
       )
       val partitions = commitMessages
         .map(c => c.partition())
+        .distinct
         .map(p => PartitionPathUtils.generatePartitionPath(partitionComputer.generatePartValues(p)))
       for (partition <- partitions) {
         actions.forEach(a => a.markDone(partition))

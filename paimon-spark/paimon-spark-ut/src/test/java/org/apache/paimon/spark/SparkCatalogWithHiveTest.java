@@ -73,6 +73,9 @@ public class SparkCatalogWithHiveTest {
                         .config(
                                 "spark.sql.catalog.spark_catalog.warehouse",
                                 warehousePath.toString())
+                        .config(
+                                "spark.sql.extensions",
+                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
                         .master("local[2]")
                         .getOrCreate();
 
@@ -139,6 +142,9 @@ public class SparkCatalogWithHiveTest {
                         .config(
                                 "spark.sql.catalog.spark_catalog",
                                 SparkGenericCatalog.class.getName())
+                        .config(
+                                "spark.sql.extensions",
+                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
                         .master("local[2]")
                         .getOrCreate();
 
@@ -167,6 +173,9 @@ public class SparkCatalogWithHiveTest {
                         .config(
                                 "spark.sql.catalog.spark_catalog.warehouse",
                                 warehousePath.toString())
+                        .config(
+                                "spark.sql.extensions",
+                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
                         .master("local[2]")
                         .getOrCreate();
 

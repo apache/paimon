@@ -757,6 +757,7 @@ public class RESTCatalogServer {
                             new GetDatabaseResponse(
                                     UUID.randomUUID().toString(),
                                     database.name(),
+                                    "/tmp",
                                     database.options(),
                                     "owner",
                                     1L,
@@ -931,6 +932,7 @@ public class RESTCatalogServer {
                         new GetTableResponse(
                                 entry.getValue().uuid(),
                                 identifier.getTableName(),
+                                entry.getValue().schema().options().get(PATH.key()),
                                 entry.getValue().isExternal(),
                                 entry.getValue().schema().id(),
                                 entry.getValue().schema().toSchema(),
@@ -966,13 +968,16 @@ public class RESTCatalogServer {
                 } else {
                     tableMetadata = tableMetadataStore.get(identifier.getFullName());
                 }
+                Schema schema = tableMetadata.schema().toSchema();
+                String path = schema.options().remove(PATH.key());
                 response =
                         new GetTableResponse(
                                 tableMetadata.uuid(),
                                 identifier.getTableName(),
+                                path,
                                 tableMetadata.isExternal(),
                                 tableMetadata.schema().id(),
-                                tableMetadata.schema().toSchema(),
+                                schema,
                                 "owner",
                                 1L,
                                 "created",
@@ -1572,7 +1577,8 @@ public class RESTCatalogServer {
                             tableMetadata.uuid(),
                             catalog.catalogLoader(),
                             catalog.lockFactory().orElse(null),
-                            catalog.lockContext().orElse(null));
+                            catalog.lockContext().orElse(null),
+                            false);
             Path path = new Path(schema.options().get(PATH.key()));
             FileIO dataFileIO = catalog.fileIO();
             FileStoreTable table =

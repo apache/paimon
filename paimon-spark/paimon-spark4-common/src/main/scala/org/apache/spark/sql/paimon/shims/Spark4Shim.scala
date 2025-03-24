@@ -25,10 +25,12 @@ import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, SparkAr
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.{Column, SparkSession}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.internal.ExpressionUtils
@@ -78,6 +80,16 @@ class Spark4Shim extends SparkShim {
 
   override def toPaimonVariant(o: Object): Variant = {
     val v = o.asInstanceOf[VariantVal]
+    new GenericVariant(v.getValue, v.getMetadata)
+  }
+
+  override def toPaimonVariant(row: InternalRow, pos: Int): Variant = {
+    val v = row.getVariant(pos)
+    new GenericVariant(v.getValue, v.getMetadata)
+  }
+
+  override def toPaimonVariant(array: ArrayData, pos: Int): Variant = {
+    val v = array.getVariant(pos)
     new GenericVariant(v.getValue, v.getMetadata)
   }
 

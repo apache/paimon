@@ -21,11 +21,20 @@ package org.apache.paimon.spark.util
 import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
 
 object SparkRowUtils {
 
   def getRowKind(row: Row, rowkindColIdx: Int): RowKind = {
+    if (rowkindColIdx != -1) {
+      RowKind.fromByteValue(row.getByte(rowkindColIdx))
+    } else {
+      RowKind.INSERT
+    }
+  }
+
+  def getRowKind(row: InternalRow, rowkindColIdx: Int): RowKind = {
     if (rowkindColIdx != -1) {
       RowKind.fromByteValue(row.getByte(rowkindColIdx))
     } else {

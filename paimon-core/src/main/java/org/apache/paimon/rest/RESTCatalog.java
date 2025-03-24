@@ -76,6 +76,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
@@ -93,6 +94,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -103,6 +105,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.CoreOptions.BRANCH;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
@@ -229,8 +233,10 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.database(name),
                             GetDatabaseResponse.class,
                             restAuthFunction);
-            return new Database.DatabaseImpl(
-                    name, response.options(), response.comment().orElse(null));
+            Map<String, String> options = new HashMap<>(response.getOptions());
+            options.put(DB_LOCATION_PROP, response.getLocation());
+            response.putAuditOptionsTo(options);
+            return new Database.DatabaseImpl(name, options, options.get(COMMENT_PROP));
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(name);
         } catch (ForbiddenException e) {
@@ -379,6 +385,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsVersionManagement() {
+        return true;
+    }
+
+    @Override
     public boolean commitSnapshot(
             Identifier identifier, Snapshot snapshot, List<PartitionStatistics> statistics)
             throws TableNotExistException {
@@ -451,12 +462,19 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         }
 
-        return toTableMetadata(response);
+        return toTableMetadata(identifier.getDatabaseName(), response);
     }
 
-    private TableMetadata toTableMetadata(GetTableResponse response) {
+    private TableMetadata toTableMetadata(String db, GetTableResponse response) {
         TableSchema schema = TableSchema.create(response.getSchemaId(), response.getSchema());
-        return new TableMetadata(schema, response.isExternal(), response.getId());
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(PATH.key(), response.getPath());
+        response.putAuditOptionsTo(options);
+        Identifier identifier = Identifier.create(db, response.getName());
+        if (identifier.getBranchName() != null) {
+            options.put(BRANCH.key(), identifier.getBranchName());
+        }
+        return new TableMetadata(schema.copy(options), response.isExternal(), response.getId());
     }
 
     private Table toTable(String db, GetTableResponse response) {
@@ -467,7 +485,7 @@ public class RESTCatalog implements Catalog {
                     identifier,
                     path -> fileIOForData(path, identifier),
                     this::fileIOFromOptions,
-                    i -> toTableMetadata(response),
+                    i -> toTableMetadata(db, response),
                     null,
                     null);
         } catch (TableNotExistException e) {
@@ -716,6 +734,31 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        // partitions of the REST Catalog server are automatically calculated and do not require
+        // special creating.
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
+            throws TableNotExistException {
+        // The partition statistics of the REST Catalog server are automatically calculated and do
+        // not require special reporting.
+    }
+
+    @Override
     public View getView(Identifier identifier) throws ViewNotExistException {
         try {
             GetViewResponse response =
@@ -828,13 +871,15 @@ public class RESTCatalog implements Catalog {
 
     private ViewImpl toView(String db, GetViewResponse response) {
         ViewSchema schema = response.getSchema();
+        Map<String, String> options = new HashMap<>(schema.options());
+        response.putAuditOptionsTo(options);
         return new ViewImpl(
                 Identifier.create(db, response.getName()),
                 schema.fields(),
                 schema.query(),
                 schema.dialects(),
                 schema.comment(),
-                schema.options());
+                options);
     }
 
     @Override

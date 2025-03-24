@@ -38,6 +38,7 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.RowType;
 
@@ -478,6 +479,30 @@ public abstract class AbstractCatalog implements Catalog {
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }
+
+    @Override
+    public boolean supportsVersionManagement() {
+        return false;
+    }
+
+    @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
+            throws TableNotExistException {}
 
     /**
      * Create a {@link FormatTable} identified by the given {@link Identifier}.
