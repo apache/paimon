@@ -1519,13 +1519,13 @@ components:
       properties:
         message:
           type: string
+        resourceType:
+          type: string
+        resourceName:
+          type: string
         code:
           type: integer
           format: int32
-        stack:
-          type: array
-          items:
-            type: string
     CreateTableRequest:
       type: object
       properties:
@@ -1606,9 +1606,7 @@ components:
       properties:
         database:
           type: string
-        table:
-          type: string
-        branch:
+        object:
           type: string
     Schema:
       type: object
