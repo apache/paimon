@@ -901,7 +901,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void alterView(Identifier identifier, DialectChange dialectChange)
+    public void alterView(Identifier identifier, DialectChange dialectChange, boolean force)
             throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
         try {
             AlterViewRequest request = new AlterViewRequest(dialectChange);
@@ -910,12 +910,16 @@ public class RESTCatalog implements Catalog {
                     request,
                     restAuthFunction);
         } catch (AlreadyExistsException e) {
-            throw new DialectAlreadyExistException(identifier, e.resourceName());
-        } catch (NoSuchResourceException e) {
-            if (e.resourceType() == ErrorResponseResourceType.DIALECT) {
-                throw new DialectNotExistException(identifier, e.resourceName());
+            if (!force) {
+                throw new DialectAlreadyExistException(identifier, e.resourceName());
             }
-            throw new ViewNotExistException(identifier);
+        } catch (NoSuchResourceException e) {
+            if (!force) {
+                if (e.resourceType() == ErrorResponseResourceType.DIALECT) {
+                    throw new DialectNotExistException(identifier, e.resourceName());
+                }
+                throw new ViewNotExistException(identifier);
+            }
         }
     }
 

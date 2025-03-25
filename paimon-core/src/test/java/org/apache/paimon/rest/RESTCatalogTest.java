@@ -83,6 +83,7 @@ import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -1064,18 +1065,19 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         DialectChange.AddDialect addDialect =
                 (DialectChange.AddDialect)
                         DialectChange.add("flink_1", "SELECT * FROM FLINK_TABLE_1");
-        catalog.alterView(identifier, addDialect);
+        catalog.alterView(identifier, addDialect, false);
         View catalogView = catalog.getView(identifier);
         assertThat(catalogView.query(addDialect.getDialect())).isEqualTo(addDialect.getQuery());
         assertThrows(
                 Catalog.DialectAlreadyExistException.class,
-                () -> catalog.alterView(identifier, addDialect));
+                () -> catalog.alterView(identifier, addDialect, false));
+        assertDoesNotThrow(() -> catalog.alterView(identifier, addDialect, true));
 
         // update
         DialectChange.UpdateDialect updateDialect =
                 (DialectChange.UpdateDialect)
                         DialectChange.update("flink_1", "SELECT * FROM FLINK_TABLE_2");
-        catalog.alterView(identifier, updateDialect);
+        catalog.alterView(identifier, updateDialect, false);
         catalogView = catalog.getView(identifier);
         assertThat(catalogView.query(updateDialect.getDialect()))
                 .isEqualTo(updateDialect.getQuery());
@@ -1084,17 +1086,26 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () ->
                         catalog.alterView(
                                 identifier,
-                                DialectChange.update("no_exist", "SELECT * FROM FLINK_TABLE_2")));
+                                DialectChange.update("no_exist", "SELECT * FROM FLINK_TABLE_2"),
+                                false));
+        assertDoesNotThrow(
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                DialectChange.update("no_exist", "SELECT * FROM FLINK_TABLE_2"),
+                                true));
 
         // drop
         DialectChange.DropDialect dropDialect =
                 (DialectChange.DropDialect) DialectChange.drop(updateDialect.getDialect());
-        catalog.alterView(identifier, dropDialect);
+        catalog.alterView(identifier, dropDialect, false);
         catalogView = catalog.getView(identifier);
         assertThat(catalogView.query(dropDialect.getDialect())).isEqualTo(catalogView.query());
         assertThrows(
                 Catalog.DialectNotExistException.class,
-                () -> catalog.alterView(identifier, DialectChange.drop("no_exist")));
+                () -> catalog.alterView(identifier, DialectChange.drop("no_exist"), false));
+        assertDoesNotThrow(
+                () -> catalog.alterView(identifier, DialectChange.drop("no_exist"), true));
     }
 
     private TestPagedResponse generateTestPagedResponse(
