@@ -51,7 +51,7 @@ public class CommitMessageSerializerTest {
                         row(0), 1, 2, dataIncrement, compactIncrement, indexIncrement);
 
         CommitMessageImpl newCommittable =
-                (CommitMessageImpl) serializer.deserialize(5, serializer.serialize(committable));
+                (CommitMessageImpl) serializer.deserialize(7, serializer.serialize(committable));
         assertThat(newCommittable.partition()).isEqualTo(committable.partition());
         assertThat(newCommittable.bucket()).isEqualTo(committable.bucket());
         assertThat(newCommittable.totalBuckets()).isEqualTo(committable.totalBuckets());
