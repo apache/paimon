@@ -1595,18 +1595,41 @@ components:
     DialectChange:
       anyOf:
         - $ref: '#/components/schemas/AddDialect'
+        - $ref: '#/components/schemas/UpdateDialect'
+        - $ref: '#/components/schemas/DropDialect'
+      required:
+        - action
+      properties:
+        action:
+          type: string
     AddDialect:
       type: object
       properties:
-        'action':
+        action:
           type: string
-          enum: [ "add" ]
+          const: "add"
         dialect:
           type: string
         query:
           type: string
-        force:
-          type: boolean
+    UpdateDialect:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "update"
+        dialect:
+          type: string
+        query:
+          type: string
+    DropDialect:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "drop"
+        dialect:
+          type: string
     DataField:
       type: object
       properties:
@@ -1734,12 +1757,17 @@ components:
         - $ref: '#/components/schemas/UpdateColumnType'
         - $ref: '#/components/schemas/UpdateColumnPosition'
         - $ref: '#/components/schemas/UpdateColumnNullability'
+      required:
+        - action
+      properties:
+        action:
+          type: string
     SetOption:
       type: object
       properties:
         action:
           type: string
-          enum: ["setOption"]
+          const: "setOption"
         key:
           type: string
         value:
@@ -1749,7 +1777,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["removeOption"]
+          const: "removeOption"
         key:
           type: string
     UpdateComment:
@@ -1757,7 +1785,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["updateComment"]
+          const: "updateComment"
         comment:
           type: string
     AddColumn:
@@ -1765,7 +1793,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["addColumn"]
+          const: "addColumn"
         fieldNames:
           type: array
           items:
@@ -1781,7 +1809,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["renameColumn"]
+          const: "renameColumn"
         fieldNames:
           type: array
           items:
@@ -1793,7 +1821,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["dropColumn"]
+          const: "dropColumn"
         fieldNames:
           type: array
           items:
@@ -1803,7 +1831,7 @@ components:
       properties:
         action:
           type: string
-          enum: [ "updateColumnComment" ]
+          const: "updateColumnComment"
         fieldNames:
           type: array
           items:
@@ -1815,7 +1843,7 @@ components:
       properties:
         action:
           type: string
-          enum: [ "updateColumnType" ]
+          const: "updateColumnType"
         fieldNames:
           type: array
           items:
@@ -1829,7 +1857,7 @@ components:
       properties:
         action:
           type: string
-          enum: [ "updateColumnPosition" ]
+          const: "updateColumnPosition"
         move:
           $ref: '#/components/schemas/Move'
     UpdateColumnNullability:
@@ -1837,7 +1865,7 @@ components:
       properties:
         action:
           type: string
-          enum: [ "update_column_nullability" ]
+          const: "update_column_nullability"
         fieldNames:
           type: array
           items:
@@ -1878,12 +1906,17 @@ components:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
         - $ref: '#/components/schemas/TagInstant'
+      required:
+        - type
+      properties:
+        type:
+          type: string
     SnapshotInstant:
       type: object
       properties:
         'type':
           type: string
-          enum: [ "snapshot" ]
+          const: "snapshot"
         snapshotId:
           type: integer
           format: int64
@@ -1892,7 +1925,7 @@ components:
       properties:
         'type':
           type: string
-          enum: [ "tag" ]
+          const: "tag"
         tagName:
           type: string
     Snapshot:

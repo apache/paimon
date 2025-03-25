@@ -38,7 +38,8 @@ import java.io.Serializable;
     @JsonSubTypes.Type(value = DialectChange.AddDialect.class, name = DialectChange.Actions.ADD),
     @JsonSubTypes.Type(
             value = DialectChange.UpdateDialect.class,
-            name = DialectChange.Actions.UPDATE)
+            name = DialectChange.Actions.UPDATE),
+    @JsonSubTypes.Type(value = DialectChange.DropDialect.class, name = DialectChange.Actions.DROP)
 })
 public interface DialectChange extends Serializable {
 
@@ -48,6 +49,10 @@ public interface DialectChange extends Serializable {
 
     static DialectChange update(String dialect, String query) {
         return new UpdateDialect(dialect, query);
+    }
+
+    static DialectChange drop(String dialect) {
+        return new DropDialect(dialect);
     }
 
     /** add dialect for dialect change. */
@@ -112,11 +117,30 @@ public interface DialectChange extends Serializable {
         }
     }
 
+    final class DropDialect implements DialectChange {
+        private static final long serialVersionUID = 1L;
+        private static final String FIELD_DIALECT = "dialect";
+
+        @JsonProperty(FIELD_DIALECT)
+        private final String dialect;
+
+        @JsonCreator
+        public DropDialect(@JsonProperty(FIELD_DIALECT) String dialect) {
+            this.dialect = dialect;
+        }
+
+        @JsonGetter(FIELD_DIALECT)
+        public String getDialect() {
+            return dialect;
+        }
+    }
+
     /** Actions for view alter. */
     class Actions {
         public static final String FIELD_TYPE = "action";
         public static final String ADD = "add";
         public static final String UPDATE = "update";
+        public static final String DROP = "drop";
 
         private Actions() {}
     }
