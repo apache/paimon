@@ -1591,9 +1591,12 @@ components:
       type: object
       properties:
         change:
-          $ref: '#/components/schemas/DialectChange'
-    DialectChange:
+          $ref: '#/components/schemas/ViewChange'
+    ViewChange:
       anyOf:
+        - $ref: '#/components/schemas/SetViewOption'
+        - $ref: '#/components/schemas/RemoveViewOption'
+        - $ref: '#/components/schemas/UpdateViewComment'
         - $ref: '#/components/schemas/AddDialect'
         - $ref: '#/components/schemas/UpdateDialect'
         - $ref: '#/components/schemas/DropDialect'
@@ -1601,6 +1604,32 @@ components:
         - action
       properties:
         action:
+          type: string
+    SetViewOption:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "setOption"
+        key:
+          type: string
+        value:
+          type: string
+    RemoveViewOption:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "removeOption"
+        key:
+          type: string
+    UpdateViewComment:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "comment"
+        key:
           type: string
     AddDialect:
       type: object

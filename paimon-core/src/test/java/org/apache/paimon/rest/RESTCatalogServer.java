@@ -1358,33 +1358,47 @@ public class RESTCatalogServer {
                         ViewChange viewChange = request.getDialectChange();
                         ViewImpl view = (ViewImpl) viewStore.get(identifier.getFullName());
                         HashMap<String, String> newDialects = new HashMap<>(view.dialects());
-                        if (viewChange instanceof ViewChange.AddDialect) {
+                        Map<String, String> newOptions = new HashMap<>(view.options());
+                        String newComment = view.comment().orElse(null);
+                        if (viewChange instanceof ViewChange.SetViewOption) {
+                            ViewChange.SetViewOption setViewOption =
+                                    (ViewChange.SetViewOption) viewChange;
+                            newOptions.put(setViewOption.key(), setViewOption.value());
+
+                        } else if (viewChange instanceof ViewChange.RemoveViewOption) {
+                            ViewChange.RemoveViewOption removeViewOption =
+                                    (ViewChange.RemoveViewOption) viewChange;
+                            newOptions.remove(removeViewOption.key());
+                        } else if (viewChange instanceof ViewChange.UpdateViewComment) {
+                            ViewChange.UpdateViewComment updateViewComment =
+                                    (ViewChange.UpdateViewComment) viewChange;
+                            newComment = updateViewComment.comment();
+                        } else if (viewChange instanceof ViewChange.AddDialect) {
                             ViewChange.AddDialect addDialect = (ViewChange.AddDialect) viewChange;
-                            if (view.dialects().containsKey(addDialect.getDialect())) {
+                            if (view.dialects().containsKey(addDialect.dialect())) {
 
                                 throw new Catalog.DialectAlreadyExistException(
-                                        identifier, addDialect.getDialect());
+                                        identifier, addDialect.dialect());
                             } else {
-                                newDialects.put(addDialect.getDialect(), addDialect.getQuery());
+                                newDialects.put(addDialect.dialect(), addDialect.query());
                             }
                         } else if (viewChange instanceof ViewChange.UpdateDialect) {
                             ViewChange.UpdateDialect updateDialect =
                                     (ViewChange.UpdateDialect) viewChange;
-                            if (view.dialects().containsKey(updateDialect.getDialect())) {
-                                newDialects.put(
-                                        updateDialect.getDialect(), updateDialect.getQuery());
+                            if (view.dialects().containsKey(updateDialect.dialect())) {
+                                newDialects.put(updateDialect.dialect(), updateDialect.query());
                             } else {
                                 throw new Catalog.DialectNotExistException(
-                                        identifier, updateDialect.getDialect());
+                                        identifier, updateDialect.dialect());
                             }
                         } else if (viewChange instanceof ViewChange.DropDialect) {
                             ViewChange.DropDialect dropDialect =
                                     (ViewChange.DropDialect) viewChange;
-                            if (view.dialects().containsKey(dropDialect.getDialect())) {
-                                newDialects.remove(dropDialect.getDialect());
+                            if (view.dialects().containsKey(dropDialect.dialect())) {
+                                newDialects.remove(dropDialect.dialect());
                             } else {
                                 throw new Catalog.DialectNotExistException(
-                                        identifier, dropDialect.getDialect());
+                                        identifier, dropDialect.dialect());
                             }
                         }
                         view =
@@ -1393,8 +1407,8 @@ public class RESTCatalogServer {
                                         view.rowType().getFields(),
                                         view.query(),
                                         newDialects,
-                                        view.comment().orElse(null),
-                                        view.options());
+                                        newComment,
+                                        newOptions);
                         viewStore.put(identifier.getFullName(), view);
                         return new MockResponse().setResponseCode(200);
                     } else {

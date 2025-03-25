@@ -39,13 +39,13 @@ import java.util.Objects;
         property = ViewChange.Actions.FIELD_TYPE)
 @JsonSubTypes({
     @JsonSubTypes.Type(
-            value = ViewChange.SetOption.class,
+            value = ViewChange.SetViewOption.class,
             name = ViewChange.Actions.SET_OPTION_ACTION),
     @JsonSubTypes.Type(
-            value = ViewChange.RemoveOption.class,
+            value = ViewChange.RemoveViewOption.class,
             name = ViewChange.Actions.REMOVE_OPTION_ACTION),
     @JsonSubTypes.Type(
-            value = ViewChange.UpdateComment.class,
+            value = ViewChange.UpdateViewComment.class,
             name = ViewChange.Actions.UPDATE_COMMENT_ACTION),
     @JsonSubTypes.Type(
             value = ViewChange.AddDialect.class,
@@ -60,15 +60,15 @@ import java.util.Objects;
 public interface ViewChange extends Serializable {
 
     static ViewChange setOption(String key, String value) {
-        return new ViewChange.SetOption(key, value);
+        return new ViewChange.SetViewOption(key, value);
     }
 
     static ViewChange removeOption(String key) {
-        return new ViewChange.RemoveOption(key);
+        return new ViewChange.RemoveViewOption(key);
     }
 
     static ViewChange updateComment(String comment) {
-        return new ViewChange.UpdateComment(comment);
+        return new ViewChange.UpdateViewComment(comment);
     }
 
     static ViewChange addDialect(String dialect, String query) {
@@ -81,6 +81,130 @@ public interface ViewChange extends Serializable {
 
     static ViewChange dropDialect(String dialect) {
         return new DropDialect(dialect);
+    }
+
+    /** set a view option for view change. */
+    final class SetViewOption implements ViewChange {
+
+        private static final long serialVersionUID = 1L;
+
+        private static final String FIELD_KEY = "key";
+        private static final String FIELD_VALUE = "value";
+
+        @JsonProperty(FIELD_KEY)
+        private final String key;
+
+        @JsonProperty(FIELD_VALUE)
+        private final String value;
+
+        @JsonCreator
+        private SetViewOption(
+                @JsonProperty(FIELD_KEY) String key, @JsonProperty(FIELD_VALUE) String value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        @JsonGetter(FIELD_KEY)
+        public String key() {
+            return key;
+        }
+
+        @JsonGetter(FIELD_VALUE)
+        public String value() {
+            return value;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SetViewOption that = (SetViewOption) o;
+            return key.equals(that.key) && value.equals(that.value);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(key, value);
+        }
+    }
+
+    /** remove a view option for view change. */
+    final class RemoveViewOption implements ViewChange {
+
+        private static final long serialVersionUID = 1L;
+
+        private static final String FIELD_KEY = "key";
+
+        @JsonProperty(FIELD_KEY)
+        private final String key;
+
+        private RemoveViewOption(@JsonProperty(FIELD_KEY) String key) {
+            this.key = key;
+        }
+
+        @JsonGetter(FIELD_KEY)
+        public String key() {
+            return key;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            RemoveViewOption that = (RemoveViewOption) o;
+            return key.equals(that.key);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(key);
+        }
+    }
+
+    /** update a view comment for view change. */
+    final class UpdateViewComment implements ViewChange {
+
+        private static final long serialVersionUID = 1L;
+
+        private static final String FIELD_COMMENT = "comment";
+
+        // If comment is null, means to remove comment
+        @JsonProperty(FIELD_COMMENT)
+        private final @Nullable String comment;
+
+        private UpdateViewComment(@JsonProperty(FIELD_COMMENT) @Nullable String comment) {
+            this.comment = comment;
+        }
+
+        @JsonGetter(FIELD_COMMENT)
+        public @Nullable String comment() {
+            return comment;
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (object == null || getClass() != object.getClass()) {
+                return false;
+            }
+            UpdateViewComment that = (UpdateViewComment) object;
+            return Objects.equals(comment, that.comment);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(comment);
+        }
     }
 
     /** addDialect dialect for view change. */
@@ -104,12 +228,12 @@ public interface ViewChange extends Serializable {
         }
 
         @JsonGetter(FIELD_DIALECT)
-        public String getDialect() {
+        public String dialect() {
             return dialect;
         }
 
         @JsonGetter(FIELD_QUERY)
-        public String getQuery() {
+        public String query() {
             return query;
         }
     }
@@ -135,12 +259,12 @@ public interface ViewChange extends Serializable {
         }
 
         @JsonGetter(FIELD_DIALECT)
-        public String getDialect() {
+        public String dialect() {
             return dialect;
         }
 
         @JsonGetter(FIELD_QUERY)
-        public String getQuery() {
+        public String query() {
             return query;
         }
     }
@@ -159,132 +283,8 @@ public interface ViewChange extends Serializable {
         }
 
         @JsonGetter(FIELD_DIALECT)
-        public String getDialect() {
+        public String dialect() {
             return dialect;
-        }
-    }
-
-    /** set a view option for view change. */
-    final class SetOption implements ViewChange {
-
-        private static final long serialVersionUID = 1L;
-
-        private static final String FIELD_KEY = "key";
-        private static final String FIELD_VALUE = "value";
-
-        @JsonProperty(FIELD_KEY)
-        private final String key;
-
-        @JsonProperty(FIELD_VALUE)
-        private final String value;
-
-        @JsonCreator
-        private SetOption(
-                @JsonProperty(FIELD_KEY) String key, @JsonProperty(FIELD_VALUE) String value) {
-            this.key = key;
-            this.value = value;
-        }
-
-        @JsonGetter(FIELD_KEY)
-        public String key() {
-            return key;
-        }
-
-        @JsonGetter(FIELD_VALUE)
-        public String value() {
-            return value;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            SetOption that = (SetOption) o;
-            return key.equals(that.key) && value.equals(that.value);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(key, value);
-        }
-    }
-
-    /** remove a view option for view change. */
-    final class RemoveOption implements ViewChange {
-
-        private static final long serialVersionUID = 1L;
-
-        private static final String FIELD_KEY = "key";
-
-        @JsonProperty(FIELD_KEY)
-        private final String key;
-
-        private RemoveOption(@JsonProperty(FIELD_KEY) String key) {
-            this.key = key;
-        }
-
-        @JsonGetter(FIELD_KEY)
-        public String key() {
-            return key;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            RemoveOption that = (RemoveOption) o;
-            return key.equals(that.key);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(key);
-        }
-    }
-
-    /** update a view comment for view change. */
-    final class UpdateComment implements ViewChange {
-
-        private static final long serialVersionUID = 1L;
-
-        private static final String FIELD_COMMENT = "comment";
-
-        // If comment is null, means to remove comment
-        @JsonProperty(FIELD_COMMENT)
-        private final @Nullable String comment;
-
-        private UpdateComment(@JsonProperty(FIELD_COMMENT) @Nullable String comment) {
-            this.comment = comment;
-        }
-
-        @JsonGetter(FIELD_COMMENT)
-        public @Nullable String comment() {
-            return comment;
-        }
-
-        @Override
-        public boolean equals(Object object) {
-            if (this == object) {
-                return true;
-            }
-            if (object == null || getClass() != object.getClass()) {
-                return false;
-            }
-            UpdateComment that = (UpdateComment) object;
-            return Objects.equals(comment, that.comment);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(comment);
         }
     }
 
