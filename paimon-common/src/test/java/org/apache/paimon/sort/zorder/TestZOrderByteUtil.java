@@ -110,9 +110,9 @@ public class TestZOrderByteUtil {
             String stringResult = interleaveStrings(testStrings);
 
             assertEquals(
-                    "String interleave didn't match byte interleave",
                     stringResult,
-                    byteResultAsString);
+                    byteResultAsString,
+                    "String interleave didn't match byte interleave");
         }
     }
 
@@ -137,9 +137,9 @@ public class TestZOrderByteUtil {
             String stringResult = interleaveStrings(testStrings);
 
             assertEquals(
-                    "String interleave didn't match byte interleave",
                     stringResult,
-                    byteResultAsString);
+                    byteResultAsString,
+                    "String interleave didn't match byte interleave");
         }
     }
 
