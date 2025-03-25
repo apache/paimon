@@ -1521,6 +1521,7 @@ components:
           type: string
         resourceType:
           type: string
+          enum: ["DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "UNKNOWN"]
         resourceName:
           type: string
         code:
