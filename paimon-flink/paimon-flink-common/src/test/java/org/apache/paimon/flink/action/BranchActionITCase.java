@@ -30,7 +30,6 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
-import org.junit.Assert;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -40,6 +39,7 @@ import java.util.List;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
 
 /** IT cases for branch management actions. */
 class BranchActionITCase extends ActionITCaseBase {
@@ -320,7 +320,7 @@ class BranchActionITCase extends ActionITCaseBase {
                         "+I[11, new.data_11]",
                         "+I[12, new.data_12]",
                         "+I[13, new.data_13]");
-        Assert.assertEquals(expected, sortedActual);
+        assertEquals(expected, sortedActual);
 
         // Fast-forward branch branch_name again
         executeSQL(
@@ -332,7 +332,7 @@ class BranchActionITCase extends ActionITCaseBase {
         result = readTableData(table);
         sortedActual = new ArrayList<>(result);
         expected = Arrays.asList("+I[1, Hi]", "+I[2, Hello]");
-        Assert.assertEquals(expected, sortedActual);
+        assertEquals(expected, sortedActual);
 
         // Fast-forward branch branch_name_action again
         createAction(
@@ -352,7 +352,7 @@ class BranchActionITCase extends ActionITCaseBase {
         result = readTableData(table);
         sortedActual = new ArrayList<>(result);
         expected = Arrays.asList("+I[1, Hi]", "+I[2, Hello]", "+I[3, Paimon]");
-        Assert.assertEquals(expected, sortedActual);
+        assertEquals(expected, sortedActual);
     }
 
     List<String> readTableData(FileStoreTable table) throws Exception {

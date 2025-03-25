@@ -26,7 +26,6 @@ import org.apache.paimon.utils.ThreadPoolUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.commons.io.FileUtils;
-import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -288,9 +287,9 @@ public class AuthSessionTest {
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
         DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         DLFToken fetchToken = dlfAuthProvider.token;
-        Assert.assertEquals(fetchToken.getAccessKeyId(), customToken.getAccessKeyId());
-        Assert.assertEquals(fetchToken.getAccessKeySecret(), customToken.getAccessKeySecret());
-        Assert.assertEquals(fetchToken.getSecurityToken(), customToken.getSecurityToken());
+        assertEquals(fetchToken.getAccessKeyId(), customToken.getAccessKeyId());
+        assertEquals(fetchToken.getAccessKeySecret(), customToken.getAccessKeySecret());
+        assertEquals(fetchToken.getSecurityToken(), customToken.getSecurityToken());
     }
 
     @Test

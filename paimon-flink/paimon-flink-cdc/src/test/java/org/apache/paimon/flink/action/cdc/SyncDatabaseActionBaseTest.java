@@ -26,7 +26,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.RowKind;
 
-import org.junit.Assert;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -36,6 +35,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.junit.Assert.assertEquals;
 
 /** Tests for {@link SyncDatabaseActionBase}. */
 public class SyncDatabaseActionBaseTest {
@@ -93,11 +94,11 @@ public class SyncDatabaseActionBaseTest {
 
         parser.setRawEvent(whiteAnyDbCdcRecord);
         parsedRecords = parser.parseRecords();
-        Assert.assertEquals(1, parsedRecords.size());
+        assertEquals(1, parsedRecords.size());
 
         parser.setRawEvent(blackAnyDbCdcRecord);
         parsedRecords = parser.parseRecords();
-        Assert.assertEquals(0, parsedRecords.size());
+        assertEquals(0, parsedRecords.size());
     }
 
     @Test
@@ -111,20 +112,20 @@ public class SyncDatabaseActionBaseTest {
 
         parser.setRawEvent(whiteAnyDbCdcRecord);
         parsedRecords = parser.parseRecords();
-        Assert.assertEquals(0, parsedRecords.size());
+        assertEquals(0, parsedRecords.size());
 
         parser.setRawEvent(blackAnyDbCdcRecord);
         parsedRecords = parser.parseRecords();
-        Assert.assertEquals(0, parsedRecords.size());
+        assertEquals(0, parsedRecords.size());
 
         // white db and white table
         parser.setRawEvent(whiteCdcRecord);
         parsedRecords = parser.parseRecords();
-        Assert.assertEquals(1, parsedRecords.size());
+        assertEquals(1, parsedRecords.size());
 
         parser.setRawEvent(blackAnyDbCdcRecord);
         parsedRecords = parser.parseRecords();
-        Assert.assertEquals(0, parsedRecords.size());
+        assertEquals(0, parsedRecords.size());
     }
 
     @Test
@@ -138,9 +139,9 @@ public class SyncDatabaseActionBaseTest {
         List<CdcRecord> parsedRecords;
         parser.setRawEvent(whiteDbBlackTblCdcRecord);
         parsedRecords = parser.parseRecords();
-        Assert.assertEquals(0, parsedRecords.size());
+        assertEquals(0, parsedRecords.size());
         parser.setRawEvent(blackDbWhiteTblCdcRecord);
         parsedRecords = parser.parseRecords();
-        Assert.assertEquals(0, parsedRecords.size());
+        assertEquals(0, parsedRecords.size());
     }
 }
