@@ -35,12 +35,19 @@ import java.io.Serializable;
         include = JsonTypeInfo.As.PROPERTY,
         property = DialectChange.Actions.FIELD_TYPE)
 @JsonSubTypes({
-    @JsonSubTypes.Type(value = DialectChange.AddDialect.class, name = DialectChange.Actions.ADD)
+    @JsonSubTypes.Type(value = DialectChange.AddDialect.class, name = DialectChange.Actions.ADD),
+    @JsonSubTypes.Type(
+            value = DialectChange.UpdateDialect.class,
+            name = DialectChange.Actions.UPDATE)
 })
 public interface DialectChange extends Serializable {
 
-    static DialectChange add(String dialect, String query, boolean force) {
-        return new AddDialect(dialect, query, force);
+    static DialectChange add(String dialect, String query) {
+        return new AddDialect(dialect, query);
+    }
+
+    static DialectChange update(String dialect, String query) {
+        return new UpdateDialect(dialect, query);
     }
 
     /** add dialect for dialect change. */
@@ -48,7 +55,6 @@ public interface DialectChange extends Serializable {
         private static final long serialVersionUID = 1L;
         private static final String FIELD_DIALECT = "dialect";
         private static final String FIELD_QUERY = "query";
-        private static final String FIELD_FORCE = "force";
 
         @JsonProperty(FIELD_DIALECT)
         private final String dialect;
@@ -56,17 +62,12 @@ public interface DialectChange extends Serializable {
         @JsonProperty(FIELD_QUERY)
         private final String query;
 
-        @JsonProperty(FIELD_FORCE)
-        private final boolean force;
-
         @JsonCreator
         public AddDialect(
                 @JsonProperty(FIELD_DIALECT) String dialect,
-                @JsonProperty(FIELD_QUERY) String query,
-                @JsonProperty(FIELD_FORCE) boolean force) {
+                @JsonProperty(FIELD_QUERY) String query) {
             this.dialect = dialect;
             this.query = query;
-            this.force = force;
         }
 
         @JsonGetter(FIELD_DIALECT)
@@ -78,10 +79,36 @@ public interface DialectChange extends Serializable {
         public String getQuery() {
             return query;
         }
+    }
 
-        @JsonGetter(FIELD_FORCE)
-        public boolean isForce() {
-            return force;
+    /** update dialect for dialect change. */
+    final class UpdateDialect implements DialectChange {
+        private static final long serialVersionUID = 1L;
+        private static final String FIELD_DIALECT = "dialect";
+        private static final String FIELD_QUERY = "query";
+
+        @JsonProperty(FIELD_DIALECT)
+        private final String dialect;
+
+        @JsonProperty(FIELD_QUERY)
+        private final String query;
+
+        @JsonCreator
+        public UpdateDialect(
+                @JsonProperty(FIELD_DIALECT) String dialect,
+                @JsonProperty(FIELD_QUERY) String query) {
+            this.dialect = dialect;
+            this.query = query;
+        }
+
+        @JsonGetter(FIELD_DIALECT)
+        public String getDialect() {
+            return dialect;
+        }
+
+        @JsonGetter(FIELD_QUERY)
+        public String getQuery() {
+            return query;
         }
     }
 
@@ -89,6 +116,7 @@ public interface DialectChange extends Serializable {
     class Actions {
         public static final String FIELD_TYPE = "action";
         public static final String ADD = "add";
+        public static final String UPDATE = "update";
 
         private Actions() {}
     }

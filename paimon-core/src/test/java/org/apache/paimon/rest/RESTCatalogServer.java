@@ -495,6 +495,14 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     404);
                     return mockResponse(response, 404);
+                } catch (Catalog.DialectNotExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.DIALECT,
+                                    e.dialect(),
+                                    e.getMessage(),
+                                    404);
+                    return mockResponse(response, 404);
                 } catch (Catalog.ViewAlreadyExistException e) {
                     response =
                             new ErrorResponse(
@@ -1348,30 +1356,38 @@ public class RESTCatalogServer {
                         AlterViewRequest request =
                                 OBJECT_MAPPER.readValue(requestData, AlterViewRequest.class);
                         DialectChange dialectChange = request.getDialectChange();
+                        ViewImpl view = (ViewImpl) viewStore.get(identifier.getFullName());
+                        HashMap<String, String> newDialects = new HashMap<>(view.dialects());
                         if (dialectChange instanceof DialectChange.AddDialect) {
                             DialectChange.AddDialect addDialect =
                                     (DialectChange.AddDialect) dialectChange;
-                            ViewImpl view = (ViewImpl) viewStore.get(identifier.getFullName());
-                            if (view.dialects().containsKey(addDialect.getDialect())
-                                    && !addDialect.isForce()) {
+                            if (view.dialects().containsKey(addDialect.getDialect())) {
 
                                 throw new Catalog.DialectAlreadyExistException(
                                         identifier, addDialect.getDialect());
                             } else {
-                                HashMap<String, String> newDialects =
-                                        new HashMap<>(view.dialects());
                                 newDialects.put(addDialect.getDialect(), addDialect.getQuery());
-                                view =
-                                        new ViewImpl(
-                                                identifier,
-                                                view.rowType().getFields(),
-                                                view.query(),
-                                                newDialects,
-                                                view.comment().orElse(null),
-                                                view.options());
-                                viewStore.put(identifier.getFullName(), view);
+                            }
+                        } else if (dialectChange instanceof DialectChange.UpdateDialect) {
+                            DialectChange.UpdateDialect updateDialect =
+                                    (DialectChange.UpdateDialect) dialectChange;
+                            if (view.dialects().containsKey(updateDialect.getDialect())) {
+                                newDialects.put(
+                                        updateDialect.getDialect(), updateDialect.getQuery());
+                            } else {
+                                throw new Catalog.DialectNotExistException(
+                                        identifier, updateDialect.getDialect());
                             }
                         }
+                        view =
+                                new ViewImpl(
+                                        identifier,
+                                        view.rowType().getFields(),
+                                        view.query(),
+                                        newDialects,
+                                        view.comment().orElse(null),
+                                        view.options());
+                        viewStore.put(identifier.getFullName(), view);
                         return new MockResponse().setResponseCode(200);
                     } else {
                         throw new Catalog.ViewNotExistException(identifier);

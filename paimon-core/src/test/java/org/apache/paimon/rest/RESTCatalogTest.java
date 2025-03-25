@@ -1060,19 +1060,31 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         View view = createView(identifier);
         catalog.createDatabase(identifier.getDatabaseName(), false);
         catalog.createView(identifier, view, false);
-        // alter view
+        // add
         DialectChange.AddDialect addDialect =
                 (DialectChange.AddDialect)
-                        DialectChange.add("flink", "SELECT * FROM FLINK_TABLE_1", true);
+                        DialectChange.add("flink_1", "SELECT * FROM FLINK_TABLE_1");
         catalog.alterView(identifier, addDialect);
         View catalogView = catalog.getView(identifier);
         assertThat(catalogView.query(addDialect.getDialect())).isEqualTo(addDialect.getQuery());
         assertThrows(
                 Catalog.DialectAlreadyExistException.class,
+                () -> catalog.alterView(identifier, addDialect));
+
+        // update
+        DialectChange.UpdateDialect updateDialect =
+                (DialectChange.UpdateDialect)
+                        DialectChange.update("flink_1", "SELECT * FROM FLINK_TABLE_2");
+        catalog.alterView(identifier, updateDialect);
+        catalogView = catalog.getView(identifier);
+        assertThat(catalogView.query(updateDialect.getDialect()))
+                .isEqualTo(updateDialect.getQuery());
+        assertThrows(
+                Catalog.DialectNotExistException.class,
                 () ->
                         catalog.alterView(
                                 identifier,
-                                DialectChange.add("flink", "SELECT * FROM FLINK_TABLE_2", false)));
+                                DialectChange.update("no_exist", "SELECT * FROM FLINK_TABLE_2")));
     }
 
     private TestPagedResponse generateTestPagedResponse(

@@ -902,7 +902,7 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public void alterView(Identifier identifier, DialectChange dialectChange)
-            throws ViewNotExistException, DialectAlreadyExistException {
+            throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
         try {
             AlterViewRequest request = new AlterViewRequest(dialectChange);
             client.post(
@@ -912,6 +912,9 @@ public class RESTCatalog implements Catalog {
         } catch (AlreadyExistsException e) {
             throw new DialectAlreadyExistException(identifier, e.resourceName());
         } catch (NoSuchResourceException e) {
+            if (e.resourceType() == ErrorResponseResourceType.DIALECT) {
+                throw new DialectNotExistException(identifier, e.resourceName());
+            }
             throw new ViewNotExistException(identifier);
         }
     }
