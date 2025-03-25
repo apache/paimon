@@ -62,3 +62,7 @@ RESTCatalog supports multiple access authentication methods, including the follo
 
 1. [Bear Token]({{< ref "concepts/rest/bear" >}}).
 2. [DLF Token]({{< ref "concepts/rest/dlf" >}}).
+
+## API
+
+{{< generated/rest_catalog >}}
