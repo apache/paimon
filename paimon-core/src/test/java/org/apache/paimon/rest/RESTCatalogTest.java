@@ -1060,18 +1060,21 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Identifier identifier = new Identifier("rest_catalog_db", "my_view");
         View view = createView(identifier);
         catalog.createDatabase(identifier.getDatabaseName(), false);
-        catalog.createView(identifier, view, false);
-        // add
         DialectChange.AddDialect addDialect =
                 (DialectChange.AddDialect)
                         DialectChange.add("flink_1", "SELECT * FROM FLINK_TABLE_1");
+        assertDoesNotThrow(() -> catalog.alterView(identifier, addDialect, true));
+        assertThrows(
+                Catalog.ViewNotExistException.class,
+                () -> catalog.alterView(identifier, addDialect, false));
+        catalog.createView(identifier, view, false);
+        // add
         catalog.alterView(identifier, addDialect, false);
         View catalogView = catalog.getView(identifier);
         assertThat(catalogView.query(addDialect.getDialect())).isEqualTo(addDialect.getQuery());
         assertThrows(
                 Catalog.DialectAlreadyExistException.class,
                 () -> catalog.alterView(identifier, addDialect, false));
-        assertDoesNotThrow(() -> catalog.alterView(identifier, addDialect, true));
 
         // update
         DialectChange.UpdateDialect updateDialect =
@@ -1088,12 +1091,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 identifier,
                                 DialectChange.update("no_exist", "SELECT * FROM FLINK_TABLE_2"),
                                 false));
-        assertDoesNotThrow(
-                () ->
-                        catalog.alterView(
-                                identifier,
-                                DialectChange.update("no_exist", "SELECT * FROM FLINK_TABLE_2"),
-                                true));
 
         // drop
         DialectChange.DropDialect dropDialect =
@@ -1104,8 +1101,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.DialectNotExistException.class,
                 () -> catalog.alterView(identifier, DialectChange.drop("no_exist"), false));
-        assertDoesNotThrow(
-                () -> catalog.alterView(identifier, DialectChange.drop("no_exist"), true));
     }
 
     private TestPagedResponse generateTestPagedResponse(
