@@ -1378,6 +1378,15 @@ public class RESTCatalogServer {
                                 throw new Catalog.DialectNotExistException(
                                         identifier, updateDialect.getDialect());
                             }
+                        } else if (dialectChange instanceof DialectChange.DropDialect) {
+                            DialectChange.DropDialect dropDialect =
+                                    (DialectChange.DropDialect) dialectChange;
+                            if (view.dialects().containsKey(dropDialect.getDialect())) {
+                                newDialects.remove(dropDialect.getDialect());
+                            } else {
+                                throw new Catalog.DialectNotExistException(
+                                        identifier, dropDialect.getDialect());
+                            }
                         }
                         view =
                                 new ViewImpl(
