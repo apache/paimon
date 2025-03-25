@@ -24,6 +24,8 @@ import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewDialect;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.DataTypes;
@@ -107,7 +109,7 @@ public class AlterViewDialectProcedure extends BaseProcedure {
                 }
         }
         try {
-            paimonCatalog.alterView(view, viewChange, false);
+            paimonCatalog.alterView(view, ImmutableList.of(viewChange), false);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

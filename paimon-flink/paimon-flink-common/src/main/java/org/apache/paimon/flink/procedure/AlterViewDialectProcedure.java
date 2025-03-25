@@ -23,6 +23,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewDialect;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
@@ -79,7 +81,7 @@ public class AlterViewDialectProcedure extends ProcedureBase {
                     throw new IllegalArgumentException("Unsupported action: " + action);
                 }
         }
-        catalog.alterView(identifier, viewChange, false);
+        catalog.alterView(identifier, ImmutableList.of(viewChange), false);
         return new String[] {"Success"};
     }
 }
