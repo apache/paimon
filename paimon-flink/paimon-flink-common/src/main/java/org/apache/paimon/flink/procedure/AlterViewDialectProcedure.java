@@ -34,7 +34,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- add dialect in the view
- *  CALL sys.alter_view_dialect('viewId', 'add', 'dialect', 'query')
+ *  CALL sys.alter_view_dialect('viewId', 'add', 'query')
  *
  * </code></pre>
  */
@@ -48,19 +48,15 @@ public class AlterViewDialectProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "view", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "action", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "dialect", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "query", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
-            ProcedureContext procedureContext,
-            String viewId,
-            String action,
-            String dialect,
-            String query)
+            ProcedureContext procedureContext, String viewId, String action, String query)
             throws Catalog.ViewNotExistException, Catalog.DialectAlreadyExistException,
                     Catalog.DialectNotExistException {
         Identifier identifier = Identifier.fromString(viewId);
         DialectChange dialectChange;
+        String dialect = "flink";
         switch (action) {
             case "add":
                 {
