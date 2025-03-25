@@ -42,7 +42,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for branch management actions. */
-class BranchActionITCase extends ActionITCaseBase {
+public class BranchActionITCase extends ActionITCaseBase {
 
     @Test
     void testCreateAndDeleteBranch() throws Exception {
@@ -355,7 +355,7 @@ class BranchActionITCase extends ActionITCaseBase {
         Assert.assertEquals(expected, sortedActual);
     }
 
-    List<String> readTableData(FileStoreTable table) throws Exception {
+    protected List<String> readTableData(FileStoreTable table) throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},

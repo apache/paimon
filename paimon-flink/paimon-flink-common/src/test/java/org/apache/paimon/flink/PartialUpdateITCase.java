@@ -139,7 +139,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         iter.close();
     }
 
-    private List<List<Object>> rowsToList(List<Row> rows) {
+    protected List<List<Object>> rowsToList(List<Row> rows) {
         return rows.stream().map(this::toList).collect(Collectors.toList());
     }
 
