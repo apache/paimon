@@ -99,7 +99,7 @@ public class SimpleHashBucketAssignerTest {
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner0.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(2);
+            assertThat(bucket).isEqualTo(2);
         }
 
         // exceed upper bound
