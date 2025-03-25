@@ -29,8 +29,10 @@ import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+import org.apache.flink.types.Row;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 
 /**
@@ -45,20 +47,29 @@ public class PurgeFilesProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "purge_files";
 
-    @ProcedureHint(argument = {@ArgumentHint(name = "table", type = @DataTypeHint("STRING"))})
-    public String[] call(ProcedureContext procedureContext, String tableId)
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
+            })
+    public @DataTypeHint("ROW<dir_path STRING>") Row[] call(
+            ProcedureContext procedureContext, String tableId, Boolean dryRun)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileIO fileIO = fileStoreTable.fileIO();
         Path tablePath = fileStoreTable.snapshotManager().tablePath();
+        ArrayList<String> deleteDir = new ArrayList<>();
         try {
             Arrays.stream(fileIO.listStatus(tablePath))
                     .filter(f -> !f.getPath().getName().contains("schema"))
                     .forEach(
                             fileStatus -> {
                                 try {
-                                    fileIO.delete(fileStatus.getPath(), true);
+                                    deleteDir.add(fileStatus.getPath().getName());
+                                    if (dryRun == null || !dryRun) {
+                                        fileIO.delete(fileStatus.getPath(), true);
+                                    }
                                 } catch (IOException e) {
                                     throw new RuntimeException(e);
                                 }
@@ -66,9 +77,10 @@ public class PurgeFilesProcedure extends ProcedureBase {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return new String[] {
-            String.format("Success purge files with table: %s.", fileStoreTable.name())
-        };
+
+        return deleteDir.isEmpty()
+                ? new Row[] {Row.of("There are no dir to be deleted.")}
+                : deleteDir.stream().map(Row::of).toArray(Row[]::new);
     }
 
     @Override

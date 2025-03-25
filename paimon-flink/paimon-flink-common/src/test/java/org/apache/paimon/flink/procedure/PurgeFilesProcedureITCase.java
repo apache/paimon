@@ -45,4 +45,39 @@ public class PurgeFilesProcedureITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES (2, 'a')");
         assertThat(sql("select * from `T`")).containsExactly(Row.of(2, "a"));
     }
+
+    @Test
+    public void testPurgeFilesDryRun() {
+        sql(
+                "CREATE TABLE T (id INT, name STRING,"
+                        + " PRIMARY KEY (id) NOT ENFORCED)"
+                        + " WITH ('bucket'='1')");
+        // There are no dir to delete.
+        assertThat(
+                        sql("CALL sys.purge_files(`table` => 'default.T', `dry_run` => true)")
+                                .stream()
+                                .map(row -> row.getField(0)))
+                .containsExactlyInAnyOrder("There are no dir to be deleted.");
+
+        sql("INSERT INTO T VALUES (1, 'a')");
+        assertThat(sql("select * from `T`")).containsExactly(Row.of(1, "a"));
+
+        // dry run.
+        assertThat(
+                        sql("CALL sys.purge_files(`table` => 'default.T', `dry_run` => true)")
+                                .stream()
+                                .map(row -> row.getField(0)))
+                .containsExactlyInAnyOrder("snapshot", "bucket-0", "manifest");
+
+        assertThat(sql("select * from `T`")).containsExactly(Row.of(1, "a"));
+
+        assertThat(
+                        sql("CALL sys.purge_files(`table` => 'default.T')").stream()
+                                .map(row -> row.getField(0)))
+                .containsExactlyInAnyOrder("snapshot", "bucket-0", "manifest");
+        assertThat(sql("select * from `T`")).containsExactly();
+
+        sql("INSERT INTO T VALUES (2, 'a')");
+        assertThat(sql("select * from `T`")).containsExactly(Row.of(2, "a"));
+    }
 }

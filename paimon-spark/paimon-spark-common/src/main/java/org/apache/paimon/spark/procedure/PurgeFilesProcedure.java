@@ -31,20 +31,25 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** A procedure to purge files for a table. */
 public class PurgeFilesProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
-            new ProcedureParameter[] {ProcedureParameter.required("table", StringType)};
+            new ProcedureParameter[] {
+                ProcedureParameter.required("table", StringType),
+                ProcedureParameter.optional("dry_run", BooleanType)
+            };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", StringType, true, Metadata.empty())
+                        new StructField("dir_path", StringType, true, Metadata.empty())
                     });
 
     private PurgeFilesProcedure(TableCatalog tableCatalog) {
@@ -64,6 +69,7 @@ public class PurgeFilesProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
+        boolean dryRun = !args.isNullAt(1) && args.getBoolean(1);
 
         return modifyPaimonTable(
                 tableIdent,
@@ -71,13 +77,17 @@ public class PurgeFilesProcedure extends BaseProcedure {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
                     FileIO fileIO = fileStoreTable.fileIO();
                     Path tablePath = fileStoreTable.snapshotManager().tablePath();
+                    ArrayList<String> deleteDir = new ArrayList<>();
                     try {
                         Arrays.stream(fileIO.listStatus(tablePath))
                                 .filter(f -> !f.getPath().getName().contains("schema"))
                                 .forEach(
                                         fileStatus -> {
                                             try {
-                                                fileIO.delete(fileStatus.getPath(), true);
+                                                deleteDir.add(fileStatus.getPath().getName());
+                                                if (!dryRun) {
+                                                    fileIO.delete(fileStatus.getPath(), true);
+                                                }
                                             } catch (IOException e) {
                                                 throw new RuntimeException(e);
                                             }
@@ -87,13 +97,14 @@ public class PurgeFilesProcedure extends BaseProcedure {
                         throw new RuntimeException(e);
                     }
 
-                    InternalRow outputRow =
-                            newInternalRow(
-                                    UTF8String.fromString(
-                                            String.format(
-                                                    "Success purge files with table: %s.",
-                                                    fileStoreTable.name())));
-                    return new InternalRow[] {outputRow};
+                    return deleteDir.isEmpty()
+                            ? new InternalRow[] {
+                                newInternalRow(
+                                        UTF8String.fromString("There are no dir to be deleted."))
+                            }
+                            : deleteDir.stream()
+                                    .map(x -> newInternalRow(UTF8String.fromString(x)))
+                                    .toArray(InternalRow[]::new);
                 });
     }
 
