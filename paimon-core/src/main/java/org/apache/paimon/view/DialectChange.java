@@ -28,7 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTyp
 
 import java.io.Serializable;
 
-// Dialect change to view.
+/** Dialect change to view. */
 @Public
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
