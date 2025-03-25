@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -77,9 +78,11 @@ public class PurgeFilesProcedure extends BaseProcedure {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
                     FileIO fileIO = fileStoreTable.fileIO();
                     Path tablePath = fileStoreTable.snapshotManager().tablePath();
-                    ArrayList<String> deleteDir = new ArrayList<>();
+                    ArrayList<String> deleteDir;
                     try {
-                        Arrays.stream(fileIO.listStatus(tablePath))
+                        FileStatus[] fileStatuses = fileIO.listStatus(tablePath);
+                        deleteDir = new ArrayList<>(fileStatuses.length);
+                        Arrays.stream(fileStatuses)
                                 .filter(f -> !f.getPath().getName().contains("schema"))
                                 .forEach(
                                         fileStatus -> {
@@ -97,7 +100,7 @@ public class PurgeFilesProcedure extends BaseProcedure {
                         throw new RuntimeException(e);
                     }
 
-                    return deleteDir.isEmpty()
+                    return deleteDir == null || deleteDir.isEmpty()
                             ? new InternalRow[] {
                                 newInternalRow(
                                         UTF8String.fromString("There are no dir to be deleted."))

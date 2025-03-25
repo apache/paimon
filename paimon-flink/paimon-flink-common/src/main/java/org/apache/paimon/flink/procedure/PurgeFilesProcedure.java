@@ -21,6 +21,7 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -59,9 +60,11 @@ public class PurgeFilesProcedure extends ProcedureBase {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileIO fileIO = fileStoreTable.fileIO();
         Path tablePath = fileStoreTable.snapshotManager().tablePath();
-        ArrayList<String> deleteDir = new ArrayList<>();
+        ArrayList<String> deleteDir;
         try {
-            Arrays.stream(fileIO.listStatus(tablePath))
+            FileStatus[] fileStatuses = fileIO.listStatus(tablePath);
+            deleteDir = new ArrayList<>(fileStatuses.length);
+            Arrays.stream(fileStatuses)
                     .filter(f -> !f.getPath().getName().contains("schema"))
                     .forEach(
                             fileStatus -> {
@@ -78,7 +81,7 @@ public class PurgeFilesProcedure extends ProcedureBase {
             throw new RuntimeException(e);
         }
 
-        return deleteDir.isEmpty()
+        return deleteDir == null || deleteDir.isEmpty()
                 ? new Row[] {Row.of("There are no dir to be deleted.")}
                 : deleteDir.stream().map(Row::of).toArray(Row[]::new);
     }
