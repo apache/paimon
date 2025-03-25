@@ -289,7 +289,7 @@ public class IncrementalTableTest extends TableTestBase {
 
         assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG2,TAG1")))
                 .hasMessageContaining(
-                        "Tag end TAG1 with snapshot id 1 should be larger than tag start TAG2 with snapshot id 2");
+                        "Tag end TAG1 with snapshot id 1 should be >= tag start TAG2 with snapshot id 2");
     }
 
     @Test
