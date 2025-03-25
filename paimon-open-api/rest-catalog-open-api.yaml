@@ -921,7 +921,7 @@ paths:
     post:
       tags:
         - partition
-      summary: MarkDone partitions, for non-existent partitions, partitions will be created directly
+      summary: MarkDone partitions
       operationId: markDonePartitions
       parameters:
         - name: prefix
