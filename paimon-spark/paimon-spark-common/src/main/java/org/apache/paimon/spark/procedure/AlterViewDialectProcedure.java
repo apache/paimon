@@ -88,17 +88,17 @@ public class AlterViewDialectProcedure extends BaseProcedure {
         switch (args.getString(1)) {
             case "add":
                 {
-                    viewChange = ViewChange.add(dialect, args.getString(2));
+                    viewChange = ViewChange.addDialect(dialect, args.getString(2));
                     break;
                 }
             case "update":
                 {
-                    viewChange = ViewChange.update(dialect, args.getString(2));
+                    viewChange = ViewChange.updateDialect(dialect, args.getString(2));
                     break;
                 }
             case "drop":
                 {
-                    viewChange = ViewChange.drop(dialect);
+                    viewChange = ViewChange.dropDialect(dialect);
                     break;
                 }
             default:

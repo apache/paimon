@@ -1607,7 +1607,7 @@ components:
       properties:
         action:
           type: string
-          const: "add"
+          const: "addDialect"
         dialect:
           type: string
         query:
@@ -1617,7 +1617,7 @@ components:
       properties:
         action:
           type: string
-          const: "update"
+          const: "updateDialect"
         dialect:
           type: string
         query:
@@ -1627,7 +1627,7 @@ components:
       properties:
         action:
           type: string
-          const: "drop"
+          const: "dropDialect"
         dialect:
           type: string
     DataField:

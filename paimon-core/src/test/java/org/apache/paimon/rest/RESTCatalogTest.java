@@ -1061,7 +1061,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         View view = createView(identifier);
         catalog.createDatabase(identifier.getDatabaseName(), false);
         ViewChange.AddDialect addDialect =
-                (ViewChange.AddDialect) ViewChange.add("flink_1", "SELECT * FROM FLINK_TABLE_1");
+                (ViewChange.AddDialect)
+                        ViewChange.addDialect("flink_1", "SELECT * FROM FLINK_TABLE_1");
         assertDoesNotThrow(() -> catalog.alterView(identifier, addDialect, true));
         assertThrows(
                 Catalog.ViewNotExistException.class,
@@ -1078,7 +1079,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // update
         ViewChange.UpdateDialect updateDialect =
                 (ViewChange.UpdateDialect)
-                        ViewChange.update("flink_1", "SELECT * FROM FLINK_TABLE_2");
+                        ViewChange.updateDialect("flink_1", "SELECT * FROM FLINK_TABLE_2");
         catalog.alterView(identifier, updateDialect, false);
         catalogView = catalog.getView(identifier);
         assertThat(catalogView.query(updateDialect.getDialect()))
@@ -1088,18 +1089,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () ->
                         catalog.alterView(
                                 identifier,
-                                ViewChange.update("no_exist", "SELECT * FROM FLINK_TABLE_2"),
+                                ViewChange.updateDialect("no_exist", "SELECT * FROM FLINK_TABLE_2"),
                                 false));
 
         // drop
         ViewChange.DropDialect dropDialect =
-                (ViewChange.DropDialect) ViewChange.drop(updateDialect.getDialect());
+                (ViewChange.DropDialect) ViewChange.dropDialect(updateDialect.getDialect());
         catalog.alterView(identifier, dropDialect, false);
         catalogView = catalog.getView(identifier);
         assertThat(catalogView.query(dropDialect.getDialect())).isEqualTo(catalogView.query());
         assertThrows(
                 Catalog.DialectNotExistException.class,
-                () -> catalog.alterView(identifier, ViewChange.drop("no_exist"), false));
+                () -> catalog.alterView(identifier, ViewChange.dropDialect("no_exist"), false));
     }
 
     private TestPagedResponse generateTestPagedResponse(

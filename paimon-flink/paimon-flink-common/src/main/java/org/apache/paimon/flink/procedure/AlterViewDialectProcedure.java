@@ -61,17 +61,17 @@ public class AlterViewDialectProcedure extends ProcedureBase {
         switch (action) {
             case "add":
                 {
-                    viewChange = ViewChange.add(dialect, query);
+                    viewChange = ViewChange.addDialect(dialect, query);
                     break;
                 }
             case "update":
                 {
-                    viewChange = ViewChange.update(dialect, query);
+                    viewChange = ViewChange.updateDialect(dialect, query);
                     break;
                 }
             case "drop":
                 {
-                    viewChange = ViewChange.drop(dialect);
+                    viewChange = ViewChange.dropDialect(dialect);
                     break;
                 }
             default:
