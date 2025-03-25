@@ -356,6 +356,12 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Allow sink committer and writer operator to be chained together");
 
+    public static final ConfigOption<PartitionMarkDoneActionMode> PARTITION_MARK_DONE_MODE =
+            key("partition.mark-done-action.mode")
+                    .enumType(PartitionMarkDoneActionMode.class)
+                    .defaultValue(PartitionMarkDoneActionMode.PROCESS_TIME)
+                    .withDescription("How to trigger partition mark done action.");
+
     public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_DONE =
             key("partition.idle-time-to-done")
                     .durationType()
@@ -530,6 +536,34 @@ public class FlinkConnectorOptions {
         private final String description;
 
         SplitAssignMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The mode for partition mark done. */
+    public enum PartitionMarkDoneActionMode implements DescribedEnum {
+        PROCESS_TIME(
+                "process-time",
+                "Based on the time of the machine, mark the partition done once the processing time passes period time plus delay."),
+        WATERMARK(
+                "watermark",
+                "Based on the watermark of the input, mark the partition done once the watermark passes period time plus delay.");
+
+        private final String value;
+        private final String description;
+
+        PartitionMarkDoneActionMode(String value, String description) {
             this.value = value;
             this.description = description;
         }
