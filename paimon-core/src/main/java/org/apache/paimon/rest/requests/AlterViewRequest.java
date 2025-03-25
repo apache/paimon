@@ -26,22 +26,24 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+
 /** Request for altering view. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AlterViewRequest implements RESTRequest {
 
-    private static final String FIELD_CHANGE = "change";
+    private static final String FIELD_CHANGES = "changes";
 
-    @JsonProperty(FIELD_CHANGE)
-    private final ViewChange viewChange;
+    @JsonProperty(FIELD_CHANGES)
+    private final List<ViewChange> viewChanges;
 
     @JsonCreator
-    public AlterViewRequest(@JsonProperty(FIELD_CHANGE) ViewChange viewChange) {
-        this.viewChange = viewChange;
+    public AlterViewRequest(@JsonProperty(FIELD_CHANGES) List<ViewChange> viewChanges) {
+        this.viewChanges = viewChanges;
     }
 
-    @JsonGetter(FIELD_CHANGE)
-    public ViewChange getDialectChange() {
-        return viewChange;
+    @JsonGetter(FIELD_CHANGES)
+    public List<ViewChange> viewChanges() {
+        return viewChanges;
     }
 }

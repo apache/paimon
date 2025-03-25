@@ -901,10 +901,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void alterView(Identifier identifier, ViewChange viewChange, boolean ignoreIfNotExists)
+    public void alterView(
+            Identifier identifier, List<ViewChange> viewChanges, boolean ignoreIfNotExists)
             throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
         try {
-            AlterViewRequest request = new AlterViewRequest(viewChange);
+            AlterViewRequest request = new AlterViewRequest(viewChanges);
             client.post(
                     resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
                     request,

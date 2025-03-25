@@ -442,13 +442,13 @@ public interface Catalog extends AutoCloseable {
      * Alter a view.
      *
      * @param view identifier of the view to alter
-     * @param viewChange - dialect change of view
+     * @param viewChanges - changes of view
      * @param ignoreIfNotExists
      * @throws ViewNotExistException if the view does not exist
      * @throws DialectAlreadyExistException if the dialect already exists
      * @throws DialectNotExistException if the dialect not exists
      */
-    default void alterView(Identifier view, ViewChange viewChange, boolean ignoreIfNotExists)
+    default void alterView(Identifier view, List<ViewChange> viewChanges, boolean ignoreIfNotExists)
             throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
         throw new UnsupportedOperationException();
     }

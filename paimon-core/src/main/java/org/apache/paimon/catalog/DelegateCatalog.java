@@ -253,9 +253,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public void alterView(Identifier view, ViewChange viewChange, boolean ignoreIfNotExists)
+    public void alterView(Identifier view, List<ViewChange> viewChanges, boolean ignoreIfNotExists)
             throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
-        wrapped.alterView(view, viewChange, ignoreIfNotExists);
+        wrapped.alterView(view, viewChanges, ignoreIfNotExists);
     }
 
     @Override

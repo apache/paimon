@@ -1590,8 +1590,10 @@ components:
     AlterViewRequest:
       type: object
       properties:
-        change:
-          $ref: '#/components/schemas/ViewChange'
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ViewChange'
     ViewChange:
       anyOf:
         - $ref: '#/components/schemas/SetViewOption'
