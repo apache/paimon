@@ -49,6 +49,7 @@ public class ManifestsReader {
     private final ManifestList.Factory manifestListFactory;
 
     @Nullable private PartitionPredicate partitionFilter = null;
+    @Nullable private Integer specifiedBucket = null;
 
     public ManifestsReader(
             RowType partitionType,
@@ -59,6 +60,11 @@ public class ManifestsReader {
         this.partitionDefaultValue = partitionDefaultValue;
         this.snapshotManager = snapshotManager;
         this.manifestListFactory = manifestListFactory;
+    }
+
+    public ManifestsReader withBucket(int bucket) {
+        this.specifiedBucket = bucket;
+        return this;
     }
 
     public ManifestsReader withPartitionFilter(Predicate predicate) {
@@ -123,6 +129,14 @@ public class ManifestsReader {
 
     /** Note: Keep this thread-safe. */
     private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
+        Integer minBucket = manifest.minBucket();
+        Integer maxBucket = manifest.maxBucket();
+        if (specifiedBucket != null && minBucket != null && maxBucket != null) {
+            if (specifiedBucket < minBucket || specifiedBucket > maxBucket) {
+                return false;
+            }
+        }
+
         if (partitionFilter == null) {
             return true;
         }

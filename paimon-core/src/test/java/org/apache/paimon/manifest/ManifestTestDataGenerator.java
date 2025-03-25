@@ -63,7 +63,7 @@ public class ManifestTestDataGenerator {
     }
 
     public ManifestEntry next() {
-        if (bufferedResults.size() > 0) {
+        if (!bufferedResults.isEmpty()) {
             return bufferedResults.poll();
         }
 
@@ -114,6 +114,8 @@ public class ManifestTestDataGenerator {
                 numAddedFiles,
                 numDeletedFiles,
                 serializer.toBinaryAllMode(collector.extract()),
+                0,
+                0,
                 0);
     }
 

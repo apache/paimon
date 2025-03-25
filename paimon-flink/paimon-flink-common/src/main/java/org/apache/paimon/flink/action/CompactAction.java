@@ -248,9 +248,9 @@ public class CompactAction extends TableActionBase {
 
         List<BinaryRow> partitions =
                 fileStoreTable
-                        .newScan()
-                        .withBucketFilter(new PostponeBucketFilter())
-                        .listPartitions();
+                        .newSnapshotReader()
+                        .withBucket(BucketMode.POSTPONE_BUCKET)
+                        .partitions();
         if (partitions.isEmpty()) {
             return false;
         }
@@ -289,7 +289,7 @@ public class CompactAction extends TableActionBase {
                             realTable
                                     .newReadBuilder()
                                     .withPartitionFilter(partitionSpec)
-                                    .withBucketFilter(new PostponeBucketFilter()),
+                                    .withBucket(BucketMode.POSTPONE_BUCKET),
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
             DataStream<InternalRow> partitioned =
@@ -312,16 +312,6 @@ public class CompactAction extends TableActionBase {
         }
 
         return true;
-    }
-
-    private static class PostponeBucketFilter implements Filter<Integer>, Serializable {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public boolean test(Integer bucket) {
-            return bucket == BucketMode.POSTPONE_BUCKET;
-        }
     }
 
     private static class NormalBucketFilter implements Filter<Integer>, Serializable {

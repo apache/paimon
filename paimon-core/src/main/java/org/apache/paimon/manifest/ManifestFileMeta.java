@@ -22,8 +22,11 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -47,7 +50,9 @@ public class ManifestFileMeta {
                             new DataField(2, "_NUM_ADDED_FILES", new BigIntType(false)),
                             new DataField(3, "_NUM_DELETED_FILES", new BigIntType(false)),
                             new DataField(4, "_PARTITION_STATS", SimpleStats.SCHEMA),
-                            new DataField(5, "_SCHEMA_ID", new BigIntType(false))));
+                            new DataField(5, "_SCHEMA_ID", new BigIntType(false)),
+                            new DataField(6, "_MIN_BUCKET", new IntType(true)),
+                            new DataField(7, "_MAX_BUCKET", new IntType(true))));
 
     private final String fileName;
     private final long fileSize;
@@ -55,6 +60,8 @@ public class ManifestFileMeta {
     private final long numDeletedFiles;
     private final SimpleStats partitionStats;
     private final long schemaId;
+    private final @Nullable Integer minBucket;
+    private final @Nullable Integer maxBucket;
 
     public ManifestFileMeta(
             String fileName,
@@ -62,13 +69,17 @@ public class ManifestFileMeta {
             long numAddedFiles,
             long numDeletedFiles,
             SimpleStats partitionStats,
-            long schemaId) {
+            long schemaId,
+            @Nullable Integer minBucket,
+            @Nullable Integer maxBucket) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
         this.numDeletedFiles = numDeletedFiles;
         this.partitionStats = partitionStats;
         this.schemaId = schemaId;
+        this.minBucket = minBucket;
+        this.maxBucket = maxBucket;
     }
 
     public String fileName() {
@@ -95,6 +106,14 @@ public class ManifestFileMeta {
         return schemaId;
     }
 
+    public @Nullable Integer minBucket() {
+        return minBucket;
+    }
+
+    public @Nullable Integer maxBucket() {
+        return maxBucket;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestFileMeta)) {
@@ -106,20 +125,36 @@ public class ManifestFileMeta {
                 && numAddedFiles == that.numAddedFiles
                 && numDeletedFiles == that.numDeletedFiles
                 && Objects.equals(partitionStats, that.partitionStats)
-                && schemaId == that.schemaId;
+                && schemaId == that.schemaId
+                && Objects.equals(minBucket, that.minBucket)
+                && Objects.equals(maxBucket, that.maxBucket);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(
-                fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats, schemaId);
+                fileName,
+                fileSize,
+                numAddedFiles,
+                numDeletedFiles,
+                partitionStats,
+                schemaId,
+                minBucket,
+                maxBucket);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %d, %s, %d}",
-                fileName, fileSize, numAddedFiles, numDeletedFiles, partitionStats, schemaId);
+                "{%s, %d, %d, %d, %s, %d, %s, %s}",
+                fileName,
+                fileSize,
+                numAddedFiles,
+                numDeletedFiles,
+                partitionStats,
+                schemaId,
+                minBucket,
+                maxBucket);
     }
 
     // ----------------------- Serialization -----------------------------

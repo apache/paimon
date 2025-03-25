@@ -35,7 +35,7 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
 
     @Override
     public int getVersion() {
-        return 2;
+        return 3;
     }
 
     @Override
@@ -46,26 +46,28 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 meta.numAddedFiles(),
                 meta.numDeletedFiles(),
                 meta.partitionStats().toRow(),
-                meta.schemaId());
+                meta.schemaId(),
+                meta.minBucket(),
+                meta.maxBucket());
     }
 
     @Override
     public ManifestFileMeta convertFrom(int version, InternalRow row) {
-        if (version != 2) {
-            if (version == 1) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "The current version %s is not compatible with the version %s, please recreate the table.",
-                                getVersion(), version));
-            }
-            throw new IllegalArgumentException("Unsupported version: " + version);
+        if (version == 1) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The current version %s is not compatible with the version %s, please recreate the table.",
+                            getVersion(), version));
         }
+
         return new ManifestFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
                 row.getLong(2),
                 row.getLong(3),
                 SimpleStats.fromRow(row.getRow(4, 3)),
-                row.getLong(5));
+                row.getLong(5),
+                version >= 3 ? row.getInt(6) : null,
+                version >= 3 ? row.getInt(7) : null);
     }
 }
