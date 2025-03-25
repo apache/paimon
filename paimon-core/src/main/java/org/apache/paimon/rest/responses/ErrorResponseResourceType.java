@@ -26,5 +26,14 @@ public enum ErrorResponseResourceType {
     SNAPSHOT,
     BRANCH,
     TAG,
-    VIEW
+    VIEW,
+    UNKNOWN;
+
+    public static ErrorResponseResourceType fromString(String resourceType) {
+        try {
+            return ErrorResponseResourceType.valueOf(resourceType);
+        } catch (IllegalArgumentException e) {
+            return UNKNOWN;
+        }
+    }
 }

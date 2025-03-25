@@ -51,13 +51,13 @@ public class DefaultErrorHandler extends ErrorHandler {
                 throw new ForbiddenException("Forbidden: %s", message);
             case 404:
                 throw new NoSuchResourceException(
-                        error.getResourceType(), error.getResourceName(), "%s", message);
+                        error.getResourceTypeEnum(), error.getResourceName(), "%s", message);
             case 405:
             case 406:
                 break;
             case 409:
                 throw new AlreadyExistsException(
-                        error.getResourceType(), error.getResourceName(), "%s", message);
+                        error.getResourceTypeEnum(), error.getResourceName(), "%s", message);
             case 500:
                 throw new ServiceFailureException("Server error: %s", message);
             case 501:

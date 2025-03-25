@@ -81,7 +81,8 @@ public class HttpClientTest {
         mockResponseDataStr = server.createResponseBody(mockResponseData);
         errorResponseStr =
                 server.createResponseBody(
-                        new ErrorResponse(ErrorResponseResourceType.DATABASE, "test", "test", 400));
+                        new ErrorResponse(
+                                ErrorResponseResourceType.DATABASE.name(), "test", "test", 400));
         httpClient = new HttpClient(server.getBaseUrl());
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);

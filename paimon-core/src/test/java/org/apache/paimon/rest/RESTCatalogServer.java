@@ -424,7 +424,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.DatabaseNotExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.DATABASE,
+                                    ErrorResponseResourceType.DATABASE.name(),
                                     e.database(),
                                     e.getMessage(),
                                     404);
@@ -432,7 +432,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.TableNotExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.TABLE,
+                                    ErrorResponseResourceType.TABLE.name(),
                                     e.identifier().getTableName(),
                                     e.getMessage(),
                                     404);
@@ -440,7 +440,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.ColumnNotExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.COLUMN,
+                                    ErrorResponseResourceType.COLUMN.name(),
                                     e.column(),
                                     e.getMessage(),
                                     404);
@@ -448,7 +448,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.DatabaseNoPermissionException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.DATABASE,
+                                    ErrorResponseResourceType.DATABASE.name(),
                                     e.database(),
                                     e.getMessage(),
                                     403);
@@ -456,7 +456,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.TableNoPermissionException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.TABLE,
+                                    ErrorResponseResourceType.TABLE.name(),
                                     e.identifier().getTableName(),
                                     e.getMessage(),
                                     403);
@@ -464,7 +464,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.DatabaseAlreadyExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.DATABASE,
+                                    ErrorResponseResourceType.DATABASE.name(),
                                     e.database(),
                                     e.getMessage(),
                                     409);
@@ -472,7 +472,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.TableAlreadyExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.TABLE,
+                                    ErrorResponseResourceType.TABLE.name(),
                                     e.identifier().getTableName(),
                                     e.getMessage(),
                                     409);
@@ -480,7 +480,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.ColumnAlreadyExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.COLUMN,
+                                    ErrorResponseResourceType.COLUMN.name(),
                                     e.column(),
                                     e.getMessage(),
                                     409);
@@ -488,7 +488,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.ViewNotExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.VIEW,
+                                    ErrorResponseResourceType.VIEW.name(),
                                     e.identifier().getTableName(),
                                     e.getMessage(),
                                     404);
@@ -496,7 +496,7 @@ public class RESTCatalogServer {
                 } catch (Catalog.ViewAlreadyExistException e) {
                     response =
                             new ErrorResponse(
-                                    ErrorResponseResourceType.VIEW,
+                                    ErrorResponseResourceType.VIEW.name(),
                                     e.identifier().getTableName(),
                                     e.getMessage(),
                                     409);
@@ -556,7 +556,7 @@ public class RESTCatalogServer {
         if (!snapshotOptional.isPresent()) {
             response =
                     new ErrorResponse(
-                            ErrorResponseResourceType.SNAPSHOT,
+                            ErrorResponseResourceType.SNAPSHOT.name(),
                             identifier.getDatabaseName(),
                             "No Snapshot",
                             404);
@@ -582,7 +582,8 @@ public class RESTCatalogServer {
         }
         return Optional.of(
                 mockResponse(
-                        new ErrorResponse(ErrorResponseResourceType.TABLE, null, "", 404), 404));
+                        new ErrorResponse(ErrorResponseResourceType.TABLE.name(), null, "", 404),
+                        404));
     }
 
     private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {
@@ -617,7 +618,8 @@ public class RESTCatalogServer {
             return new MockResponse().setResponseCode(200);
         }
         return mockResponse(
-                new ErrorResponse(ErrorResponseResourceType.SNAPSHOT, "" + snapshotId, "", 404),
+                new ErrorResponse(
+                        ErrorResponseResourceType.SNAPSHOT.name(), "" + snapshotId, "", 404),
                 404);
     }
 
@@ -644,7 +646,8 @@ public class RESTCatalogServer {
             }
         }
         return mockResponse(
-                new ErrorResponse(ErrorResponseResourceType.TAG, "" + tagName, "", 404), 404);
+                new ErrorResponse(ErrorResponseResourceType.TAG.name(), "" + tagName, "", 404),
+                404);
     }
 
     private void cleanSnapshot(Identifier identifier, Long snapshotId, Long latestSnapshotId)
@@ -692,7 +695,7 @@ public class RESTCatalogServer {
                         parameters.getOrDefault(MAX_RESULTS, null));
                 return mockResponse(
                         new ErrorResponse(
-                                ErrorResponseResourceType.TABLE,
+                                ErrorResponseResourceType.TABLE.name(),
                                 null,
                                 "invalid input queryParameter maxResults"
                                         + parameters.get(MAX_RESULTS),
@@ -845,7 +848,7 @@ public class RESTCatalogServer {
             }
         }
         return mockResponse(
-                new ErrorResponse(ErrorResponseResourceType.DATABASE, null, "", 404), 404);
+                new ErrorResponse(ErrorResponseResourceType.DATABASE.name(), null, "", 404), 404);
     }
 
     private List<String> listTables(String databaseName) {
@@ -872,7 +875,7 @@ public class RESTCatalogServer {
                         parameters.getOrDefault(MAX_RESULTS, null));
                 return mockResponse(
                         new ErrorResponse(
-                                ErrorResponseResourceType.TABLE,
+                                ErrorResponseResourceType.TABLE.name(),
                                 null,
                                 "invalid input queryParameter maxResults"
                                         + parameters.get(MAX_RESULTS),
@@ -904,7 +907,7 @@ public class RESTCatalogServer {
                         parameters.getOrDefault(MAX_RESULTS, null));
                 return mockResponse(
                         new ErrorResponse(
-                                ErrorResponseResourceType.TABLE,
+                                ErrorResponseResourceType.TABLE.name(),
                                 null,
                                 "invalid input queryParameter maxResults"
                                         + parameters.get(MAX_RESULTS),
@@ -1111,21 +1114,27 @@ public class RESTCatalogServer {
             if (e.getMessage().contains("Tag")) {
                 response =
                         new ErrorResponse(
-                                ErrorResponseResourceType.TAG, fromTag, e.getMessage(), 404);
+                                ErrorResponseResourceType.TAG.name(), fromTag, e.getMessage(), 404);
                 return mockResponse(response, 404);
             }
             if (e.getMessage().contains("Branch name")
                     && e.getMessage().contains("already exists")) {
                 response =
                         new ErrorResponse(
-                                ErrorResponseResourceType.BRANCH, branch, e.getMessage(), 409);
+                                ErrorResponseResourceType.BRANCH.name(),
+                                branch,
+                                e.getMessage(),
+                                409);
                 return mockResponse(response, 409);
             }
             if (e.getMessage().contains("Branch name")
                     && e.getMessage().contains("doesn't exist")) {
                 response =
                         new ErrorResponse(
-                                ErrorResponseResourceType.BRANCH, branch, e.getMessage(), 404);
+                                ErrorResponseResourceType.BRANCH.name(),
+                                branch,
+                                e.getMessage(),
+                                404);
                 return mockResponse(response, 404);
             }
         }
@@ -1145,7 +1154,7 @@ public class RESTCatalogServer {
                         parameters.getOrDefault(MAX_RESULTS, null));
                 return mockResponse(
                         new ErrorResponse(
-                                ErrorResponseResourceType.TABLE,
+                                ErrorResponseResourceType.TABLE.name(),
                                 null,
                                 "invalid input queryParameter maxResults"
                                         + parameters.get(MAX_RESULTS),
@@ -1216,7 +1225,7 @@ public class RESTCatalogServer {
                         parameters.getOrDefault(MAX_RESULTS, null));
                 return mockResponse(
                         new ErrorResponse(
-                                ErrorResponseResourceType.TABLE,
+                                ErrorResponseResourceType.TABLE.name(),
                                 null,
                                 "invalid input queryParameter maxResults"
                                         + parameters.get(MAX_RESULTS),
@@ -1251,7 +1260,7 @@ public class RESTCatalogServer {
                             parameters.getOrDefault(MAX_RESULTS, null));
                     return mockResponse(
                             new ErrorResponse(
-                                    ErrorResponseResourceType.TABLE,
+                                    ErrorResponseResourceType.TABLE.name(),
                                     null,
                                     "invalid input queryParameter maxResults"
                                             + parameters.get(MAX_RESULTS),
