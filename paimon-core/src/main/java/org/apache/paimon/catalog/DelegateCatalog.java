@@ -27,8 +27,8 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
-import org.apache.paimon.view.DialectChange;
 import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
 
 import javax.annotation.Nullable;
 
@@ -253,9 +253,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public void alterView(Identifier view, DialectChange dialectChange, boolean ignoreIfNotExists)
+    public void alterView(Identifier view, ViewChange viewChange, boolean ignoreIfNotExists)
             throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
-        wrapped.alterView(view, dialectChange, ignoreIfNotExists);
+        wrapped.alterView(view, viewChange, ignoreIfNotExists);
     }
 
     @Override

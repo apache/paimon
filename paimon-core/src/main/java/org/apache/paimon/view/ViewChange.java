@@ -33,30 +33,28 @@ import java.io.Serializable;
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.PROPERTY,
-        property = DialectChange.Actions.FIELD_TYPE)
+        property = ViewChange.Actions.FIELD_TYPE)
 @JsonSubTypes({
-    @JsonSubTypes.Type(value = DialectChange.AddDialect.class, name = DialectChange.Actions.ADD),
-    @JsonSubTypes.Type(
-            value = DialectChange.UpdateDialect.class,
-            name = DialectChange.Actions.UPDATE),
-    @JsonSubTypes.Type(value = DialectChange.DropDialect.class, name = DialectChange.Actions.DROP)
+    @JsonSubTypes.Type(value = ViewChange.AddView.class, name = ViewChange.Actions.ADD),
+    @JsonSubTypes.Type(value = ViewChange.UpdateView.class, name = ViewChange.Actions.UPDATE),
+    @JsonSubTypes.Type(value = ViewChange.DropView.class, name = ViewChange.Actions.DROP)
 })
-public interface DialectChange extends Serializable {
+public interface ViewChange extends Serializable {
 
-    static DialectChange add(String dialect, String query) {
-        return new AddDialect(dialect, query);
+    static ViewChange add(String dialect, String query) {
+        return new AddView(dialect, query);
     }
 
-    static DialectChange update(String dialect, String query) {
-        return new UpdateDialect(dialect, query);
+    static ViewChange update(String dialect, String query) {
+        return new UpdateView(dialect, query);
     }
 
-    static DialectChange drop(String dialect) {
-        return new DropDialect(dialect);
+    static ViewChange drop(String dialect) {
+        return new DropView(dialect);
     }
 
     /** add dialect for dialect change. */
-    final class AddDialect implements DialectChange {
+    final class AddView implements ViewChange {
         private static final long serialVersionUID = 1L;
         private static final String FIELD_DIALECT = "dialect";
         private static final String FIELD_QUERY = "query";
@@ -68,7 +66,7 @@ public interface DialectChange extends Serializable {
         private final String query;
 
         @JsonCreator
-        public AddDialect(
+        public AddView(
                 @JsonProperty(FIELD_DIALECT) String dialect,
                 @JsonProperty(FIELD_QUERY) String query) {
             this.dialect = dialect;
@@ -87,7 +85,7 @@ public interface DialectChange extends Serializable {
     }
 
     /** update dialect for dialect change. */
-    final class UpdateDialect implements DialectChange {
+    final class UpdateView implements ViewChange {
         private static final long serialVersionUID = 1L;
         private static final String FIELD_DIALECT = "dialect";
         private static final String FIELD_QUERY = "query";
@@ -99,7 +97,7 @@ public interface DialectChange extends Serializable {
         private final String query;
 
         @JsonCreator
-        public UpdateDialect(
+        public UpdateView(
                 @JsonProperty(FIELD_DIALECT) String dialect,
                 @JsonProperty(FIELD_QUERY) String query) {
             this.dialect = dialect;
@@ -117,7 +115,7 @@ public interface DialectChange extends Serializable {
         }
     }
 
-    final class DropDialect implements DialectChange {
+    final class DropView implements ViewChange {
         private static final long serialVersionUID = 1L;
         private static final String FIELD_DIALECT = "dialect";
 
@@ -125,7 +123,7 @@ public interface DialectChange extends Serializable {
         private final String dialect;
 
         @JsonCreator
-        public DropDialect(@JsonProperty(FIELD_DIALECT) String dialect) {
+        public DropView(@JsonProperty(FIELD_DIALECT) String dialect) {
             this.dialect = dialect;
         }
 

@@ -19,7 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.rest.RESTRequest;
-import org.apache.paimon.view.DialectChange;
+import org.apache.paimon.view.ViewChange;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -33,15 +33,15 @@ public class AlterViewRequest implements RESTRequest {
     private static final String FIELD_CHANGE = "change";
 
     @JsonProperty(FIELD_CHANGE)
-    private final DialectChange dialectChange;
+    private final ViewChange viewChange;
 
     @JsonCreator
-    public AlterViewRequest(@JsonProperty(FIELD_CHANGE) DialectChange dialectChange) {
-        this.dialectChange = dialectChange;
+    public AlterViewRequest(@JsonProperty(FIELD_CHANGE) ViewChange viewChange) {
+        this.viewChange = viewChange;
     }
 
     @JsonGetter(FIELD_CHANGE)
-    public DialectChange getDialectChange() {
-        return dialectChange;
+    public ViewChange getDialectChange() {
+        return viewChange;
     }
 }

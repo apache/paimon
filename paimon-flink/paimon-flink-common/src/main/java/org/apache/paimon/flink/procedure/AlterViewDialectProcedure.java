@@ -20,7 +20,8 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.view.DialectChange;
+import org.apache.paimon.view.ViewChange;
+import org.apache.paimon.view.ViewDialect;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -55,22 +56,22 @@ public class AlterViewDialectProcedure extends ProcedureBase {
             throws Catalog.ViewNotExistException, Catalog.DialectAlreadyExistException,
                     Catalog.DialectNotExistException {
         Identifier identifier = Identifier.fromString(viewId);
-        DialectChange dialectChange;
-        String dialect = "flink";
+        ViewChange viewChange;
+        String dialect = ViewDialect.FLINK.toString();
         switch (action) {
             case "add":
                 {
-                    dialectChange = DialectChange.add(dialect, query);
+                    viewChange = ViewChange.add(dialect, query);
                     break;
                 }
             case "update":
                 {
-                    dialectChange = DialectChange.update(dialect, query);
+                    viewChange = ViewChange.update(dialect, query);
                     break;
                 }
             case "drop":
                 {
-                    dialectChange = DialectChange.drop(dialect);
+                    viewChange = ViewChange.drop(dialect);
                     break;
                 }
             default:
@@ -78,7 +79,7 @@ public class AlterViewDialectProcedure extends ProcedureBase {
                     throw new IllegalArgumentException("Unsupported action: " + action);
                 }
         }
-        catalog.alterView(identifier, dialectChange, false);
+        catalog.alterView(identifier, viewChange, false);
         return new String[] {"Success"};
     }
 }

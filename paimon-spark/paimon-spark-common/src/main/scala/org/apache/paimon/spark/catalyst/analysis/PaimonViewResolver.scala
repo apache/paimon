@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.catalog.Catalog.ViewNotExistException
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.catalog.SupportView
-import org.apache.paimon.view.View
+import org.apache.paimon.view.{View, ViewDialect}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.{GetColumnByOrdinal, UnresolvedRelation, UnresolvedTableOrView}
@@ -59,7 +59,8 @@ case class PaimonViewResolver(spark: SparkSession)
   }
 
   private def createViewRelation(nameParts: Seq[String], view: View): LogicalPlan = {
-    val parsedPlan = parseViewText(nameParts.toArray.mkString("."), view.query("spark"))
+    val parsedPlan =
+      parseViewText(nameParts.toArray.mkString("."), view.query(ViewDialect.SPARK.toString))
 
     val aliases = SparkTypeUtils.fromPaimonRowType(view.rowType()).fields.zipWithIndex.map {
       case (expected, pos) =>

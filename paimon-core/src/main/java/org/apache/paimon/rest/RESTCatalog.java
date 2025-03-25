@@ -80,8 +80,8 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.view.DialectChange;
 import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
@@ -901,11 +901,10 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void alterView(
-            Identifier identifier, DialectChange dialectChange, boolean ignoreIfNotExists)
+    public void alterView(Identifier identifier, ViewChange viewChange, boolean ignoreIfNotExists)
             throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
         try {
-            AlterViewRequest request = new AlterViewRequest(dialectChange);
+            AlterViewRequest request = new AlterViewRequest(viewChange);
             client.post(
                     resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
                     request,

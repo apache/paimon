@@ -78,8 +78,8 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.view.DialectChange;
 import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
@@ -1355,12 +1355,11 @@ public class RESTCatalogServer {
                     if (viewStore.containsKey(identifier.getFullName())) {
                         AlterViewRequest request =
                                 OBJECT_MAPPER.readValue(requestData, AlterViewRequest.class);
-                        DialectChange dialectChange = request.getDialectChange();
+                        ViewChange viewChange = request.getDialectChange();
                         ViewImpl view = (ViewImpl) viewStore.get(identifier.getFullName());
                         HashMap<String, String> newDialects = new HashMap<>(view.dialects());
-                        if (dialectChange instanceof DialectChange.AddDialect) {
-                            DialectChange.AddDialect addDialect =
-                                    (DialectChange.AddDialect) dialectChange;
+                        if (viewChange instanceof ViewChange.AddView) {
+                            ViewChange.AddView addDialect = (ViewChange.AddView) viewChange;
                             if (view.dialects().containsKey(addDialect.getDialect())) {
 
                                 throw new Catalog.DialectAlreadyExistException(
@@ -1368,9 +1367,9 @@ public class RESTCatalogServer {
                             } else {
                                 newDialects.put(addDialect.getDialect(), addDialect.getQuery());
                             }
-                        } else if (dialectChange instanceof DialectChange.UpdateDialect) {
-                            DialectChange.UpdateDialect updateDialect =
-                                    (DialectChange.UpdateDialect) dialectChange;
+                        } else if (viewChange instanceof ViewChange.UpdateView) {
+                            ViewChange.UpdateView updateDialect =
+                                    (ViewChange.UpdateView) viewChange;
                             if (view.dialects().containsKey(updateDialect.getDialect())) {
                                 newDialects.put(
                                         updateDialect.getDialect(), updateDialect.getQuery());
@@ -1378,9 +1377,8 @@ public class RESTCatalogServer {
                                 throw new Catalog.DialectNotExistException(
                                         identifier, updateDialect.getDialect());
                             }
-                        } else if (dialectChange instanceof DialectChange.DropDialect) {
-                            DialectChange.DropDialect dropDialect =
-                                    (DialectChange.DropDialect) dialectChange;
+                        } else if (viewChange instanceof ViewChange.DropView) {
+                            ViewChange.DropView dropDialect = (ViewChange.DropView) viewChange;
                             if (view.dialects().containsKey(dropDialect.getDialect())) {
                                 newDialects.remove(dropDialect.getDialect());
                             } else {

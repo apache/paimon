@@ -21,7 +21,8 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
-import org.apache.paimon.view.DialectChange;
+import org.apache.paimon.view.ViewChange;
+import org.apache.paimon.view.ViewDialect;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -39,13 +40,13 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- add dialect in the view
- *  CALL sys.alert_view_dialect('viewId', 'add', 'dialect', 'query')
+ *  CALL sys.alert_view_dialect('viewId', 'add', 'query')
  *
  *  -- update dialect in the view
- *  CALL sys.alert_view_dialect('viewId', 'update', 'dialect', 'query')
+ *  CALL sys.alert_view_dialect('viewId', 'update', 'query')
  *
  *  -- drop dialect in the view
- *  CALL sys.alert_view_dialect('viewId', 'drop', 'dialect')
+ *  CALL sys.alert_view_dialect('viewId', 'drop')
  *
  * </code></pre>
  */
@@ -55,7 +56,6 @@ public class AlterViewDialectProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("view", StringType),
                 ProcedureParameter.required("action", StringType),
-                ProcedureParameter.required("dialect", StringType),
                 ProcedureParameter.optional("query", StringType)
             };
 
@@ -83,21 +83,22 @@ public class AlterViewDialectProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
         Identifier view = Identifier.fromString(args.getString(0));
-        DialectChange dialectChange;
+        ViewChange viewChange;
+        String dialect = ViewDialect.SPARK.toString();
         switch (args.getString(1)) {
             case "add":
                 {
-                    dialectChange = DialectChange.add(args.getString(2), args.getString(3));
+                    viewChange = ViewChange.add(dialect, args.getString(2));
                     break;
                 }
             case "update":
                 {
-                    dialectChange = DialectChange.update(args.getString(2), args.getString(3));
+                    viewChange = ViewChange.update(dialect, args.getString(2));
                     break;
                 }
             case "drop":
                 {
-                    dialectChange = DialectChange.drop(args.getString(2));
+                    viewChange = ViewChange.drop(dialect);
                     break;
                 }
             default:
@@ -106,7 +107,7 @@ public class AlterViewDialectProcedure extends BaseProcedure {
                 }
         }
         try {
-            paimonCatalog.alterView(view, dialectChange, false);
+            paimonCatalog.alterView(view, viewChange, false);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

@@ -20,6 +20,7 @@ package org.apache.paimon.spark.catalog;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewDialect;
 import org.apache.paimon.view.ViewImpl;
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
@@ -67,7 +68,8 @@ public interface SupportView extends WithPaimonCatalog {
                                     paimonIdent,
                                     toPaimonRowType(schema).getFields(),
                                     queryText,
-                                    Collections.singletonMap("spark", queryText),
+                                    Collections.singletonMap(
+                                            ViewDialect.SPARK.toString(), queryText),
                                     comment,
                                     properties),
                             ignoreIfExists);

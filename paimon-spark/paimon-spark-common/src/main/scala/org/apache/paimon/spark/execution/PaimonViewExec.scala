@@ -20,7 +20,7 @@ package org.apache.paimon.spark.execution
 
 import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
-import org.apache.paimon.view.View
+import org.apache.paimon.view.{View, ViewDialect}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.catalog.CatalogTable
@@ -129,7 +129,7 @@ case class ShowCreatePaimonViewExec(output: Seq[Attribute], catalog: SupportView
     showDataColumns(view, builder)
     showComment(view, builder)
     showProperties(view, builder)
-    builder ++= s"AS\n${view.query("spark")}\n"
+    builder ++= s"AS\n${view.query(ViewDialect.SPARK.toString)}\n"
 
     Seq(new GenericInternalRow(values = Array(UTF8String.fromString(builder.toString))))
   }
@@ -203,7 +203,7 @@ case class DescribePaimonViewExec(
     rows += row("# Detailed View Information", "", "")
     rows += row("Name", view.fullName(), "")
     rows += row("Comment", view.comment().orElse(""), "")
-    rows += row("View Text", view.query("spark"), "")
+    rows += row("View Text", view.query(ViewDialect.SPARK.toString), "")
     rows += row(
       "View Query Output Columns",
       view.rowType().getFieldNames.asScala.mkString("[", ", ", "]"),

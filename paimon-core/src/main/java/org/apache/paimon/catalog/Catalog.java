@@ -28,8 +28,8 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
-import org.apache.paimon.view.DialectChange;
 import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
 
 import javax.annotation.Nullable;
 
@@ -442,13 +442,13 @@ public interface Catalog extends AutoCloseable {
      * Alter a view.
      *
      * @param view identifier of the view to alter
-     * @param dialectChange - dialect change of view
+     * @param viewChange - dialect change of view
      * @param ignoreIfNotExists
      * @throws ViewNotExistException if the view does not exist
      * @throws DialectAlreadyExistException if the dialect already exists
      * @throws DialectNotExistException if the dialect not exists
      */
-    default void alterView(Identifier view, DialectChange dialectChange, boolean ignoreIfNotExists)
+    default void alterView(Identifier view, ViewChange viewChange, boolean ignoreIfNotExists)
             throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
         throw new UnsupportedOperationException();
     }
