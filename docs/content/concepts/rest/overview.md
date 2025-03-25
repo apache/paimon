@@ -29,7 +29,7 @@ under the License.
 ## Overview
 
 Paimon REST Catalog provides a lightweight implementation to access the catalog service. Paimon could access the
-catalog service through a catalog server which implements REST API. You can see all APIs in [REST API](https://github.com/apache/paimon/blob/master/paimon-open-api/rest-catalog-open-api.yaml).
+catalog service through a catalog server which implements REST API. You can see all APIs in [REST API]({{< ref "concepts/rest/rest-api" >}}).
 
 {{< img src="/img/rest-catalog.svg">}}
 
@@ -50,7 +50,7 @@ catalog service through a catalog server which implements REST API. You can see 
 
 ## Conclusion
 
-REST Catalog offers adaptable solution for accessing the catalog service. According to [REST API](https://github.com/apache/paimon/blob/master/paimon-open-api/rest-catalog-open-api.yaml) is decoupled
+REST Catalog offers adaptable solution for accessing the catalog service. According to [REST API]({{< ref "concepts/rest/rest-api" >}}) is decoupled
 from the catalog service.
 
 Technology-specific Logic is encapsulated on the catalog server. At the same time, the catalog server supports any
@@ -62,7 +62,3 @@ RESTCatalog supports multiple access authentication methods, including the follo
 
 1. [Bear Token]({{< ref "concepts/rest/bear" >}}).
 2. [DLF Token]({{< ref "concepts/rest/dlf" >}}).
-
-## API
-
-{{< generated/rest_catalog >}}
