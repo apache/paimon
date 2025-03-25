@@ -49,7 +49,7 @@ import java.util.concurrent.Executors;
 import static java.nio.file.Files.createTempDirectory;
 import static java.nio.file.attribute.PosixFilePermissions.asFileAttribute;
 import static java.nio.file.attribute.PosixFilePermissions.fromString;
-import static org.junit.Assert.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -99,7 +99,7 @@ public class TestHiveMetastore {
                                         String errMsg = "Failed to delete " + localDirPath;
                                         try {
                                             if (!fs.delete(localDirPath, true)) {
-                                                assertFalse(errMsg, fs.exists(localDirPath));
+                                                assertFalse(fs.exists(localDirPath), errMsg);
                                             }
                                         } catch (IOException e) {
                                             throw new RuntimeException(errMsg, e);

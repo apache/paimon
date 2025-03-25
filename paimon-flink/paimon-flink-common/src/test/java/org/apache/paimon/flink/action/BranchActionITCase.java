@@ -39,7 +39,7 @@ import java.util.List;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** IT cases for branch management actions. */
 class BranchActionITCase extends ActionITCaseBase {

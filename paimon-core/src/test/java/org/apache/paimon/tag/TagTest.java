@@ -25,7 +25,7 @@ import org.junit.Test;
 import java.time.Duration;
 import java.time.LocalDateTime;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link Tag}. */
 public class TagTest {

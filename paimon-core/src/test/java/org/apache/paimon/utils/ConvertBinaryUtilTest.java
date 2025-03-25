@@ -25,7 +25,7 @@ import java.util.Random;
 
 import static org.apache.paimon.utils.ConvertBinaryUtil.convertBytesToLong;
 import static org.apache.paimon.utils.ConvertBinaryUtil.convertStringToLong;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link ConvertBinaryUtil}. */
 public class ConvertBinaryUtilTest {
