@@ -42,6 +42,7 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
+import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -77,6 +78,7 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.view.DialectChange;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
@@ -353,10 +355,7 @@ public class RESTCatalogServer {
                             return new MockResponse().setResponseCode(200);
                         } else if (isPartitions) {
                             return partitionsApiHandle(
-                                    restAuthParameter.method(),
-                                    restAuthParameter.data(),
-                                    parameters,
-                                    identifier);
+                                    restAuthParameter.method(), parameters, identifier);
                         } else if (isBranches) {
                             return branchApiHandle(
                                     resources,
@@ -412,7 +411,10 @@ public class RESTCatalogServer {
                             return viewDetailsHandle(
                                     restAuthParameter.method(), databaseName, parameters);
                         } else if (isView) {
-                            return viewHandle(restAuthParameter.method(), identifier);
+                            return viewHandle(
+                                    restAuthParameter.method(),
+                                    identifier,
+                                    restAuthParameter.data());
                         } else {
                             return databaseHandle(
                                     restAuthParameter.method(),
@@ -498,6 +500,14 @@ public class RESTCatalogServer {
                             new ErrorResponse(
                                     ErrorResponseResourceType.VIEW,
                                     e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    409);
+                    return mockResponse(response, 409);
+                } catch (Catalog.DialectAlreadyExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponseResourceType.DIALECT,
+                                    e.dialect(),
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
@@ -1027,7 +1037,7 @@ public class RESTCatalogServer {
     }
 
     private MockResponse partitionsApiHandle(
-            String method, String data, Map<String, String> parameters, Identifier tableIdentifier)
+            String method, Map<String, String> parameters, Identifier tableIdentifier)
             throws Exception {
         switch (method) {
             case "GET":
@@ -1302,7 +1312,8 @@ public class RESTCatalogServer {
                 .collect(Collectors.toList());
     }
 
-    private MockResponse viewHandle(String method, Identifier identifier) throws Exception {
+    private MockResponse viewHandle(String method, Identifier identifier, String requestData)
+            throws Exception {
         RESTResponse response;
         if (viewStore.containsKey(identifier.getFullName())) {
             switch (method) {
@@ -1332,6 +1343,39 @@ public class RESTCatalogServer {
                 case "DELETE":
                     viewStore.remove(identifier.getFullName());
                     return new MockResponse().setResponseCode(200);
+                case "POST":
+                    if (viewStore.containsKey(identifier.getFullName())) {
+                        AlterViewRequest request =
+                                OBJECT_MAPPER.readValue(requestData, AlterViewRequest.class);
+                        DialectChange dialectChange = request.getDialectChange();
+                        if (dialectChange instanceof DialectChange.AddDialect) {
+                            DialectChange.AddDialect addDialect =
+                                    (DialectChange.AddDialect) dialectChange;
+                            ViewImpl view = (ViewImpl) viewStore.get(identifier.getFullName());
+                            if (view.dialects().containsKey(addDialect.getDialect())
+                                    && !addDialect.isForce()) {
+
+                                throw new Catalog.DialectAlreadyExistException(
+                                        identifier, addDialect.getDialect());
+                            } else {
+                                HashMap<String, String> newDialects =
+                                        new HashMap<>(view.dialects());
+                                newDialects.put(addDialect.getDialect(), addDialect.getQuery());
+                                view =
+                                        new ViewImpl(
+                                                identifier,
+                                                view.rowType().getFields(),
+                                                view.query(),
+                                                newDialects,
+                                                view.comment().orElse(null),
+                                                view.options());
+                                viewStore.put(identifier.getFullName(), view);
+                            }
+                        }
+                        return new MockResponse().setResponseCode(200);
+                    } else {
+                        throw new Catalog.ViewNotExistException(identifier);
+                    }
                 default:
                     return new MockResponse().setResponseCode(404);
             }

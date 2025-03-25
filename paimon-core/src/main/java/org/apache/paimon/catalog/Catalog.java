@@ -445,7 +445,7 @@ public interface Catalog extends AutoCloseable {
      * @param dialectChange - dialect change of view
      */
     default void alterView(Identifier view, DialectChange dialectChange)
-            throws ViewNotExistException {
+            throws ViewNotExistException, DialectAlreadyExistException {
         throw new UnsupportedOperationException();
     }
 
@@ -893,6 +893,34 @@ public interface Catalog extends AutoCloseable {
 
         public Identifier identifier() {
             return identifier;
+        }
+    }
+
+    /** Exception for trying to add a dialect that already exists. */
+    class DialectAlreadyExistException extends Exception {
+
+        private static final String MSG = "Dialect %s in view %s already exists.";
+
+        private final Identifier identifier;
+        private final String dialect;
+
+        public DialectAlreadyExistException(Identifier identifier, String dialect) {
+            this(identifier, dialect, null);
+        }
+
+        public DialectAlreadyExistException(
+                Identifier identifier, String dialect, Throwable cause) {
+            super(String.format(MSG, dialect, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.dialect = dialect;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String dialect() {
+            return dialect;
         }
     }
 

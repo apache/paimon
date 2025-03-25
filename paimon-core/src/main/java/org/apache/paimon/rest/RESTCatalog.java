@@ -902,13 +902,15 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public void alterView(Identifier identifier, DialectChange dialectChange)
-            throws ViewNotExistException {
+            throws ViewNotExistException, DialectAlreadyExistException {
         try {
             AlterViewRequest request = new AlterViewRequest(dialectChange);
             client.post(
                     resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
                     request,
                     restAuthFunction);
+        } catch (AlreadyExistsException e) {
+            throw new DialectAlreadyExistException(identifier, e.resourceName());
         } catch (NoSuchResourceException e) {
             throw new ViewNotExistException(identifier);
         }

@@ -26,5 +26,6 @@ public enum ErrorResponseResourceType {
     SNAPSHOT,
     BRANCH,
     TAG,
-    VIEW
+    VIEW,
+    DIALECT
 }

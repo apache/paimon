@@ -1309,6 +1309,53 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+    post:
+      tags:
+        - view
+      summary: Alter view
+      operationId: alterView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: view
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterViewRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       tags:
         - view
@@ -1540,6 +1587,26 @@ components:
           $ref: '#/components/schemas/Identifier'
         schema:
           $ref: '#/components/schemas/ViewSchema'
+    AlterViewRequest:
+      type: object
+      properties:
+        change:
+          $ref: '#/components/schemas/DialectChange'
+    DialectChange:
+      anyOf:
+        - $ref: '#/components/schemas/AddDialect'
+    AddDialect:
+      type: object
+      properties:
+        'action':
+          type: string
+          enum: [ "add" ]
+        dialect:
+          type: string
+        query:
+          type: string
+        force:
+          type: boolean
     DataField:
       type: object
       properties:

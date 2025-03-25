@@ -49,6 +49,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.view.DialectChange;
 import org.apache.paimon.view.View;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -1051,6 +1052,27 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         assertEquals(fetchTimes.get(), testData.size() / maxResults + 1);
         assertThat(fetchData).containsSequence(testData);
+    }
+
+    @Test
+    void testAlterViewDialect() throws Exception {
+        Identifier identifier = new Identifier("rest_catalog_db", "my_view");
+        View view = createView(identifier);
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        catalog.createView(identifier, view, false);
+        // alter view
+        DialectChange.AddDialect addDialect =
+                (DialectChange.AddDialect)
+                        DialectChange.add("flink", "SELECT * FROM FLINK_TABLE_1", true);
+        catalog.alterView(identifier, addDialect);
+        View catalogView = catalog.getView(identifier);
+        assertThat(catalogView.query(addDialect.getDialect())).isEqualTo(addDialect.getQuery());
+        assertThrows(
+                Catalog.DialectAlreadyExistException.class,
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                DialectChange.add("flink", "SELECT * FROM FLINK_TABLE_2", false)));
     }
 
     private TestPagedResponse generateTestPagedResponse(

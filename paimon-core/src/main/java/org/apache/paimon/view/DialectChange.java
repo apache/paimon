@@ -20,8 +20,76 @@ package org.apache.paimon.view;
 
 import org.apache.paimon.annotation.Public;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSubTypes;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import java.io.Serializable;
 
-/** Dialect change to view */
+// Dialect change to view.
 @Public
-public interface DialectChange extends Serializable {}
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.PROPERTY,
+        property = DialectChange.Actions.FIELD_TYPE)
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = DialectChange.AddDialect.class, name = DialectChange.Actions.ADD)
+})
+public interface DialectChange extends Serializable {
+
+    static DialectChange add(String dialect, String query, boolean force) {
+        return new AddDialect(dialect, query, force);
+    }
+
+    /** add dialect for dialect change. */
+    final class AddDialect implements DialectChange {
+        private static final long serialVersionUID = 1L;
+        private static final String FIELD_DIALECT = "dialect";
+        private static final String FIELD_QUERY = "query";
+        private static final String FIELD_FORCE = "force";
+
+        @JsonProperty(FIELD_DIALECT)
+        private final String dialect;
+
+        @JsonProperty(FIELD_QUERY)
+        private final String query;
+
+        @JsonProperty(FIELD_FORCE)
+        private final boolean force;
+
+        @JsonCreator
+        public AddDialect(
+                @JsonProperty(FIELD_DIALECT) String dialect,
+                @JsonProperty(FIELD_QUERY) String query,
+                @JsonProperty(FIELD_FORCE) boolean force) {
+            this.dialect = dialect;
+            this.query = query;
+            this.force = force;
+        }
+
+        @JsonGetter(FIELD_DIALECT)
+        public String getDialect() {
+            return dialect;
+        }
+
+        @JsonGetter(FIELD_QUERY)
+        public String getQuery() {
+            return query;
+        }
+
+        @JsonGetter(FIELD_FORCE)
+        public boolean isForce() {
+            return force;
+        }
+    }
+
+    /** Actions for view alter. */
+    class Actions {
+        public static final String FIELD_TYPE = "action";
+        public static final String ADD = "add";
+
+        private Actions() {}
+    }
+}
