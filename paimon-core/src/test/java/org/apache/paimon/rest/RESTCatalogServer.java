@@ -1358,8 +1358,8 @@ public class RESTCatalogServer {
                         ViewChange viewChange = request.getDialectChange();
                         ViewImpl view = (ViewImpl) viewStore.get(identifier.getFullName());
                         HashMap<String, String> newDialects = new HashMap<>(view.dialects());
-                        if (viewChange instanceof ViewChange.AddView) {
-                            ViewChange.AddView addDialect = (ViewChange.AddView) viewChange;
+                        if (viewChange instanceof ViewChange.AddDialect) {
+                            ViewChange.AddDialect addDialect = (ViewChange.AddDialect) viewChange;
                             if (view.dialects().containsKey(addDialect.getDialect())) {
 
                                 throw new Catalog.DialectAlreadyExistException(
@@ -1367,9 +1367,9 @@ public class RESTCatalogServer {
                             } else {
                                 newDialects.put(addDialect.getDialect(), addDialect.getQuery());
                             }
-                        } else if (viewChange instanceof ViewChange.UpdateView) {
-                            ViewChange.UpdateView updateDialect =
-                                    (ViewChange.UpdateView) viewChange;
+                        } else if (viewChange instanceof ViewChange.UpdateDialect) {
+                            ViewChange.UpdateDialect updateDialect =
+                                    (ViewChange.UpdateDialect) viewChange;
                             if (view.dialects().containsKey(updateDialect.getDialect())) {
                                 newDialects.put(
                                         updateDialect.getDialect(), updateDialect.getQuery());
@@ -1377,8 +1377,9 @@ public class RESTCatalogServer {
                                 throw new Catalog.DialectNotExistException(
                                         identifier, updateDialect.getDialect());
                             }
-                        } else if (viewChange instanceof ViewChange.DropView) {
-                            ViewChange.DropView dropDialect = (ViewChange.DropView) viewChange;
+                        } else if (viewChange instanceof ViewChange.DropDialect) {
+                            ViewChange.DropDialect dropDialect =
+                                    (ViewChange.DropDialect) viewChange;
                             if (view.dialects().containsKey(dropDialect.getDialect())) {
                                 newDialects.remove(dropDialect.getDialect());
                             } else {

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.view;
 
+/** Dialect of view. */
 public enum ViewDialect {
     FLINK("flink"),
     SPARK("spark");
