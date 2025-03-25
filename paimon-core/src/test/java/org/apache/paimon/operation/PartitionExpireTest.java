@@ -330,6 +330,7 @@ public class PartitionExpireTest {
                 new CommitMessageImpl(
                         message.partition(),
                         message.bucket(),
+                        message.totalBuckets(),
                         new DataIncrement(emptyList(), emptyList(), emptyList()),
                         new CompactIncrement(singletonList(file), emptyList(), emptyList()));
 

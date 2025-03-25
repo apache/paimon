@@ -108,8 +108,10 @@ public class UnawareAppendCompactionTask {
                 new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
         return new CommitMessageImpl(
                 partition,
-                0, // bucket 0 is bucket for unaware-bucket table for compatibility with the old
-                // design
+                // bucket 0 is bucket for unaware-bucket table
+                // for compatibility with the old design
+                0,
+                table.coreOptions().bucket(),
                 DataIncrement.emptyIncrement(),
                 compactIncrement,
                 indexIncrement);

@@ -264,10 +264,9 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  'postpone.default-bucket-num' = '2'\n"
                         + ")");
 
-        int numPartitions = 3;
         int numKeys = 100;
         List<String> values = new ArrayList<>();
-        for (int i = 0; i < numPartitions; i++) {
+        for (int i = 0; i < 3; i++) {
             for (int j = 0; j < numKeys; j++) {
                 values.add(String.format("(%d, %d, %d)", i, j, i * numKeys + j));
             }
@@ -276,7 +275,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
 
         List<String> expectedBuckets = new ArrayList<>();
-        for (int i = 0; i < numPartitions; i++) {
+        for (int i = 0; i < 3; i++) {
             expectedBuckets.add(String.format("+I[{%d}, 2]", i));
         }
         String bucketSql =
@@ -284,7 +283,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         assertThat(collect(tEnv.executeSql(bucketSql))).hasSameElementsAs(expectedBuckets);
 
         List<String> expectedData = new ArrayList<>();
-        for (int i = 0; i < numPartitions; i++) {
+        for (int i = 0; i < 3; i++) {
             expectedData.add(
                     String.format(
                             "+I[%d, %d]",
@@ -296,23 +295,20 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         // before rescaling, write some files in bucket = -2 directory,
         // these files should not be touched by rescaling
         values.clear();
-        int changedPartition = 1;
         for (int j = 0; j < numKeys; j++) {
-            values.add(
-                    String.format(
-                            "(%d, %d, %d)",
-                            changedPartition, j, -(changedPartition * numKeys + j)));
+            values.add(String.format("(1, %d, 0)", j));
+            values.add(String.format("(2, %d, 1)", j));
         }
         tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
 
         tEnv.executeSql(
-                "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 4, `partition` => 'pt="
-                        + changedPartition
-                        + "')");
+                "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 4, `partition` => 'pt=1')");
+        tEnv.executeSql(
+                "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 8, `partition` => 'pt=2')");
         expectedBuckets.clear();
-        for (int i = 0; i < numPartitions; i++) {
-            expectedBuckets.add(String.format("+I[{%d}, %d]", i, i == changedPartition ? 4 : 2));
-        }
+        expectedBuckets.add("+I[{0}, 2]");
+        expectedBuckets.add("+I[{1}, 4]");
+        expectedBuckets.add("+I[{2}, 8]");
         assertThat(collect(tEnv.executeSql(bucketSql))).hasSameElementsAs(expectedBuckets);
         assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expectedData);
 
@@ -321,13 +317,9 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         assertThat(collect(tEnv.executeSql(bucketSql))).hasSameElementsAs(expectedBuckets);
 
         expectedData.clear();
-        for (int i = 0; i < numPartitions; i++) {
-            int val = (i * numKeys + i * numKeys + numKeys - 1) * numKeys / 2;
-            if (i == changedPartition) {
-                val *= -1;
-            }
-            expectedData.add(String.format("+I[%d, %d]", i, val));
-        }
+        expectedData.add(String.format("+I[0, %d]", (numKeys - 1) * numKeys / 2));
+        expectedData.add("+I[1, 0]");
+        expectedData.add(String.format("+I[2, %d]", numKeys));
         assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expectedData);
     }
 

@@ -20,7 +20,6 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -148,13 +147,13 @@ public interface FileStoreScan {
         }
 
         /** Return a map group by partition and bucket. */
-        static Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupByPartFiles(
+        static Map<BinaryRow, Map<Integer, List<ManifestEntry>>> groupByPartFiles(
                 List<ManifestEntry> files) {
-            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupBy = new LinkedHashMap<>();
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> groupBy = new LinkedHashMap<>();
             for (ManifestEntry entry : files) {
                 groupBy.computeIfAbsent(entry.partition(), k -> new LinkedHashMap<>())
                         .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())
-                        .add(entry.file());
+                        .add(entry);
             }
             return groupBy;
         }

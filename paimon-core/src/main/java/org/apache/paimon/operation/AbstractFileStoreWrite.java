@@ -74,7 +74,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
     @Nullable private final DeletionVectorsMaintainer.Factory dvMaintainerFactory;
-    private final int totalBuckets;
+    private final int numBuckets;
     private final RowType partitionType;
 
     @Nullable protected IOManager ioManager;
@@ -84,12 +84,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private ExecutorService lazyCompactExecutor;
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
+    private boolean ignoreNumBucketCheck = false;
     protected boolean isStreamingMode = false;
 
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
     private boolean isInsertOnly;
-    private boolean legacyPartitionName;
+    private final boolean legacyPartitionName;
 
     protected AbstractFileStoreWrite(
             SnapshotManager snapshotManager,
@@ -98,7 +99,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName,
             CoreOptions options,
-            int totalBuckets,
+            int numBuckets,
             RowType partitionType,
             int writerNumberMax,
             boolean legacyPartitionName) {
@@ -112,7 +113,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
         this.indexFactory = indexFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
-        this.totalBuckets = totalBuckets;
+        this.numBuckets = numBuckets;
         this.partitionType = partitionType;
         this.writers = new HashMap<>();
         this.tableName = tableName;
@@ -134,6 +135,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public void withIgnorePreviousFiles(boolean ignorePreviousFiles) {
         this.ignorePreviousFiles = ignorePreviousFiles;
+    }
+
+    @Override
+    public void withIgnoreNumBucketCheck(boolean ignoreNumBucketCheck) {
+        this.ignoreNumBucketCheck = ignoreNumBucketCheck;
     }
 
     @Override
@@ -228,6 +234,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         new CommitMessageImpl(
                                 partition,
                                 bucket,
+                                writerContainer.totalBuckets,
                                 increment.newFilesIncrement(),
                                 increment.compactIncrement(),
                                 new IndexIncrement(newIndexFiles));
@@ -348,6 +355,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         new State<>(
                                 partition,
                                 bucket,
+                                writerContainer.totalBuckets,
                                 writerContainer.baseSnapshotId,
                                 writerContainer.lastModifiedCommitIdentifier,
                                 dataFiles,
@@ -380,6 +388,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             WriterContainer<T> writerContainer =
                     new WriterContainer<>(
                             writer,
+                            state.totalBuckets,
                             state.indexMaintainer,
                             state.deletionVectorsMaintainer,
                             state.baseSnapshotId);
@@ -409,7 +418,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private long writerNumber() {
-        return writers.values().stream().mapToLong(e -> e.values().size()).sum();
+        return writers.values().stream().mapToLong(Map::size).sum();
     }
 
     @VisibleForTesting
@@ -429,9 +438,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
+        int totalBuckets = numBuckets;
         if (!ignorePreviousFiles && latestSnapshot != null) {
-            restoreFiles = scanExistingFileMetas(latestSnapshot, partition, bucket);
+            totalBuckets = scanExistingFileMetas(latestSnapshot, partition, bucket, restoreFiles);
         }
+
         IndexMaintainer<T> indexMaintainer =
                 indexFactory == null
                         ? null
@@ -455,6 +466,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         notifyNewWriter(writer);
         return new WriterContainer<>(
                 writer,
+                totalBuckets,
                 indexMaintainer,
                 deletionVectorsMaintainer,
                 latestSnapshot == null ? null : latestSnapshot.id());
@@ -471,13 +483,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return this;
     }
 
-    private List<DataFileMeta> scanExistingFileMetas(
-            Snapshot snapshot, BinaryRow partition, int bucket) {
-        List<DataFileMeta> existingFileMetas = new ArrayList<>();
+    private int scanExistingFileMetas(
+            Snapshot snapshot,
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> existingFileMetas) {
         List<ManifestEntry> files =
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
+        int totalBuckets = numBuckets;
         for (ManifestEntry entry : files) {
-            if (entry.totalBuckets() != totalBuckets) {
+            if (!ignoreNumBucketCheck && entry.totalBuckets() != numBuckets) {
                 String partInfo =
                         partitionType.getFieldCount() > 0
                                 ? "partition "
@@ -491,11 +506,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         String.format(
                                 "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
                                         + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                                partInfo, totalBuckets, entry.totalBuckets()));
+                                partInfo, numBuckets, entry.totalBuckets()));
             }
+            totalBuckets = entry.totalBuckets();
             existingFileMetas.add(entry.file());
         }
-        return existingFileMetas;
+        return totalBuckets;
     }
 
     private ExecutorService compactExecutor() {
@@ -534,6 +550,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @VisibleForTesting
     public static class WriterContainer<T> {
         public final RecordWriter<T> writer;
+        public final int totalBuckets;
         @Nullable public final IndexMaintainer<T> indexMaintainer;
         @Nullable public final DeletionVectorsMaintainer deletionVectorsMaintainer;
         protected final long baseSnapshotId;
@@ -541,10 +558,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         protected WriterContainer(
                 RecordWriter<T> writer,
+                int totalBUckets,
                 @Nullable IndexMaintainer<T> indexMaintainer,
                 @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
                 Long baseSnapshotId) {
             this.writer = writer;
+            this.totalBuckets = totalBUckets;
             this.indexMaintainer = indexMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
             this.baseSnapshotId =

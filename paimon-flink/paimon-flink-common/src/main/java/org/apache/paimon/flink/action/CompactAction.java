@@ -60,6 +60,7 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -241,9 +242,12 @@ public class CompactAction extends TableActionBase {
                 whereSql == null,
                 "Postpone bucket compaction currently does not support predicates");
 
+        Options options = new Options(table.options());
+        int defaultBucketNum = options.get(FlinkConnectorOptions.POSTPONE_DEFAULT_BUCKET_NUM);
+
         // change bucket to a positive value, so we can scan files from the bucket = -2 directory
         Map<String, String> bucketOptions = new HashMap<>(table.options());
-        bucketOptions.put(CoreOptions.BUCKET.key(), "1");
+        bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(defaultBucketNum));
         FileStoreTable fileStoreTable = table.copy(table.schema().copy(bucketOptions));
 
         List<BinaryRow> partitions =
@@ -255,15 +259,16 @@ public class CompactAction extends TableActionBase {
             return false;
         }
 
-        Options options = new Options(fileStoreTable.options());
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
                         fileStoreTable.coreOptions().partitionDefaultName(),
                         fileStoreTable.rowType(),
                         fileStoreTable.partitionKeys().toArray(new String[0]),
                         fileStoreTable.coreOptions().legacyPartitionName());
+        String commitUser = CoreOptions.createCommitUser(options);
+        List<DataStream<Committable>> dataStreams = new ArrayList<>();
         for (BinaryRow partition : partitions) {
-            int bucketNum = options.get(FlinkConnectorOptions.POSTPONE_DEFAULT_BUCKET_NUM);
+            int bucketNum = defaultBucketNum;
 
             Iterator<ManifestEntry> it =
                     fileStoreTable
@@ -299,8 +304,6 @@ public class CompactAction extends TableActionBase {
                             new RowDataChannelComputer(realTable.schema(), false),
                             null);
             FixedBucketSink sink = new FixedBucketSink(realTable, null, null);
-            String commitUser =
-                    CoreOptions.createCommitUser(realTable.coreOptions().toConfiguration());
             DataStream<Committable> written =
                     sink.doWrite(partitioned, commitUser, partitioned.getParallelism())
                             .forward()
@@ -308,9 +311,16 @@ public class CompactAction extends TableActionBase {
                                     "Rewrite compact committable",
                                     new CommittableTypeInfo(),
                                     new RewritePostponeBucketCommittableOperator(realTable));
-            sink.doCommit(written.union(sourcePair.getRight()), commitUser);
+            dataStreams.add(written);
+            dataStreams.add(sourcePair.getRight());
         }
 
+        FixedBucketSink sink = new FixedBucketSink(fileStoreTable, null, null);
+        DataStream<Committable> dataStream = dataStreams.get(0);
+        for (int i = 1; i < dataStreams.size(); i++) {
+            dataStream = dataStream.union(dataStreams.get(i));
+        }
+        sink.doCommit(dataStream, commitUser);
         return true;
     }
 

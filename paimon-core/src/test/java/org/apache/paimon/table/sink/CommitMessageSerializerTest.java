@@ -39,6 +39,7 @@ public class CommitMessageSerializerTest {
     @Test
     public void test() throws IOException {
         CommitMessageSerializer serializer = new CommitMessageSerializer();
+
         DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         IndexIncrement indexIncrement =
@@ -46,9 +47,14 @@ public class CommitMessageSerializerTest {
                         Arrays.asList(randomIndexFile(), randomIndexFile()),
                         Arrays.asList(randomIndexFile(), randomIndexFile()));
         CommitMessageImpl committable =
-                new CommitMessageImpl(row(0), 1, dataIncrement, compactIncrement, indexIncrement);
+                new CommitMessageImpl(
+                        row(0), 1, 2, dataIncrement, compactIncrement, indexIncrement);
+
         CommitMessageImpl newCommittable =
                 (CommitMessageImpl) serializer.deserialize(5, serializer.serialize(committable));
+        assertThat(newCommittable.partition()).isEqualTo(committable.partition());
+        assertThat(newCommittable.bucket()).isEqualTo(committable.bucket());
+        assertThat(newCommittable.totalBuckets()).isEqualTo(committable.totalBuckets());
         assertThat(newCommittable.compactIncrement()).isEqualTo(committable.compactIncrement());
         assertThat(newCommittable.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
         assertThat(newCommittable.indexIncrement()).isEqualTo(committable.indexIncrement());

@@ -74,6 +74,12 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     void withIgnorePreviousFiles(boolean ignorePreviousFiles);
 
     /**
+     * Ignores the check that the written partition must have the same number of buckets with the
+     * table option.
+     */
+    void withIgnoreNumBucketCheck(boolean ignoreNumBucketCheck);
+
+    /**
      * We detect whether it is in batch mode, if so, we do some optimization.
      *
      * @param isStreamingMode whether in streaming mode
@@ -151,6 +157,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
 
         protected final BinaryRow partition;
         protected final int bucket;
+        protected final int totalBuckets;
 
         protected final long baseSnapshotId;
         protected final long lastModifiedCommitIdentifier;
@@ -163,6 +170,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         protected State(
                 BinaryRow partition,
                 int bucket,
+                int totalBuckets,
                 long baseSnapshotId,
                 long lastModifiedCommitIdentifier,
                 Collection<DataFileMeta> dataFiles,
@@ -172,6 +180,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 CommitIncrement commitIncrement) {
             this.partition = partition;
             this.bucket = bucket;
+            this.totalBuckets = totalBuckets;
             this.baseSnapshotId = baseSnapshotId;
             this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
             this.dataFiles = new ArrayList<>(dataFiles);
@@ -184,9 +193,10 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         @Override
         public String toString() {
             return String.format(
-                    "{%s, %d, %d, %d, %s, %d, %s, %s, %s}",
+                    "{%s, %d, %d, %d, %d, %s, %d, %s, %s, %s}",
                     partition,
                     bucket,
+                    totalBuckets,
                     baseSnapshotId,
                     lastModifiedCommitIdentifier,
                     dataFiles,

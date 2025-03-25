@@ -704,8 +704,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private ManifestEntry makeEntry(FileKind kind, CommitMessage commitMessage, DataFileMeta file) {
+        Integer totalBuckets = commitMessage.totalBuckets();
+        if (totalBuckets == null) {
+            totalBuckets = numBucket;
+        }
+
         return new ManifestEntry(
-                kind, commitMessage.partition(), commitMessage.bucket(), numBucket, file);
+                kind, commitMessage.partition(), commitMessage.bucket(), totalBuckets, file);
     }
 
     private int tryCommit(

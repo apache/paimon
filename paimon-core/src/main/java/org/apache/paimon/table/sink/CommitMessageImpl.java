@@ -26,6 +26,8 @@ import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.io.IndexIncrement;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -45,6 +47,7 @@ public class CommitMessageImpl implements CommitMessage {
 
     private transient BinaryRow partition;
     private transient int bucket;
+    private transient @Nullable Integer totalBuckets;
     private transient DataIncrement dataIncrement;
     private transient CompactIncrement compactIncrement;
     private transient IndexIncrement indexIncrement;
@@ -53,11 +56,13 @@ public class CommitMessageImpl implements CommitMessage {
     public CommitMessageImpl(
             BinaryRow partition,
             int bucket,
+            @Nullable Integer totalBuckets,
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement) {
         this(
                 partition,
                 bucket,
+                totalBuckets,
                 dataIncrement,
                 compactIncrement,
                 new IndexIncrement(Collections.emptyList()));
@@ -66,11 +71,13 @@ public class CommitMessageImpl implements CommitMessage {
     public CommitMessageImpl(
             BinaryRow partition,
             int bucket,
+            @Nullable Integer totalBuckets,
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement,
             IndexIncrement indexIncrement) {
         this.partition = partition;
         this.bucket = bucket;
+        this.totalBuckets = totalBuckets;
         this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
         this.indexIncrement = indexIncrement;
@@ -84,6 +91,11 @@ public class CommitMessageImpl implements CommitMessage {
     @Override
     public int bucket() {
         return bucket;
+    }
+
+    @Override
+    public @Nullable Integer totalBuckets() {
+        return totalBuckets;
     }
 
     public DataIncrement newFilesIncrement() {
@@ -116,6 +128,7 @@ public class CommitMessageImpl implements CommitMessage {
         CommitMessageImpl message = (CommitMessageImpl) CACHE.get().deserialize(version, bytes);
         this.partition = message.partition;
         this.bucket = message.bucket;
+        this.totalBuckets = message.totalBuckets;
         this.dataIncrement = message.dataIncrement;
         this.compactIncrement = message.compactIncrement;
         this.indexIncrement = message.indexIncrement;
@@ -133,6 +146,7 @@ public class CommitMessageImpl implements CommitMessage {
         CommitMessageImpl that = (CommitMessageImpl) o;
         return bucket == that.bucket
                 && Objects.equals(partition, that.partition)
+                && Objects.equals(totalBuckets, that.totalBuckets)
                 && Objects.equals(dataIncrement, that.dataIncrement)
                 && Objects.equals(compactIncrement, that.compactIncrement)
                 && Objects.equals(indexIncrement, that.indexIncrement);
@@ -140,7 +154,8 @@ public class CommitMessageImpl implements CommitMessage {
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, dataIncrement, compactIncrement, indexIncrement);
+        return Objects.hash(
+                partition, bucket, totalBuckets, dataIncrement, compactIncrement, indexIncrement);
     }
 
     @Override
@@ -149,9 +164,10 @@ public class CommitMessageImpl implements CommitMessage {
                 "FileCommittable {"
                         + "partition = %s, "
                         + "bucket = %d, "
+                        + "totalBuckets = %s, "
                         + "newFilesIncrement = %s, "
                         + "compactIncrement = %s, "
                         + "indexIncrement = %s}",
-                partition, bucket, dataIncrement, compactIncrement, indexIncrement);
+                partition, bucket, totalBuckets, dataIncrement, compactIncrement, indexIncrement);
     }
 }

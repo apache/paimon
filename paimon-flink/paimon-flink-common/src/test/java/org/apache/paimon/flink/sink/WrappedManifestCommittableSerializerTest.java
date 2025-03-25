@@ -76,22 +76,23 @@ class WrappedManifestCommittableSerializerTest {
                 rnd.nextBoolean()
                         ? new ManifestCommittable(rnd.nextLong(), rnd.nextLong())
                         : new ManifestCommittable(rnd.nextLong(), null);
-        addFileCommittables(committable, row(0), 0);
-        addFileCommittables(committable, row(0), 1);
-        addFileCommittables(committable, row(1), 0);
-        addFileCommittables(committable, row(1), 1);
+        addFileCommittables(committable, row(0), 0, 2);
+        addFileCommittables(committable, row(0), 1, 2);
+        addFileCommittables(committable, row(1), 0, 2);
+        addFileCommittables(committable, row(1), 1, 2);
         return committable;
     }
 
     public static void addFileCommittables(
-            ManifestCommittable committable, BinaryRow partition, int bucket) {
+            ManifestCommittable committable, BinaryRow partition, int bucket, int totalBuckets) {
         List<CommitMessage> commitMessages = new ArrayList<>();
         int length = ThreadLocalRandom.current().nextInt(10) + 1;
         for (int i = 0; i < length; i++) {
             DataIncrement dataIncrement = randomNewFilesIncrement();
             CompactIncrement compactIncrement = randomCompactIncrement();
             CommitMessage commitMessage =
-                    new CommitMessageImpl(partition, bucket, dataIncrement, compactIncrement);
+                    new CommitMessageImpl(
+                            partition, bucket, totalBuckets, dataIncrement, compactIncrement);
             commitMessages.add(commitMessage);
             committable.addFileCommittable(commitMessage);
         }
