@@ -642,7 +642,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         compareCloneFiles(sourceWarehouse, "default", "t", targetWarehouse, "default", "t");
     }
 
-    private void compareCloneFiles(
+    protected void compareCloneFiles(
             String sourceWarehouse,
             String sourceDb,
             String sourceTableName,
@@ -730,7 +730,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         }
     }
 
-    private Pair<Path, Boolean> pathExist(FileIO fileIO, List<Path> paths) throws IOException {
+    protected Pair<Path, Boolean> pathExist(FileIO fileIO, List<Path> paths) throws IOException {
         for (Path path : paths) {
             if (fileIO.exists(path)) {
                 return Pair.of(path, true);
@@ -739,7 +739,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         return Pair.of(null, false);
     }
 
-    private Path getPathExcludeTableRoot(Path absolutePath, Path sourceTableRoot) {
+    protected Path getPathExcludeTableRoot(Path absolutePath, Path sourceTableRoot) {
         String fileAbsolutePath = absolutePath.toUri().toString();
         String sourceTableRootPath = sourceTableRoot.toString();
 
@@ -993,7 +993,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         return tEnv.executeSql(procedureStatement).collect();
     }
 
-    private List<String> collect(TableEnvironment tEnv, String sql) throws Exception {
+    protected List<String> collect(TableEnvironment tEnv, String sql) throws Exception {
         List<String> actual = new ArrayList<>();
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
             while (it.hasNext()) {

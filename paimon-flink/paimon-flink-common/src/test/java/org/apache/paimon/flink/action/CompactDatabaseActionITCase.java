@@ -87,7 +87,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 Arguments.of("divided", "procedure_named"));
     }
 
-    private FileStoreTable createTable(
+    protected FileStoreTable createTable(
             String databaseName,
             String tableName,
             List<String> partitionKeys,

@@ -459,7 +459,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
                 .collect(Collectors.toList());
     }
 
-    private List<String> read(
+    protected List<String> read(
             FileStoreTable table, Function<InternalRow, String> consumerReadResult)
             throws IOException {
         List<String> ret = new ArrayList<>();

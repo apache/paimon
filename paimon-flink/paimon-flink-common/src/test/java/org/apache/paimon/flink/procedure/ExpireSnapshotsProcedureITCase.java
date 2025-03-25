@@ -162,7 +162,7 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
         checkSnapshots(snapshotManager, 6, 6);
     }
 
-    private void checkSnapshots(SnapshotManager sm, int earliest, int latest) throws IOException {
+    protected void checkSnapshots(SnapshotManager sm, int earliest, int latest) throws IOException {
         assertThat(sm.snapshotCount()).isEqualTo(latest - earliest + 1);
         assertThat(sm.earliestSnapshotId()).isEqualTo(earliest);
         assertThat(sm.latestSnapshotId()).isEqualTo(latest);
