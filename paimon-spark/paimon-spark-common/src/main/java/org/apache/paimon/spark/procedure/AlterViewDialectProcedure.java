@@ -21,6 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
+import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewDialect;
 
@@ -33,6 +34,7 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -84,7 +86,9 @@ public class AlterViewDialectProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
-        Identifier view = Identifier.fromString(args.getString(0));
+        org.apache.spark.sql.connector.catalog.Identifier ident =
+                toIdentifier(args.getString(0), PARAMETERS[0].name());
+        Identifier view = CatalogUtils.toIdentifier(ident);
         ViewChange viewChange;
         String dialect = ViewDialect.SPARK.toString();
         switch (args.getString(1)) {
