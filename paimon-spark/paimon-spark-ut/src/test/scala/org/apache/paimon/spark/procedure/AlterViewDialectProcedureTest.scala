@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.options.CatalogOptions
-import org.apache.paimon.rest.{RESTCatalogInternalOptions, RESTCatalogServer}
+import org.apache.paimon.rest.{RESTCatalogFactory, RESTCatalogInternalOptions, RESTCatalogServer}
 import org.apache.paimon.rest.auth.{AuthProviderEnum, BearTokenAuthProvider}
 import org.apache.paimon.rest.responses.ConfigResponse
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap
@@ -66,13 +66,11 @@ class AlterViewDialectProcedureTest extends PaimonSparkTestBase {
 
   override protected def sparkConf: SparkConf = {
     super.sparkConf
-      .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
-      .set("spark.sql.catalog.paimon.metastore", "rest")
+      .set("spark.sql.catalog.paimon.metastore", RESTCatalogFactory.IDENTIFIER)
       .set("spark.sql.catalog.paimon.uri", serverUrl)
       .set("spark.sql.catalog.paimon.token", initToken)
       .set("spark.sql.catalog.paimon.warehouse", warehouse)
       .set("spark.sql.catalog.paimon.token.provider", AuthProviderEnum.BEAR.identifier)
-      .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
   }
 
   test(s"test alter view dialect procedure") {
