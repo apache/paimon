@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonRestCatalogSparkTestBase
+import org.apache.paimon.spark.catalog.SupportView
 
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions
@@ -46,34 +47,40 @@ class AlterViewDialectProcedureTest extends PaimonRestCatalogSparkTestBase {
 
     checkViewQuery(viewName, query)
 
-    checkAnswer(spark.sql(s"CALL sys.alter_view_dialect('$viewName', 'drop')"), Row(true))
+    checkAnswer(
+      spark.sql(s"CALL sys.alter_view_dialect('$viewName', 'drop', '${SupportView.DIALECT}')"),
+      Row(true))
 
-    checkAnswer(spark.sql(s"CALL sys.alter_view_dialect('$viewName', 'add', '$query')"), Row(true))
+    checkAnswer(
+      spark.sql(
+        s"CALL sys.alter_view_dialect('$viewName', 'add', '${SupportView.DIALECT}', '$query')"),
+      Row(true))
 
     checkViewQuery(viewName, query)
 
     val newQuery = "SELECT * FROM T WHERE `id` > 2";
 
     checkAnswer(
-      spark.sql(s"CALL sys.alter_view_dialect('$viewName', 'update', '$newQuery')"),
+      spark.sql(
+        s"CALL sys.alter_view_dialect('$viewName', 'update', '${SupportView.DIALECT}', '$newQuery')"),
       Row(true))
 
     checkViewQuery(viewName, newQuery)
-    val engine = "flink"
 
     checkAnswer(
-      spark.sql(
-        s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'add', `query` => '$query', `engine` => '$engine')"),
+      spark.sql(s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'drop')"),
       Row(true))
 
     checkAnswer(
       spark.sql(
-        s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'update', `query` => '$newQuery', `engine` => '$engine')"),
+        s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'add', `query` => '$query')"),
       Row(true))
+    checkViewQuery(viewName, query)
 
     checkAnswer(
       spark.sql(
-        s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'drop', `engine` => '$engine')"),
+        s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'update', `query` => '$newQuery')"),
       Row(true))
+    checkViewQuery(viewName, newQuery)
   }
 }

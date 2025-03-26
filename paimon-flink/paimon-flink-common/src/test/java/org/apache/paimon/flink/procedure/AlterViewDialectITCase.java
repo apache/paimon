@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.RESTCatalogITCaseBase;
 
 import org.apache.flink.types.Row;
@@ -43,39 +44,49 @@ public class AlterViewDialectITCase extends RESTCatalogITCaseBase {
         sql(String.format("CREATE VIEW %s.%s AS %s", DATABASE_NAME, viewName, query));
         String newQuery =
                 String.format("SELECT * FROM `%s`.`%s` WHERE `b` > 2", DATABASE_NAME, TABLE_NAME);
-        sql(
-                String.format(
-                        "CALL sys.alter_view_dialect('%s.%s', 'update', '%s')",
-                        DATABASE_NAME, viewName, newQuery));
-        List<Row> result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
-        assertThat(result.toString()).contains(newQuery);
-        sql(String.format("CALL sys.alter_view_dialect('%s.%s', 'drop')", DATABASE_NAME, viewName));
-        result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
-        assertThat(result.toString()).contains("`b` > 1");
-        sql(
-                String.format(
-                        "CALL sys.alter_view_dialect('%s.%s', 'add', '%s')",
-                        DATABASE_NAME, viewName, newQuery));
+
+        List<Row> result =
+                sql(
+                        String.format(
+                                "CALL sys.alter_view_dialect('%s.%s', 'update', '%s', '%s')",
+                                DATABASE_NAME, viewName, FlinkCatalog.DIALECT, newQuery));
+        assertThat(result.toString()).contains("Success");
         result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
         assertThat(result.toString()).contains(newQuery);
 
         result =
                 sql(
                         String.format(
-                                "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'add', `query` => '%s', `engine` => 'spark')",
-                                DATABASE_NAME, viewName, newQuery));
+                                "CALL sys.alter_view_dialect('%s.%s', 'drop', '%s')",
+                                DATABASE_NAME, viewName, FlinkCatalog.DIALECT));
         assertThat(result.toString()).contains("Success");
+
         result =
                 sql(
                         String.format(
-                                "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'update', `query` => '%s', `engine` => 'spark')",
-                                DATABASE_NAME, viewName, query));
+                                "CALL sys.alter_view_dialect('%s.%s', 'add', '%s', '%s')",
+                                DATABASE_NAME, viewName, FlinkCatalog.DIALECT, query));
         assertThat(result.toString()).contains("Success");
-        result =
-                sql(
-                        String.format(
-                                "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'drop', `engine` => 'spark')",
-                                DATABASE_NAME, viewName, query));
-        assertThat(result.toString()).contains("Success");
+        result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
+        assertThat(result.toString()).contains(query);
+
+        sql(
+                String.format(
+                        "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'update', `query` => '%s')",
+                        DATABASE_NAME, viewName, newQuery));
+        result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
+        assertThat(result.toString()).contains(newQuery);
+        sql(
+                String.format(
+                        "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'drop')",
+                        DATABASE_NAME, viewName));
+        result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
+        assertThat(result.toString()).contains("`b` > 1");
+        sql(
+                String.format(
+                        "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'add', `query` => '%s')",
+                        DATABASE_NAME, viewName, query));
+        result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
+        assertThat(result.toString()).contains(query);
     }
 }

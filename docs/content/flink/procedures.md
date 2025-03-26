@@ -803,32 +803,32 @@ All available procedures are listed below.
       <td>alter_view_dialect</td>
       <td>
          -- add dialect in the view<br/>
-         CALL [catalog.]sys.alter_view_dialect('view', 'add', 'query')<br/>
-         CALL [catalog.]sys.alter_view_dialect(`view` => 'view', `action` => 'add', `query` => 'query', `engine` => 'spark')<br/><br/>
+         CALL [catalog.]sys.alter_view_dialect('view_identifier', 'add', 'flink', 'query')<br/>
+         CALL [catalog.]sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'add', `query` => 'query')<br/><br/>
          -- update dialect in the view<br/>
-         CALL [catalog.]sys.alter_view_dialect('view', 'update', 'query')<br/>
-         CALL [catalog.]sys.alter_view_dialect(`view` => 'view', `action` => 'update', `query` => 'query', `engine` => 'spark')<br/><br/>
+         CALL [catalog.]sys.alter_view_dialect('view_identifier', 'update', 'flink', 'query')<br/>
+         CALL [catalog.]sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'update', `query` => 'query')<br/><br/>
          -- drop dialect in the view<br/>
-         CALL [catalog.]sys.alter_view_dialect('view', 'drop')<br/><br/>
-         CALL [catalog.]sys.alter_view_dialect(`view` => 'view', `action` => 'drop', `engine` => 'spark')<br/><br/>
+         CALL [catalog.]sys.alter_view_dialect('view_identifier', 'drop', 'flink')<br/><br/>
+         CALL [catalog.]sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')<br/><br/>
       </td>
       <td>
          To alter view dialect. Arguments:
             <li>view: the target view identifier. Cannot be empty.</li>
             <li>action: define change action like: add, update, drop. Cannot be empty.</li>
-            <li>query: query for the dialect when action is add and update it couldn't be empty.</li>
             <li>engine: when engine which is not flink need define it.</li>
+            <li>query: query for the dialect when action is add and update it couldn't be empty.</li>
       </td>
       <td>
          -- add dialect in the view<br/>
-         CALL sys.alter_view_dialect('view', 'add', 'query')<br/>
-         CALL sys.alter_view_dialect(`view` => 'view', `action` => 'add', `query` => 'query', `engine` => 'spark')<br/><br/>
+         CALL sys.alter_view_dialect('view_identifier', 'add', 'flink', 'query')<br/>
+         CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'add', `query` => 'query')<br/><br/>
          -- update dialect in the view<br/>
-         CALL sys.alter_view_dialect('view', 'update', 'query')<br/>
-         CALL sys.alter_view_dialect(`view` => 'view', `action` => 'update', `query` => 'query', `engine` => 'spark')<br/><br/>
+         CALL sys.alter_view_dialect('view_identifier', 'update', 'flink', 'query')<br/>
+         CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'update', `query` => 'query')<br/><br/>
          -- drop dialect in the view<br/>
-         CALL sys.alter_view_dialect('view', 'drop')<br/>
-         CALL sys.alter_view_dialect(`view` => 'view', `action` => 'drop', `engine` => 'spark')<br/><br/>
+         CALL sys.alter_view_dialect('view_identifier', 'drop', 'flink')<br/>
+         CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')<br/><br/>
       </td>
    </tr>
    </tbody>

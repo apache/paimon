@@ -39,38 +39,33 @@ import static org.apache.paimon.flink.FlinkCatalog.DIALECT;
  *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- add dialect in the view
- *  CALL sys.alter_view_dialect('view', 'add', 'query')
- *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'add', `query` => 'query', `engine` => 'spark')
+ *  CALL sys.alter_view_dialect('view_identifier', 'add', 'flink', 'query')
+ *  CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'add', `query` => 'query')
  *
  *  -- update dialect in the view
- *  CALL sys.alter_view_dialect('view', 'update', 'query')
- *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'update', `query` => 'query', `engine` => 'spark')
+ *  CALL sys.alter_view_dialect('view_identifier', 'update', 'flink', 'query')
+ *  CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'update', `query` => 'query')
  *
  *  -- drop dialect in the view
- *  CALL sys.alter_view_dialect('view', 'drop')
- *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'drop', `engine` => 'spark')
+ *  CALL sys.alter_view_dialect('view_identifier', 'drop', 'flink')
+ *  CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')
  *
  * </code></pre>
  */
 public class AlterViewDialectProcedure extends ProcedureBase {
-    @Override
-    public String identifier() {
-        return "alter_view_dialect";
-    }
-
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "view", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "action", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "query", type = @DataTypeHint("STRING"), isOptional = true),
-                @ArgumentHint(name = "engine", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "engine", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "query", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String view,
             String action,
-            String query,
-            String engine)
+            String engine,
+            String query)
             throws Catalog.ViewNotExistException, Catalog.DialectAlreadyExistException,
                     Catalog.DialectNotExistException {
         Identifier identifier = Identifier.fromString(view);
@@ -105,5 +100,10 @@ public class AlterViewDialectProcedure extends ProcedureBase {
         }
         catalog.alterView(identifier, ImmutableList.of(viewChange), false);
         return new String[] {"Success"};
+    }
+
+    @Override
+    public String identifier() {
+        return "alter_view_dialect";
     }
 }

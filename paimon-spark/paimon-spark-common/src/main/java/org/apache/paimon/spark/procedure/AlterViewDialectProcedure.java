@@ -45,16 +45,16 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- add dialect in the view
- *  CALL sys.alter_view_dialect('view', 'add', 'query')
- *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'add', `query` => 'query', `engine` => 'flink')
+ *  CALL sys.alter_view_dialect('view_identifier', 'add', 'spark', 'query')
+ *  CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'add', `query` => 'query')
  *
  *  -- update dialect in the view
- *  CALL sys.alter_view_dialect('view', 'update', 'query')
- *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'update', `query` => 'query', `engine` => 'flink')
+ *  CALL sys.alter_view_dialect('view_identifier', 'update', 'spark', 'query')
+ *  CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'update', `query` => 'query')
  *
  *  -- drop dialect in the view
- *  CALL sys.alter_view_dialect('view', 'drop')
- *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'drop', `engine` => 'flink')
+ *  CALL sys.alter_view_dialect('view_identifier', 'drop', 'spark')
+ *  CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')
  *
  * </code></pre>
  */
@@ -64,8 +64,8 @@ public class AlterViewDialectProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("view", StringType),
                 ProcedureParameter.required("action", StringType),
-                ProcedureParameter.optional("query", StringType),
                 ProcedureParameter.optional("engine", StringType),
+                ProcedureParameter.optional("query", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -95,12 +95,12 @@ public class AlterViewDialectProcedure extends BaseProcedure {
                 toIdentifier(args.getString(0), PARAMETERS[0].name());
         Identifier view = CatalogUtils.toIdentifier(ident);
         ViewChange viewChange;
-        String query = ((GenericInternalRow) args).genericGet(2) == null ? null : args.getString(2);
         String dialect =
-                ((GenericInternalRow) args).genericGet(3) == null
-                                || StringUtils.isNullOrWhitespaceOnly(args.getString(3))
+                ((GenericInternalRow) args).genericGet(2) == null
+                                || StringUtils.isNullOrWhitespaceOnly(args.getString(2))
                         ? SupportView.DIALECT
-                        : args.getString(3);
+                        : args.getString(2);
+        String query = ((GenericInternalRow) args).genericGet(3) == null ? null : args.getString(3);
         switch (args.getString(1)) {
             case "add":
                 {
