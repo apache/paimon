@@ -34,7 +34,6 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
-import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -44,13 +43,13 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- add dialect in the view
- *  CALL sys.alert_view_dialect('viewId', 'add', 'query')
+ *  CALL sys.alter_view_dialect('view', 'add', 'query')
  *
  *  -- update dialect in the view
- *  CALL sys.alert_view_dialect('viewId', 'update', 'query')
+ *  CALL sys.alter_view_dialect('view', 'update', 'query')
  *
  *  -- drop dialect in the view
- *  CALL sys.alert_view_dialect('viewId', 'drop')
+ *  CALL sys.alter_view_dialect('view', 'drop')
  *
  * </code></pre>
  */
