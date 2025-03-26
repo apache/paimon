@@ -23,6 +23,7 @@ import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.memory.ArraySegmentPool;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReader;
 
 import javax.annotation.Nullable;
@@ -52,6 +53,7 @@ import java.util.function.Supplier;
 public class ParallelExecution<T, E> implements Closeable {
 
     private final Serializer<T> serializer;
+    private final int pageSize;
     private final BlockingQueue<MemorySegment> idlePages;
     private final BlockingQueue<ParallelBatch<T, E>> results;
     private final ExecutorService executorService;
@@ -66,6 +68,7 @@ public class ParallelExecution<T, E> implements Closeable {
             int parallelism,
             List<Supplier<Pair<RecordReader<T>, E>>> readers) {
         this.serializer = serializer;
+        this.pageSize = pageSize;
         int totalPages = parallelism * 2;
         this.idlePages = new ArrayBlockingQueue<>(totalPages);
         for (int i = 0; i < totalPages; i++) {
@@ -127,6 +130,13 @@ public class ParallelExecution<T, E> implements Closeable {
                         count++;
                         break;
                     } catch (EOFException e) {
+                        if (count == 0) {
+                            throw new RuntimeException(
+                                    String.format(
+                                            "Current page size %s is too small, one record cannot fit into a single page. "
+                                                    + "Please increase the 'page-size' table option.",
+                                            new MemorySize(pageSize).toHumanReadableString()));
+                        }
                         sendToResults(outputView, count, pair.getRight());
                         outputView = null;
                     }
