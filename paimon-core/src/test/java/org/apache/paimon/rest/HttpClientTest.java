@@ -25,7 +25,6 @@ import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
-import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -82,7 +81,7 @@ public class HttpClientTest {
         errorResponseStr =
                 server.createResponseBody(
                         new ErrorResponse(
-                                ErrorResponseResourceType.DATABASE.name(), "test", "test", 400));
+                                ErrorResponse.RESOURCE_TYPE_DATABASE, "test", "test", 400));
         httpClient = new HttpClient(server.getBaseUrl());
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);

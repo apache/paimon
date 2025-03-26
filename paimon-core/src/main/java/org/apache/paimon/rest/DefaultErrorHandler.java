@@ -28,7 +28,6 @@ import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
 import org.apache.paimon.rest.responses.ErrorResponse;
-import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 
 /** Default error handler. */
 public class DefaultErrorHandler extends ErrorHandler {
@@ -52,19 +51,13 @@ public class DefaultErrorHandler extends ErrorHandler {
                 throw new ForbiddenException("Forbidden: %s", message);
             case 404:
                 throw new NoSuchResourceException(
-                        ErrorResponseResourceType.fromString(error.getResourceType()),
-                        error.getResourceName(),
-                        "%s",
-                        message);
+                        error.getResourceType(), error.getResourceName(), "%s", message);
             case 405:
             case 406:
                 break;
             case 409:
                 throw new AlreadyExistsException(
-                        ErrorResponseResourceType.fromString(error.getResourceType()),
-                        error.getResourceName(),
-                        "%s",
-                        message);
+                        error.getResourceType(), error.getResourceName(), "%s", message);
             case 500:
                 throw new ServiceFailureException("Server error: %s", message);
             case 501:

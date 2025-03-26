@@ -29,6 +29,20 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ErrorResponse implements RESTResponse {
 
+    public static final String RESOURCE_TYPE_DATABASE = "DATABASE";
+
+    public static final String RESOURCE_TYPE_TABLE = "TABLE";
+
+    public static final String RESOURCE_TYPE_COLUMN = "COLUMN";
+
+    public static final String RESOURCE_TYPE_SNAPSHOT = "SNAPSHOT";
+
+    public static final String RESOURCE_TYPE_BRANCH = "BRANCH";
+
+    public static final String RESOURCE_TYPE_TAG = "TAG";
+
+    public static final String RESOURCE_TYPE_VIEW = "VIEW";
+
     private static final String FIELD_MESSAGE = "message";
     private static final String FIELD_RESOURCE_TYPE = "resourceType";
     private static final String FIELD_RESOURCE_NAME = "resourceName";
