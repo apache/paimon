@@ -167,6 +167,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
 
+    public static final String DIALECT = "flink";
+
     private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
 
     private final ClassLoader classLoader;
@@ -346,7 +348,7 @@ public class FlinkCatalog extends AbstractCatalog {
                 org.apache.flink.table.api.Schema.newBuilder()
                         .fromRowDataType(fromLogicalToDataType(toLogicalType(view.rowType())))
                         .build();
-        String query = view.query("flink");
+        String query = view.query(DIALECT);
         return Optional.of(
                 CatalogView.of(schema, view.comment().orElse(null), query, query, view.options()));
     }
@@ -456,7 +458,7 @@ public class FlinkCatalog extends AbstractCatalog {
                         identifier,
                         builder.build().getFields(),
                         query,
-                        Collections.singletonMap("flink", query),
+                        Collections.singletonMap(DIALECT, query),
                         table.getComment(),
                         table.getOptions());
         try {

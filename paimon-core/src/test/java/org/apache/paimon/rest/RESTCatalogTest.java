@@ -50,6 +50,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -82,6 +83,7 @@ import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -1051,6 +1053,78 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         assertEquals(fetchTimes.get(), testData.size() / maxResults + 1);
         assertThat(fetchData).containsSequence(testData);
+    }
+
+    @Test
+    void testAlterView() throws Exception {
+        Identifier identifier = new Identifier("rest_catalog_db", "my_view");
+        View view = createView(identifier);
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        ViewChange.AddDialect addDialect =
+                (ViewChange.AddDialect)
+                        ViewChange.addDialect("flink_1", "SELECT * FROM FLINK_TABLE_1");
+        assertDoesNotThrow(() -> catalog.alterView(identifier, ImmutableList.of(addDialect), true));
+        assertThrows(
+                Catalog.ViewNotExistException.class,
+                () -> catalog.alterView(identifier, ImmutableList.of(addDialect), false));
+        catalog.createView(identifier, view, false);
+        // set options
+        String key = UUID.randomUUID().toString();
+        String value = UUID.randomUUID().toString();
+        ViewChange setOption = ViewChange.setOption(key, value);
+        catalog.alterView(identifier, ImmutableList.of(setOption), false);
+        View catalogView = catalog.getView(identifier);
+        assertThat(catalogView.options().get(key)).isEqualTo(value);
+
+        // remove options
+        catalog.alterView(identifier, ImmutableList.of(ViewChange.removeOption(key)), false);
+        catalogView = catalog.getView(identifier);
+        assertThat(catalogView.options().containsKey(key)).isEqualTo(false);
+
+        // update comment
+        String newComment = "new comment";
+        catalog.alterView(
+                identifier, ImmutableList.of(ViewChange.updateComment(newComment)), false);
+        catalogView = catalog.getView(identifier);
+        assertThat(catalogView.comment().get()).isEqualTo(newComment);
+        // add dialect
+        catalog.alterView(identifier, ImmutableList.of(addDialect), false);
+        catalogView = catalog.getView(identifier);
+        assertThat(catalogView.query(addDialect.dialect())).isEqualTo(addDialect.query());
+        assertThrows(
+                Catalog.DialectAlreadyExistException.class,
+                () -> catalog.alterView(identifier, ImmutableList.of(addDialect), false));
+
+        // update dialect
+        ViewChange.UpdateDialect updateDialect =
+                (ViewChange.UpdateDialect)
+                        ViewChange.updateDialect("flink_1", "SELECT * FROM FLINK_TABLE_2");
+        catalog.alterView(identifier, ImmutableList.of(updateDialect), false);
+        catalogView = catalog.getView(identifier);
+        assertThat(catalogView.query(updateDialect.dialect())).isEqualTo(updateDialect.query());
+        assertThrows(
+                Catalog.DialectNotExistException.class,
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                ImmutableList.of(
+                                        ViewChange.updateDialect(
+                                                "no_exist", "SELECT * FROM FLINK_TABLE_2")),
+                                false));
+
+        // drop dialect
+        ViewChange.DropDialect dropDialect =
+                (ViewChange.DropDialect) ViewChange.dropDialect(updateDialect.dialect());
+        catalog.alterView(identifier, ImmutableList.of(dropDialect), false);
+        catalogView = catalog.getView(identifier);
+        assertThat(catalogView.query(dropDialect.dialect())).isEqualTo(catalogView.query());
+        assertThrows(
+                Catalog.DialectNotExistException.class,
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                ImmutableList.of(ViewChange.dropDialect("no_exist")),
+                                false));
     }
 
     private TestPagedResponse generateTestPagedResponse(

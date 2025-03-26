@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
+import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
@@ -267,5 +268,16 @@ public class RESTObjectMapperTest {
                                 .readValue(rollbackTableRequestByTagStr, RollbackTableRequest.class)
                                 .getInstant();
         assertEquals(rollbackTableRequestByTagParseData.getTagName(), tagName);
+    }
+
+    @Test
+    public void alterViewRequestParseTest() throws Exception {
+        AlterViewRequest request = MockRESTMessage.alterViewRequest();
+        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
+        AlterViewRequest parseData = OBJECT_MAPPER.readValue(requestStr, AlterViewRequest.class);
+        assertEquals(parseData.viewChanges().size(), request.viewChanges().size());
+        for (int i = 0; i < request.viewChanges().size(); i++) {
+            assertEquals(parseData.viewChanges().get(i), request.viewChanges().get(i));
+        }
     }
 }

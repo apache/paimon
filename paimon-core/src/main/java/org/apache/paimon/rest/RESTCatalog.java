@@ -44,6 +44,7 @@ import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
+import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
@@ -80,6 +81,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
@@ -896,6 +898,28 @@ public class RESTCatalog implements Catalog {
             }
         } catch (AlreadyExistsException e) {
             throw new ViewAlreadyExistException(toView);
+        }
+    }
+
+    @Override
+    public void alterView(
+            Identifier identifier, List<ViewChange> viewChanges, boolean ignoreIfNotExists)
+            throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
+        try {
+            AlterViewRequest request = new AlterViewRequest(viewChanges);
+            client.post(
+                    resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
+                    request,
+                    restAuthFunction);
+        } catch (AlreadyExistsException e) {
+            throw new DialectAlreadyExistException(identifier, e.resourceName());
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DIALECT)) {
+                throw new DialectNotExistException(identifier, e.resourceName());
+            }
+            if (!ignoreIfNotExists) {
+                throw new ViewNotExistException(identifier);
+            }
         }
     }
 

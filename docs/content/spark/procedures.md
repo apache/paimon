@@ -380,5 +380,26 @@ This section introduce all available spark procedures about paimon.
          CALL sys.compact_manifest(`table` => 'default.T')
       </td>
    </tr>
+   <tr>
+      <td>alter_view_dialect</td>
+      <td>
+         To alter view dialect. Arguments:
+            <li>view: the target view identifier. Cannot be empty.</li>
+            <li>action: define change action like: add, update, drop. Cannot be empty.</li>
+            <li>engine: when engine which is not spark need define it.</li>
+            <li>query: query for the dialect when action is add and update it couldn't be empty.</li>
+      </td>
+      <td>
+         -- add dialect in the view<br/>
+         CALL sys.alter_view_dialect('view_identifier', 'add', 'spark', 'query')<br/>
+         CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'add', `query` => 'query')<br/><br/>
+         -- update dialect in the view<br/>
+         CALL sys.alter_view_dialect('view_identifier', 'update', 'spark', 'query')<br/>
+         CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'update', `query` => 'query')<br/><br/>
+         -- drop dialect in the view<br/>
+         CALL sys.alter_view_dialect('view_identifier', 'drop', 'spark')<br/>
+         CALL sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')<br/><br/>
+      </td>
+   </tr>
    </tbody>
 </table>

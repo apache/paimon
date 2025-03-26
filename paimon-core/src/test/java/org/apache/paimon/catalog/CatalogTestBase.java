@@ -1048,26 +1048,8 @@ public abstract class CatalogTestBase {
         if (!supportsView()) {
             return;
         }
-
         Identifier identifier = new Identifier("view_db", "my_view");
-        RowType rowType =
-                RowType.builder()
-                        .field("str", DataTypes.STRING())
-                        .field("int", DataTypes.INT())
-                        .build();
-        String query = "SELECT * FROM OTHER_TABLE";
-        String comment = "it is my view";
-        Map<String, String> options = new HashMap<>();
-        options.put("key1", "v1");
-        options.put("key2", "v2");
-
-        Map<String, String> dialects = new HashMap<>();
-        if (supportsViewDialects()) {
-            dialects.put("flink", "SELECT * FROM FLINK_TABLE");
-            dialects.put("spark", "SELECT * FROM SPARK_TABLE");
-        }
-        View view =
-                new ViewImpl(identifier, rowType.getFields(), query, dialects, comment, options);
+        View view = createView(identifier);
 
         assertThatThrownBy(() -> catalog.createView(identifier, view, false))
                 .isInstanceOf(Catalog.DatabaseNotExistException.class);
@@ -1567,5 +1549,25 @@ public abstract class CatalogTestBase {
         Map<String, String> options = new HashMap<>(1);
         options.put("type", "format-table");
         return options;
+    }
+
+    protected View createView(Identifier identifier) {
+        RowType rowType =
+                RowType.builder()
+                        .field("str", DataTypes.STRING())
+                        .field("int", DataTypes.INT())
+                        .build();
+        String query = "SELECT * FROM OTHER_TABLE";
+        String comment = "it is my view";
+        Map<String, String> options = new HashMap<>();
+        options.put("key1", "v1");
+        options.put("key2", "v2");
+
+        Map<String, String> dialects = new HashMap<>();
+        if (supportsViewDialects()) {
+            dialects.put("flink", "SELECT * FROM FLINK_TABLE");
+            dialects.put("spark", "SELECT * FROM SPARK_TABLE");
+        }
+        return new ViewImpl(identifier, rowType.getFields(), query, dialects, comment, options);
     }
 }

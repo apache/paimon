@@ -29,6 +29,7 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
 
 import javax.annotation.Nullable;
 
@@ -434,6 +435,21 @@ public interface Catalog extends AutoCloseable {
      */
     default void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Alter a view.
+     *
+     * @param view identifier of the view to alter
+     * @param viewChanges - changes of view
+     * @param ignoreIfNotExists
+     * @throws ViewNotExistException if the view does not exist
+     * @throws DialectAlreadyExistException if the dialect already exists
+     * @throws DialectNotExistException if the dialect not exists
+     */
+    default void alterView(Identifier view, List<ViewChange> viewChanges, boolean ignoreIfNotExists)
+            throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
         throw new UnsupportedOperationException();
     }
 
@@ -884,6 +900,34 @@ public interface Catalog extends AutoCloseable {
         }
     }
 
+    /** Exception for trying to add a dialect that already exists. */
+    class DialectAlreadyExistException extends Exception {
+
+        private static final String MSG = "Dialect %s in view %s already exists.";
+
+        private final Identifier identifier;
+        private final String dialect;
+
+        public DialectAlreadyExistException(Identifier identifier, String dialect) {
+            this(identifier, dialect, null);
+        }
+
+        public DialectAlreadyExistException(
+                Identifier identifier, String dialect, Throwable cause) {
+            super(String.format(MSG, dialect, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.dialect = dialect;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String dialect() {
+            return dialect;
+        }
+    }
+
     /** Exception for trying to create a branch that already exists. */
     class BranchAlreadyExistException extends Exception {
 
@@ -962,6 +1006,33 @@ public interface Catalog extends AutoCloseable {
 
         public String tag() {
             return tag;
+        }
+    }
+
+    /** Exception for trying to update dialect that doesn't exist. */
+    class DialectNotExistException extends Exception {
+
+        private static final String MSG = "Dialect %s in view %s doesn't exist.";
+
+        private final Identifier identifier;
+        private final String dialect;
+
+        public DialectNotExistException(Identifier identifier, String dialect) {
+            this(identifier, dialect, null);
+        }
+
+        public DialectNotExistException(Identifier identifier, String dialect, Throwable cause) {
+            super(String.format(MSG, dialect, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.dialect = dialect;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String dialect() {
+            return dialect;
         }
     }
 }

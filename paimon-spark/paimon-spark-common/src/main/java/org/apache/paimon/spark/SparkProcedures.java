@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.AlterViewDialectProcedure;
 import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
 import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
@@ -100,6 +101,7 @@ public class SparkProcedures {
         procedureBuilders.put("compact_manifest", CompactManifestProcedure::builder);
         procedureBuilders.put("refresh_object_table", RefreshObjectTableProcedure::builder);
         procedureBuilders.put("clear_consumers", ClearConsumersProcedure::builder);
+        procedureBuilders.put("alter_view_dialect", AlterViewDialectProcedure::builder);
         return procedureBuilders.build();
     }
 }

@@ -37,6 +37,8 @@ import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 /** Catalog methods for working with Views. */
 public interface SupportView extends WithPaimonCatalog {
 
+    String DIALECT = "spark";
+
     default List<String> listViews(String[] namespace) throws NoSuchNamespaceException {
         try {
             checkNamespace(namespace);
@@ -67,7 +69,7 @@ public interface SupportView extends WithPaimonCatalog {
                                     paimonIdent,
                                     toPaimonRowType(schema).getFields(),
                                     queryText,
-                                    Collections.singletonMap("spark", queryText),
+                                    Collections.singletonMap(DIALECT, queryText),
                                     comment,
                                     properties),
                             ignoreIfExists);
