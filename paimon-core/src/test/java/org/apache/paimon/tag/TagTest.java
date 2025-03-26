@@ -20,11 +20,12 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.Snapshot;
 
-import org.junit.Assert;
 import org.junit.Test;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link Tag}. */
 public class TagTest {
@@ -54,7 +55,7 @@ public class TagTest {
     @Test
     public void testFromJson() {
         Tag tag = Tag.fromJson(snapshot.toJson());
-        Assert.assertEquals(
+        assertEquals(
                 "{\n"
                         + "  \"version\" : 3,\n"
                         + "  \"id\" : 0,\n"
@@ -80,7 +81,7 @@ public class TagTest {
                         Duration.ofSeconds(5),
                         LocalDateTime.of(1969, 1, 1, 0, 0, 0, 123456789));
         String tagJson = tag.toJson();
-        Assert.assertEquals(
+        assertEquals(
                 "{\n"
                         + "  \"version\" : 3,\n"
                         + "  \"id\" : 0,\n"
@@ -100,6 +101,6 @@ public class TagTest {
                 tagJson);
 
         Tag newTag = Tag.fromJson(tagJson);
-        Assert.assertEquals(tag, newTag);
+        assertEquals(tag, newTag);
     }
 }

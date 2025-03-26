@@ -18,7 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.junit.Assert;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -26,6 +25,7 @@ import java.util.Random;
 
 import static org.apache.paimon.utils.ConvertBinaryUtil.convertBytesToLong;
 import static org.apache.paimon.utils.ConvertBinaryUtil.convertStringToLong;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link ConvertBinaryUtil}. */
 public class ConvertBinaryUtilTest {
@@ -37,7 +37,7 @@ public class ConvertBinaryUtilTest {
 
         Long convertStringValue = convertStringToLong(randomString);
         Long convertBytesValue = convertBytesToLong(randomStringBytes);
-        Assert.assertEquals(convertStringValue, convertBytesValue);
+        assertEquals(convertStringValue, convertBytesValue);
     }
 
     public static String generateRandomString() {

@@ -34,7 +34,7 @@ import org.junit.Test;
 
 import java.io.IOException;
 
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link DefaultErrorHandler}. */
 public class DefaultErrorHandlerTest {

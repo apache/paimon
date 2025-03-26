@@ -20,7 +20,6 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryRow;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -41,16 +40,16 @@ public class SimpleHashBucketAssignerTest {
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(0);
+            assertThat(bucket).isEqualTo(0);
         }
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(2);
+            assertThat(bucket).isEqualTo(2);
         }
 
         int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-        Assertions.assertThat(bucket).isEqualTo(4);
+        assertThat(bucket).isEqualTo(4);
     }
 
     @Test
@@ -63,18 +62,18 @@ public class SimpleHashBucketAssignerTest {
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(0);
+            assertThat(bucket).isEqualTo(0);
         }
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(2);
+            assertThat(bucket).isEqualTo(2);
         }
 
         // exceed upper bound
         for (int i = 0; i < 200; i++) {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isIn(0, 2);
+            assertThat(bucket).isIn(0, 2);
         }
     }
 
@@ -90,27 +89,27 @@ public class SimpleHashBucketAssignerTest {
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner0.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(0);
+            assertThat(bucket).isEqualTo(0);
         }
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner1.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(1);
+            assertThat(bucket).isEqualTo(1);
         }
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner0.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(2);
+            assertThat(bucket).isEqualTo(2);
         }
 
         // exceed upper bound
         for (int i = 0; i < 200; i++) {
             int bucket = simpleHashBucketAssigner0.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isIn(0, 2);
+            assertThat(bucket).isIn(0, 2);
         }
         for (int i = 0; i < 200; i++) {
             int bucket = simpleHashBucketAssigner1.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isIn(1);
+            assertThat(bucket).isIn(1);
         }
     }
 
@@ -125,14 +124,14 @@ public class SimpleHashBucketAssignerTest {
 
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(0);
+            assertThat(bucket).isEqualTo(0);
         }
 
         // reset hash, the record will go into bucket 0
         hash = 0;
         for (int i = 0; i < 100; i++) {
             int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
-            Assertions.assertThat(bucket).isEqualTo(0);
+            assertThat(bucket).isEqualTo(0);
         }
     }
 

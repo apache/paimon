@@ -26,7 +26,6 @@ import org.apache.paimon.utils.ThreadPoolUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.commons.io.FileUtils;
-import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -58,9 +57,9 @@ import static org.apache.paimon.rest.auth.AuthSession.REFRESH_NUM_RETRIES;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_AUTHORIZATION_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_DATE_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.TOKEN_DATE_FORMATTER;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -288,9 +287,9 @@ public class AuthSessionTest {
         AuthSession session = AuthSession.fromRefreshAuthProvider(executor, authProvider);
         DLFAuthProvider dlfAuthProvider = (DLFAuthProvider) session.getAuthProvider();
         DLFToken fetchToken = dlfAuthProvider.token;
-        Assert.assertEquals(fetchToken.getAccessKeyId(), customToken.getAccessKeyId());
-        Assert.assertEquals(fetchToken.getAccessKeySecret(), customToken.getAccessKeySecret());
-        Assert.assertEquals(fetchToken.getSecurityToken(), customToken.getSecurityToken());
+        assertEquals(fetchToken.getAccessKeyId(), customToken.getAccessKeyId());
+        assertEquals(fetchToken.getAccessKeySecret(), customToken.getAccessKeySecret());
+        assertEquals(fetchToken.getSecurityToken(), customToken.getSecurityToken());
     }
 
     @Test
