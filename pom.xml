@@ -522,6 +522,7 @@ under the License.
                         <exclude>docs/themes/book/**</exclude>
                         <exclude>docs/assets/github.css</exclude>
                         <exclude>docs/static/js/anchor.min.js</exclude>
+                        <exclude>docs/static/js/redoc.standalone.js</exclude>
                         <exclude>**/*.svg</exclude>
                         <exclude>**/dependency-reduced-pom.xml</exclude>
                         <!-- Bundled license files -->

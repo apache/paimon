@@ -32,7 +32,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -606,8 +605,7 @@ public abstract class SimpleTableTestBase {
             assertThat(file.level()).isEqualTo(0);
         }
 
-        SnapshotManager snapshotManager =
-                newSnapshotManager(FileIOFinder.find(table.location()), table.location());
+        SnapshotManager snapshotManager = newSnapshotManager(table.fileIO(), table.location());
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         assertThat(latestSnapshotId).isNotNull();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -1018,7 +1016,7 @@ public abstract class SimpleTableTestBase {
         table.createTag("test-tag", 2);
 
         // verify that tag file exist
-        TagManager tagManager = new TagManager(new TraceableFileIO(), table.location());
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
@@ -1042,7 +1040,7 @@ public abstract class SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
             table.createTag("test-tag", 1);
             // verify that tag file exist
-            TagManager tagManager = new TagManager(new TraceableFileIO(), table.location());
+            TagManager tagManager = new TagManager(table.fileIO(), table.location());
             assertThat(tagManager.tagExists("test-tag")).isTrue();
             // verify that test-tag is equal to snapshot 1
             Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
@@ -1051,8 +1049,7 @@ public abstract class SimpleTableTestBase {
             // snapshot 2
             write.write(rowData(2, 20, 200L));
             commit.commit(1, write.prepareCommit(false, 2));
-            SnapshotManager snapshotManager =
-                    newSnapshotManager(new TraceableFileIO(), table.location());
+            SnapshotManager snapshotManager = newSnapshotManager(table.fileIO(), table.location());
             // The snapshot 1 is expired.
             assertThat(snapshotManager.snapshotExists(1)).isFalse();
             table.createTag("test-tag-2", 1);
@@ -1075,7 +1072,7 @@ public abstract class SimpleTableTestBase {
             // snapshot 2
             write.write(rowData(1, 10, 100L));
             commit.commit(1, write.prepareCommit(false, 2));
-            TagManager tagManager = new TagManager(new TraceableFileIO(), table.location());
+            TagManager tagManager = new TagManager(table.fileIO(), table.location());
             table.createTag("test-tag", 1);
             // verify that tag file exist
             assertThat(tagManager.tagExists("test-tag")).isTrue();
@@ -1103,7 +1100,7 @@ public abstract class SimpleTableTestBase {
         table.createTag("test-tag", 2);
 
         // verify that tag file exist
-        TagManager tagManager = new TagManager(new TraceableFileIO(), table.location());
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
         assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
@@ -1120,22 +1117,22 @@ public abstract class SimpleTableTestBase {
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
                 Snapshot.fromPath(
-                        new TraceableFileIO(),
+                        table.fileIO(),
                         tagManager.copyWithBranch("test-branch").tagPath("test-tag"));
         assertThat(branchTag.equals(snapshot2)).isTrue();
 
         // verify snapshot in test-branch is equal to snapshot 2
         SnapshotManager snapshotManager =
-                newSnapshotManager(new TraceableFileIO(), table.location(), "test-branch");
+                newSnapshotManager(table.fileIO(), table.location(), "test-branch");
         Snapshot branchSnapshot =
-                Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
+                Snapshot.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
         SchemaManager schemaManager =
-                new SchemaManager(new TraceableFileIO(), table.location(), "test-branch");
+                new SchemaManager(table.fileIO(), table.location(), "test-branch");
         TableSchema branchSchema =
-                TableSchema.fromPath(new TraceableFileIO(), schemaManager.toSchemaPath(0));
+                TableSchema.fromPath(table.fileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
@@ -1290,22 +1287,19 @@ public abstract class SimpleTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // verify snapshot in branch1 and main branch is same
-        SnapshotManager snapshotManager =
-                newSnapshotManager(new TraceableFileIO(), table.location());
+        SnapshotManager snapshotManager = newSnapshotManager(table.fileIO(), table.location());
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
-                        new TraceableFileIO(),
+                        table.fileIO(),
                         snapshotManager.copyWithBranch(BRANCH_NAME).snapshotPath(2));
-        Snapshot snapshot =
-                Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
+        Snapshot snapshot = Snapshot.fromPath(table.fileIO(), snapshotManager.snapshotPath(2));
         assertThat(branchSnapshot.equals(snapshot)).isTrue();
 
         // verify schema in branch1 and main branch is same
-        SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), table.location());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         TableSchema branchSchema =
                 TableSchema.fromPath(
-                        new TraceableFileIO(),
-                        schemaManager.copyWithBranch(BRANCH_NAME).toSchemaPath(0));
+                        table.fileIO(), schemaManager.copyWithBranch(BRANCH_NAME).toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
 

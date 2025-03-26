@@ -25,7 +25,6 @@ import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ErrorResponse;
-import org.apache.paimon.rest.responses.ErrorResponseResourceType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -50,9 +49,9 @@ import java.util.stream.Collectors;
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
@@ -81,7 +80,8 @@ public class HttpClientTest {
         mockResponseDataStr = server.createResponseBody(mockResponseData);
         errorResponseStr =
                 server.createResponseBody(
-                        new ErrorResponse(ErrorResponseResourceType.DATABASE, "test", "test", 400));
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_DATABASE, "test", "test", 400));
         httpClient = new HttpClient(server.getBaseUrl());
         httpClient.setErrorHandler(errorHandler);
         AuthProvider authProvider = new BearTokenAuthProvider(TOKEN);

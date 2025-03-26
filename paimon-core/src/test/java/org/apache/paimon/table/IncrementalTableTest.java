@@ -33,6 +33,7 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -287,7 +289,7 @@ public class IncrementalTableTest extends TableTestBase {
 
         assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG2,TAG1")))
                 .hasMessageContaining(
-                        "Tag end TAG1 with snapshot id 1 should be larger than tag start TAG2 with snapshot id 2");
+                        "Tag end TAG1 with snapshot id 1 should be >= tag start TAG2 with snapshot id 2");
     }
 
     @Test
@@ -404,6 +406,74 @@ public class IncrementalTableTest extends TableTestBase {
         assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-03"))).isEmpty();
         assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-04")))
                 .containsExactly(GenericRow.of(3, BinaryString.fromString("c")));
+    }
+
+    @Test
+    public void testIncrementalEmptyResult() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.STRING())
+                        .primaryKey("a")
+                        .option("bucket", "1")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        // no snapshot
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "1,2"))).isEmpty();
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN_TIMESTAMP, "2025-01-01,2025-01-02")))
+                .isEmpty();
+
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        write.write(GenericRow.of(1, BinaryString.fromString("a")));
+        List<CommitMessage> commitMessages = write.prepareCommit(false, 0);
+        commit.commit(0, commitMessages);
+
+        write.write(GenericRow.of(2, BinaryString.fromString("b")));
+        commitMessages = write.prepareCommit(false, 1);
+        commit.commit(1, commitMessages);
+
+        table.createTag("tag1", 1);
+
+        long earliestTimestamp = snapshotManager.earliestSnapshot().timeMillis();
+        long latestTimestamp = snapshotManager.latestSnapshot().timeMillis();
+
+        // same tag
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "tag1,tag1"))).isEmpty();
+
+        // same snapshot
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "1,1"))).isEmpty();
+
+        // same timestamp
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN_TIMESTAMP, "2025-01-01,2025-01-01")))
+                .isEmpty();
+
+        // startTimestamp > latestSnapshot.timeMillis()
+        assertThat(
+                        read(
+                                table,
+                                Pair.of(
+                                        INCREMENTAL_BETWEEN_TIMESTAMP,
+                                        String.format(
+                                                "%s,%s",
+                                                latestTimestamp + 1, latestTimestamp + 2))))
+                .isEmpty();
+
+        // endTimestamp < earliestSnapshot.timeMillis()
+        assertThat(
+                        read(
+                                table,
+                                Pair.of(
+                                        INCREMENTAL_BETWEEN_TIMESTAMP,
+                                        String.format(
+                                                "%s,%s",
+                                                earliestTimestamp - 2, earliestTimestamp - 1))))
+                .isEmpty();
     }
 
     private static long utcMills(String timestamp) {

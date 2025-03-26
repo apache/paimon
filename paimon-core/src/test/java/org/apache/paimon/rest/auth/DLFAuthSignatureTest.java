@@ -21,11 +21,12 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.rest.MockRESTMessage;
 import org.apache.paimon.rest.RESTObjectMapper;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link DLFAuthSignature}. */
 public class DLFAuthSignatureTest {
@@ -50,7 +51,7 @@ public class DLFAuthSignatureTest {
         String authorization =
                 DLFAuthSignature.getAuthorization(
                         restAuthParameter, token, region, signHeaders, dateTime, date);
-        Assertions.assertEquals(
+        assertEquals(
                 "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,Signature=c72caf1d40b55b1905d891ee3e3de48a2f8bebefa7e39e4f277acc93c269c5e3",
                 authorization);
     }

@@ -921,7 +921,7 @@ paths:
     post:
       tags:
         - partition
-      summary: MarkDone partitions, for non-existent partitions, partitions will be created directly
+      summary: MarkDone partitions
       operationId: markDonePartitions
       parameters:
         - name: prefix
@@ -1568,6 +1568,7 @@ components:
           type: string
         resourceType:
           type: string
+          enum: ["DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN"]
         resourceName:
           type: string
         code:

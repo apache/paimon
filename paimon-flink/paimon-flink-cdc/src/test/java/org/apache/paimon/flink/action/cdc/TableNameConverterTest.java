@@ -18,11 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Tests for {@link TableNameConverter}. */
 public class TableNameConverterTest {
@@ -33,14 +34,14 @@ public class TableNameConverterTest {
         tableMapping.put("mapped_src", "mapped_TGT");
         TableNameConverter caseConverter =
                 new TableNameConverter(true, true, "pre_", "_pos", tableMapping);
-        Assert.assertEquals(caseConverter.convert("", "mapped_SRC"), "mapped_TGT");
+        assertEquals(caseConverter.convert("", "mapped_SRC"), "mapped_TGT");
 
-        Assert.assertEquals(caseConverter.convert("", "unmapped_src"), "pre_unmapped_src_pos");
+        assertEquals(caseConverter.convert("", "unmapped_src"), "pre_unmapped_src_pos");
 
         TableNameConverter noCaseConverter =
                 new TableNameConverter(false, true, "pre_", "_pos", tableMapping);
-        Assert.assertEquals(noCaseConverter.convert("", "mapped_src"), "mapped_tgt");
-        Assert.assertEquals(noCaseConverter.convert("", "unmapped_src"), "pre_unmapped_src_pos");
+        assertEquals(noCaseConverter.convert("", "mapped_src"), "mapped_tgt");
+        assertEquals(noCaseConverter.convert("", "unmapped_src"), "pre_unmapped_src_pos");
     }
 
     @Test
@@ -59,20 +60,20 @@ public class TableNameConverterTest {
         // Tables in the specified db should have the specified prefix and suffix.
 
         // db prefix + normal suffix
-        Assert.assertEquals(
+        assertEquals(
                 "db_pref_table_name_suf", tblNameConverter.convert("db_with_prefix", "table_name"));
 
         // normal prefix + db suffix
-        Assert.assertEquals(
+        assertEquals(
                 "pre_table_name_db_suff", tblNameConverter.convert("db_with_suffix", "table_name"));
 
         // db prefix + db suffix
-        Assert.assertEquals(
+        assertEquals(
                 "db_pref_table_name_db_suff",
                 tblNameConverter.convert("db_with_prefix_suffix", "table_name"));
 
         // only normal prefix and suffix
-        Assert.assertEquals(
+        assertEquals(
                 "pre_table_name_suf",
                 tblNameConverter.convert("db_without_prefix_suffix", "table_name"));
     }

@@ -400,7 +400,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         }
     }
 
-    private void createTable() throws Exception {
+    protected void createTable() throws Exception {
         catalog.createDatabase(database, true);
         catalog.createTable(identifier(), schema(), true);
     }

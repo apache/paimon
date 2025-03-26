@@ -43,7 +43,6 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
@@ -72,11 +71,6 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader reader) {
-        // Check the validity of scan staring snapshotId.
-        Optional<Result> checkResult = checkScanSnapshotIdValidity();
-        if (checkResult.isPresent()) {
-            return checkResult.get();
-        }
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new ConcurrentHashMap<>();
         ManifestsReader manifestsReader = reader.manifestsReader();
 
@@ -153,39 +147,23 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
         return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, result));
     }
 
-    /**
-     * Check the validity of staring snapshotId early.
-     *
-     * @return If the check passes return empty.
-     */
-    private Optional<Result> checkScanSnapshotIdValidity() {
-        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-
-        if (earliestSnapshotId == null || latestSnapshotId == null) {
-            LOG.warn("There is currently no snapshot. Waiting for snapshot generation.");
-            return Optional.of(new NoSnapshot());
-        }
-
-        checkArgument(
-                startingSnapshotId <= endingSnapshotId,
-                "Starting snapshotId %s must less than ending snapshotId %s.",
-                startingSnapshotId,
-                endingSnapshotId);
+    public static StartingScanner betweenSnapshotIds(
+            long startId, long endId, SnapshotManager snapshotManager, ScanMode scanMode) {
+        long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        long latestSnapshotId = snapshotManager.latestSnapshotId();
 
         // because of the left open right closed rule of IncrementalStartingScanner that is
         // different from StaticFromStartingScanner, so we should allow starting snapshotId to be
         // equal to the earliestSnapshotId - 1.
         checkArgument(
-                startingSnapshotId >= earliestSnapshotId - 1
-                        && endingSnapshotId <= latestSnapshotId,
+                startId >= earliestSnapshotId - 1 && endId <= latestSnapshotId,
                 "The specified scan snapshotId range [%s, %s] is out of available snapshotId range [%s, %s].",
-                startingSnapshotId,
-                endingSnapshotId,
+                startId,
+                endId,
                 earliestSnapshotId,
                 latestSnapshotId);
 
-        return Optional.empty();
+        return new IncrementalDeltaStartingScanner(snapshotManager, startId, endId, scanMode);
     }
 
     public static IncrementalDeltaStartingScanner betweenTimestamps(

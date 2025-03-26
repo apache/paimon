@@ -25,10 +25,11 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test write read equals in append only table. */
 public class TableFormatReadWriteTest extends TableTestBase {
@@ -79,7 +80,7 @@ public class TableFormatReadWriteTest extends TableTestBase {
 
         List<InternalRow> readed = read(table);
 
-        Assertions.assertThat(readed).containsExactlyInAnyOrder(datas);
+        assertThat(readed).containsExactlyInAnyOrder(datas);
         dropTableDefault();
     }
 

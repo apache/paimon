@@ -57,7 +57,7 @@ import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
-import org.apache.paimon.rest.responses.ErrorResponseResourceType;
+import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
@@ -375,7 +375,7 @@ public class RESTCatalog implements Catalog {
                             GetTableSnapshotResponse.class,
                             restAuthFunction);
         } catch (NoSuchResourceException e) {
-            if (e.resourceType() == ErrorResponseResourceType.SNAPSHOT) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 return Optional.empty();
             }
             throw new TableNotExistException(identifier);
@@ -426,10 +426,10 @@ public class RESTCatalog implements Catalog {
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
-            if (e.resourceType() == ErrorResponseResourceType.SNAPSHOT) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(
                         String.format("Rollback snapshot '%s' doesn't exist.", e.resourceName()));
-            } else if (e.resourceType() == ErrorResponseResourceType.TAG) {
+            } else if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
                 throw new IllegalArgumentException(
                         String.format("Rollback tag '%s' doesn't exist.", e.resourceName()));
             }
@@ -557,9 +557,10 @@ public class RESTCatalog implements Catalog {
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
-                if (e.resourceType() == ErrorResponseResourceType.TABLE) {
+                if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
                     throw new TableNotExistException(identifier);
-                } else if (e.resourceType() == ErrorResponseResourceType.COLUMN) {
+                } else if (StringUtils.equals(
+                        e.resourceType(), ErrorResponse.RESOURCE_TYPE_COLUMN)) {
                     throw new ColumnNotExistException(identifier, e.resourceName());
                 }
             }
@@ -671,9 +672,9 @@ public class RESTCatalog implements Catalog {
                     request,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
-            if (e.resourceType() == ErrorResponseResourceType.TABLE) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
                 throw new TableNotExistException(identifier, e);
-            } else if (e.resourceType() == ErrorResponseResourceType.TAG) {
+            } else if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
                 throw new TagNotExistException(identifier, fromTag, e);
             } else {
                 throw e;
@@ -913,7 +914,7 @@ public class RESTCatalog implements Catalog {
         } catch (AlreadyExistsException e) {
             throw new DialectAlreadyExistException(identifier, e.resourceName());
         } catch (NoSuchResourceException e) {
-            if (e.resourceType() == ErrorResponseResourceType.DIALECT) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_DIALECT)) {
                 throw new DialectNotExistException(identifier, e.resourceName());
             }
             if (!ignoreIfNotExists) {

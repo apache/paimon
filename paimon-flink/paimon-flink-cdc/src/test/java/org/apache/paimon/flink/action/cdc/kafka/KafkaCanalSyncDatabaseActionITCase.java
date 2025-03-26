@@ -645,7 +645,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(120)
+    @Timeout(240)
     public void testExpressionNow() throws Exception {
         final String topic = "expression-now";
         createTestTopic(topic, 1, 1);

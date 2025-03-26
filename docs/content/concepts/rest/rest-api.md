@@ -1,3 +1,9 @@
+---
+title: "REST API"
+layout: "custom-page"
+bookToc: false
+redocPage: true
+---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -16,14 +22,12 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
-<!--
-    Misc other content that should run in the header
--->
-<link rel="stylesheet" type="text/css" href="{{.Site.BaseURL}}/font-awesome/css/font-awesome.min.css">
-<script src="{{.Site.BaseURL}}/js/anchor.min.js"></script>
-<script src="{{.Site.BaseURL}}/js/flink.js"></script>
-<!-- Only takes effect when the `redocPage` variable is true. -->
-{{ if .Params.redocPage }}
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval'; default-src 'self' data: blob: 'unsafe-inline' https://raw.githubusercontent.com/apache/paimon/master/paimon-open-api/;">
-    <script src="{{.Site.BaseURL}}/js/redoc.standalone.js"></script>
-{{ end }}
+
+<body>
+    <div id="redoc-container"></div>
+    <script>
+        Redoc.init('https://raw.githubusercontent.com/apache/paimon/master/paimon-open-api/rest-catalog-open-api.yaml', {
+            disableSearch: true
+        }, document.getElementById('redoc-container'));
+    </script>
+</body>

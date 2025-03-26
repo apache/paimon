@@ -110,25 +110,14 @@ public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
         assertThatNoException()
                 .isThrownBy(
                         () ->
-                                new IncrementalDeltaStartingScanner(
-                                                snapshotManager, 0, 4, ScanMode.DELTA)
+                                IncrementalDeltaStartingScanner.betweenSnapshotIds(
+                                                0, 4, snapshotManager, ScanMode.DELTA)
                                         .scan(snapshotReader));
 
-        // Starting snapshotId must less than ending snapshotId.
         assertThatThrownBy(
                         () ->
-                                new IncrementalDeltaStartingScanner(
-                                                snapshotManager, 4, 3, ScanMode.DELTA)
-                                        .scan(snapshotReader))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Starting snapshotId 4 must less than ending snapshotId 3."));
-
-        assertThatThrownBy(
-                        () ->
-                                new IncrementalDeltaStartingScanner(
-                                                snapshotManager, 1, 5, ScanMode.DELTA)
+                                IncrementalDeltaStartingScanner.betweenSnapshotIds(
+                                                1, 5, snapshotManager, ScanMode.DELTA)
                                         .scan(snapshotReader))
                 .satisfies(
                         anyCauseMatches(

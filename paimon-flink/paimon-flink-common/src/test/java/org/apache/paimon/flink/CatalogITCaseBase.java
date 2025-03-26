@@ -109,7 +109,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         return false;
     }
 
-    private void prepareEnv() {
+    protected void prepareEnv() {
         Parser parser = ((TableEnvironmentImpl) tEnv).getParser();
         for (String ddl : ddl()) {
             tEnv.executeSql(ddl);

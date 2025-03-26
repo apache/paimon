@@ -67,7 +67,7 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
         return StartingScanner.fromPlan(reader.withSnapshot(end).readIncrementalDiff(start));
     }
 
-    public static IncrementalDiffStartingScanner betweenTags(
+    public static StartingScanner betweenTags(
             Tag startTag,
             Tag endTag,
             SnapshotManager snapshotManager,
@@ -82,24 +82,22 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
                 end.id());
 
         checkArgument(
-                end.id() > start.id(),
-                "Tag end %s with snapshot id %s should be larger than tag start %s with snapshot id %s",
+                end.id() >= start.id(),
+                "Tag end %s with snapshot id %s should be >= tag start %s with snapshot id %s",
                 incrementalBetween.getRight(),
                 end.id(),
                 incrementalBetween.getLeft(),
                 start.id());
 
+        if (start.id() == end.id()) {
+            return new EmptyResultStartingScanner(snapshotManager);
+        }
+
         return new IncrementalDiffStartingScanner(snapshotManager, start, end);
     }
 
-    public static IncrementalDiffStartingScanner betweenSnapshotIds(
+    public static StartingScanner betweenSnapshotIds(
             long startId, long endId, SnapshotManager snapshotManager) {
-        checkArgument(
-                endId > startId,
-                "Ending snapshotId should be larger than starting snapshotId %s.",
-                endId,
-                startId);
-
         Snapshot start = snapshotManager.snapshot(startId);
         Snapshot end = snapshotManager.snapshot(endId);
         return new IncrementalDiffStartingScanner(snapshotManager, start, end);
