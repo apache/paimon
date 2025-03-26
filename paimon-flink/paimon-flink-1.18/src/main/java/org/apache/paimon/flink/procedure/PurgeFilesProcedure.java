@@ -67,7 +67,7 @@ public class PurgeFilesProcedure extends ProcedureBase {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return deleteDir == null || deleteDir.isEmpty()
+        return deleteDir.isEmpty()
                 ? new String[] {"There are no dir to be deleted."}
                 : deleteDir.toArray(new String[0]);
     }

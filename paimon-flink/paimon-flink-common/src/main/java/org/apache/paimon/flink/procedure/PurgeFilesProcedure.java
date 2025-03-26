@@ -53,7 +53,7 @@ public class PurgeFilesProcedure extends ProcedureBase {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
             })
-    public @DataTypeHint("ROW<dir_path STRING>") Row[] call(
+    public @DataTypeHint("ROW<purged_file_path STRING>") Row[] call(
             ProcedureContext procedureContext, String tableId, Boolean dryRun)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
@@ -81,7 +81,7 @@ public class PurgeFilesProcedure extends ProcedureBase {
             throw new RuntimeException(e);
         }
 
-        return deleteDir == null || deleteDir.isEmpty()
+        return deleteDir.isEmpty()
                 ? new Row[] {Row.of("There are no dir to be deleted.")}
                 : deleteDir.stream().map(Row::of).toArray(Row[]::new);
     }

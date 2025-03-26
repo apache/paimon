@@ -50,7 +50,7 @@ public class PurgeFilesProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("dir_path", StringType, true, Metadata.empty())
+                        new StructField("purged_file_path", StringType, true, Metadata.empty())
                     });
 
     private PurgeFilesProcedure(TableCatalog tableCatalog) {
@@ -100,7 +100,7 @@ public class PurgeFilesProcedure extends BaseProcedure {
                         throw new RuntimeException(e);
                     }
 
-                    return deleteDir == null || deleteDir.isEmpty()
+                    return deleteDir.isEmpty()
                             ? new InternalRow[] {
                                 newInternalRow(
                                         UTF8String.fromString("There are no dir to be deleted."))
