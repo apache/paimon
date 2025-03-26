@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.utils.StringUtils;
+
 /** The type of resource that caused the error. */
 public enum ErrorResponseResourceType {
     DATABASE,
@@ -30,6 +32,9 @@ public enum ErrorResponseResourceType {
     UNKNOWN;
 
     public static ErrorResponseResourceType fromString(String resourceType) {
+        if (StringUtils.isEmpty(resourceType)) {
+            return UNKNOWN;
+        }
         try {
             return ErrorResponseResourceType.valueOf(resourceType);
         } catch (IllegalArgumentException e) {

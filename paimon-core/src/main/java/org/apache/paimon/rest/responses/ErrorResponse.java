@@ -75,10 +75,6 @@ public class ErrorResponse implements RESTResponse {
         return resourceType;
     }
 
-    public ErrorResponseResourceType getResourceTypeEnum() {
-        return ErrorResponseResourceType.fromString(resourceType);
-    }
-
     @JsonGetter(FIELD_RESOURCE_NAME)
     public String getResourceName() {
         return resourceName;
