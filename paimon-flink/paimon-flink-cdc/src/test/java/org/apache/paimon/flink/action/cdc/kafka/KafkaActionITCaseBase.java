@@ -247,8 +247,8 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                 KafkaActionITCaseBase.class
                         .getClassLoader()
                         .getResource(String.format(resourceDirFormat, args));
-	    assert url != null;
-	    Files.readAllLines(Paths.get(url.toURI())).stream()
+        assert url != null;
+        Files.readAllLines(Paths.get(url.toURI())).stream()
                 .filter(this::isRecordLine)
                 .forEach(r -> send(topic, r, wait));
     }
