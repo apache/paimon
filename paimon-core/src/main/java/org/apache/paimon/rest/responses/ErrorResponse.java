@@ -29,13 +29,27 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ErrorResponse implements RESTResponse {
 
+    public static final String RESOURCE_TYPE_DATABASE = "DATABASE";
+
+    public static final String RESOURCE_TYPE_TABLE = "TABLE";
+
+    public static final String RESOURCE_TYPE_COLUMN = "COLUMN";
+
+    public static final String RESOURCE_TYPE_SNAPSHOT = "SNAPSHOT";
+
+    public static final String RESOURCE_TYPE_BRANCH = "BRANCH";
+
+    public static final String RESOURCE_TYPE_TAG = "TAG";
+
+    public static final String RESOURCE_TYPE_VIEW = "VIEW";
+
     private static final String FIELD_MESSAGE = "message";
     private static final String FIELD_RESOURCE_TYPE = "resourceType";
     private static final String FIELD_RESOURCE_NAME = "resourceName";
     private static final String FIELD_CODE = "code";
 
     @JsonProperty(FIELD_RESOURCE_TYPE)
-    private final ErrorResponseResourceType resourceType;
+    private final String resourceType;
 
     @JsonProperty(FIELD_RESOURCE_NAME)
     private final String resourceName;
@@ -46,11 +60,7 @@ public class ErrorResponse implements RESTResponse {
     @JsonProperty(FIELD_CODE)
     private final Integer code;
 
-    public ErrorResponse(
-            ErrorResponseResourceType resourceType,
-            String resourceName,
-            String message,
-            Integer code) {
+    public ErrorResponse(String resourceType, String resourceName, String message, Integer code) {
         this.resourceType = resourceType;
         this.resourceName = resourceName;
         this.code = code;
@@ -59,7 +69,7 @@ public class ErrorResponse implements RESTResponse {
 
     @JsonCreator
     public ErrorResponse(
-            @JsonProperty(FIELD_RESOURCE_TYPE) ErrorResponseResourceType resourceType,
+            @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
             @JsonProperty(FIELD_RESOURCE_NAME) String resourceName,
             @JsonProperty(FIELD_MESSAGE) String message,
             @JsonProperty(FIELD_CODE) int code) {
@@ -75,7 +85,7 @@ public class ErrorResponse implements RESTResponse {
     }
 
     @JsonGetter(FIELD_RESOURCE_TYPE)
-    public ErrorResponseResourceType getResourceType() {
+    public String getResourceType() {
         return resourceType;
     }
 
