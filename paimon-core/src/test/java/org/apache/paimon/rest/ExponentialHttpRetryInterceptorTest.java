@@ -33,6 +33,7 @@ import java.net.NoRouteToHostException;
 import java.net.UnknownHostException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link ExponentialHttpRetryInterceptor}. */
 class ExponentialHttpRetryInterceptorTest {
@@ -42,7 +43,7 @@ class ExponentialHttpRetryInterceptorTest {
             new ExponentialHttpRetryInterceptor(maxRetries);
 
     @Test
-    void testNeedRetryByMethod() {
+    void testNeedRetryByMethod() throws IOException {
 
         assertThat(interceptor.needRetry("GET", new IOException(), 1)).isTrue();
         assertThat(interceptor.needRetry("HEAD", new IOException(), 1)).isTrue();
@@ -50,25 +51,38 @@ class ExponentialHttpRetryInterceptorTest {
         assertThat(interceptor.needRetry("DELETE", new IOException(), 1)).isTrue();
         assertThat(interceptor.needRetry("TRACE", new IOException(), 1)).isTrue();
         assertThat(interceptor.needRetry("OPTIONS", new IOException(), 1)).isTrue();
-
-        assertThat(interceptor.needRetry("POST", new IOException(), 1)).isFalse();
-        assertThat(interceptor.needRetry("PATCH", new IOException(), 1)).isFalse();
-        assertThat(interceptor.needRetry("CONNECT", new IOException(), 1)).isFalse();
-        assertThat(interceptor.needRetry("GET", new IOException(), maxRetries + 1)).isFalse();
+        assertThatThrownBy(() -> interceptor.needRetry("POST", new IOException(), 1))
+                .isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> interceptor.needRetry("POST", new IOException(), 1))
+                .isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> interceptor.needRetry("PATCH", new IOException(), 1))
+                .isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> interceptor.needRetry("CONNECT", new IOException(), 1))
+                .isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> interceptor.needRetry("GET", new IOException(), maxRetries + 1))
+                .isInstanceOf(IOException.class);
     }
 
     @Test
-    void testNeedRetryByException() {
+    void testNeedRetryByException() throws IOException {
 
-        assertThat(interceptor.needRetry("GET", new InterruptedIOException(), 1)).isFalse();
-        assertThat(interceptor.needRetry("GET", new UnknownHostException(), 1)).isFalse();
-        assertThat(interceptor.needRetry("GET", new ConnectException(), 1)).isFalse();
-        assertThat(interceptor.needRetry("GET", new NoRouteToHostException(), 1)).isFalse();
-        assertThat(interceptor.needRetry("GET", new SSLException("error"), 1)).isFalse();
+        assertThatThrownBy(() -> interceptor.needRetry("GET", new InterruptedIOException(), 1))
+                .isInstanceOf(InterruptedIOException.class);
+        assertThatThrownBy(() -> interceptor.needRetry("GET", new UnknownHostException(), 1))
+                .isInstanceOf(UnknownHostException.class);
+        assertThatThrownBy(() -> interceptor.needRetry("GET", new ConnectException(), 1))
+                .isInstanceOf(ConnectException.class);
+        assertThatThrownBy(() -> interceptor.needRetry("GET", new NoRouteToHostException(), 1))
+                .isInstanceOf(NoRouteToHostException.class);
+        assertThatThrownBy(() -> interceptor.needRetry("GET", new SSLException("error"), 1))
+                .isInstanceOf(SSLException.class);
 
         assertThat(interceptor.needRetry("GET", new IOException("error"), 1)).isTrue();
-        assertThat(interceptor.needRetry("GET", new IOException("error"), maxRetries + 1))
-                .isFalse();
+        assertThatThrownBy(
+                        () ->
+                                interceptor.needRetry(
+                                        "GET", new IOException("error"), maxRetries + 1))
+                .isInstanceOf(IOException.class);
     }
 
     @Test

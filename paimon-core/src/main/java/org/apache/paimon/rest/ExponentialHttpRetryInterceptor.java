@@ -122,19 +122,19 @@ public class ExponentialHttpRetryInterceptor implements Interceptor {
                 || (!response.isSuccessful() && retrievableCodes.contains(response.code()));
     }
 
-    public boolean needRetry(String method, IOException e, int execCount) {
+    public boolean needRetry(String method, IOException e, int execCount) throws IOException {
         if (execCount > maxRetries) {
-            return false;
+            throw e;
         }
         if (!retrievableMethods.contains(method)) {
-            return false;
+            throw e;
         }
         if (nonRetriableExceptions.contains(e.getClass())) {
-            return false;
+            throw e;
         } else {
             for (Class<? extends IOException> rejectException : nonRetriableExceptions) {
                 if (rejectException.isInstance(e)) {
-                    return false;
+                    throw e;
                 }
             }
         }
