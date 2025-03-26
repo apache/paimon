@@ -37,13 +37,4 @@ public enum ViewDialect {
     public String toString() {
         return value;
     }
-
-    public static ViewDialect fromString(String value) {
-        for (ViewDialect dialect : ViewDialect.values()) {
-            if (dialect.value.equalsIgnoreCase(value)) {
-                return dialect;
-            }
-        }
-        throw new IllegalArgumentException("Unknown dialect: " + value);
-    }
 }
