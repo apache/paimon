@@ -954,7 +954,33 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
+            // When drop a Hive external table, only the hive metadata is deleted and the data files
+            // are not deleted.
             boolean externalTable = isExternalTable(getHmsTable(identifier));
+
+            // Deletes table directory to avoid schema in filesystem exists after dropping hive
+            // table successfully to keep the table consistency between which in filesystem and
+            // which in Hive metastore.
+            if (!externalTable) {
+                Path path = getTableLocation(identifier);
+                try {
+                    if (fileIO.exists(path)) {
+                        fileIO.deleteDirectoryQuietly(path);
+                    }
+                    for (Path externalPath : externalPaths) {
+                        if (fileIO.exists(externalPath)) {
+                            fileIO.deleteDirectoryQuietly(externalPath);
+                        }
+                    }
+                } catch (Exception ee) {
+                    LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
+                    throw new RuntimeException(
+                            String.format(
+                                    "Delete directory[%s] fail for table %s",
+                                    path, identifier), ee);
+                }
+            }
+
             clients.execute(
                     client ->
                             client.dropTable(
@@ -963,29 +989,6 @@ public class HiveCatalog extends AbstractCatalog {
                                     !externalTable,
                                     false,
                                     true));
-
-            // When drop a Hive external table, only the hive metadata is deleted and the data files
-            // are not deleted.
-            if (externalTable) {
-                return;
-            }
-
-            // Deletes table directory to avoid schema in filesystem exists after dropping hive
-            // table successfully to keep the table consistency between which in filesystem and
-            // which in Hive metastore.
-            Path path = getTableLocation(identifier);
-            try {
-                if (fileIO.exists(path)) {
-                    fileIO.deleteDirectoryQuietly(path);
-                }
-                for (Path externalPath : externalPaths) {
-                    if (fileIO.exists(externalPath)) {
-                        fileIO.deleteDirectoryQuietly(externalPath);
-                    }
-                }
-            } catch (Exception ee) {
-                LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
-            }
         } catch (TException | TableNotExistException e) {
             throw new RuntimeException("Failed to drop table " + identifier.getFullName(), e);
         } catch (InterruptedException e) {
