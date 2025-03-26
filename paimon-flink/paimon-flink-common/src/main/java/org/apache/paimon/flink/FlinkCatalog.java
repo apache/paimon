@@ -47,7 +47,6 @@ import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
-import org.apache.paimon.view.ViewDialect;
 import org.apache.paimon.view.ViewImpl;
 
 import org.apache.flink.table.catalog.AbstractCatalog;
@@ -167,6 +166,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
+
+    public static final String DIALECT = "flink";
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkCatalog.class);
 
@@ -347,7 +348,7 @@ public class FlinkCatalog extends AbstractCatalog {
                 org.apache.flink.table.api.Schema.newBuilder()
                         .fromRowDataType(fromLogicalToDataType(toLogicalType(view.rowType())))
                         .build();
-        String query = view.query(ViewDialect.FLINK.value());
+        String query = view.query(DIALECT);
         return Optional.of(
                 CatalogView.of(schema, view.comment().orElse(null), query, query, view.options()));
     }
@@ -457,7 +458,7 @@ public class FlinkCatalog extends AbstractCatalog {
                         identifier,
                         builder.build().getFields(),
                         query,
-                        Collections.singletonMap(ViewDialect.FLINK.value(), query),
+                        Collections.singletonMap(DIALECT, query),
                         table.getComment(),
                         table.getOptions());
         try {

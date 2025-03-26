@@ -20,14 +20,16 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.spark.utils.CatalogUtils;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.ViewChange;
-import org.apache.paimon.view.ViewDialect;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
@@ -44,12 +46,15 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  *
  *  -- add dialect in the view
  *  CALL sys.alter_view_dialect('view', 'add', 'query')
+ *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'add', `query` => 'query', `engine` => 'flink')
  *
  *  -- update dialect in the view
  *  CALL sys.alter_view_dialect('view', 'update', 'query')
+ *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'update', `query` => 'query', `engine` => 'flink')
  *
  *  -- drop dialect in the view
  *  CALL sys.alter_view_dialect('view', 'drop')
+ *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'drop', `engine` => 'flink')
  *
  * </code></pre>
  */
@@ -59,7 +64,8 @@ public class AlterViewDialectProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("view", StringType),
                 ProcedureParameter.required("action", StringType),
-                ProcedureParameter.optional("query", StringType)
+                ProcedureParameter.optional("query", StringType),
+                ProcedureParameter.optional("engine", StringType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -89,16 +95,27 @@ public class AlterViewDialectProcedure extends BaseProcedure {
                 toIdentifier(args.getString(0), PARAMETERS[0].name());
         Identifier view = CatalogUtils.toIdentifier(ident);
         ViewChange viewChange;
-        String dialect = ViewDialect.SPARK.value();
+        String query = ((GenericInternalRow) args).genericGet(2) == null ? null : args.getString(2);
+        String dialect =
+                ((GenericInternalRow) args).genericGet(3) == null
+                                || StringUtils.isNullOrWhitespaceOnly(args.getString(3))
+                        ? SupportView.DIALECT
+                        : args.getString(3);
         switch (args.getString(1)) {
             case "add":
                 {
-                    viewChange = ViewChange.addDialect(dialect, args.getString(2));
+                    if (StringUtils.isNullOrWhitespaceOnly(query)) {
+                        throw new IllegalArgumentException("query is required for add action.");
+                    }
+                    viewChange = ViewChange.addDialect(dialect, query);
                     break;
                 }
             case "update":
                 {
-                    viewChange = ViewChange.updateDialect(dialect, args.getString(2));
+                    if (StringUtils.isNullOrWhitespaceOnly(query)) {
+                        throw new IllegalArgumentException("query is required for update action.");
+                    }
+                    viewChange = ViewChange.updateDialect(dialect, query);
                     break;
                 }
             case "drop":

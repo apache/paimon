@@ -20,8 +20,8 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.ViewChange;
-import org.apache.paimon.view.ViewDialect;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -29,6 +29,8 @@ import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import static org.apache.paimon.flink.FlinkCatalog.DIALECT;
 
 /**
  * alter view procedure. Usage:
@@ -38,12 +40,15 @@ import org.apache.flink.table.procedure.ProcedureContext;
  *
  *  -- add dialect in the view
  *  CALL sys.alter_view_dialect('view', 'add', 'query')
+ *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'add', `query` => 'query', `engine` => 'spark')
  *
  *  -- update dialect in the view
  *  CALL sys.alter_view_dialect('view', 'update', 'query')
+ *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'update', `query` => 'query', `engine` => 'spark')
  *
  *  -- drop dialect in the view
  *  CALL sys.alter_view_dialect('view', 'drop')
+ *  CALL sys.alter_view_dialect(`view` => 'view', `action` => 'drop', `engine` => 'spark')
  *
  * </code></pre>
  */
@@ -57,23 +62,34 @@ public class AlterViewDialectProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "view", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "action", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "query", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "query", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "engine", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
-            ProcedureContext procedureContext, String viewId, String action, String query)
+            ProcedureContext procedureContext,
+            String view,
+            String action,
+            String query,
+            String engine)
             throws Catalog.ViewNotExistException, Catalog.DialectAlreadyExistException,
                     Catalog.DialectNotExistException {
-        Identifier identifier = Identifier.fromString(viewId);
+        Identifier identifier = Identifier.fromString(view);
         ViewChange viewChange;
-        String dialect = ViewDialect.FLINK.value();
+        String dialect = StringUtils.isNullOrWhitespaceOnly(engine) ? DIALECT : engine;
         switch (action) {
             case "add":
                 {
+                    if (StringUtils.isNullOrWhitespaceOnly(query)) {
+                        throw new IllegalArgumentException("query is required for add action.");
+                    }
                     viewChange = ViewChange.addDialect(dialect, query);
                     break;
                 }
             case "update":
                 {
+                    if (StringUtils.isNullOrWhitespaceOnly(query)) {
+                        throw new IllegalArgumentException("query is required for update action.");
+                    }
                     viewChange = ViewChange.updateDialect(dialect, query);
                     break;
                 }

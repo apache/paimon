@@ -42,7 +42,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.view.View;
-import org.apache.paimon.view.ViewDialect;
 import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -1566,8 +1565,8 @@ public abstract class CatalogTestBase {
 
         Map<String, String> dialects = new HashMap<>();
         if (supportsViewDialects()) {
-            dialects.put(ViewDialect.FLINK.value(), "SELECT * FROM FLINK_TABLE");
-            dialects.put(ViewDialect.SPARK.value(), "SELECT * FROM SPARK_TABLE");
+            dialects.put("flink", "SELECT * FROM FLINK_TABLE");
+            dialects.put("spark", "SELECT * FROM SPARK_TABLE");
         }
         return new ViewImpl(identifier, rowType.getFields(), query, dialects, comment, options);
     }
