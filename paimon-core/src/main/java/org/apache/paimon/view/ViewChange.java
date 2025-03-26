@@ -236,6 +236,23 @@ public interface ViewChange extends Serializable {
         public String query() {
             return query;
         }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (object == null || getClass() != object.getClass()) {
+                return false;
+            }
+            AddDialect that = (AddDialect) object;
+            return Objects.equals(dialect, that.dialect) && Objects.equals(query, that.query);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(dialect, query);
+        }
     }
 
     /** update dialect for view change. */
@@ -267,6 +284,23 @@ public interface ViewChange extends Serializable {
         public String query() {
             return query;
         }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (object == null || getClass() != object.getClass()) {
+                return false;
+            }
+            UpdateDialect that = (UpdateDialect) object;
+            return Objects.equals(dialect, that.dialect) && Objects.equals(query, that.query);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(dialect, query);
+        }
     }
 
     /** drop dialect for view change. */
@@ -285,6 +319,23 @@ public interface ViewChange extends Serializable {
         @JsonGetter(FIELD_DIALECT)
         public String dialect() {
             return dialect;
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (object == null || getClass() != object.getClass()) {
+                return false;
+            }
+            DropDialect that = (DropDialect) object;
+            return Objects.equals(dialect, that.dialect);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(dialect);
         }
     }
 

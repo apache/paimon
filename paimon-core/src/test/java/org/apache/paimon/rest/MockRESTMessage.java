@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
+import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
@@ -44,6 +45,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -271,6 +273,17 @@ public class MockRESTMessage {
         return new RollbackTableRequest(Instant.tag(tagName));
     }
 
+    public static AlterViewRequest alterViewRequest() {
+        List<ViewChange> viewChanges = new ArrayList<>();
+        viewChanges.add(ViewChange.setOption("key", "value"));
+        viewChanges.add(ViewChange.removeOption("key"));
+        viewChanges.add(ViewChange.updateComment("comment"));
+        viewChanges.add(ViewChange.addDialect("dialect", "query"));
+        viewChanges.add(ViewChange.updateDialect("dialect", "query"));
+        viewChanges.add(ViewChange.dropDialect("dialect"));
+        return new AlterViewRequest(viewChanges);
+    }
+
     private static ViewSchema viewSchema() {
         List<DataField> fields =
                 Arrays.asList(
@@ -282,10 +295,6 @@ public class MockRESTMessage {
                 Collections.emptyMap(),
                 "comment",
                 Collections.singletonMap("pt", "1"));
-    }
-
-    private static Partition partition() {
-        return new Partition(Collections.singletonMap("pt", "1"), 1, 1, 1, 1, false);
     }
 
     private static Schema schema(Map<String, String> options) {
