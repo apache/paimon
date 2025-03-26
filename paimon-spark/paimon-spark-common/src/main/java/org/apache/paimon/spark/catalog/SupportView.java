@@ -68,8 +68,7 @@ public interface SupportView extends WithPaimonCatalog {
                                     paimonIdent,
                                     toPaimonRowType(schema).getFields(),
                                     queryText,
-                                    Collections.singletonMap(
-                                            ViewDialect.SPARK.toString(), queryText),
+                                    Collections.singletonMap(ViewDialect.SPARK.value(), queryText),
                                     comment,
                                     properties),
                             ignoreIfExists);

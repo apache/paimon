@@ -29,6 +29,10 @@ public enum ViewDialect {
         this.value = value;
     }
 
+    public String value() {
+        return value;
+    }
+
     @Override
     public String toString() {
         return value;

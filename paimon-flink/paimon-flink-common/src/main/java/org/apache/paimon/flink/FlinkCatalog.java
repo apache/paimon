@@ -347,7 +347,7 @@ public class FlinkCatalog extends AbstractCatalog {
                 org.apache.flink.table.api.Schema.newBuilder()
                         .fromRowDataType(fromLogicalToDataType(toLogicalType(view.rowType())))
                         .build();
-        String query = view.query(ViewDialect.FLINK.toString());
+        String query = view.query(ViewDialect.FLINK.value());
         return Optional.of(
                 CatalogView.of(schema, view.comment().orElse(null), query, query, view.options()));
     }
@@ -457,7 +457,7 @@ public class FlinkCatalog extends AbstractCatalog {
                         identifier,
                         builder.build().getFields(),
                         query,
-                        Collections.singletonMap(ViewDialect.FLINK.toString(), query),
+                        Collections.singletonMap(ViewDialect.FLINK.value(), query),
                         table.getComment(),
                         table.getOptions());
         try {

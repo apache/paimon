@@ -89,7 +89,7 @@ public class AlterViewDialectProcedure extends BaseProcedure {
                 toIdentifier(args.getString(0), PARAMETERS[0].name());
         Identifier view = CatalogUtils.toIdentifier(ident);
         ViewChange viewChange;
-        String dialect = ViewDialect.SPARK.toString();
+        String dialect = ViewDialect.SPARK.value();
         switch (args.getString(1)) {
             case "add":
                 {

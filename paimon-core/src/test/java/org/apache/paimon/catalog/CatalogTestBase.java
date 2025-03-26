@@ -1566,8 +1566,8 @@ public abstract class CatalogTestBase {
 
         Map<String, String> dialects = new HashMap<>();
         if (supportsViewDialects()) {
-            dialects.put(ViewDialect.FLINK.toString(), "SELECT * FROM FLINK_TABLE");
-            dialects.put(ViewDialect.SPARK.toString(), "SELECT * FROM SPARK_TABLE");
+            dialects.put(ViewDialect.FLINK.value(), "SELECT * FROM FLINK_TABLE");
+            dialects.put(ViewDialect.SPARK.value(), "SELECT * FROM SPARK_TABLE");
         }
         return new ViewImpl(identifier, rowType.getFields(), query, dialects, comment, options);
     }

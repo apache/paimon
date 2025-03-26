@@ -37,7 +37,13 @@ import org.apache.flink.table.procedure.ProcedureContext;
  *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- add dialect in the view
- *  CALL sys.alter_view_dialect('viewId', 'add', 'query')
+ *  CALL sys.alter_view_dialect('view', 'add', 'query')
+ *
+ *  -- update dialect in the view
+ *  CALL sys.alter_view_dialect('view', 'update', 'query')
+ *
+ *  -- drop dialect in the view
+ *  CALL sys.alter_view_dialect('view', 'drop')
  *
  * </code></pre>
  */
@@ -59,7 +65,7 @@ public class AlterViewDialectProcedure extends ProcedureBase {
                     Catalog.DialectNotExistException {
         Identifier identifier = Identifier.fromString(viewId);
         ViewChange viewChange;
-        String dialect = ViewDialect.FLINK.toString();
+        String dialect = ViewDialect.FLINK.value();
         switch (action) {
             case "add":
                 {
