@@ -25,7 +25,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.flink.util.DockerImageVersions;
-import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -221,8 +220,6 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     }
 
     protected void createTestTopic(String topic, int numPartitions, int replicationFactor) {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
         try {
             adminClient
                     .createTopics(
@@ -250,7 +247,8 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                 KafkaActionITCaseBase.class
                         .getClassLoader()
                         .getResource(String.format(resourceDirFormat, args));
-        Files.readAllLines(Paths.get(url.toURI())).stream()
+	    assert url != null;
+	    Files.readAllLines(Paths.get(url.toURI())).stream()
                 .filter(this::isRecordLine)
                 .forEach(r -> send(topic, r, wait));
     }
