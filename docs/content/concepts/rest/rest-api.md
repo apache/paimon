@@ -26,7 +26,7 @@ under the License.
 <body>
     <div id="redoc-container"></div>
     <script>
-        Redoc.init('https://raw.githubusercontent.com/apache/paimon/master/paimon-open-api/rest-catalog-open-api.yaml', {
+        Redoc.init('/docs/master/rest-catalog-open-api.yaml', {
             disableSearch: true
         }, document.getElementById('redoc-container'));
     </script>
