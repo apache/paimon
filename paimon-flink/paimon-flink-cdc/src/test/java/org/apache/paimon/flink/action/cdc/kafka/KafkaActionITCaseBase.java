@@ -175,10 +175,6 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         return standardProps;
     }
 
-    public String getBootstrapServers() {
-        return KAFKA_CONTAINER.getBootstrapServers();
-    }
-
     protected Map<String, String> getBasicKafkaConfig() {
         Map<String, String> config = new HashMap<>();
         config.put("properties.bootstrap.servers", KAFKA_CONTAINER.getBootstrapServers());
