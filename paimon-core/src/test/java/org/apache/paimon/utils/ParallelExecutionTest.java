@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Queue;
 import java.util.function.Supplier;
 
+import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -126,6 +127,19 @@ public class ParallelExecutionTest {
                         2,
                         Arrays.asList(supplier1, supplier1, () -> Pair.of(exReader, 2)));
         assertThatThrownBy(() -> collect(execution)).hasMessageContaining(message);
+    }
+
+    @Test
+    public void testTooBigRecord() {
+        Supplier<Pair<RecordReader<Integer>, Integer>> supplier =
+                () -> Pair.of(create(new LinkedList<>(singletonList(singletonList(1)))), 1);
+
+        ParallelExecution<Integer, Integer> execution =
+                new ParallelExecution<>(new IntSerializer(), 2, 2, singletonList(supplier));
+        assertThatThrownBy(() -> collect(execution))
+                .hasMessageContaining(
+                        "Current page size 2 bytes is too small, one record cannot fit into a single page."
+                                + " Please increase the 'page-size' table option.");
     }
 
     private RecordReader<Integer> create(Queue<List<Integer>> queue) {
