@@ -46,22 +46,16 @@ class AlterViewDialectProcedureTest extends PaimonRestCatalogSparkTestBase {
 
     checkViewQuery(viewName, query)
 
-    checkAnswer(
-      spark.sql(s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'drop')"),
-      Row(true))
+    checkAnswer(spark.sql(s"CALL sys.alter_view_dialect('$viewName', 'drop')"), Row(true))
 
-    checkAnswer(
-      spark.sql(
-        s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'add', `query` => '$query')"),
-      Row(true))
+    checkAnswer(spark.sql(s"CALL sys.alter_view_dialect('$viewName', 'add', '$query')"), Row(true))
 
     checkViewQuery(viewName, query)
 
     val newQuery = "SELECT * FROM T WHERE `id` > 2";
 
     checkAnswer(
-      spark.sql(
-        s"CALL sys.alter_view_dialect(`view` => '$viewName', `action` => 'update', `query` => '$newQuery')"),
+      spark.sql(s"CALL sys.alter_view_dialect('$viewName', 'update', '$newQuery')"),
       Row(true))
 
     checkViewQuery(viewName, newQuery)

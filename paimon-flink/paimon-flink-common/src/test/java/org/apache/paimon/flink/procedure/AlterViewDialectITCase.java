@@ -45,19 +45,16 @@ public class AlterViewDialectITCase extends RESTCatalogITCaseBase {
                 String.format("SELECT * FROM `%s`.`%s` WHERE `b` > 2", DATABASE_NAME, TABLE_NAME);
         sql(
                 String.format(
-                        "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'update', `query` => '%s')",
+                        "CALL sys.alter_view_dialect('%s.%s', 'update', '%s')",
                         DATABASE_NAME, viewName, newQuery));
         List<Row> result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
         assertThat(result.toString()).contains(newQuery);
-        sql(
-                String.format(
-                        "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'drop')",
-                        DATABASE_NAME, viewName));
+        sql(String.format("CALL sys.alter_view_dialect('%s.%s', 'drop')", DATABASE_NAME, viewName));
         result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
         assertThat(result.toString()).contains("`b` > 1");
         sql(
                 String.format(
-                        "CALL sys.alter_view_dialect(`view` => '%s.%s', `action` => 'add', `query` => '%s')",
+                        "CALL sys.alter_view_dialect('%s.%s', 'add', '%s')",
                         DATABASE_NAME, viewName, newQuery));
         result = sql(String.format("SHOW CREATE VIEW %s.%s", DATABASE_NAME, viewName));
         assertThat(result.toString()).contains(newQuery);

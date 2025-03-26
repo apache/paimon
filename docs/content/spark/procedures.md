@@ -387,7 +387,7 @@ This section introduce all available spark procedures about paimon.
             <li>view: the target view identifier. Cannot be empty.</li>
             <li>action: define change action like: add, update, drop. Cannot be empty.</li>
             <li>query: query for the dialect when action is add and update it couldn't be empty.</li>
-            <li>engine: when engine which is not flink need define it.</li>
+            <li>engine: when engine which is not spark need define it.</li>
       </td>
       <td>
          -- add dialect in the view<br/>
