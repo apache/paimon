@@ -48,8 +48,9 @@ public class ManifestsReader {
     private final SnapshotManager snapshotManager;
     private final ManifestList.Factory manifestListFactory;
 
-    @Nullable private PartitionPredicate partitionFilter = null;
+    private boolean onlyReadRealBuckets = false;
     @Nullable private Integer specifiedBucket = null;
+    @Nullable private PartitionPredicate partitionFilter = null;
 
     public ManifestsReader(
             RowType partitionType,
@@ -60,6 +61,11 @@ public class ManifestsReader {
         this.partitionDefaultValue = partitionDefaultValue;
         this.snapshotManager = snapshotManager;
         this.manifestListFactory = manifestListFactory;
+    }
+
+    public ManifestsReader onlyReadRealBuckets() {
+        this.onlyReadRealBuckets = true;
+        return this;
     }
 
     public ManifestsReader withBucket(int bucket) {
@@ -131,8 +137,12 @@ public class ManifestsReader {
     private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
         Integer minBucket = manifest.minBucket();
         Integer maxBucket = manifest.maxBucket();
-        if (specifiedBucket != null && minBucket != null && maxBucket != null) {
-            if (specifiedBucket < minBucket || specifiedBucket > maxBucket) {
+        if (minBucket != null && maxBucket != null) {
+            if (onlyReadRealBuckets && maxBucket < 0) {
+                return false;
+            }
+            if (specifiedBucket != null
+                    && (specifiedBucket < minBucket || specifiedBucket > maxBucket)) {
                 return false;
             }
         }

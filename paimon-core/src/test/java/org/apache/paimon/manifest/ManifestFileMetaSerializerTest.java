@@ -71,7 +71,16 @@ public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<Man
         SimpleStats partitionStats = new SimpleStats(minFields, maxFields, nullCounts);
         ManifestFileMeta meta =
                 new ManifestFileMeta(
-                        "test-manifest-file", 1024, 5, 2, partitionStats, 1, null, null);
+                        "test-manifest-file",
+                        1024,
+                        5,
+                        2,
+                        partitionStats,
+                        1,
+                        null,
+                        null,
+                        null,
+                        null);
 
         byte[] v2Bytes =
                 IOUtils.readFully(

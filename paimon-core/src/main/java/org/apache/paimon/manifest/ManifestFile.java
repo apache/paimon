@@ -131,6 +131,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private long schemaId = Long.MIN_VALUE;
         private int minBucket = Integer.MAX_VALUE;
         private int maxBucket = Integer.MIN_VALUE;
+        private int minLevel = Integer.MAX_VALUE;
+        private int maxLevel = Integer.MIN_VALUE;
 
         ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
             super(
@@ -161,6 +163,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             schemaId = Math.max(schemaId, entry.file().schemaId());
             minBucket = Math.min(minBucket, entry.bucket());
             maxBucket = Math.max(maxBucket, entry.bucket());
+            minLevel = Math.min(minLevel, entry.level());
+            maxLevel = Math.max(maxLevel, entry.level());
 
             partitionStatsCollector.collect(entry.partition());
         }
@@ -177,7 +181,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                             ? schemaId
                             : schemaManager.latest().get().id(),
                     minBucket,
-                    maxBucket);
+                    maxBucket,
+                    minLevel,
+                    maxLevel);
         }
     }
 

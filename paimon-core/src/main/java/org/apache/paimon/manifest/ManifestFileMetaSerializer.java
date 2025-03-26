@@ -48,7 +48,9 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 meta.partitionStats().toRow(),
                 meta.schemaId(),
                 meta.minBucket(),
-                meta.maxBucket());
+                meta.maxBucket(),
+                meta.minLevel(),
+                meta.maxLevel());
     }
 
     @Override
@@ -68,6 +70,8 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 SimpleStats.fromRow(row.getRow(4, 3)),
                 row.getLong(5),
                 version >= 3 ? row.getInt(6) : null,
-                version >= 3 ? row.getInt(7) : null);
+                version >= 3 ? row.getInt(7) : null,
+                version >= 3 ? row.getInt(8) : null,
+                version >= 3 ? row.getInt(9) : null);
     }
 }

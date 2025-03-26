@@ -52,7 +52,9 @@ public class ManifestFileMeta {
                             new DataField(4, "_PARTITION_STATS", SimpleStats.SCHEMA),
                             new DataField(5, "_SCHEMA_ID", new BigIntType(false)),
                             new DataField(6, "_MIN_BUCKET", new IntType(true)),
-                            new DataField(7, "_MAX_BUCKET", new IntType(true))));
+                            new DataField(7, "_MAX_BUCKET", new IntType(true)),
+                            new DataField(8, "_MIN_LEVEL", new IntType(true)),
+                            new DataField(9, "_MAX_LEVEL", new IntType(true))));
 
     private final String fileName;
     private final long fileSize;
@@ -62,6 +64,8 @@ public class ManifestFileMeta {
     private final long schemaId;
     private final @Nullable Integer minBucket;
     private final @Nullable Integer maxBucket;
+    private final @Nullable Integer minLevel;
+    private final @Nullable Integer maxLevel;
 
     public ManifestFileMeta(
             String fileName,
@@ -71,7 +75,9 @@ public class ManifestFileMeta {
             SimpleStats partitionStats,
             long schemaId,
             @Nullable Integer minBucket,
-            @Nullable Integer maxBucket) {
+            @Nullable Integer maxBucket,
+            @Nullable Integer minLevel,
+            @Nullable Integer maxLevel) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
@@ -80,6 +86,8 @@ public class ManifestFileMeta {
         this.schemaId = schemaId;
         this.minBucket = minBucket;
         this.maxBucket = maxBucket;
+        this.minLevel = minLevel;
+        this.maxLevel = maxLevel;
     }
 
     public String fileName() {
@@ -114,6 +122,14 @@ public class ManifestFileMeta {
         return maxBucket;
     }
 
+    public @Nullable Integer minLevel() {
+        return minLevel;
+    }
+
+    public @Nullable Integer maxLevel() {
+        return maxLevel;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestFileMeta)) {
@@ -127,7 +143,9 @@ public class ManifestFileMeta {
                 && Objects.equals(partitionStats, that.partitionStats)
                 && schemaId == that.schemaId
                 && Objects.equals(minBucket, that.minBucket)
-                && Objects.equals(maxBucket, that.maxBucket);
+                && Objects.equals(maxBucket, that.maxBucket)
+                && Objects.equals(minLevel, that.minLevel)
+                && Objects.equals(maxLevel, that.maxLevel);
     }
 
     @Override
@@ -140,13 +158,15 @@ public class ManifestFileMeta {
                 partitionStats,
                 schemaId,
                 minBucket,
-                maxBucket);
+                maxBucket,
+                minLevel,
+                maxLevel);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %d, %s, %d, %s, %s}",
+                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s}",
                 fileName,
                 fileSize,
                 numAddedFiles,
@@ -154,7 +174,9 @@ public class ManifestFileMeta {
                 partitionStats,
                 schemaId,
                 minBucket,
-                maxBucket);
+                maxBucket,
+                minLevel,
+                maxLevel);
     }
 
     // ----------------------- Serialization -----------------------------

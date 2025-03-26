@@ -99,6 +99,10 @@ public class ManifestTestDataGenerator {
 
         long numAddedFiles = 0;
         long numDeletedFiles = 0;
+        int minBucket = Integer.MAX_VALUE;
+        int maxBucket = Integer.MIN_VALUE;
+        int minLevel = Integer.MAX_VALUE;
+        int maxLevel = Integer.MIN_VALUE;
         for (ManifestEntry entry : entries) {
             collector.collect(entry.partition());
             if (entry.kind() == FileKind.ADD) {
@@ -106,6 +110,10 @@ public class ManifestTestDataGenerator {
             } else {
                 numDeletedFiles++;
             }
+            minBucket = Math.min(minBucket, entry.bucket());
+            maxBucket = Math.max(maxBucket, entry.bucket());
+            minLevel = Math.min(minLevel, entry.level());
+            maxLevel = Math.max(maxLevel, entry.level());
         }
 
         return new ManifestFileMeta(
@@ -115,8 +123,10 @@ public class ManifestTestDataGenerator {
                 numDeletedFiles,
                 serializer.toBinaryAllMode(collector.extract()),
                 0,
-                0,
-                0);
+                minBucket,
+                maxBucket,
+                minLevel,
+                maxLevel);
     }
 
     private void mergeLevelsIfNeeded(BinaryRow partition, int bucket) {

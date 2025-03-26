@@ -41,7 +41,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -58,7 +57,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.Serializable;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
@@ -266,10 +264,8 @@ public class CompactAction extends TableActionBase {
             int bucketNum = options.get(FlinkConnectorOptions.POSTPONE_DEFAULT_BUCKET_NUM);
 
             Iterator<ManifestEntry> it =
-                    fileStoreTable
-                            .newSnapshotReader()
+                    table.newSnapshotReader()
                             .withPartitionFilter(Collections.singletonList(partition))
-                            .withBucketFilter(new NormalBucketFilter())
                             .readFileIterator();
             if (it.hasNext()) {
                 bucketNum = it.next().totalBuckets();
@@ -312,16 +308,6 @@ public class CompactAction extends TableActionBase {
         }
 
         return true;
-    }
-
-    private static class NormalBucketFilter implements Filter<Integer>, Serializable {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public boolean test(Integer bucket) {
-            return bucket >= 0;
-        }
     }
 
     @Override

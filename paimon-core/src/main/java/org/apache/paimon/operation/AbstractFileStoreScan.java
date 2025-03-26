@@ -134,6 +134,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan onlyReadRealBuckets() {
+        manifestsReader.onlyReadRealBuckets();
         this.onlyReadRealBuckets = true;
         return this;
     }
