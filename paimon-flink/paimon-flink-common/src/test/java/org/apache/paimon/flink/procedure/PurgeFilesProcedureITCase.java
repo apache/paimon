@@ -23,6 +23,8 @@ import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link PurgeFilesProcedure}. */
@@ -37,9 +39,19 @@ public class PurgeFilesProcedureITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO T VALUES (1, 'a')");
         assertThat(sql("select * from `T`")).containsExactly(Row.of(1, "a"));
+        List<Row> result = sql("CALL sys.purge_files(`table` => 'default.T', dry_run => true)");
+        assertThat(result).hasSize(1);
+        assertThat((String) result.get(0).getFieldAs(0))
+                .contains("Successfully analyzed files to purge")
+                .contains("Files to purge:");
+        assertThat(sql("select * from `T`")).containsExactly(Row.of(1, "a"));
 
         sql("INSERT INTO T VALUES (1, 'a')");
-        sql("CALL sys.purge_files(`table` => 'default.T')");
+        result = sql("CALL sys.purge_files(`table` => 'default.T')");
+        assertThat(result).hasSize(1);
+        assertThat((String) result.get(0).getFieldAs(0))
+                .contains("Successfully purged files")
+                .contains("Purged files:");
         assertThat(sql("select * from `T`")).containsExactly();
 
         sql("INSERT INTO T VALUES (2, 'a')");

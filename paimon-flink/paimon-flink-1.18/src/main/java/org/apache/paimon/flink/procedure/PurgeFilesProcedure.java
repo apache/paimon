@@ -21,42 +21,65 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /** A procedure to purge files for a table. */
 public class PurgeFilesProcedure extends ProcedureBase {
     public static final String IDENTIFIER = "purge_files";
 
-    public String[] call(ProcedureContext procedureContext, String tableId)
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, @Nullable Boolean nullableDryRun)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileIO fileIO = fileStoreTable.fileIO();
         Path tablePath = fileStoreTable.snapshotManager().tablePath();
+        List<Path> filePaths;
+        boolean dryRun = nullableDryRun != null && nullableDryRun;
         try {
-            Arrays.stream(fileIO.listStatus(tablePath))
-                    .filter(f -> !f.getPath().getName().contains("schema"))
-                    .forEach(
-                            fileStatus -> {
-                                try {
-                                    fileIO.delete(fileStatus.getPath(), true);
-                                } catch (IOException e) {
-                                    throw new RuntimeException(e);
-                                }
-                            });
+            filePaths =
+                    Arrays.stream(fileIO.listStatus(tablePath))
+                            .filter(f -> !f.getPath().getName().contains("schema"))
+                            .map(FileStatus::getPath)
+                            .collect(Collectors.toList());
+            if (!dryRun) {
+                filePaths.forEach(
+                        filePath -> {
+                            try {
+                                fileIO.delete(filePath, true);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return new String[] {
-            String.format("Success purge files with table: %s.", fileStoreTable.name())
-        };
+        if (dryRun) {
+            return new String[] {
+                String.format(
+                        "Successfully analyzed files to purge with table: %s. Files to purge: %s",
+                        fileStoreTable.name(), filePaths)
+            };
+        } else {
+            return new String[] {
+                String.format(
+                        "Successfully purged files with table: %s. Purged files: %s",
+                        fileStoreTable.name(), filePaths)
+            };
+        }
     }
 
     @Override

@@ -496,6 +496,7 @@ All available procedures are listed below.
       <td>
          To clear table with purge files directly. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
+            <li>dry_run(optional): only check what files will be purged, but not really remove them. Default is false.</li>
       </td>
       <td>
          -- for Flink 1.18<br/>
