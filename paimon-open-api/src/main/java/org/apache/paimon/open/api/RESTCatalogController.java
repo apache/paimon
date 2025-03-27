@@ -78,7 +78,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.rest.RESTCatalog.QUERY_PARAMETER_WAREHOUSE_KEY;
 
-/** RESTCatalog management APIs. */
+/** RESTCatalog open APIs. */
 @CrossOrigin(origins = "http://localhost:8081")
 @RestController
 public class RESTCatalogController {
