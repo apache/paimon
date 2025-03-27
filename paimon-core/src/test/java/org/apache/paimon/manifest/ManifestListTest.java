@@ -89,35 +89,35 @@ public class ManifestListTest {
     // ============================ Compatibility tests ===================================
 
     @Test
-    public void testCanReadOldMetaPaimon_1_0() throws Exception {
-        ManifestList legacyManifestList = createLegacyManifestListPaimon_1_0();
+    public void testCanReadOldMetaPaimon10() throws Exception {
+        ManifestList legacyManifestList = createLegacyManifestListPaimon10();
         List<ManifestFileMeta> metas = generateData();
         String manifestListName = legacyManifestList.write(metas).getKey();
 
         ManifestList manifestList = createManifestList(tempDir.toString());
         List<ManifestFileMeta> actualMetas = manifestList.read(manifestListName);
-        assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon_1_0(metas));
+        assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon10(metas));
     }
 
     @Test
-    public void testOldReaderCanReadNewMetaPaimon_1_0() throws Exception {
+    public void testOldReaderCanReadNewMetaPaimon10() throws Exception {
         ManifestList manifestList = createManifestList(tempDir.toString());
         List<ManifestFileMeta> metas = generateData();
         String manifestListName = manifestList.write(metas).getKey();
 
-        ManifestList legacyManifestList = createLegacyManifestListPaimon_1_0();
+        ManifestList legacyManifestList = createLegacyManifestListPaimon10();
         List<ManifestFileMeta> actualMetas = legacyManifestList.read(manifestListName);
-        assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon_1_0(metas));
+        assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon10(metas));
     }
 
-    private ManifestList createLegacyManifestListPaimon_1_0() {
+    private ManifestList createLegacyManifestListPaimon10() {
         FileStorePathFactory pathFactory = createPathFactory(tempDir.toString());
         RowType legacyMetaType =
                 VersionedObjectSerializer.versionType(
-                        LegacyManifestFileMetaSerializerPaimon_1_0.SCHEMA);
+                        LegacyManifestFileMetaSerializerPaimon10.SCHEMA);
         return new ManifestList(
                 LocalFileIO.create(),
-                new LegacyManifestFileMetaSerializerPaimon_1_0(),
+                new LegacyManifestFileMetaSerializerPaimon10(),
                 legacyMetaType,
                 avro.createReaderFactory(legacyMetaType),
                 avro.createWriterFactory(legacyMetaType),
@@ -126,7 +126,7 @@ public class ManifestListTest {
                 null);
     }
 
-    private List<ManifestFileMeta> getLegacyMetaPaimon_1_0(List<ManifestFileMeta> metas) {
+    private List<ManifestFileMeta> getLegacyMetaPaimon10(List<ManifestFileMeta> metas) {
         List<ManifestFileMeta> result = new ArrayList<>();
         for (ManifestFileMeta meta : metas) {
             result.add(

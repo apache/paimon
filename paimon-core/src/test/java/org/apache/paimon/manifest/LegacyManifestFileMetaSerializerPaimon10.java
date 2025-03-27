@@ -30,7 +30,8 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import java.util.Arrays;
 
-public class LegacyManifestFileMetaSerializerPaimon_1_0
+/** Legacy serializer for {@link ManifestFileMeta} in Paimon 1.0. */
+public class LegacyManifestFileMetaSerializerPaimon10
         extends VersionedObjectSerializer<ManifestFileMeta> {
 
     private static final long serialVersionUID = 1L;
@@ -47,7 +48,7 @@ public class LegacyManifestFileMetaSerializerPaimon_1_0
                             new DataField(4, "_PARTITION_STATS", SimpleStats.SCHEMA),
                             new DataField(5, "_SCHEMA_ID", new BigIntType(false))));
 
-    public LegacyManifestFileMetaSerializerPaimon_1_0() {
+    public LegacyManifestFileMetaSerializerPaimon10() {
         super(SCHEMA);
     }
 
