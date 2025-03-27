@@ -809,7 +809,7 @@ All available procedures are listed below.
          CALL [catalog.]sys.alter_view_dialect('view_identifier', 'update', 'flink', 'query')<br/>
          CALL [catalog.]sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'update', `query` => 'query')<br/><br/>
          -- drop dialect in the view<br/>
-         CALL [catalog.]sys.alter_view_dialect('view_identifier', 'drop', 'flink')<br/><br/>
+         CALL [catalog.]sys.alter_view_dialect('view_identifier', 'drop', 'flink')<br/>
          CALL [catalog.]sys.alter_view_dialect(`view` => 'view_identifier', `action` => 'drop')<br/><br/>
       </td>
       <td>
