@@ -186,6 +186,42 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+  /v1/catalogs/id/{id}:
+    get:
+      tags:
+        - Catalogs
+      operationId: getCatalogById
+      summary: Get a catalog by id
+      description: |
+        Gets the specified catalog.
+      parameters:
+        - name: id
+          in: path
+          description: The id of the catalog.
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The catalog was successfully retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetCatalogResponse'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
 components:
   schemas:
     CreateCatalogRequest:
