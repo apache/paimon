@@ -32,6 +32,9 @@ import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.HashMap;
@@ -473,13 +476,24 @@ public class AuthSessionTest {
 
     private AuthProvider generateDLFAuthProvider(
             Optional<Long> tokenRefreshInMillsOpt, String fileName, String serverUrl) {
-        Options options = new Options();
-        options.set(DLF_TOKEN_PATH.key(), folder.toUri() + "/" + fileName);
-        options.set(RESTCatalogOptions.URI.key(), serverUrl);
-        options.set(DLF_REGION.key(), "cn-hangzhou");
-        tokenRefreshInMillsOpt.ifPresent(
-                tokenRefreshInMills ->
-                        options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms"));
-        return AuthProviderFactory.createAuthProvider(AuthProviderEnum.DLF.identifier(), options);
+        try {
+            Path tokenPath = folder.resolve(fileName);
+            if (!Files.exists(tokenPath)) {
+                Files.createFile(tokenPath);
+            }
+
+            Options options = new Options();
+            options.set(DLF_TOKEN_PATH.key(), tokenPath.toUri().toString());
+            options.set(RESTCatalogOptions.URI.key(), serverUrl);
+            options.set(DLF_REGION.key(), "cn-hangzhou");
+
+            tokenRefreshInMillsOpt.ifPresent(
+                    refreshTime -> options.set(TOKEN_REFRESH_TIME.key(), refreshTime + "ms"));
+
+            return AuthProviderFactory.createAuthProvider(
+                    AuthProviderEnum.DLF.identifier(), options);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to create auth provider", e);
+        }
     }
 }
