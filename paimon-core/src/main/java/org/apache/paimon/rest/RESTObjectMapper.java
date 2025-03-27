@@ -18,42 +18,12 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeJsonParser;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Module;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-
-import static org.apache.paimon.utils.JsonSerdeUtil.registerJsonObjects;
 
 /** Object mapper for REST request and response. */
 public class RESTObjectMapper {
 
-    public static final ObjectMapper OBJECT_MAPPER = RESTObjectMapper.create();
-
-    private static ObjectMapper create() {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-        mapper.registerModule(createPaimonRestJacksonModule());
-        mapper.registerModule(new JavaTimeModule());
-        return mapper;
-    }
-
-    private static Module createPaimonRestJacksonModule() {
-        SimpleModule module = new SimpleModule("Paimon_REST");
-        registerJsonObjects(
-                module,
-                DataField.class,
-                DataField::serializeJson,
-                DataTypeJsonParser::parseDataField);
-        registerJsonObjects(
-                module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
-        return module;
-    }
+    public static final ObjectMapper OBJECT_MAPPER = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE;
 }

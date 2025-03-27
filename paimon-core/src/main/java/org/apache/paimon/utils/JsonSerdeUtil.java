@@ -29,9 +29,11 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationContext;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Module;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializerProvider;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
@@ -53,10 +55,12 @@ public class JsonSerdeUtil {
      * Object mapper shared instance to serialize and deserialize the plan. Note that creating and
      * copying of object mappers is expensive and should be avoided.
      */
-    private static final ObjectMapper OBJECT_MAPPER_INSTANCE;
+    public static final ObjectMapper OBJECT_MAPPER_INSTANCE;
 
     static {
         OBJECT_MAPPER_INSTANCE = new ObjectMapper();
+        OBJECT_MAPPER_INSTANCE.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        OBJECT_MAPPER_INSTANCE.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
         OBJECT_MAPPER_INSTANCE.registerModule(createPaimonJacksonModule());
         OBJECT_MAPPER_INSTANCE.registerModule(new JavaTimeModule());
     }
