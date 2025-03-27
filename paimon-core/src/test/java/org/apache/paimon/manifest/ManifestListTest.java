@@ -25,8 +25,10 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -84,6 +86,67 @@ public class ManifestListTest {
         assertThat(manifestListName.startsWith("manifest-list-")).isTrue();
     }
 
+    // ============================ Compatibility tests ===================================
+
+    @Test
+    public void testCanReadOldMetaPaimon_1_0() throws Exception {
+        ManifestList legacyManifestList = createLegacyManifestListPaimon_1_0();
+        List<ManifestFileMeta> metas = generateData();
+        String manifestListName = legacyManifestList.write(metas).getKey();
+
+        ManifestList manifestList = createManifestList(tempDir.toString());
+        List<ManifestFileMeta> actualMetas = manifestList.read(manifestListName);
+        assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon_1_0(metas));
+    }
+
+    @Test
+    public void testOldReaderCanReadNewMetaPaimon_1_0() throws Exception {
+        ManifestList manifestList = createManifestList(tempDir.toString());
+        List<ManifestFileMeta> metas = generateData();
+        String manifestListName = manifestList.write(metas).getKey();
+
+        ManifestList legacyManifestList = createLegacyManifestListPaimon_1_0();
+        List<ManifestFileMeta> actualMetas = legacyManifestList.read(manifestListName);
+        assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon_1_0(metas));
+    }
+
+    private ManifestList createLegacyManifestListPaimon_1_0() {
+        FileStorePathFactory pathFactory = createPathFactory(tempDir.toString());
+        RowType legacyMetaType =
+                VersionedObjectSerializer.versionType(
+                        LegacyManifestFileMetaSerializerPaimon_1_0.SCHEMA);
+        return new ManifestList(
+                LocalFileIO.create(),
+                new LegacyManifestFileMetaSerializerPaimon_1_0(),
+                legacyMetaType,
+                avro.createReaderFactory(legacyMetaType),
+                avro.createWriterFactory(legacyMetaType),
+                "zstd",
+                pathFactory.manifestListFactory(),
+                null);
+    }
+
+    private List<ManifestFileMeta> getLegacyMetaPaimon_1_0(List<ManifestFileMeta> metas) {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        for (ManifestFileMeta meta : metas) {
+            result.add(
+                    new ManifestFileMeta(
+                            meta.fileName(),
+                            meta.fileSize(),
+                            meta.numAddedFiles(),
+                            meta.numDeletedFiles(),
+                            meta.partitionStats(),
+                            meta.schemaId(),
+                            null,
+                            null,
+                            null,
+                            null));
+        }
+        return result;
+    }
+
+    // ============================ Test utils ===================================
+
     private List<ManifestFileMeta> generateData() {
         Random random = new Random();
         List<ManifestFileMeta> metas = new ArrayList<>();
@@ -97,22 +160,25 @@ public class ManifestListTest {
         return metas;
     }
 
+    private FileStorePathFactory createPathFactory(String pathStr) {
+        return new FileStorePathFactory(
+                new Path(pathStr),
+                TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                "default",
+                CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                null,
+                null);
+    }
+
     private ManifestList createManifestList(String pathStr) {
-        Path path = new Path(pathStr);
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(
-                        path,
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                        "default",
-                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
-                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
-                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
-                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
-                        CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        null,
-                        null);
-        return new ManifestList.Factory(FileIOFinder.find(path), avro, "zstd", pathFactory, null)
+        FileStorePathFactory pathFactory = createPathFactory(pathStr);
+        return new ManifestList.Factory(
+                        FileIOFinder.find(new Path(pathStr)), avro, "zstd", pathFactory, null)
                 .create();
     }
 }
