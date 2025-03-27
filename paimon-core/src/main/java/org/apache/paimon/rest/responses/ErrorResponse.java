@@ -66,17 +66,6 @@ public class ErrorResponse implements RESTResponse {
     @JsonProperty(FIELD_CODE)
     private final Integer code;
 
-    public ErrorResponse(
-            @Nullable String resourceType,
-            @Nullable String resourceName,
-            String message,
-            Integer code) {
-        this.resourceType = resourceType;
-        this.resourceName = resourceName;
-        this.code = code;
-        this.message = message;
-    }
-
     @JsonCreator
     public ErrorResponse(
             @Nullable @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
