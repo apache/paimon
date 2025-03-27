@@ -240,7 +240,7 @@ public class FileMetaUtils {
 
     public static BinaryRow writePartitionValue(
             RowType partitionRowType,
-            Map<String, String> partitionValues,
+            List<String> partitionValues,
             List<BinaryWriter.ValueSetter> valueSetters,
             String partitionDefaultName) {
 
@@ -250,7 +250,7 @@ public class FileMetaUtils {
         List<DataField> fields = partitionRowType.getFields();
 
         for (int i = 0; i < fields.size(); i++) {
-            String partitionName = partitionValues.get(fields.get(i).name());
+            String partitionName = partitionValues.get(i);
             if (partitionName.equals(partitionDefaultName)) {
                 binaryRowWriter.setNullAt(i);
             } else {
