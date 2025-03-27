@@ -81,15 +81,14 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void add(KeyValue kv) {
+        latestKv = kv;
         boolean isRetract =
                 kv.valueKind() != RowKind.INSERT && kv.valueKind() != RowKind.UPDATE_AFTER;
 
-        if (removeRecordOnDelete && isRetract) {
-            currentDeleteRow = true;
+        currentDeleteRow = removeRecordOnDelete && isRetract;
+        if (currentDeleteRow) {
             return;
         }
-
-        latestKv = kv;
 
         for (int i = 0; i < getters.length; i++) {
             FieldAggregator fieldAggregator = aggregators[i];
