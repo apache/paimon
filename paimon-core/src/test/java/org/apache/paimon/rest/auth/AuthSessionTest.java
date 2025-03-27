@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.utils.Pair;
@@ -26,9 +27,8 @@ import org.apache.paimon.utils.ThreadPoolUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.commons.io.FileUtils;
-import org.junit.Rule;
 import org.junit.jupiter.api.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
 import java.io.File;
@@ -65,8 +65,8 @@ import static org.mockito.Mockito.when;
 
 /** Test for {@link AuthSession}. */
 public class AuthSessionTest {
-
-    @Rule public TemporaryFolder folder = new TemporaryFolder();
+    
+    @TempDir public java.nio.file.Path folder;
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
 
     @Test
@@ -241,7 +241,7 @@ public class AuthSessionTest {
         // create options with token loader
         Options options = new Options();
         options.set(DLF_TOKEN_LOADER.key(), "local_file");
-        options.set(DLF_TOKEN_PATH.key(), folder.getRoot().getPath() + "/" + fileName);
+        options.set(DLF_TOKEN_PATH.key(), folder.toUri() + "/" + fileName);
         options.set(RESTCatalogOptions.URI.key(), "serverUrl");
         options.set(DLF_REGION.key(), "cn-hangzhou");
         options.set(TOKEN_REFRESH_TIME.key(), tokenRefreshInMills + "ms");
@@ -453,7 +453,7 @@ public class AuthSessionTest {
     }
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
-        File tokenFile = folder.newFile(fileName);
+        File tokenFile = folder.resolve(fileName).toFile();
         ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
         String expiration = now.format(TOKEN_DATE_FORMATTER);
         String secret = UUID.randomUUID().toString();
@@ -475,7 +475,7 @@ public class AuthSessionTest {
     private AuthProvider generateDLFAuthProvider(
             Optional<Long> tokenRefreshInMillsOpt, String fileName, String serverUrl) {
         Options options = new Options();
-        options.set(DLF_TOKEN_PATH.key(), folder.getRoot().getPath() + "/" + fileName);
+        options.set(DLF_TOKEN_PATH.key(), folder.toUri() + "/" + fileName);
         options.set(RESTCatalogOptions.URI.key(), serverUrl);
         options.set(DLF_REGION.key(), "cn-hangzhou");
         tokenRefreshInMillsOpt.ifPresent(
