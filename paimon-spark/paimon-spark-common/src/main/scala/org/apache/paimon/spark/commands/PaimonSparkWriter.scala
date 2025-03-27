@@ -311,6 +311,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           val commitMessage = new CommitMessageImpl(
             dvIndexFileMaintainer.getPartition,
             dvIndexFileMaintainer.getBucket,
+            null,
             DataIncrement.emptyIncrement(),
             CompactIncrement.emptyIncrement(),
             new IndexIncrement(added.map(_.indexFile).asJava, deleted.map(_.indexFile).asJava)
@@ -333,6 +334,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           new CommitMessageImpl(
             partition,
             bucket,
+            null,
             DataIncrement.emptyIncrement(),
             CompactIncrement.emptyIncrement(),
             new IndexIncrement(added.map(_.indexFile()).asJava, removed.map(_.indexFile()).asJava))

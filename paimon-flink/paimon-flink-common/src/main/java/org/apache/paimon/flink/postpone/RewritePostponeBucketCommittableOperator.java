@@ -33,6 +33,8 @@ import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -93,12 +95,14 @@ public class RewritePostponeBucketCommittableOperator
                 bucketFiles.entrySet()) {
             for (Map.Entry<Integer, BucketFiles> bucketEntry :
                     partitionEntry.getValue().entrySet()) {
+                BucketFiles bucketFiles = bucketEntry.getValue();
                 CommitMessageImpl message =
                         new CommitMessageImpl(
                                 partitionEntry.getKey(),
                                 bucketEntry.getKey(),
+                                bucketFiles.totalBuckets,
                                 DataIncrement.emptyIncrement(),
-                                bucketEntry.getValue().makeIncrement());
+                                bucketFiles.makeIncrement());
                 output.collect(
                         new StreamRecord<>(
                                 new Committable(checkpointId, Committable.Kind.FILE, message)));
@@ -112,6 +116,7 @@ public class RewritePostponeBucketCommittableOperator
         private final DataFilePathFactory pathFactory;
         private final FileIO fileIO;
 
+        private @Nullable Integer totalBuckets;
         private final Map<String, DataFileMeta> newFiles;
         private final List<DataFileMeta> compactBefore;
         private final List<DataFileMeta> compactAfter;
@@ -128,6 +133,8 @@ public class RewritePostponeBucketCommittableOperator
         }
 
         private void update(CommitMessageImpl message) {
+            totalBuckets = message.totalBuckets();
+
             for (DataFileMeta file : message.newFilesIncrement().newFiles()) {
                 newFiles.put(file.fileName(), file);
             }

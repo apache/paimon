@@ -28,9 +28,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -61,23 +59,22 @@ public class ManifestCommittableSerializerTest {
                 rnd.nextBoolean()
                         ? new ManifestCommittable(rnd.nextLong(), rnd.nextLong())
                         : new ManifestCommittable(rnd.nextLong(), null);
-        addFileCommittables(committable, row(0), 0);
-        addFileCommittables(committable, row(0), 1);
-        addFileCommittables(committable, row(1), 0);
-        addFileCommittables(committable, row(1), 1);
+        addFileCommittables(committable, row(0), 0, 2);
+        addFileCommittables(committable, row(0), 1, 2);
+        addFileCommittables(committable, row(1), 0, 2);
+        addFileCommittables(committable, row(1), 1, 2);
         return committable;
     }
 
     private static void addFileCommittables(
-            ManifestCommittable committable, BinaryRow partition, int bucket) {
-        List<CommitMessage> commitMessages = new ArrayList<>();
+            ManifestCommittable committable, BinaryRow partition, int bucket, int totalBuckets) {
         int length = ThreadLocalRandom.current().nextInt(10) + 1;
         for (int i = 0; i < length; i++) {
             DataIncrement dataIncrement = randomNewFilesIncrement();
             CompactIncrement compactIncrement = randomCompactIncrement();
             CommitMessage commitMessage =
-                    new CommitMessageImpl(partition, bucket, dataIncrement, compactIncrement);
-            commitMessages.add(commitMessage);
+                    new CommitMessageImpl(
+                            partition, bucket, totalBuckets, dataIncrement, compactIncrement);
             committable.addFileCommittable(commitMessage);
         }
 

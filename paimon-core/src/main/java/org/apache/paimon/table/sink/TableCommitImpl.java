@@ -300,7 +300,7 @@ public class TableCommitImpl implements InnerTableCommit {
                                 f -> nonExists.test(f) ? singletonList(f) : emptyList(),
                                 files));
 
-        if (nonExistFiles.size() > 0) {
+        if (!nonExistFiles.isEmpty()) {
             String message =
                     String.join(
                             "\n",

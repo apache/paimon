@@ -49,7 +49,7 @@ class MultiTableCommittableSerializerTest {
         DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
-                new CommitMessageImpl(row(0), 1, dataIncrement, compactIncrement);
+                new CommitMessageImpl(row(0), 1, 2, dataIncrement, compactIncrement);
         Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
 
         Arrays.asList(Tuple2.of("测试数据库", "用户信息表"), Tuple2.of("database", "table"))
@@ -82,7 +82,7 @@ class MultiTableCommittableSerializerTest {
         DataIncrement newFilesIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
-                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
+                new CommitMessageImpl(row(0), 1, 2, newFilesIncrement, compactIncrement);
         Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
 
         Arrays.asList(Tuple2.of("测试数据库", "用户信息表"), Tuple2.of("database", "table"))

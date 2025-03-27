@@ -65,6 +65,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -311,17 +312,17 @@ public class SnapshotReaderImpl implements SnapshotReader {
         FileStoreScan.Plan plan = scan.plan();
         @Nullable Snapshot snapshot = plan.snapshot();
 
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> files =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> grouped =
                 groupByPartFiles(plan.files(FileKind.ADD));
         if (options.scanPlanSortPartition()) {
-            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> newFiles = new LinkedHashMap<>();
-            files.entrySet().stream()
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> sorted = new LinkedHashMap<>();
+            grouped.entrySet().stream()
                     .sorted((o1, o2) -> partitionComparator().compare(o1.getKey(), o2.getKey()))
-                    .forEach(entry -> newFiles.put(entry.getKey(), entry.getValue()));
-            files = newFiles;
+                    .forEach(entry -> sorted.put(entry.getKey(), entry.getValue()));
+            grouped = sorted;
         }
         List<DataSplit> splits =
-                generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, files);
+                generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, grouped);
         return new PlanImpl(
                 plan.watermark(), snapshot == null ? null : snapshot.id(), (List) splits);
     }
@@ -330,7 +331,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             @Nullable Snapshot snapshot,
             boolean isStreaming,
             SplitGenerator splitGenerator,
-            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> groupedManifestEntries) {
         List<DataSplit> splits = new ArrayList<>();
         // Read deletion indexes at once to reduce file IO
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletionIndexFilesMap = null;
@@ -338,22 +339,28 @@ public class SnapshotReaderImpl implements SnapshotReader {
             deletionIndexFilesMap =
                     deletionVectors && snapshot != null
                             ? indexFileHandler.scan(
-                                    snapshot, DELETION_VECTORS_INDEX, groupedDataFiles.keySet())
+                                    snapshot,
+                                    DELETION_VECTORS_INDEX,
+                                    groupedManifestEntries.keySet())
                             : Collections.emptyMap();
         }
-        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
-                groupedDataFiles.entrySet()) {
+        for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> entry :
+                groupedManifestEntries.entrySet()) {
             BinaryRow partition = entry.getKey();
-            Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
-            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
+            Map<Integer, List<ManifestEntry>> buckets = entry.getValue();
+            for (Map.Entry<Integer, List<ManifestEntry>> bucketEntry : buckets.entrySet()) {
                 int bucket = bucketEntry.getKey();
-                List<DataFileMeta> bucketFiles = bucketEntry.getValue();
+                List<DataFileMeta> bucketFiles =
+                        bucketEntry.getValue().stream()
+                                .map(ManifestEntry::file)
+                                .collect(Collectors.toList());
                 DataSplit.Builder builder =
                         DataSplit.builder()
                                 .withSnapshot(
                                         snapshot == null ? FIRST_SNAPSHOT_ID - 1 : snapshot.id())
                                 .withPartition(partition)
                                 .withBucket(bucket)
+                                .withTotalBuckets(bucketEntry.getValue().get(0).totalBuckets())
                                 .isStreaming(isStreaming);
                 List<SplitGenerator.SplitGroup> splitGroups =
                         isStreaming
@@ -406,9 +413,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
         withMode(ScanMode.DELTA);
         FileStoreScan.Plan plan = scan.plan();
 
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(plan.files(FileKind.DELETE));
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
         Snapshot beforeSnapshot = snapshotManager.snapshot(plan.snapshot().id() - 1);
         return toChangesPlan(true, plan, beforeSnapshot, beforeFiles, dataFiles);
@@ -418,8 +425,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
             boolean isStreaming,
             FileStoreScan.Plan plan,
             Snapshot beforeSnapshot,
-            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles,
-            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles) {
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles,
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles) {
         Snapshot snapshot = plan.snapshot();
         List<DataSplit> splits = new ArrayList<>();
         Map<BinaryRow, Set<Integer>> buckets = new HashMap<>();
@@ -450,23 +457,38 @@ public class SnapshotReaderImpl implements SnapshotReader {
         for (Map.Entry<BinaryRow, Set<Integer>> entry : buckets.entrySet()) {
             BinaryRow part = entry.getKey();
             for (Integer bucket : entry.getValue()) {
-                List<DataFileMeta> before =
+                List<ManifestEntry> beforeEntries =
                         beforeFiles
                                 .getOrDefault(part, Collections.emptyMap())
                                 .getOrDefault(bucket, Collections.emptyList());
-                List<DataFileMeta> data =
+                List<ManifestEntry> dataEntries =
                         dataFiles
                                 .getOrDefault(part, Collections.emptyMap())
                                 .getOrDefault(bucket, Collections.emptyList());
 
                 // deduplicate
-                before.removeIf(data::remove);
+                beforeEntries.removeIf(dataEntries::remove);
+
+                Integer totalBuckets = null;
+                if (!dataEntries.isEmpty()) {
+                    totalBuckets = dataEntries.get(0).totalBuckets();
+                } else if (!beforeEntries.isEmpty()) {
+                    totalBuckets = beforeEntries.get(0).totalBuckets();
+                }
+
+                List<DataFileMeta> before =
+                        beforeEntries.stream()
+                                .map(ManifestEntry::file)
+                                .collect(Collectors.toList());
+                List<DataFileMeta> data =
+                        dataEntries.stream().map(ManifestEntry::file).collect(Collectors.toList());
 
                 DataSplit.Builder builder =
                         DataSplit.builder()
                                 .withSnapshot(snapshot.id())
                                 .withPartition(part)
                                 .withBucket(bucket)
+                                .withTotalBuckets(totalBuckets)
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
                                 .isStreaming(isStreaming)
@@ -497,9 +519,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
     public Plan readIncrementalDiff(Snapshot before) {
         withMode(ScanMode.ALL);
         FileStoreScan.Plan plan = scan.plan();
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
         return toChangesPlan(false, plan, before, beforeFiles, dataFiles);
     }

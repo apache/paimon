@@ -48,7 +48,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    private static final int CURRENT_VERSION = 6;
+    private static final int CURRENT_VERSION = 7;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
@@ -85,8 +85,18 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private void serialize(CommitMessage obj, DataOutputView view) throws IOException {
         CommitMessageImpl message = (CommitMessageImpl) obj;
+
         serializeBinaryRow(obj.partition(), view);
         view.writeInt(obj.bucket());
+
+        Integer totalBuckets = obj.totalBuckets();
+        if (totalBuckets != null) {
+            view.writeBoolean(true);
+            view.writeInt(totalBuckets);
+        } else {
+            view.writeBoolean(false);
+        }
+
         dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
         dataFileSerializer.serializeList(message.newFilesIncrement().deletedFiles(), view);
         dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
@@ -120,6 +130,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         return new CommitMessageImpl(
                 deserializeBinaryRow(view),
                 view.readInt(),
+                version >= 7 && view.readBoolean() ? view.readInt() : null,
                 new DataIncrement(
                         fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
                 new CompactIncrement(

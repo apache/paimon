@@ -49,19 +49,20 @@ object SparkDeletionVectors {
       root: Path,
       pathFactory: FileStorePathFactory,
       dataFilePathToMeta: Map[String, SparkDataFileMeta]): DataSplit = {
-    val (dataFiles, deletionFiles) = sparkDeletionVectors
+    val (dataFiles, deletionFiles, totalBuckets) = sparkDeletionVectors
       .relativePaths(pathFactory)
       .map {
         dataFile =>
           val meta = dataFilePathToMeta(dataFile)
-          (meta.dataFileMeta, meta.deletionFile.orNull)
+          (meta.dataFileMeta, meta.deletionFile.orNull, meta.totalBuckets)
       }
-      .unzip
+      .unzip3
     DataSplit
       .builder()
       .withBucketPath(root + "/" + sparkDeletionVectors.partitionAndBucket)
       .withPartition(SerializationUtils.deserializeBinaryRow(sparkDeletionVectors.partition))
       .withBucket(sparkDeletionVectors.bucket)
+      .withTotalBuckets(totalBuckets.head)
       .withDataFiles(dataFiles.toList.asJava)
       .withDataDeletionFiles(deletionFiles.toList.asJava)
       .rawConvertible(true)

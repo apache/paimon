@@ -83,10 +83,12 @@ public class FileMetaUtils {
                 .collect(Collectors.toList());
     }
 
-    public static CommitMessage commitFile(BinaryRow partition, List<DataFileMeta> dataFileMetas) {
+    public static CommitMessage commitFile(
+            BinaryRow partition, int totalBuckets, List<DataFileMeta> dataFileMetas) {
         return new CommitMessageImpl(
                 partition,
                 0,
+                totalBuckets,
                 new DataIncrement(dataFileMetas, Collections.emptyList(), Collections.emptyList()),
                 new CompactIncrement(
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));

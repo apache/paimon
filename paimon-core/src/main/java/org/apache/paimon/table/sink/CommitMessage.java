@@ -21,6 +21,8 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 
 /**
@@ -36,4 +38,8 @@ public interface CommitMessage extends Serializable {
 
     /** Bucket of this commit message. */
     int bucket();
+
+    /** Total number of buckets in this partition. */
+    @Nullable
+    Integer totalBuckets();
 }

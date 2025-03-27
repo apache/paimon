@@ -336,6 +336,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
+                                                    1,
                                                     new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
@@ -353,6 +354,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
+                                                    1,
                                                     new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
@@ -369,6 +371,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
+                                                    1,
                                                     new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
@@ -404,6 +407,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
+                                                    1,
                                                     new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
@@ -421,6 +425,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
+                                                    1,
                                                     new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
@@ -437,6 +442,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
+                                                    1,
                                                     new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
