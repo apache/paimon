@@ -438,9 +438,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        int totalBuckets = numBuckets;
+        int totalBuckets;
         if (!ignorePreviousFiles && latestSnapshot != null) {
             totalBuckets = scanExistingFileMetas(latestSnapshot, partition, bucket, restoreFiles);
+        } else {
+            totalBuckets = getDefaultBucketNum(partition);
         }
 
         IndexMaintainer<T> indexMaintainer =
@@ -490,7 +492,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             List<DataFileMeta> existingFileMetas) {
         List<ManifestEntry> files =
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
-        int totalBuckets = numBuckets;
+        int totalBuckets = getDefaultBucketNum(partition);
         for (ManifestEntry entry : files) {
             if (!ignoreNumBucketCheck && entry.totalBuckets() != numBuckets) {
                 String partInfo =
@@ -512,6 +514,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             existingFileMetas.add(entry.file());
         }
         return totalBuckets;
+    }
+
+    // TODO see comments on FileStoreWrite#withIgnoreNumBucketCheck for what is needed to support
+    //  writing partitions with different buckets
+    public int getDefaultBucketNum(BinaryRow partition) {
+        return numBuckets;
     }
 
     private ExecutorService compactExecutor() {
@@ -558,12 +566,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         protected WriterContainer(
                 RecordWriter<T> writer,
-                int totalBUckets,
+                int totalBuckets,
                 @Nullable IndexMaintainer<T> indexMaintainer,
                 @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
                 Long baseSnapshotId) {
             this.writer = writer;
-            this.totalBuckets = totalBUckets;
+            this.totalBuckets = totalBuckets;
             this.indexMaintainer = indexMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
             this.baseSnapshotId =
