@@ -100,6 +100,8 @@ public interface ReadBuilder extends Serializable {
     /** Push partition filter. */
     ReadBuilder withPartitionFilter(Map<String, String> partitionSpec);
 
+    ReadBuilder withBucket(int bucket);
+
     /**
      * Push bucket filter. Note that this method cannot be used simultaneously with {@link
      * #withShard(int, int)}.

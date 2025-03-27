@@ -22,15 +22,34 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
-/** Serializer for {@link ManifestFileMeta}. */
-public class ManifestFileMetaSerializer extends VersionedObjectSerializer<ManifestFileMeta> {
+import java.util.Arrays;
+
+/** Legacy serializer for {@link ManifestFileMeta} in Paimon 1.0. */
+public class LegacyManifestFileMetaSerializerPaimon10
+        extends VersionedObjectSerializer<ManifestFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
-    public ManifestFileMetaSerializer() {
-        super(ManifestFileMeta.SCHEMA);
+    public static final RowType SCHEMA =
+            new RowType(
+                    false,
+                    Arrays.asList(
+                            new DataField(
+                                    0, "_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)),
+                            new DataField(1, "_FILE_SIZE", new BigIntType(false)),
+                            new DataField(2, "_NUM_ADDED_FILES", new BigIntType(false)),
+                            new DataField(3, "_NUM_DELETED_FILES", new BigIntType(false)),
+                            new DataField(4, "_PARTITION_STATS", SimpleStats.SCHEMA),
+                            new DataField(5, "_SCHEMA_ID", new BigIntType(false))));
+
+    public LegacyManifestFileMetaSerializerPaimon10() {
+        super(SCHEMA);
     }
 
     @Override
@@ -46,11 +65,7 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 meta.numAddedFiles(),
                 meta.numDeletedFiles(),
                 meta.partitionStats().toRow(),
-                meta.schemaId(),
-                meta.minBucket(),
-                meta.maxBucket(),
-                meta.minLevel(),
-                meta.maxLevel());
+                meta.schemaId());
     }
 
     @Override
@@ -72,9 +87,9 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 row.getLong(3),
                 SimpleStats.fromRow(row.getRow(4, 3)),
                 row.getLong(5),
-                row.isNullAt(6) ? null : row.getInt(6),
-                row.isNullAt(7) ? null : row.getInt(7),
-                row.isNullAt(8) ? null : row.getInt(8),
-                row.isNullAt(9) ? null : row.getInt(9));
+                null,
+                null,
+                null,
+                null);
     }
 }
