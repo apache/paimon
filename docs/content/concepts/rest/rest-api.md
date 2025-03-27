@@ -24,5 +24,5 @@ under the License.
 -->
 
 <body>
-    {{< redoc >}}
+    {{< redoc_rest_catalog_api >}}
 </body>
