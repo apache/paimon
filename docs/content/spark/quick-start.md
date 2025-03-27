@@ -224,11 +224,10 @@ SELECT * FROM my_table;
 
 ```scala
 -- you can use
-val dataset = spark.read.format("paimon").table("my_table")
+spark.read.format("paimon").table("my_table").show()
 
 -- or
-val dataset = spark.read.format("paimon").load("file:/tmp/paimon/default.db/my_table")
-dataset.show()
+spark.read.format("paimon").load("file:/tmp/paimon/default.db/my_table").show()
 
 /*
 +---+------+
