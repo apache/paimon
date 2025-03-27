@@ -24,6 +24,10 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldIgnoreRetractAgg;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.Preconditions;
+
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
 
 /** Factory for {@link FieldAggregator}. */
 public interface FieldAggregatorFactory extends Factory {
@@ -46,10 +50,17 @@ public interface FieldAggregatorFactory extends Factory {
                             aggFuncName));
         }
 
+        boolean removeRecordOnRetract = options.aggregationRemoveRecordOnDelete();
+        boolean fieldIgnoreRetract = options.fieldAggIgnoreRetract(fieldName);
+        Preconditions.checkState(
+                !(removeRecordOnRetract && fieldIgnoreRetract),
+                String.format(
+                        "%s and %s have conflicting behavior so should not be enabled at the same time.",
+                        CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE,
+                        FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT));
+
         FieldAggregator fieldAggregator =
                 fieldAggregatorFactory.create(fieldType, options, fieldName);
-        return options.fieldAggIgnoreRetract(fieldName)
-                ? new FieldIgnoreRetractAgg(fieldAggregator)
-                : fieldAggregator;
+        return fieldIgnoreRetract ? new FieldIgnoreRetractAgg(fieldAggregator) : fieldAggregator;
     }
 }
