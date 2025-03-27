@@ -194,7 +194,8 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<String> listDatabasesPaged(Integer maxResults, String pageToken) {
+    public PagedList<String> listDatabasesPaged(
+            @Nullable Integer maxResults, @Nullable String pageToken) {
         ListDatabasesResponse response =
                 client.get(
                         resourcePaths.databases(),
