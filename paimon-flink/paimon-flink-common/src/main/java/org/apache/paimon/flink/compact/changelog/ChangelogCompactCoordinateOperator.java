@@ -107,6 +107,7 @@ public class ChangelogCompactCoordinateOperator
                 new CommitMessageImpl(
                         message.partition(),
                         message.bucket(),
+                        message.totalBuckets(),
                         new DataIncrement(
                                 message.newFilesIncrement().newFiles(),
                                 message.newFilesIncrement().deletedFiles(),
@@ -137,6 +138,7 @@ public class ChangelogCompactCoordinateOperator
                                 new ChangelogCompactTask(
                                         checkpointId,
                                         partition,
+                                        table.coreOptions().bucket(),
                                         partitionChangelog.newFileChangelogFiles,
                                         partitionChangelog.compactChangelogFiles))));
         partitionChangelogs.remove(partition);

@@ -33,6 +33,7 @@ under the License.
 
     <properties>
         <generated.docs.dir>./docs/layouts/shortcodes/generated</generated.docs.dir>
+        <static.docs.dir>./docs/static</static.docs.dir>
     </properties>
 
     <dependencies>
@@ -158,6 +159,12 @@ under the License.
                                             <arg value="${rootDir}/${generated.docs.dir}/"/>
                                             <arg value="${rootDir}"/>
                                         </java>
+                                        <mkdir dir="${project.basedir}/../${static.docs.dir}"/>
+                                        <copy todir="${project.basedir}/../${static.docs.dir}">
+                                            <fileset dir="${project.basedir}/../paimon-open-api">
+                                                <include name="rest-catalog-open-api.yaml"/>
+                                            </fileset>
+                                        </copy>
                                     </target>
                                 </configuration>
                             </execution>

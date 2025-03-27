@@ -49,18 +49,22 @@ import java.util.UUID;
  * file, in order to reduce the number of small files.
  */
 public class ChangelogCompactTask implements Serializable {
+
     private final long checkpointId;
     private final BinaryRow partition;
+    private final int totalBuckets;
     private final Map<Integer, List<DataFileMeta>> newFileChangelogFiles;
     private final Map<Integer, List<DataFileMeta>> compactChangelogFiles;
 
     public ChangelogCompactTask(
             long checkpointId,
             BinaryRow partition,
+            int totalBuckets,
             Map<Integer, List<DataFileMeta>> newFileChangelogFiles,
             Map<Integer, List<DataFileMeta>> compactChangelogFiles) {
         this.checkpointId = checkpointId;
         this.partition = partition;
+        this.totalBuckets = totalBuckets;
         this.newFileChangelogFiles = newFileChangelogFiles;
         this.compactChangelogFiles = compactChangelogFiles;
     }
@@ -71,6 +75,10 @@ public class ChangelogCompactTask implements Serializable {
 
     public BinaryRow partition() {
         return partition;
+    }
+
+    public int totalBuckets() {
+        return totalBuckets;
     }
 
     public Map<Integer, List<DataFileMeta>> newFileChangelogFiles() {
@@ -204,6 +212,7 @@ public class ChangelogCompactTask implements Serializable {
                     new CommitMessageImpl(
                             partition,
                             entry.getKey(),
+                            totalBuckets,
                             new DataIncrement(
                                     Collections.emptyList(),
                                     Collections.emptyList(),

@@ -109,6 +109,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         return new CommitMessageImpl(
                 partition,
                 bucket,
+                options().bucket(),
                 DataIncrement.emptyIncrement(),
                 CompactIncrement.emptyIncrement(),
                 new IndexIncrement(Collections.emptyList(), indexFileMetas));
@@ -143,6 +144,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         return new CommitMessageImpl(
                 partition,
                 bucket,
+                options().bucket(),
                 DataIncrement.emptyIncrement(),
                 CompactIncrement.emptyIncrement(),
                 new IndexIncrement(dvMaintainer.writeDeletionVectorsIndex()));

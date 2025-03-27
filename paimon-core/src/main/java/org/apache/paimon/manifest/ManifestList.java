@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -26,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
@@ -44,9 +46,10 @@ import java.util.List;
  */
 public class ManifestList extends ObjectsFile<ManifestFileMeta> {
 
-    private ManifestList(
+    @VisibleForTesting
+    public ManifestList(
             FileIO fileIO,
-            ManifestFileMetaSerializer serializer,
+            ObjectSerializer<ManifestFileMeta> serializer,
             RowType schema,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,

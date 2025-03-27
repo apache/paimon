@@ -47,6 +47,10 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
+    default InnerTableScan withBucket(int bucket) {
+        return this;
+    }
+
     default InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         return this;
     }

@@ -58,12 +58,13 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 5;
+    private static final int VERSION = 6;
 
     private long snapshotId = 0;
     private BinaryRow partition;
     private int bucket = -1;
     private String bucketPath;
+    @Nullable private Integer totalBuckets;
 
     private List<DataFileMeta> beforeFiles = new ArrayList<>();
     @Nullable private List<DeletionFile> beforeDeletionFiles;
@@ -90,6 +91,10 @@ public class DataSplit implements Split {
 
     public String bucketPath() {
         return bucketPath;
+    }
+
+    public @Nullable Integer totalBuckets() {
+        return totalBuckets;
     }
 
     public List<DataFileMeta> beforeFiles() {
@@ -276,6 +281,7 @@ public class DataSplit implements Split {
                 && rawConvertible == dataSplit.rawConvertible
                 && Objects.equals(partition, dataSplit.partition)
                 && Objects.equals(bucketPath, dataSplit.bucketPath)
+                && Objects.equals(totalBuckets, dataSplit.totalBuckets)
                 && Objects.equals(beforeFiles, dataSplit.beforeFiles)
                 && Objects.equals(beforeDeletionFiles, dataSplit.beforeDeletionFiles)
                 && Objects.equals(dataFiles, dataSplit.dataFiles)
@@ -289,6 +295,7 @@ public class DataSplit implements Split {
                 partition,
                 bucket,
                 bucketPath,
+                totalBuckets,
                 beforeFiles,
                 beforeDeletionFiles,
                 dataFiles,
@@ -310,6 +317,7 @@ public class DataSplit implements Split {
         this.partition = other.partition;
         this.bucket = other.bucket;
         this.bucketPath = other.bucketPath;
+        this.totalBuckets = other.totalBuckets;
         this.beforeFiles = other.beforeFiles;
         this.beforeDeletionFiles = other.beforeDeletionFiles;
         this.dataFiles = other.dataFiles;
@@ -325,6 +333,12 @@ public class DataSplit implements Split {
         SerializationUtils.serializeBinaryRow(partition, out);
         out.writeInt(bucket);
         out.writeUTF(bucketPath);
+        if (totalBuckets != null) {
+            out.writeBoolean(true);
+            out.writeInt(totalBuckets);
+        } else {
+            out.writeBoolean(false);
+        }
 
         DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
         out.writeInt(beforeFiles.size());
@@ -354,6 +368,7 @@ public class DataSplit implements Split {
         BinaryRow partition = SerializationUtils.deserializeBinaryRow(in);
         int bucket = in.readInt();
         String bucketPath = in.readUTF();
+        Integer totalBuckets = version >= 6 && in.readBoolean() ? in.readInt() : null;
 
         FunctionWithIOException<DataInputView, DataFileMeta> dataFileSer =
                 getFileMetaSerde(version);
@@ -385,6 +400,7 @@ public class DataSplit implements Split {
                         .withPartition(partition)
                         .withBucket(bucket)
                         .withBucketPath(bucketPath)
+                        .withTotalBuckets(totalBuckets)
                         .withBeforeFiles(beforeFiles)
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
@@ -455,6 +471,11 @@ public class DataSplit implements Split {
 
         public Builder withBucketPath(String bucketPath) {
             this.split.bucketPath = bucketPath;
+            return this;
+        }
+
+        public Builder withTotalBuckets(Integer totalBuckets) {
+            this.split.totalBuckets = totalBuckets;
             return this;
         }
 

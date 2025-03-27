@@ -174,6 +174,7 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
                         new CommitMessageImpl(
                                 reuse,
                                 entry.getKey(),
+                                table.coreOptions().bucket(),
                                 new DataIncrement(
                                         Collections.emptyList(),
                                         new ArrayList<>(entry.getValue().values()),

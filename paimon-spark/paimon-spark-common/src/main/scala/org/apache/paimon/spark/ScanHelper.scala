@@ -137,6 +137,7 @@ trait ScanHelper extends Logging {
       .withSnapshot(split.snapshotId())
       .withPartition(split.partition())
       .withBucket(split.bucket())
+      .withTotalBuckets(split.totalBuckets())
       .withDataFiles(dataFiles.toList.asJava)
       .rawConvertible(split.rawConvertible)
       .withBucketPath(split.bucketPath)

@@ -58,6 +58,8 @@ public class TestCommitThread extends Thread {
     private final RowType valueType;
     private final boolean enableOverwrite;
     private final Map<BinaryRow, List<KeyValue>> data;
+    private final int totalBuckets;
+
     private final Map<BinaryRow, List<KeyValue>> result;
     private final Map<BinaryRow, MergeTreeWriter> writers;
     private final Set<BinaryRow> writtenPartitions;
@@ -79,6 +81,8 @@ public class TestCommitThread extends Thread {
         this.valueType = valueType;
         this.enableOverwrite = enableOverwrite;
         this.data = data;
+        this.totalBuckets = testStore.options().bucket();
+
         this.result = new HashMap<>();
         this.writers = new HashMap<>();
         this.writtenPartitions = new HashSet<>();
@@ -140,7 +144,11 @@ public class TestCommitThread extends Thread {
             CommitIncrement inc = entry.getValue().prepareCommit(true);
             committable.addFileCommittable(
                     new CommitMessageImpl(
-                            entry.getKey(), 0, inc.newFilesIncrement(), inc.compactIncrement()));
+                            entry.getKey(),
+                            0,
+                            totalBuckets,
+                            inc.newFilesIncrement(),
+                            inc.compactIncrement()));
         }
 
         runWithRetry(committable, () -> commit.commit(committable, Collections.emptyMap()));
@@ -152,7 +160,11 @@ public class TestCommitThread extends Thread {
         CommitIncrement inc = writers.get(partition).prepareCommit(true);
         committable.addFileCommittable(
                 new CommitMessageImpl(
-                        partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
+                        partition,
+                        0,
+                        totalBuckets,
+                        inc.newFilesIncrement(),
+                        inc.compactIncrement()));
 
         runWithRetry(
                 committable,
@@ -175,7 +187,11 @@ public class TestCommitThread extends Thread {
                     CommitIncrement inc = writer.prepareCommit(true);
                     committable.addFileCommittable(
                             new CommitMessageImpl(
-                                    partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
+                                    partition,
+                                    0,
+                                    totalBuckets,
+                                    inc.newFilesIncrement(),
+                                    inc.compactIncrement()));
                 }
                 commit.commit(committable, Collections.emptyMap());
                 break;

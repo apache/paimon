@@ -271,6 +271,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
           new CommitMessageImpl(
             partition,
             bucket,
+            files.head.totalBuckets,
             new DataIncrement(
               Collections.emptyList[DataFileMeta],
               deletedDataFileMetas,

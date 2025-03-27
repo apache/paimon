@@ -45,7 +45,7 @@ public class CommittableSerializerTest {
         DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage committable =
-                new CommitMessageImpl(row(0), 1, dataIncrement, compactIncrement);
+                new CommitMessageImpl(row(0), 1, 2, dataIncrement, compactIncrement);
         CommitMessage newCommittable =
                 (CommitMessage)
                         serializer

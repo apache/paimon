@@ -340,6 +340,7 @@ public class TestFileStore extends KeyValueFileStore {
                         new CommitMessageImpl(
                                 entryWithPartition.getKey(),
                                 entryWithBucket.getKey(),
+                                options().bucket(),
                                 increment.newFilesIncrement(),
                                 increment.compactIncrement(),
                                 new IndexIncrement(indexFiles)));

@@ -108,6 +108,7 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
                                         .withPartition(dataSplit.partition())
                                         .withBucket(dataSplit.bucket())
                                         .withBucketPath(dataSplit.bucketPath())
+                                        .withTotalBuckets(dataSplit.totalBuckets())
                                         .withDataFiles(Collections.singletonList(meta))
                                         .isStreaming(false)
                                         .build();

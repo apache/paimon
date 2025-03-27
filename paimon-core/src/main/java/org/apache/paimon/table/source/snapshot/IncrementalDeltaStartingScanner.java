@@ -20,7 +20,6 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -71,7 +70,7 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader reader) {
-        Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new ConcurrentHashMap<>();
+        Map<Pair<BinaryRow, Integer>, List<ManifestEntry>> grouped = new ConcurrentHashMap<>();
         ManifestsReader manifestsReader = reader.manifestsReader();
 
         List<Long> snapshots =
@@ -114,29 +113,28 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
             ManifestEntry entry = entries.next();
             checkArgument(
                     entry.kind() == FileKind.ADD, "Delta or changelog should only have ADD files.");
-            grouped.compute(
-                    Pair.of(entry.partition(), entry.bucket()),
-                    (key, files) -> {
-                        if (files == null) {
-                            files = new ArrayList<>();
-                        }
-                        files.add(entry.file());
-                        return files;
-                    });
+            grouped.computeIfAbsent(
+                            Pair.of(entry.partition(), entry.bucket()), ignore -> new ArrayList<>())
+                    .add(entry);
         }
 
         List<Split> result = new ArrayList<>();
-        for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {
+        for (Map.Entry<Pair<BinaryRow, Integer>, List<ManifestEntry>> entry : grouped.entrySet()) {
             BinaryRow partition = entry.getKey().getLeft();
             int bucket = entry.getKey().getRight();
             String bucketPath = reader.pathFactory().bucketPath(partition, bucket).toString();
             for (SplitGenerator.SplitGroup splitGroup :
-                    reader.splitGenerator().splitForBatch(entry.getValue())) {
+                    reader.splitGenerator()
+                            .splitForBatch(
+                                    entry.getValue().stream()
+                                            .map(ManifestEntry::file)
+                                            .collect(Collectors.toList()))) {
                 DataSplit.Builder dataSplitBuilder =
                         DataSplit.builder()
                                 .withSnapshot(endingSnapshotId)
                                 .withPartition(partition)
                                 .withBucket(bucket)
+                                .withTotalBuckets(entry.getValue().get(0).totalBuckets())
                                 .withDataFiles(splitGroup.files)
                                 .rawConvertible(splitGroup.rawConvertible)
                                 .withBucketPath(bucketPath);

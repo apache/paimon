@@ -71,6 +71,7 @@ public class CommitMessageLegacyV2Serializer {
         return new CommitMessageImpl(
                 deserializeBinaryRow(view),
                 view.readInt(),
+                null,
                 new DataIncrement(
                         dataFileSerializer.deserializeList(view),
                         Collections.emptyList(),

@@ -66,6 +66,7 @@ case class SparkRemoveUnexistingFiles(
                     val message = new CommitMessageImpl(
                       reuse,
                       bucket,
+                      table.coreOptions().bucket(),
                       new DataIncrement(
                         Collections.emptyList(),
                         new util.ArrayList[DataFileMeta](metaMap.values()),
