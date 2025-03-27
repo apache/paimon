@@ -126,7 +126,7 @@ public abstract class SchemaEvolutionTableTestBase {
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
@@ -135,7 +135,7 @@ public abstract class SchemaEvolutionTableTestBase {
     }
 
     @AfterEach
-    public void after() throws IOException {
+    void after() throws IOException {
         // assert all connections are closed
         java.util.function.Predicate<Path> pathPredicate =
                 path -> path.toString().contains(tempDir.toString());

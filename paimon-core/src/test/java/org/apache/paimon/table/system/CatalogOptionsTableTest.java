@@ -64,7 +64,7 @@ public class CatalogOptionsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testCatalogOptionsTable() throws Exception {
+    void testCatalogOptionsTable() throws Exception {
         List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(catalogOptionsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);

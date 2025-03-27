@@ -36,7 +36,7 @@ import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedEx
 public class ManifestReadThreadPoolTest {
 
     @Test
-    public void testParallelismBatchIterable() {
+    void testParallelismBatchIterable() {
         List<Integer> nums = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++) {
@@ -53,7 +53,7 @@ public class ManifestReadThreadPoolTest {
     }
 
     @Test
-    public void testParallelismBatchIterable2() {
+    void testParallelismBatchIterable2() {
         List<Integer> nums = new ArrayList<>();
 
         for (int i = 0; i < 12345; i++) {
@@ -70,7 +70,7 @@ public class ManifestReadThreadPoolTest {
     }
 
     @Test
-    public void testParallelismBatchIterable3() {
+    void testParallelismBatchIterable3() {
         List<Integer> nums = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++) {
@@ -92,7 +92,7 @@ public class ManifestReadThreadPoolTest {
     }
 
     @Test
-    public void testParallelismBatchIterable4() {
+    void testParallelismBatchIterable4() {
         List<Integer> nums = new ArrayList<>();
 
         for (int i = 0; i < 12345; i++) {
@@ -114,7 +114,7 @@ public class ManifestReadThreadPoolTest {
     }
 
     @Test
-    public void testForEmptyInput() {
+    void testForEmptyInput() {
         Iterable<Integer> re =
                 sequentialBatchedExecute(
                         i -> singletonList(i + 1), (List<Integer>) Collections.EMPTY_LIST, null);
@@ -122,14 +122,14 @@ public class ManifestReadThreadPoolTest {
     }
 
     @Test
-    public void testForSingletonInput() {
+    void testForSingletonInput() {
         Iterable<Integer> re =
                 sequentialBatchedExecute(i -> singletonList(i + 1), singletonList(1), null);
         re.forEach(i -> Assertions.assertThat(i).isEqualTo(2));
     }
 
     @Test
-    public void testDifferentQueueSizeWithFilterElement() {
+    void testDifferentQueueSizeWithFilterElement() {
         for (int queueSize = 1; queueSize < 20; queueSize++) {
             Iterable<Integer> re =
                     sequentialBatchedExecute(

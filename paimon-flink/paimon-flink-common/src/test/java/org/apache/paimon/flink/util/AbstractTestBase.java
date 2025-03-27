@@ -68,7 +68,7 @@ public class AbstractTestBase {
     @TempDir protected static Path temporaryFolder;
 
     @AfterEach
-    public final void cleanupRunningJobs() throws Exception {
+    final void cleanupRunningJobs() throws Exception {
         ClusterClient<?> clusterClient = MINI_CLUSTER_EXTENSION.createRestClusterClient();
         for (JobStatusMessage path : clusterClient.listJobs().get()) {
             if (!path.getJobState().isTerminalState()) {

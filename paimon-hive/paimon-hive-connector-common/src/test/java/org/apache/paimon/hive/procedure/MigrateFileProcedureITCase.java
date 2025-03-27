@@ -46,12 +46,12 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
     private static final int PORT = 9085;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         TEST_HIVE_METASTORE.stop();
     }
 
@@ -61,7 +61,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testMigrateFile(String format) throws Exception {
+    void testMigrateFile(String format) throws Exception {
         test(format);
         testMigrateFileAction(format);
     }

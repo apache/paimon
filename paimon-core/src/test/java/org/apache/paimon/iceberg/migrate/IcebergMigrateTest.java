@@ -117,7 +117,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testMigrateOnlyAdd(boolean isPartitioned) throws Exception {
+    void testMigrateOnlyAdd(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
         writeInitialData(icebergTable, format, isPartitioned);
@@ -156,7 +156,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testMigrateAddAndDelete(boolean isPartitioned) throws Exception {
+    void testMigrateAddAndDelete(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
         writeInitialData(icebergTable, format, isPartitioned);
@@ -191,7 +191,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testMigrateWithDeleteFile(boolean isPartitioned) throws Exception {
+    void testMigrateWithDeleteFile(boolean isPartitioned) throws Exception {
         // only support create delete file with parquet format
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
@@ -242,7 +242,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testMigrateWithRandomIcebergData(boolean isPartitioned) throws Exception {
+    void testMigrateWithRandomIcebergData(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
 
@@ -292,7 +292,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testDeleteColumn(boolean isPartitioned) throws Exception {
+    void testDeleteColumn(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
         writeInitialData(icebergTable, format, isPartitioned);
@@ -342,7 +342,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testRenameColumn(boolean isPartitioned) throws Exception {
+    void testRenameColumn(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
         writeInitialData(icebergTable, format, isPartitioned);
@@ -392,7 +392,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testAddColumn(boolean isPartitioned) throws Exception {
+    void testAddColumn(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
         writeInitialData(icebergTable, format, isPartitioned);
@@ -442,7 +442,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testReorderColumn(boolean isPartitioned) throws Exception {
+    void testReorderColumn(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
         writeInitialData(icebergTable, format, isPartitioned);
@@ -492,7 +492,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testUpdateColumn(boolean isPartitioned) throws Exception {
+    void testUpdateColumn(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         String format = "parquet";
         writeInitialData(icebergTable, format, isPartitioned);
@@ -542,7 +542,7 @@ public class IcebergMigrateTest {
 
     @ParameterizedTest(name = "isPartitioned = {0}")
     @ValueSource(booleans = {true, false})
-    public void testMigrateWithRandomIcebergEvolution(boolean isPartitioned) throws Exception {
+    void testMigrateWithRandomIcebergEvolution(boolean isPartitioned) throws Exception {
         Table icebergTable = createIcebergTable(isPartitioned);
         icebergTable.updateSchema().addColumn("v2", Types.IntegerType.get()).commit();
         String format = "parquet";
@@ -662,7 +662,7 @@ public class IcebergMigrateTest {
     }
 
     @Test
-    public void testAllDataTypes() throws Exception {
+    void testAllDataTypes() throws Exception {
         Schema iceAllTypesSchema =
                 new Schema(
                         Types.NestedField.required(1, "c1", Types.BooleanType.get()),
@@ -717,7 +717,7 @@ public class IcebergMigrateTest {
     }
 
     @Test
-    public void testNestedDataTypes() throws Exception {
+    void testNestedDataTypes() throws Exception {
         // iceberg nested schema
         // table {
         //  1: c1: required list<string>

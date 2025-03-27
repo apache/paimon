@@ -75,7 +75,7 @@ public class SnapshotReaderTest {
     }
 
     @Test
-    public void testGetPrimaryKeyRawFiles() throws Exception {
+    void testGetPrimaryKeyRawFiles() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.STRING(), DataTypes.INT(), DataTypes.BIGINT()},
@@ -174,7 +174,7 @@ public class SnapshotReaderTest {
     }
 
     @Test
-    public void testGetAppendOnlyRawFiles() throws Exception {
+    void testGetAppendOnlyRawFiles() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
@@ -261,7 +261,7 @@ public class SnapshotReaderTest {
     }
 
     @Test
-    public void testGetAppendOnlyIndexFiles() throws Exception {
+    void testGetAppendOnlyIndexFiles() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},

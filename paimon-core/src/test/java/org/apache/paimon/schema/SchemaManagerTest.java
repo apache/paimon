@@ -85,7 +85,7 @@ public class SchemaManagerTest {
             new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
 
     @BeforeEach
-    public void beforeEach() throws IOException {
+    void beforeEach() throws IOException {
         // for failure tests
         String failingName = UUID.randomUUID().toString();
         FailingFileIO.reset(failingName, 100, 100);
@@ -95,7 +95,7 @@ public class SchemaManagerTest {
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         // assert no temp file
         File schema = new File(tempDir.toFile(), "schema");
         if (schema.exists()) {

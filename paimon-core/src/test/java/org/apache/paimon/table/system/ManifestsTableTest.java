@@ -98,14 +98,14 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadManifestsFromLatest() throws Exception {
+    void testReadManifestsFromLatest() throws Exception {
         List<InternalRow> expectedRow = getExpectedResult(2L);
         List<InternalRow> result = read(manifestsTable);
         assertThat(result).containsExactlyElementsOf(expectedRow);
     }
 
     @Test
-    public void testReadManifestsFromSpecifiedSnapshot() throws Exception {
+    void testReadManifestsFromSpecifiedSnapshot() throws Exception {
         List<InternalRow> expectedRow = getExpectedResult(1L);
         manifestsTable =
                 (ManifestsTable)
@@ -116,7 +116,7 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadManifestsFromSpecifiedTagName() throws Exception {
+    void testReadManifestsFromSpecifiedTagName() throws Exception {
         List<InternalRow> expectedRow = getExpectedResult(1L);
         table.createTag("tag1", 1L);
         manifestsTable =
@@ -137,7 +137,7 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadManifestsFromSpecifiedTimestampMillis() throws Exception {
+    void testReadManifestsFromSpecifiedTimestampMillis() throws Exception {
         write(table, GenericRow.of(3, 1, 1), GenericRow.of(3, 2, 1));
         List<InternalRow> expectedRow = getExpectedResult(3L);
         manifestsTable =
@@ -151,7 +151,7 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadManifestsFromNotExistSnapshot() {
+    void testReadManifestsFromNotExistSnapshot() {
         manifestsTable =
                 (ManifestsTable)
                         manifestsTable.copy(

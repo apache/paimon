@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
 
     @Test
-    public void testScan() throws Exception {
+    void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write =
                 table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
@@ -83,7 +83,7 @@ public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
     }
 
     @Test
-    public void testIllegalScanSnapshotId() throws Exception {
+    void testIllegalScanSnapshotId() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write =
                 table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));

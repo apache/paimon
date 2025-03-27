@@ -515,7 +515,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"none", "lookup", "input"})
-    public void testDeletePartitionWithChangelog(String producer) throws Exception {
+    void testDeletePartitionWithChangelog(String producer) throws Exception {
         sql(
                 "CREATE TABLE delete_table (pt INT, pk INT, v STRING, PRIMARY KEY(pt, pk) NOT ENFORCED) PARTITIONED BY (pt)   "
                         + "WITH ('changelog-producer' = '"
@@ -539,7 +539,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testScanFromOldSchema() throws InterruptedException {
+    void testScanFromOldSchema() throws InterruptedException {
         sql("CREATE TABLE select_old (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
 
         sql("INSERT INTO select_old VALUES (1, 'a'), (2, 'b')");
@@ -568,7 +568,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCountStarAppend() {
+    void testCountStarAppend() {
         sql("CREATE TABLE count_append (f0 INT, f1 STRING)");
         sql("INSERT INTO count_append VALUES (1, 'a'), (2, 'b')");
 
@@ -578,7 +578,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCountStarPartAppend() {
+    void testCountStarPartAppend() {
         sql("CREATE TABLE count_part_append (f0 INT, f1 STRING, dt STRING) PARTITIONED BY (dt)");
         sql("INSERT INTO count_part_append VALUES (1, 'a', '1'), (1, 'a', '1'), (2, 'b', '2')");
         String sql = "SELECT COUNT(*) FROM count_part_append WHERE dt = '1'";
@@ -588,7 +588,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCountStarAppendWithDv() {
+    void testCountStarAppendWithDv() {
         sql(
                 "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true')");
         sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
@@ -599,7 +599,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCountStarPK() {
+    void testCountStarPK() {
         sql(
                 "CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ('file.format' = 'avro')");
         sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
@@ -611,7 +611,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCountStarPKDv() {
+    void testCountStarPKDv() {
         sql(
                 "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
                         + "'file.format' = 'avro', "
@@ -641,7 +641,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testParquetRowDecimalAndTimestamp() {
+    void testParquetRowDecimalAndTimestamp() {
         sql(
                 "CREATE TABLE parquet_row_decimal(`row` ROW<f0 DECIMAL(2,1)>) WITH ('file.format' = 'parquet')");
         sql("INSERT INTO parquet_row_decimal VALUES ( (ROW(1.2)) )");
@@ -659,7 +659,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testScanBounded() {
+    void testScanBounded() {
         sql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         List<Row> result;
         try (CloseableIterator<Row> iter =
@@ -673,7 +673,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIncrementTagQueryWithRescaleBucket() throws Exception {
+    void testIncrementTagQueryWithRescaleBucket() throws Exception {
         sql("CREATE TABLE test (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('bucket' = '1')");
         Table table = paimonTable("test");
 
@@ -700,7 +700,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAggregationWithNullSequenceField() {
+    void testAggregationWithNullSequenceField() {
         sql(
                 "CREATE TABLE test ("
                         + "  pk INT PRIMARY KEY NOT ENFORCED,"
@@ -720,7 +720,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testScanWithSpecifiedPartitions() {
+    void testScanWithSpecifiedPartitions() {
         sql("CREATE TABLE P (pt STRING, id INT, v INT) PARTITIONED BY (pt)");
         sql("CREATE TABLE Q (id INT)");
         sql(
@@ -732,13 +732,13 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testEmptyTableIncrementalBetweenTimestamp() {
+    void testEmptyTableIncrementalBetweenTimestamp() {
         assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();
     }
 
     @Test
-    public void testIncrementScanMode() throws Exception {
+    void testIncrementScanMode() throws Exception {
         sql(
                 "CREATE TABLE test_scan_mode (id INT PRIMARY KEY NOT ENFORCED, v STRING) WITH ('changelog-producer' = 'lookup')");
 

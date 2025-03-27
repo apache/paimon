@@ -66,7 +66,7 @@ public class ChangelogExpireTest extends IndexFileExpireTableTest {
     }
 
     @Test
-    public void testChangelogExpire() throws Exception {
+    void testChangelogExpire() throws Exception {
         ExpireConfig expireConfig =
                 ExpireConfig.builder().changelogRetainMax(40).snapshotRetainMax(39).build();
         prepareExpireTable();

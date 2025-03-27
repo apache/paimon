@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SimpleHashBucketAssignerTest {
 
     @Test
-    public void testAssign() {
+    void testAssign() {
         SimpleHashBucketAssigner simpleHashBucketAssigner =
                 new SimpleHashBucketAssigner(2, 0, 100, -1);
 
@@ -53,7 +53,7 @@ public class SimpleHashBucketAssignerTest {
     }
 
     @Test
-    public void testAssignWithUpperBound() {
+    void testAssignWithUpperBound() {
         SimpleHashBucketAssigner simpleHashBucketAssigner =
                 new SimpleHashBucketAssigner(2, 0, 100, 3);
 
@@ -78,7 +78,7 @@ public class SimpleHashBucketAssignerTest {
     }
 
     @Test
-    public void testAssignWithUpperBoundMultiAssigners() {
+    void testAssignWithUpperBoundMultiAssigners() {
         SimpleHashBucketAssigner simpleHashBucketAssigner0 =
                 new SimpleHashBucketAssigner(2, 0, 100, 3);
         SimpleHashBucketAssigner simpleHashBucketAssigner1 =
@@ -115,7 +115,7 @@ public class SimpleHashBucketAssignerTest {
 
     @ParameterizedTest(name = "maxBuckets: {0}")
     @ValueSource(ints = {-1, 1, 2})
-    public void testAssignWithSameHash(int maxBucketsNum) {
+    void testAssignWithSameHash(int maxBucketsNum) {
         SimpleHashBucketAssigner simpleHashBucketAssigner =
                 new SimpleHashBucketAssigner(2, 0, 100, maxBucketsNum);
 
@@ -137,7 +137,7 @@ public class SimpleHashBucketAssignerTest {
 
     @ParameterizedTest(name = "maxBuckets: {0}")
     @ValueSource(ints = {-1, 1, 2})
-    public void testPartitionCopy(int maxBucketsNum) {
+    void testPartitionCopy(int maxBucketsNum) {
         SimpleHashBucketAssigner assigner = new SimpleHashBucketAssigner(1, 0, 5, maxBucketsNum);
 
         BinaryRow partition = row(1);

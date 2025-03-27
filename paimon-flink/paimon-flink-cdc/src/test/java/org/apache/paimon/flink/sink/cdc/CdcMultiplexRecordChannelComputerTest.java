@@ -63,7 +63,7 @@ public class CdcMultiplexRecordChannelComputerTest {
     private Identifier tableWithoutPartition;
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
 
         databaseName = "test_db";
@@ -117,14 +117,14 @@ public class CdcMultiplexRecordChannelComputerTest {
     }
 
     @AfterEach
-    public void after() throws Exception {
+    void after() throws Exception {
         if (catalog != null) {
             catalog.close();
         }
     }
 
     @Test
-    public void testSchemaWithPartition() throws Exception {
+    void testSchemaWithPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numInputs = random.nextInt(1000) + 1;
         List<Map<String, String>> input = new ArrayList<>();
@@ -140,7 +140,7 @@ public class CdcMultiplexRecordChannelComputerTest {
     }
 
     @Test
-    public void testSchemaNoPartition() {
+    void testSchemaNoPartition() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numInputs = random.nextInt(1000) + 1;
         List<Map<String, String>> input = new ArrayList<>();

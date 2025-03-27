@@ -111,7 +111,7 @@ public class RollingFileWriterTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testRolling(String formatType) throws IOException {
+    void testRolling(String formatType) throws IOException {
         initialize(formatType);
         int checkInterval =
                 formatType.equals(CoreOptions.FILE_FORMAT_ORC)
@@ -136,7 +136,7 @@ public class RollingFileWriterTest {
     }
 
     @Test
-    public void testStatsDenseStore() throws IOException {
+    void testStatsDenseStore() throws IOException {
         initialize("parquet", true);
         for (int i = 0; i < 1000; i++) {
             rollingFileWriter.write(GenericRow.of(i));

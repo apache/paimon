@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class ConvertBinaryUtilTest {
 
     @Test
-    public void testConvertToLong() {
+    void testConvertToLong() {
         String randomString = generateRandomString();
         byte[] randomStringBytes = randomString.getBytes(StandardCharsets.UTF_8);
 

@@ -327,7 +327,7 @@ public abstract class MergeTreeTestBase {
 
     @ParameterizedTest
     @ValueSource(longs = {1, 1024 * 1024})
-    public void testCloseUpgrade(long targetFileSize) throws Exception {
+    void testCloseUpgrade(long targetFileSize) throws Exception {
         // To generate a large number of upgrade files
         recreateMergeTree(targetFileSize);
 

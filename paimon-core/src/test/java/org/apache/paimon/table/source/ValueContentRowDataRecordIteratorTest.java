@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ValueContentRowDataRecordIteratorTest extends RowDataRecordIteratorTestBase {
 
     @Test
-    public void testIterator() throws Exception {
+    void testIterator() throws Exception {
         List<ReusingTestData> input =
                 ReusingTestData.parse("1, 1, +, 100 | 2, 2, +, 200 | 1, 3, -, 100 | 2, 4, +, 300");
         List<Long> expectedValues = Arrays.asList(100L, 200L, 100L, 300L);

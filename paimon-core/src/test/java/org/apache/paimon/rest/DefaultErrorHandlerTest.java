@@ -29,8 +29,8 @@ import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
@@ -40,13 +40,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class DefaultErrorHandlerTest {
     private ErrorHandler defaultErrorHandler;
 
-    @Before
+    @BeforeEach
     public void setUp() throws IOException {
         defaultErrorHandler = DefaultErrorHandler.getInstance();
     }
 
     @Test
-    public void testHandleErrorResponse() {
+    void testHandleErrorResponse() {
         assertThrows(
                 BadRequestException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(400)));

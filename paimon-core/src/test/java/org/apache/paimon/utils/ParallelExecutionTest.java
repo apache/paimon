@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class ParallelExecutionTest {
 
     @Test
-    public void testNormal() {
+    void testNormal() {
         Supplier<Pair<RecordReader<Integer>, Integer>> supplier1 =
                 () ->
                         Pair.of(
@@ -96,7 +96,7 @@ public class ParallelExecutionTest {
     }
 
     @Test
-    public void testException() {
+    void testException() {
         String message = "Test Exception";
 
         Supplier<Pair<RecordReader<Integer>, Integer>> supplier1 =
@@ -130,7 +130,7 @@ public class ParallelExecutionTest {
     }
 
     @Test
-    public void testTooBigRecord() {
+    void testTooBigRecord() {
         Supplier<Pair<RecordReader<Integer>, Integer>> supplier =
                 () -> Pair.of(create(new LinkedList<>(singletonList(singletonList(1)))), 1);
 

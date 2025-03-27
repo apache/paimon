@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.fail;
 public class StreamTableScanTest extends ScannerTestBase {
 
     @Test
-    public void testPlan() throws Exception {
+    void testPlan() throws Exception {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -116,7 +116,7 @@ public class StreamTableScanTest extends ScannerTestBase {
     }
 
     @Test
-    public void testFullCompactionChangelog() throws Exception {
+    void testFullCompactionChangelog() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.FULL_COMPACTION);
 
@@ -205,7 +205,7 @@ public class StreamTableScanTest extends ScannerTestBase {
     }
 
     @Test
-    public void testBoundedInFull() throws Exception {
+    void testBoundedInFull() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "4");
         FileStoreTable table = this.table.copy(options);
@@ -230,7 +230,7 @@ public class StreamTableScanTest extends ScannerTestBase {
     }
 
     @Test
-    public void testBounded() throws Exception {
+    void testBounded() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "8");
         FileStoreTable table = this.table.copy(options);
@@ -271,7 +271,7 @@ public class StreamTableScanTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartingFromNonExistingSnapshot() throws Exception {
+    void testStartingFromNonExistingSnapshot() throws Exception {
         Table table =
                 this.table.copy(
                         Collections.singletonMap(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), "0"));
@@ -291,7 +291,7 @@ public class StreamTableScanTest extends ScannerTestBase {
     }
 
     @Test
-    public void testPlanWithOutOfRange() throws Exception {
+    void testPlanWithOutOfRange() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");

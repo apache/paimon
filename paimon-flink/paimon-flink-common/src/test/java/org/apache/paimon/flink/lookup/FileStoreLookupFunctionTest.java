@@ -83,7 +83,7 @@ public class FileStoreLookupFunctionTest {
     private FileStoreTable table;
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         tablePath = new org.apache.paimon.fs.Path(tempDir.toString());
     }
 
@@ -138,7 +138,7 @@ public class FileStoreLookupFunctionTest {
     }
 
     @AfterEach
-    public void close() throws Exception {
+    void close() throws Exception {
         if (lookupFunction != null) {
             lookupFunction.close();
         }
@@ -146,7 +146,7 @@ public class FileStoreLookupFunctionTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testDefaultLocalPartial(boolean refreshAsync) throws Exception {
+    void testDefaultLocalPartial(boolean refreshAsync) throws Exception {
         createLookupFunction(false, true, false, refreshAsync);
         assertThat(lookupFunction.lookupTable()).isInstanceOf(PrimaryKeyPartialLookupTable.class);
         QueryExecutor queryExecutor =
@@ -156,7 +156,7 @@ public class FileStoreLookupFunctionTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testDefaultRemotePartial(boolean refreshAsync) throws Exception {
+    void testDefaultRemotePartial(boolean refreshAsync) throws Exception {
         createLookupFunction(false, true, false, refreshAsync);
         ServiceManager serviceManager = new ServiceManager(fileIO, tablePath);
         serviceManager.resetService(
@@ -170,7 +170,7 @@ public class FileStoreLookupFunctionTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testLookupScanLeak(boolean refreshAsync) throws Exception {
+    void testLookupScanLeak(boolean refreshAsync) throws Exception {
         createLookupFunction(refreshAsync);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
@@ -191,7 +191,7 @@ public class FileStoreLookupFunctionTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testLookupExpiredSnapshot(boolean refreshAsync) throws Exception {
+    void testLookupExpiredSnapshot(boolean refreshAsync) throws Exception {
         createLookupFunction(refreshAsync);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
@@ -204,7 +204,7 @@ public class FileStoreLookupFunctionTest {
     }
 
     @Test
-    public void testLookupDynamicPartition() throws Exception {
+    void testLookupDynamicPartition() throws Exception {
         createLookupFunction(true, false, true, false);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
@@ -224,7 +224,7 @@ public class FileStoreLookupFunctionTest {
     }
 
     @Test
-    public void testParseWrongTimePeriodsBlacklist() throws Exception {
+    void testParseWrongTimePeriodsBlacklist() throws Exception {
         FileStoreTable table = createFileStoreTable(false, false, false);
 
         FileStoreTable table1 =
@@ -262,7 +262,7 @@ public class FileStoreLookupFunctionTest {
     }
 
     @Test
-    public void testCheckRefreshInBlacklist() throws Exception {
+    void testCheckRefreshInBlacklist() throws Exception {
         Instant now = Instant.now();
         Instant start = Instant.ofEpochSecond(now.getEpochSecond() / 60 * 60);
         Instant end = start.plusSeconds(30 * 60);

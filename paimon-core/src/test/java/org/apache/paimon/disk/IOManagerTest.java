@@ -32,7 +32,7 @@ public class IOManagerTest {
     @TempDir Path tempDir;
 
     @Test
-    public void channelEnumerator() throws Exception {
+    void channelEnumerator() throws Exception {
         File tempPath = tempDir.toFile();
 
         String[] tempDirs =

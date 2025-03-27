@@ -204,7 +204,7 @@ public class ArrowFormatWriterTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testWriteWithExternalAllocator(boolean allocationFailed) {
+    void testWriteWithExternalAllocator(boolean allocationFailed) {
         long maxAllocation = allocationFailed ? 1024L : Long.MAX_VALUE;
         try (RootAllocator rootAllocator = new RootAllocator();
                 BufferAllocator allocator =

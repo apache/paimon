@@ -45,17 +45,17 @@ public class RepairActionITCase extends ActionITCaseBase {
     private static final int PORT = 9082;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         TEST_HIVE_METASTORE.stop();
     }
 
     @Test
-    public void testRepairTableAction() throws Exception {
+    void testRepairTableAction() throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"

@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class UnawareBucketRowKeyExtractorTest {
 
     @Test
-    public void testBucket() {
+    void testBucket() {
         GenericRow row = GenericRow.of(5, 6, 7);
         assertThat(bucket(extractor("a"), row)).isEqualTo(0);
     }

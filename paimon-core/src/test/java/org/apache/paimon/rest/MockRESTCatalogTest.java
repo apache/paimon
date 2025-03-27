@@ -78,7 +78,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @AfterEach
-    public void tearDown() throws Exception {
+    void tearDown() throws Exception {
         restCatalogServer.shutdown();
     }
 

@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SimpleStatsEvolutionTest {
 
     @Test
-    public void testFromBinary() {
+    void testFromBinary() {
         TableSchema dataSchema =
                 new TableSchema(
                         0,

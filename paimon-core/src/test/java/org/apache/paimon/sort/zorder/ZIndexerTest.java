@@ -41,7 +41,7 @@ public class ZIndexerTest {
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testZIndexer() {
+    void testZIndexer() {
         RowType rowType = RowType.of(new IntType(), new BigIntType());
 
         ZIndexer zIndexer = new ZIndexer(rowType, Arrays.asList("f0", "f1"));
@@ -72,7 +72,7 @@ public class ZIndexerTest {
     }
 
     @Test
-    public void testZIndexerForVarchar() {
+    void testZIndexerForVarchar() {
         RowType rowType = RowType.of(new VarCharType(), new VarCharType());
 
         int varTypeSize = 10;
@@ -105,7 +105,7 @@ public class ZIndexerTest {
     }
 
     @Test
-    public void testZIndexerForVarcharWithNull() {
+    void testZIndexerForVarcharWithNull() {
         RowType rowType = RowType.of(new VarCharType(), new VarCharType());
 
         int varTypeSize = 10;

@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SimpleStatsCollectorTest {
 
     @Test
-    public void testCollect() {
+    void testCollect() {
         RowType rowType =
                 RowType.of(new IntType(), new VarCharType(10), new ArrayType(new IntType()));
         SimpleStatsCollector collector =

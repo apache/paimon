@@ -71,7 +71,7 @@ public class TagManagerTest {
     }
 
     @Test
-    public void testCreateTagWithoutTimeRetained() throws Exception {
+    void testCreateTagWithoutTimeRetained() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
@@ -103,7 +103,7 @@ public class TagManagerTest {
     }
 
     @Test
-    public void testCreateTagWithTimeRetained() throws Exception {
+    void testCreateTagWithTimeRetained() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();

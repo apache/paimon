@@ -35,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class TableScanTest extends ScannerTestBase {
 
     @Test
-    public void testPlan() throws Exception {
+    void testPlan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -68,7 +68,7 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
-    public void testPushDownLimit() throws Exception {
+    void testPushDownLimit() throws Exception {
         createAppendOnlyTable();
 
         StreamTableWrite write = table.newWrite(commitUser);

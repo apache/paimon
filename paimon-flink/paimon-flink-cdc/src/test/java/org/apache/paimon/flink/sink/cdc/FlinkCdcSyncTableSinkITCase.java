@@ -67,26 +67,26 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
 
     @Test
     @Timeout(120)
-    public void testRandomCdcEvents() throws Exception {
+    void testRandomCdcEvents() throws Exception {
         innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1, false, false);
     }
 
     @Test
     @Timeout(120)
-    public void testRandomCdcEventsDynamicBucket() throws Exception {
+    void testRandomCdcEventsDynamicBucket() throws Exception {
         innerTestRandomCdcEvents(-1, false, false);
     }
 
     @Disabled
     @Test
     @Timeout(120)
-    public void testRandomCdcEventsGlobalDynamicBucket() throws Exception {
+    void testRandomCdcEventsGlobalDynamicBucket() throws Exception {
         innerTestRandomCdcEvents(-1, true, false);
     }
 
     @Test
     @Timeout(120)
-    public void testRandomCdcEventsUnawareBucket() throws Exception {
+    void testRandomCdcEventsUnawareBucket() throws Exception {
         innerTestRandomCdcEvents(-1, false, true);
     }
 

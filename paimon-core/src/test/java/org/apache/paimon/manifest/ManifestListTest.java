@@ -49,7 +49,7 @@ public class ManifestListTest {
     @TempDir java.nio.file.Path tempDir;
 
     @RepeatedTest(10)
-    public void testWriteAndReadManifestList() {
+    void testWriteAndReadManifestList() {
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList = createManifestList(tempDir.toString());
 
@@ -59,7 +59,7 @@ public class ManifestListTest {
     }
 
     @RepeatedTest(10)
-    public void testCleanUpForException() throws IOException {
+    void testCleanUpForException() throws IOException {
         String failingName = UUID.randomUUID().toString();
         FailingFileIO.reset(failingName, 1, 3);
         List<ManifestFileMeta> metas = generateData();

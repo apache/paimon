@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /** Test for {@link RESTUtil}. */
 public class RESTUtilTest {
     @Test
-    public void testMerge() {
+    void testMerge() {
         {
             Map<String, String> targets = new HashMap<>();
             targets.put("key1", "default1");

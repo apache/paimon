@@ -88,7 +88,7 @@ public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignBucket() throws Exception {
+    void testAssignBucket() throws Exception {
         assertThatThrownBy(() -> write.write(GenericRow.of(1, 1, 1)))
                 .hasMessageContaining(
                         "Can't extract bucket from row in dynamic bucket mode, "
@@ -129,7 +129,7 @@ public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testNotCreateNewFile() throws Exception {
+    void testNotCreateNewFile() throws Exception {
         // commit two partitions
         write(write, createRow(1, 1, 1, 1));
         write(write, createRow(2, 2, 2, 2));

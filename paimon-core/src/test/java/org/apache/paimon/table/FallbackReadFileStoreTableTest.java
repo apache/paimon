@@ -75,7 +75,7 @@ public class FallbackReadFileStoreTableTest {
     }
 
     @Test
-    public void testListPartitions() throws Exception {
+    void testListPartitions() throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();
@@ -108,7 +108,7 @@ public class FallbackReadFileStoreTableTest {
     }
 
     @Test
-    public void testListPartitionEntries() throws Exception {
+    void testListPartitionEntries() throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();

@@ -54,7 +54,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class IncrementalTableTest extends TableTestBase {
 
     @Test
-    public void testPrimaryKeyTable() throws Exception {
+    void testPrimaryKeyTable() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -111,7 +111,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAppendTable() throws Exception {
+    void testAppendTable() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -166,7 +166,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAuditLog() throws Exception {
+    void testAuditLog() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -217,7 +217,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testTagIncremental() throws Exception {
+    void testTagIncremental() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -293,7 +293,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAppendTableTag() throws Exception {
+    void testAppendTableTag() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -316,7 +316,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testIncrementalToTagFirst() throws Exception {
+    void testIncrementalToTagFirst() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -340,7 +340,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testIncrementalToAutoTag() throws Exception {
+    void testIncrementalToAutoTag() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -409,7 +409,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testIncrementalEmptyResult() throws Exception {
+    void testIncrementalEmptyResult() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()

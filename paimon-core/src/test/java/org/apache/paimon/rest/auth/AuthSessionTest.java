@@ -27,7 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import org.apache.commons.io.FileUtils;
 import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.junit.rules.TemporaryFolder;
 import org.mockito.Mockito;
 
@@ -70,7 +70,7 @@ public class AuthSessionTest {
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
 
     @Test
-    public void testBearToken() {
+    void testBearToken() {
         String token = UUID.randomUUID().toString();
         Map<String, String> initialHeaders = new HashMap<>();
         initialHeaders.put("k1", "v1");
@@ -86,7 +86,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testRefreshDLFAuthTokenFileAuthProvider() throws IOException, InterruptedException {
+    void testRefreshDLFAuthTokenFileAuthProvider() throws IOException, InterruptedException {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String theFirstGenerateToken = tokenFile2Token.getRight();
@@ -115,7 +115,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testRefreshAuthProviderIsSoonExpire() throws IOException, InterruptedException {
+    void testRefreshAuthProviderIsSoonExpire() throws IOException, InterruptedException {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
@@ -139,7 +139,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testRetryWhenRefreshFail() throws Exception {
+    void testRetryWhenRefreshFail() throws Exception {
         AuthProvider authProvider = Mockito.mock(DLFAuthProvider.class);
         long expiresAtMillis = System.currentTimeMillis() - 1000L;
         when(authProvider.expiresAtMillis()).thenReturn(Optional.of(expiresAtMillis));
@@ -156,7 +156,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testGetTimeToWaitByExpiresInMills() {
+    void testGetTimeToWaitByExpiresInMills() {
         long expiresInMillis = -100L;
         long timeToWait = AuthSession.getTimeToWaitByExpiresInMills(expiresInMillis);
         assertEquals(MIN_REFRESH_WAIT_MILLIS, timeToWait);
@@ -172,7 +172,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDLFAuthProviderByStsToken() throws IOException {
+    void testCreateDLFAuthProviderByStsToken() throws IOException {
         Options options = new Options();
         String akId = UUID.randomUUID().toString();
         String akSecret = UUID.randomUUID().toString();
@@ -191,7 +191,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDLFAuthProviderByAk() throws IOException {
+    void testCreateDLFAuthProviderByAk() throws IOException {
         Options options = new Options();
         String akId = UUID.randomUUID().toString();
         String akSecret = UUID.randomUUID().toString();
@@ -208,7 +208,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDlfAuthProviderByFileNoDefineRefresh() throws IOException {
+    void testCreateDlfAuthProviderByFileNoDefineRefresh() throws IOException {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String token = tokenFile2Token.getRight();
@@ -223,7 +223,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDLFAuthProviderWithoutNeedConf() {
+    void testCreateDLFAuthProviderWithoutNeedConf() {
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
@@ -232,8 +232,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDlfAuthProviderByDLFTokenLoader()
-            throws IOException, InterruptedException {
+    void testCreateDlfAuthProviderByDLFTokenLoader() throws IOException, InterruptedException {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String theFirstGenerateToken = tokenFile2Token.getRight();
@@ -269,7 +268,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDlfAuthProviderByCustomDLFTokenLoader()
+    void testCreateDlfAuthProviderByCustomDLFTokenLoader()
             throws IOException, InterruptedException {
         DLFToken customToken = generateToken();
         // create options with custom token loader
@@ -293,8 +292,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDlfAuthProviderByECSTokenProvider()
-            throws IOException, InterruptedException {
+    void testCreateDlfAuthProviderByECSTokenProvider() throws IOException, InterruptedException {
         MockECSMetadataService mockECSMetadataService = new MockECSMetadataService("EcsTestRole");
         mockECSMetadataService.start();
         try {
@@ -337,7 +335,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDlfAuthProviderByECSTokenProviderWithDefineRole()
+    void testCreateDlfAuthProviderByECSTokenProviderWithDefineRole()
             throws IOException, InterruptedException {
         MockECSMetadataService mockECSMetadataService = new MockECSMetadataService("CustomRole");
         mockECSMetadataService.start();
@@ -382,7 +380,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testCreateDlfAuthProviderByECSTokenProviderWithInvalidRole()
+    void testCreateDlfAuthProviderByECSTokenProviderWithInvalidRole()
             throws IOException, InterruptedException {
         MockECSMetadataService mockECSMetadataService = new MockECSMetadataService("EcsTestRole");
         mockECSMetadataService.start();
@@ -411,7 +409,7 @@ public class AuthSessionTest {
     }
 
     @Test
-    public void testDLFAuthProviderAuthHeaderWhenDataIsNotEmpty() throws Exception {
+    void testDLFAuthProviderAuthHeaderWhenDataIsNotEmpty() throws Exception {
         String fileName = UUID.randomUUID().toString();
         Pair<File, String> tokenFile2Token = generateTokenAndWriteToFile(fileName);
         String tokenStr = tokenFile2Token.getRight();

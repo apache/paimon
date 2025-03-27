@@ -48,7 +48,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testStreamingRead() throws Exception {
+    void testStreamingRead() throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
 
@@ -62,7 +62,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
 
     /** Test streaming read with array and row nested data type. */
     @Test
-    public void testStreamingReadOfArray() throws Exception {
+    void testStreamingReadOfArray() throws Exception {
         String table = "T_ARRAY";
         tEnv.executeSql(
                 "CREATE TABLE IF NOT EXISTS "
@@ -83,7 +83,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCompactedScanMode() throws Exception {
+    void testCompactedScanMode() throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
                         streamSqlIter(
@@ -104,7 +104,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testUpdate(boolean changelogRowDeduplicate) throws Exception {
+    void testUpdate(boolean changelogRowDeduplicate) throws Exception {
         sql(
                 "ALTER TABLE %s SET ('changelog-producer.row-deduplicate' = '%s')",
                 table, changelogRowDeduplicate);
@@ -144,7 +144,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testUpdateAuditLog() throws Exception {
+    void testUpdateAuditLog() throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM %s$audit_log", table));
 
@@ -166,7 +166,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRowDeduplicateWithArrayRow() throws Exception {
+    void testRowDeduplicateWithArrayRow() throws Exception {
         String table = "T_ARRAY_ROW";
         tEnv.executeSql(
                 "CREATE TABLE IF NOT EXISTS "

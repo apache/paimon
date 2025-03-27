@@ -102,7 +102,7 @@ public class LocalOrphanFilesCleanTest {
     private List<Path> manuallyAddedFiles;
 
     @BeforeEach
-    public void beforeEach() throws Exception {
+    void beforeEach() throws Exception {
         tablePath = new Path(tempDir.toString());
         fileIO = LocalFileIO.create();
         rowType =
@@ -122,7 +122,7 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         write.close();
         commit.close();
         TestPojo.reset();
@@ -453,8 +453,7 @@ public class LocalOrphanFilesCleanTest {
 
     @ValueSource(strings = {"none", "input"})
     @ParameterizedTest(name = "changelog-producer = {0}")
-    public void testCleanOrphanFilesWithChangelogDecoupled(String changelogProducer)
-            throws Exception {
+    void testCleanOrphanFilesWithChangelogDecoupled(String changelogProducer) throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);
         options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
@@ -464,7 +463,7 @@ public class LocalOrphanFilesCleanTest {
 
     @ValueSource(strings = {"none", "input"})
     @ParameterizedTest(name = "changelog-producer = {0}")
-    public void testCleanOrphanFilesWithChangelogDecoupledWithExternalPath(String changelogProducer)
+    void testCleanOrphanFilesWithChangelogDecoupledWithExternalPath(String changelogProducer)
             throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);

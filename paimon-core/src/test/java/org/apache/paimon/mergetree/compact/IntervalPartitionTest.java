@@ -99,7 +99,7 @@ public class IntervalPartitionTest {
     }
 
     @RepeatedTest(100)
-    public void randomTest() {
+    void randomTest() {
         ThreadLocalRandom r = ThreadLocalRandom.current();
         List<int[]> intervals = new ArrayList<>();
         // construct some sorted runs

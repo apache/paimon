@@ -18,7 +18,7 @@
 
 package org.apache.paimon.rest;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class ResourcePathsTest {
 
     @Test
-    public void testUrlEncode() {
+    void testUrlEncode() {
         String database = "test_db";
         String objectName = "test_table$snapshot";
         ResourcePaths resourcePaths = new ResourcePaths("paimon");

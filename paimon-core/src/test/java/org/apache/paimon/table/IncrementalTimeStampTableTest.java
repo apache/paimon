@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IncrementalTimeStampTableTest extends TableTestBase {
 
     @Test
-    public void testPrimaryKeyTable() throws Exception {
+    void testPrimaryKeyTable() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -179,7 +179,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPrimaryKeyTableTotalRecordCountWithOnePartition() throws Exception {
+    void testPrimaryKeyTableTotalRecordCountWithOnePartition() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -217,7 +217,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPrimaryKeyTableTotalRecordCountWithMultiPartition() throws Exception {
+    void testPrimaryKeyTableTotalRecordCountWithMultiPartition() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -276,7 +276,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAppendTable() throws Exception {
+    void testAppendTable() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()

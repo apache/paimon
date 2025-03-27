@@ -42,7 +42,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -55,7 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class RESTObjectMapperTest {
 
     @Test
-    public void configResponseParseTest() throws Exception {
+    void configResponseParseTest() throws Exception {
         String confKey = "a";
         Map<String, String> conf = new HashMap<>();
         conf.put(confKey, "b");
@@ -66,7 +66,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void errorResponseParseTest() throws Exception {
+    void errorResponseParseTest() throws Exception {
         String message = "message";
         Integer code = 400;
         ErrorResponse response = new ErrorResponse(null, null, message, code);
@@ -77,7 +77,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void createDatabaseRequestParseTest() throws Exception {
+    void createDatabaseRequestParseTest() throws Exception {
         String name = MockRESTMessage.databaseName();
         CreateDatabaseRequest request = MockRESTMessage.createDatabaseRequest(name);
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
@@ -88,7 +88,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void getDatabaseResponseParseTest() throws Exception {
+    void getDatabaseResponseParseTest() throws Exception {
         String name = MockRESTMessage.databaseName();
         GetDatabaseResponse response = MockRESTMessage.getDatabaseResponse(name);
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
@@ -99,7 +99,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void listDatabaseResponseParseTest() throws Exception {
+    void listDatabaseResponseParseTest() throws Exception {
         String name = MockRESTMessage.databaseName();
         ListDatabasesResponse response = MockRESTMessage.listDatabasesResponse(name);
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
@@ -110,7 +110,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void alterDatabaseRequestParseTest() throws Exception {
+    void alterDatabaseRequestParseTest() throws Exception {
         AlterDatabaseRequest request = MockRESTMessage.alterDatabaseRequest();
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         AlterDatabaseRequest parseData =
@@ -120,7 +120,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void alterDatabaseResponseParseTest() throws Exception {
+    void alterDatabaseResponseParseTest() throws Exception {
         AlterDatabaseResponse response = MockRESTMessage.alterDatabaseResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         AlterDatabaseResponse parseData =
@@ -131,7 +131,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void createTableRequestParseTest() throws Exception {
+    void createTableRequestParseTest() throws Exception {
         CreateTableRequest request = MockRESTMessage.createTableRequest("t1");
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         CreateTableRequest parseData =
@@ -142,7 +142,7 @@ public class RESTObjectMapperTest {
 
     // This test is to guarantee the compatibility of field name in RESTCatalog.
     @Test
-    public void dataFieldParseTest() throws Exception {
+    void dataFieldParseTest() throws Exception {
         int id = 1;
         String name = "col1";
         IntType type = DataTypes.INT();
@@ -159,7 +159,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void renameTableRequestParseTest() throws Exception {
+    void renameTableRequestParseTest() throws Exception {
         RenameTableRequest request = MockRESTMessage.renameRequest("t1", "t2");
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         RenameTableRequest parseData =
@@ -169,7 +169,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void getTableResponseParseTest() throws Exception {
+    void getTableResponseParseTest() throws Exception {
         GetTableResponse response = MockRESTMessage.getTableResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         GetTableResponse parseData = OBJECT_MAPPER.readValue(responseStr, GetTableResponse.class);
@@ -178,7 +178,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void listTablesResponseParseTest() throws Exception {
+    void listTablesResponseParseTest() throws Exception {
         ListTablesResponse response = MockRESTMessage.listTablesResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         ListTablesResponse parseData =
@@ -187,7 +187,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void alterTableRequestParseTest() throws Exception {
+    void alterTableRequestParseTest() throws Exception {
         AlterTableRequest request = MockRESTMessage.alterTableRequest();
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         AlterTableRequest parseData = OBJECT_MAPPER.readValue(requestStr, AlterTableRequest.class);
@@ -195,7 +195,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void listPartitionsResponseParseTest() throws Exception {
+    void listPartitionsResponseParseTest() throws Exception {
         ListPartitionsResponse response = MockRESTMessage.listPartitionsResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         ListPartitionsResponse parseData =
@@ -206,7 +206,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void createViewRequestParseTest() throws Exception {
+    void createViewRequestParseTest() throws Exception {
         CreateViewRequest request = MockRESTMessage.createViewRequest("t1");
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         CreateViewRequest parseData = OBJECT_MAPPER.readValue(requestStr, CreateViewRequest.class);
@@ -215,7 +215,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void getViewResponseParseTest() throws Exception {
+    void getViewResponseParseTest() throws Exception {
         GetViewResponse response = MockRESTMessage.getViewResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         GetViewResponse parseData = OBJECT_MAPPER.readValue(responseStr, GetViewResponse.class);
@@ -225,7 +225,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void listViewsResponseParseTest() throws Exception {
+    void listViewsResponseParseTest() throws Exception {
         ListViewsResponse response = MockRESTMessage.listViewsResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         ListViewsResponse parseData = OBJECT_MAPPER.readValue(responseStr, ListViewsResponse.class);
@@ -233,7 +233,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void getTableTokenResponseParseTest() throws Exception {
+    void getTableTokenResponseParseTest() throws Exception {
         GetTableTokenResponse response = MockRESTMessage.getTableCredentialsResponse();
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         GetTableTokenResponse parseData =
@@ -243,8 +243,8 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void rollbackTableRequestParseTest() throws Exception {
-        Long snapshotId = 123L;
+    void rollbackTableRequestParseTest() throws Exception {
+        long snapshotId = 123L;
         String tagName = "tagName";
         RollbackTableRequest rollbackTableRequestBySnapshot =
                 MockRESTMessage.rollbackTableRequestBySnapshot(snapshotId);
@@ -271,7 +271,7 @@ public class RESTObjectMapperTest {
     }
 
     @Test
-    public void alterViewRequestParseTest() throws Exception {
+    void alterViewRequestParseTest() throws Exception {
         AlterViewRequest request = MockRESTMessage.alterViewRequest();
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         AlterViewRequest parseData = OBJECT_MAPPER.readValue(requestStr, AlterViewRequest.class);

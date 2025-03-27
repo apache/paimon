@@ -50,7 +50,7 @@ public class SparkCatalogWithRestTest {
     private String initToken = "init_token";
 
     @BeforeEach
-    public void before() throws IOException {
+    void before() throws IOException {
         dataPath = tempFile.toUri().toString();
         warehouse = UUID.randomUUID().toString();
         ConfigResponse config =
@@ -67,8 +67,8 @@ public class SparkCatalogWithRestTest {
         serverUrl = restCatalogServer.getUrl();
     }
 
-    @AfterEach()
-    public void after() throws Exception {
+    @AfterEach
+    void after() throws Exception {
         restCatalogServer.shutdown();
     }
 

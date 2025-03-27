@@ -112,7 +112,7 @@ public class FileDeletionTest {
      */
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testMultiPartitions(boolean cleanEmptyDirs) throws Exception {
+    void testMultiPartitions(boolean cleanEmptyDirs) throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);

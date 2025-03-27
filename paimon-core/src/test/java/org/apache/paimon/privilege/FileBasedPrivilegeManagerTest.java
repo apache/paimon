@@ -43,12 +43,12 @@ public class FileBasedPrivilegeManagerTest {
     private Path warehouse;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString());
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempPath.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
         assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();

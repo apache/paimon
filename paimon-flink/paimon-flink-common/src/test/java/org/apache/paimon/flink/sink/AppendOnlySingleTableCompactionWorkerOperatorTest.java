@@ -53,7 +53,7 @@ import java.util.stream.Collectors;
 public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTestBase {
 
     @RepeatedTest(100)
-    public void testAsyncCompactionWorks() throws Exception {
+    void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
                 new AppendOnlySingleTableCompactionWorkerOperator.Factory(getTableDefault(), "user")

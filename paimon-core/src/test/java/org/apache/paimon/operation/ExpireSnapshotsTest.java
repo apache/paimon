@@ -587,7 +587,7 @@ public class ExpireSnapshotsTest {
     }
 
     @RepeatedTest(5)
-    public void testChangelogOutLivedSnapshot() throws Exception {
+    void testChangelogOutLivedSnapshot() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(10, allData, snapshotPositions);

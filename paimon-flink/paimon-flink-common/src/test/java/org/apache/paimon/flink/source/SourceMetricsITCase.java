@@ -58,7 +58,7 @@ public class SourceMetricsITCase {
     @TempDir Path tempPath;
 
     @AfterEach
-    public final void cleanupRunningJobs() throws Exception {
+    final void cleanupRunningJobs() throws Exception {
         ClusterClient<?> clusterClient = MINI_CLUSTER_EXTENSION.createRestClusterClient();
         for (JobStatusMessage path : clusterClient.listJobs().get()) {
             if (!path.getJobState().isTerminalState()) {
@@ -72,7 +72,7 @@ public class SourceMetricsITCase {
     }
 
     @Test
-    public void testNumRecordsIn() throws Exception {
+    void testNumRecordsIn() throws Exception {
         TableEnvironment tEnv =
                 TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         tEnv.executeSql(
@@ -97,7 +97,7 @@ public class SourceMetricsITCase {
     }
 
     @Test
-    public void testNumRecordsInWithConsumerId() throws Exception {
+    void testNumRecordsInWithConsumerId() throws Exception {
         TableEnvironment tEnv =
                 TableEnvironment.create(
                         EnvironmentSettings.newInstance().inStreamingMode().build());

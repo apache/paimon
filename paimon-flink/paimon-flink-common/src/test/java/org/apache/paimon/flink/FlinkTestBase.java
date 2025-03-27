@@ -93,7 +93,7 @@ public abstract class FlinkTestBase extends AbstractTestBase {
     /** Test class implements "private static List'<'Arguments> data()" to supply test data. */
     @ParameterizedTest
     @MethodSource("data")
-    public void test(
+    void test(
             RuntimeExecutionMode executionMode,
             String tableName,
             boolean ignoreException,

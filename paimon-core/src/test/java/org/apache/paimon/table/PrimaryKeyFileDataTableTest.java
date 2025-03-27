@@ -91,7 +91,7 @@ public class PrimaryKeyFileDataTableTest extends FileDataFilterTestBase {
     }
 
     @Test
-    public void testReadFilterKeyField() throws Exception {
+    void testReadFilterKeyField() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
@@ -197,7 +197,7 @@ public class PrimaryKeyFileDataTableTest extends FileDataFilterTestBase {
     }
 
     @Test
-    public void testStreamingFilterKey() throws Exception {
+    void testStreamingFilterKey() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));

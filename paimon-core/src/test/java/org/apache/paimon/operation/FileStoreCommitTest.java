@@ -99,7 +99,7 @@ public class FileStoreCommitTest {
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         gen = new TestKeyValueGenerator();
         // for failure tests
         failingName = UUID.randomUUID().toString();
@@ -107,7 +107,7 @@ public class FileStoreCommitTest {
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(FailingFileIO.openInputStreams(pathPredicate)).isEmpty();
         assertThat(FailingFileIO.openOutputStreams(pathPredicate)).isEmpty();
@@ -122,7 +122,7 @@ public class FileStoreCommitTest {
         "true,INPUT",
         "true,FULL_COMPACTION"
     })
-    public void testSingleCommitUser(boolean failing, String changelogProducer) throws Exception {
+    void testSingleCommitUser(boolean failing, String changelogProducer) throws Exception {
         testRandomConcurrentNoConflict(
                 1, failing, CoreOptions.ChangelogProducer.valueOf(changelogProducer));
     }
@@ -136,8 +136,7 @@ public class FileStoreCommitTest {
         "true,INPUT",
         "true,FULL_COMPACTION"
     })
-    public void testManyCommitUsersNoConflict(boolean failing, String changelogProducer)
-            throws Exception {
+    void testManyCommitUsersNoConflict(boolean failing, String changelogProducer) throws Exception {
         testRandomConcurrentNoConflict(
                 ThreadLocalRandom.current().nextInt(3) + 2,
                 failing,
@@ -153,7 +152,7 @@ public class FileStoreCommitTest {
         "true,INPUT",
         "true,FULL_COMPACTION"
     })
-    public void testManyCommitUsersWithConflict(boolean failing, String changelogProducer)
+    void testManyCommitUsersWithConflict(boolean failing, String changelogProducer)
             throws Exception {
         testRandomConcurrentWithConflict(
                 ThreadLocalRandom.current().nextInt(3) + 2,

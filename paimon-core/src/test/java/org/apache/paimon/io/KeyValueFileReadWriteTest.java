@@ -76,7 +76,7 @@ public class KeyValueFileReadWriteTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testReadNonExistentFile() {
+    void testReadNonExistentFile() {
         KeyValueFileReaderFactory readerFactory =
                 createReaderFactory(tempDir.toString(), "avro", null, null);
         assertThatThrownBy(
@@ -88,12 +88,12 @@ public class KeyValueFileReadWriteTest {
     }
 
     @RepeatedTest(10)
-    public void testWriteAndReadDataFileWithStatsCollectingRollingFile() throws Exception {
+    void testWriteAndReadDataFileWithStatsCollectingRollingFile() throws Exception {
         testWriteAndReadDataFileImpl("avro");
     }
 
     @RepeatedTest(10)
-    public void testWriteAndReadDataFileWithFileExtractingRollingFile() throws Exception {
+    void testWriteAndReadDataFileWithFileExtractingRollingFile() throws Exception {
         testWriteAndReadDataFileImpl("avro-extract");
     }
 
@@ -123,7 +123,7 @@ public class KeyValueFileReadWriteTest {
     }
 
     @RepeatedTest(10)
-    public void testCleanUpForException() throws IOException {
+    void testCleanUpForException() throws IOException {
         String failingName = UUID.randomUUID().toString();
         FailingFileIO.reset(failingName, 1, 10);
         DataFileTestDataGenerator.Data data = gen.next();
@@ -151,7 +151,7 @@ public class KeyValueFileReadWriteTest {
     }
 
     @Test
-    public void testReadKeyType() throws Exception {
+    void testReadKeyType() throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
@@ -184,7 +184,7 @@ public class KeyValueFileReadWriteTest {
     }
 
     @Test
-    public void testReadValueType() throws Exception {
+    void testReadValueType() throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
@@ -385,7 +385,7 @@ public class KeyValueFileReadWriteTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"parquet", "orc", "avro"})
-    public void testReaderUseFileSizeFromMetadata(String format) throws Exception {
+    void testReaderUseFileSizeFromMetadata(String format) throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();

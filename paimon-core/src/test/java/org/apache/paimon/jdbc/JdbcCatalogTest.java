@@ -69,7 +69,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testAcquireLockFail() throws SQLException, InterruptedException {
+    void testAcquireLockFail() throws SQLException, InterruptedException {
         String lockId = "jdbc.testDb.testTable";
         assertThat(JdbcUtils.acquire(((JdbcCatalog) catalog).getConnections(), lockId, 3000))
                 .isTrue();
@@ -78,7 +78,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCleanTimeoutLockAndAcquireLock() throws SQLException, InterruptedException {
+    void testCleanTimeoutLockAndAcquireLock() throws SQLException, InterruptedException {
         String lockId = "jdbc.testDb.testTable";
         assertThat(JdbcUtils.acquire(((JdbcCatalog) catalog).getConnections(), lockId, 1000))
                 .isTrue();
@@ -88,7 +88,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testUpperCase() throws Exception {
+    void testUpperCase() throws Exception {
         catalog.createDatabase("test_db", false);
         assertThatThrownBy(
                         () ->
@@ -103,7 +103,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testSerializeTable() throws Exception {
+    void testSerializeTable() throws Exception {
         catalog.createDatabase("test_db", false);
         catalog.createTable(Identifier.create("test_db", "table"), DEFAULT_TABLE_SCHEMA, false);
         Table table = catalog.getTable(new Identifier("test_db", "table"));

@@ -41,7 +41,7 @@ public class FileStorePathFactoryTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testManifestPaths() {
+    void testManifestPaths() {
         FileStorePathFactory pathFactory = createNonPartFactory(new Path(tempDir.toString()));
         String uuid = pathFactory.uuid();
 
@@ -68,7 +68,7 @@ public class FileStorePathFactoryTest {
     }
 
     @Test
-    public void testCreateDataFilePathFactoryNoPartition() {
+    void testCreateDataFilePathFactoryNoPartition() {
         FileStorePathFactory pathFactory = createNonPartFactory(new Path(tempDir.toString()));
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(new BinaryRow(0), 123);
@@ -78,7 +78,7 @@ public class FileStorePathFactoryTest {
     }
 
     @Test
-    public void testCreateDataFilePathFactoryWithPartition() {
+    void testCreateDataFilePathFactoryWithPartition() {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         new Path(tempDir.toString()),

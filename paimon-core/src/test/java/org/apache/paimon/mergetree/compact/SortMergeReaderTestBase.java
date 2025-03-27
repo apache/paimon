@@ -50,14 +50,14 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
     @ParameterizedTest
     @EnumSource(SortEngine.class)
-    public void testEmpty(SortEngine sortEngine) throws IOException {
+    void testEmpty(SortEngine sortEngine) throws IOException {
         runTest(parseData(""), sortEngine);
         runTest(parseData("", "", ""), sortEngine);
     }
 
     @ParameterizedTest
     @EnumSource(SortEngine.class)
-    public void testAlternateKeys(SortEngine sortEngine) throws IOException {
+    void testAlternateKeys(SortEngine sortEngine) throws IOException {
         runTest(
                 parseData(
                         "1, 1, +, 100 | 3, 2, +, 300 | 5, 3, +, 200 | 7, 4, +, 600 | 9, 20, +, 400",
@@ -70,7 +70,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
     @ParameterizedTest
     @EnumSource(SortEngine.class)
-    public void testDuplicateKeys(SortEngine sortEngine) throws IOException {
+    void testDuplicateKeys(SortEngine sortEngine) throws IOException {
         runTest(
                 parseData("1, 1, +, 100 | 3, 3, +, 300", "1, 4, +, 200 | 3, 5, +, 300"),
                 sortEngine);
@@ -78,7 +78,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
     @ParameterizedTest
     @EnumSource(SortEngine.class)
-    public void testLongTailRecords(SortEngine sortEngine) throws IOException {
+    void testLongTailRecords(SortEngine sortEngine) throws IOException {
         runTest(
                 parseData(
                         "1, 1, +, 100 | 2, 500, +, 200",

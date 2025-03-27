@@ -45,7 +45,7 @@ public class StatsTableTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testPartitionStatsNotDense(boolean thinMode) throws Exception {
+    void testPartitionStatsNotDense(boolean thinMode) throws Exception {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(METADATA_STATS_MODE, "NONE");
@@ -102,7 +102,7 @@ public class StatsTableTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testPartitionStatsDenseMode(boolean thinMode) throws Exception {
+    void testPartitionStatsDenseMode(boolean thinMode) throws Exception {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(METADATA_STATS_MODE, "NONE");

@@ -53,7 +53,7 @@ public abstract class CombiningRecordReaderTestBase {
 
     @ParameterizedTest
     @EnumSource(SortEngine.class)
-    public void testRandom(SortEngine sortEngine) throws IOException {
+    void testRandom(SortEngine sortEngine) throws IOException {
         for (int i = 0; i < 100; i++) {
             runTest(generateRandomData(), sortEngine);
         }

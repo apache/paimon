@@ -76,7 +76,7 @@ public abstract class PrimaryKeyTableTestBase {
     }
 
     @AfterEach
-    public void after() throws IOException {
+    void after() throws IOException {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempPath.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();

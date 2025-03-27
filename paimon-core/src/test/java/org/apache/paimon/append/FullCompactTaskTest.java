@@ -39,7 +39,7 @@ public class FullCompactTaskTest {
     private static final long TARGET_FILE_SIZE = 1024L;
 
     @Test
-    public void testNoCompact() {
+    void testNoCompact() {
         // empty
         innerTest(Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
 
@@ -74,7 +74,7 @@ public class FullCompactTaskTest {
     }
 
     @Test
-    public void testCompact() {
+    void testCompact() {
         innerTest(
                 Arrays.asList(
                         newFile(1L, 500L),

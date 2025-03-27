@@ -62,7 +62,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testDeduplicate(boolean changelogRowDeduplicate) {
+    void testDeduplicate(boolean changelogRowDeduplicate) {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
@@ -274,7 +274,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testSum(boolean changelogRowDeduplicate) {
+    void testSum(boolean changelogRowDeduplicate) {
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(

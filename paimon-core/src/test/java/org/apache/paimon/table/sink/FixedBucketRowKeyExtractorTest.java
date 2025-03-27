@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class FixedBucketRowKeyExtractorTest {
 
     @Test
-    public void testInvalidBucket() {
+    void testInvalidBucket() {
         assertThatThrownBy(() -> extractor("n", "b"))
                 .hasMessageContaining("Field names [a, b, c] should contains all bucket keys [n].");
 
@@ -54,7 +54,7 @@ public class FixedBucketRowKeyExtractorTest {
     }
 
     @Test
-    public void testBucket() {
+    void testBucket() {
         GenericRow row = GenericRow.of(5, 6, 7);
         assertThat(bucket(extractor("a", "a,b"), row)).isEqualTo(96);
         assertThat(bucket(extractor("", "a"), row)).isEqualTo(96);
@@ -65,7 +65,7 @@ public class FixedBucketRowKeyExtractorTest {
     }
 
     @Test
-    public void testIllegalBucket() {
+    void testIllegalBucket() {
         GenericRow row = GenericRow.of(5, 6, 7);
         assertThatThrownBy(() -> bucket(extractor("", "", "a", -1), row))
                 .hasMessageContaining("Num bucket is illegal");

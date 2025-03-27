@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TableScanListPartitionsTest extends ScannerTestBase {
 
     @Test
-    public void testListPartitions() throws Exception {
+    void testListPartitions() throws Exception {
         BatchTableWrite write = table.newWrite(commitUser);
 
         for (int i = 0; i < 1000; i++) {

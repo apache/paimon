@@ -62,7 +62,7 @@ public class KafkaLogStoreFactoryTest {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.StartupMode.class)
-    public void testCreateKafkaLogStoreFactoryTimestamp(CoreOptions.StartupMode startupMode) {
+    void testCreateKafkaLogStoreFactoryTimestamp(CoreOptions.StartupMode startupMode) {
         String now = String.valueOf(System.currentTimeMillis());
         Consumer<Map<String, String>> setter =
                 (options) -> options.put(SCAN_TIMESTAMP_MILLIS.key(), now);
@@ -71,7 +71,7 @@ public class KafkaLogStoreFactoryTest {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.StartupMode.class)
-    public void testCreateKafkaLogStoreFactoryTimestampStr(CoreOptions.StartupMode startupMode) {
+    void testCreateKafkaLogStoreFactoryTimestampStr(CoreOptions.StartupMode startupMode) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         String timestampString = LocalDateTime.now().format(formatter);
         Consumer<Map<String, String>> setter =
@@ -119,8 +119,7 @@ public class KafkaLogStoreFactoryTest {
     }
 
     @Test
-    public void testInputChangelogProducerWithKafkaLog(@TempDir java.nio.file.Path temp)
-            throws Exception {
+    void testInputChangelogProducerWithKafkaLog(@TempDir java.nio.file.Path temp) throws Exception {
         Options options = new Options();
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
 

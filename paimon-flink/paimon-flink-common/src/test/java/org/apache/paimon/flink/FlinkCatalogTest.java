@@ -232,8 +232,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testCreateAndGetCatalogMaterializedTable(Map<String, String> options)
-            throws Exception {
+    void testCreateAndGetCatalogMaterializedTable(Map<String, String> options) throws Exception {
         ObjectPath tablePath = path1;
         CatalogMaterializedTable materializedTable = createMaterializedTable(options);
         catalog.createDatabase(tablePath.getDatabaseName(), null, false);
@@ -259,7 +258,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testDropMaterializedTable(Map<String, String> options) throws Exception {
+    void testDropMaterializedTable(Map<String, String> options) throws Exception {
         ObjectPath tablePath = path1;
         catalog.createDatabase(tablePath.getDatabaseName(), null, false);
         catalog.createTable(tablePath, this.createTable(options), false);
@@ -270,7 +269,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testAlterMaterializedTable(Map<String, String> options) throws Exception {
+    void testAlterMaterializedTable(Map<String, String> options) throws Exception {
         ObjectPath tablePath = path1;
         CatalogMaterializedTable materializedTable = createMaterializedTable(options);
         catalog.createDatabase(tablePath.getDatabaseName(), null, false);
@@ -305,7 +304,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testAlterTable(Map<String, String> options) throws Exception {
+    void testAlterTable(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createTable(options);
         catalog.createTable(this.path1, table, false);
@@ -321,7 +320,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testListTables(Map<String, String> options) throws Exception {
+    void testListTables(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
         catalog.createTable(this.path3, this.createTable(options), false);
@@ -331,13 +330,13 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testAlterTable_differentTypedTable() {
+    void testAlterTable_differentTypedTable() {
         // TODO support this
     }
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testCreateFlinkTable(Map<String, String> options) {
+    void testCreateFlinkTable(Map<String, String> options) {
         // create a flink table
         CatalogTable table = createTable(options);
         HashMap<String, String> newOptions = new HashMap<>(table.getOptions());
@@ -350,7 +349,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateFlinkTableWithPath() throws Exception {
+    void testCreateFlinkTableWithPath() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         Map<String, String> options = new HashMap<>();
         options.put(PATH.key(), "/unknown/path");
@@ -362,7 +361,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("streamingOptionProvider")
-    public void testCreateTable_Streaming(Map<String, String> options) throws Exception {
+    void testCreateTable_Streaming(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = createTable(options);
         catalog.createTable(path1, table, false);
@@ -371,7 +370,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testAlterPartitionedTable(Map<String, String> options) throws Exception {
+    void testAlterPartitionedTable(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createPartitionedTable(options);
         catalog.createTable(this.path1, table, false);
@@ -383,7 +382,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testCreateTable_Batch(Map<String, String> options) throws Exception {
+    void testCreateTable_Batch(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createTable(options);
         catalog.createTable(this.path1, table, false);
@@ -398,8 +397,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testCreateTable_TableAlreadyExist_ignored(Map<String, String> options)
-            throws Exception {
+    void testCreateTable_TableAlreadyExist_ignored(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createTable(options);
         catalog.createTable(this.path1, table, false);
@@ -410,7 +408,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testCreatePartitionedTable_Batch(Map<String, String> options) throws Exception {
+    void testCreatePartitionedTable_Batch(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = this.createPartitionedTable(options);
         catalog.createTable(this.path1, table, false);
@@ -422,7 +420,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testDropDb_DatabaseNotEmptyException(Map<String, String> options) throws Exception {
+    void testDropDb_DatabaseNotEmptyException(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
         assertThatThrownBy(() -> catalog.dropDatabase("db1", true, false))
@@ -432,7 +430,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testTableExists(Map<String, String> options) throws Exception {
+    void testTableExists(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         assertThat(catalog.tableExists(this.path1)).isFalse();
         catalog.createTable(this.path1, this.createTable(options), false);
@@ -455,20 +453,19 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testAlterTable_TableNotExist_ignored(Map<String, String> options) throws Exception {
+    void testAlterTable_TableNotExist_ignored(Map<String, String> options) throws Exception {
         catalog.alterTable(this.nonExistObjectPath, this.createTable(options), true);
         assertThat(catalog.tableExists(this.nonExistObjectPath)).isFalse();
     }
 
     @Test
-    public void testDropTable_TableNotExist_ignored() throws Exception {
+    void testDropTable_TableNotExist_ignored() throws Exception {
         catalog.dropTable(this.nonExistObjectPath, true);
     }
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testCreateTable_TableAlreadyExistException(Map<String, String> options)
-            throws Exception {
+    void testCreateTable_TableAlreadyExistException(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
         assertThatThrownBy(() -> catalog.createTable(this.path1, this.createTable(options), false))
@@ -478,7 +475,7 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testDropTable_nonPartitionedTable(Map<String, String> options) throws Exception {
+    void testDropTable_nonPartitionedTable(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
         assertThat(catalog.tableExists(this.path1)).isTrue();
@@ -487,7 +484,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testGetTable_TableNotExistException() throws Exception {
+    void testGetTable_TableNotExistException() throws Exception {
         assertThatThrownBy(() -> catalog.getTable(this.nonExistObjectPath))
                 .isInstanceOf(TableNotExistException.class)
                 .hasMessage("Table (or view) db1.nonexist does not exist in Catalog test-catalog.");
@@ -495,14 +492,14 @@ public class FlinkCatalogTest {
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testDbExists(Map<String, String> options) throws Exception {
+    void testDbExists(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
         assertThat(catalog.databaseExists("db1")).isTrue();
     }
 
     @Test
-    public void testGetDatabase() throws Exception {
+    void testGetDatabase() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogDatabase database = catalog.getDatabase(path1.getDatabaseName());
         assertThat(database.getProperties()).isEmpty();
@@ -513,14 +510,13 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testDropDb_DatabaseNotExist_Ignore() throws Exception {
+    void testDropDb_DatabaseNotExist_Ignore() throws Exception {
         catalog.dropDatabase("db1", true, false);
     }
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testAlterTable_TableNotExistException(Map<String, String> options)
-            throws Exception {
+    void testAlterTable_TableNotExistException(Map<String, String> options) throws Exception {
         assertThatThrownBy(
                         () ->
                                 catalog.alterTable(
@@ -530,14 +526,14 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testDropTable_TableNotExistException() throws Exception {
+    void testDropTable_TableNotExistException() throws Exception {
         assertThatThrownBy(() -> catalog.dropTable(this.nonExistDbPath, false))
                 .isInstanceOf(TableNotExistException.class)
                 .hasMessage("Table (or view) non.exist does not exist in Catalog test-catalog.");
     }
 
     @Test
-    public void testCreateDb_Database() throws Exception {
+    void testCreateDb_Database() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         List<String> dbs = catalog.listDatabases();
         assertThat(dbs).hasSize(2);
@@ -549,7 +545,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateDb_DatabaseAlreadyExistException() throws Exception {
+    void testCreateDb_DatabaseAlreadyExistException() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
 
         assertThatThrownBy(() -> catalog.createDatabase(path1.getDatabaseName(), null, false))
@@ -558,7 +554,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateDb_DatabaseWithProperties() throws Exception {
+    void testCreateDb_DatabaseWithProperties() throws Exception {
         CatalogDatabaseImpl database =
                 new CatalogDatabaseImpl(Collections.singletonMap("haa", "ccc"), null);
         catalog.createDatabase(path1.getDatabaseName(), database, false);
@@ -579,14 +575,14 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateDb_DatabaseWithCommentSuccessful() throws DatabaseAlreadyExistException {
+    void testCreateDb_DatabaseWithCommentSuccessful() throws DatabaseAlreadyExistException {
         CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), "haha");
         assertDoesNotThrow(() -> catalog.createDatabase(path1.getDatabaseName(), database, false));
     }
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
-    public void testCreateTable_DatabaseNotExistException(Map<String, String> options) {
+    void testCreateTable_DatabaseNotExistException(Map<String, String> options) {
         assertThat(catalog.databaseExists(path1.getDatabaseName())).isFalse();
 
         assertThatThrownBy(
@@ -596,14 +592,14 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testDropDb_DatabaseNotExistException() {
+    void testDropDb_DatabaseNotExistException() {
         assertThatThrownBy(() -> catalog.dropDatabase(path1.getDatabaseName(), false, false))
                 .isInstanceOf(DatabaseNotExistException.class)
                 .hasMessage("Database db1 does not exist in Catalog test-catalog.");
     }
 
     @Test
-    public void testAlterDb() throws DatabaseAlreadyExistException, DatabaseNotExistException {
+    void testAlterDb() throws DatabaseAlreadyExistException, DatabaseNotExistException {
         CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
         catalog.createDatabase(path1.getDatabaseName(), database, false);
         Map<String, String> properties = Collections.singletonMap("haa", "ccc");
@@ -619,8 +615,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testAlterDbComment()
-            throws DatabaseAlreadyExistException, DatabaseNotExistException {
+    void testAlterDbComment() throws DatabaseAlreadyExistException, DatabaseNotExistException {
         CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
         catalog.createDatabase(path1.getDatabaseName(), database, false);
         Catalog mockCatalog = spy(catalog);
@@ -633,7 +628,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testAlterDb_DatabaseNotExistException() {
+    void testAlterDb_DatabaseNotExistException() {
         CatalogDatabaseImpl database = new CatalogDatabaseImpl(Collections.emptyMap(), null);
         assertThatThrownBy(() -> catalog.alterDatabase(path1.getDatabaseName(), database, false))
                 .isInstanceOf(DatabaseNotExistException.class)
@@ -641,7 +636,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testGetProperties() throws Exception {
+    void testGetProperties() throws Exception {
         Map<String, String> oldProperties = Collections.emptyMap();
         Map<String, String> newProperties = Collections.singletonMap("haa", "ccc");
         List<PropertyChange> propertyChanges =
@@ -656,7 +651,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testGetPropertyChangeFromComment() {
+    void testGetPropertyChangeFromComment() {
         Optional<PropertyChange> commentChange =
                 FlinkCatalog.getPropertyChangeFromComment(Optional.empty(), Optional.empty());
         assertThat(commentChange.isPresent()).isFalse();
@@ -672,7 +667,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateTableWithColumnOptions() throws Exception {
+    void testCreateTableWithColumnOptions() throws Exception {
         ResolvedExpression expression =
                 new ResolvedExpressionMock(DataTypes.INT(), () -> "test + 1");
         ResolvedSchema resolvedSchema =
@@ -715,7 +710,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testCreateTableWithLogSystemRegister() throws Exception {
+    void testCreateTableWithLogSystemRegister() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
 
         ResolvedExpression expression =
@@ -761,7 +756,7 @@ public class FlinkCatalogTest {
     }
 
     @Test
-    public void testDisableCreateTableInDefaultDB()
+    void testDisableCreateTableInDefaultDB()
             throws TableAlreadyExistException, DatabaseNotExistException,
                     DatabaseAlreadyExistException {
         String path = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();

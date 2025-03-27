@@ -35,7 +35,7 @@ import java.util.List;
 public class FormatReaderMappingTest {
 
     @Test
-    public void testTrimKeyFields() {
+    void testTrimKeyFields() {
         List<DataField> keyFields = new ArrayList<>();
         List<DataField> allFields = new ArrayList<>();
         List<DataField> testFields = new ArrayList<>();
@@ -94,7 +94,7 @@ public class FormatReaderMappingTest {
     }
 
     @Test
-    public void testTrimKeyWithIndexMapping() {
+    void testTrimKeyWithIndexMapping() {
         List<DataField> readTableFields = new ArrayList<>();
         List<DataField> readDataFields = new ArrayList<>();
 

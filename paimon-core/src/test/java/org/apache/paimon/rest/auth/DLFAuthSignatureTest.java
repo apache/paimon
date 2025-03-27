@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class DLFAuthSignatureTest {
 
     @Test
-    public void testGetAuthorization() throws Exception {
+    void testGetAuthorization() throws Exception {
         String region = "cn-hangzhou";
         String dateTime = "20231203T121212Z";
         String date = "20231203";

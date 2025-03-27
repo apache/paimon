@@ -53,7 +53,7 @@ public class MergeTreeReadersConnectionsLeakTest {
     String tableName = "my_table";
 
     @RepeatedTest(20)
-    public void testFailedStream() {
+    void testFailedStream() {
         FailingConstructInputOutputIO fileIO =
                 new FailingConstructInputOutputIO(0.3, MergeTreeReaders.class);
         try {

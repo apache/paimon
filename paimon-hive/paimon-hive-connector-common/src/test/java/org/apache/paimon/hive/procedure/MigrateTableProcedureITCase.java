@@ -50,12 +50,12 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     private static final int PORT = 9084;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         TEST_HIVE_METASTORE.stop();
     }
 
@@ -65,7 +65,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testMigrateProcedure(String format) throws Exception {
+    void testMigrateProcedure(String format) throws Exception {
         testUpgradeNonPartitionTable(format);
         resetMetastore();
         testUpgradePartitionTable(format);
@@ -143,7 +143,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testMigrateAction(String format) throws Exception {
+    void testMigrateAction(String format) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");

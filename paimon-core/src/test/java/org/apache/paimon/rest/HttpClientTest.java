@@ -33,9 +33,9 @@ import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -71,8 +71,8 @@ public class HttpClientTest {
     private Map<String, String> headers;
     private RESTAuthFunction restAuthFunction;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    void setUp() throws Exception {
         server = new TestHttpWebServer(MOCK_PATH);
         server.start();
         errorHandler = DefaultErrorHandler.getInstance();
@@ -90,20 +90,20 @@ public class HttpClientTest {
         restAuthFunction = new RESTAuthFunction(headers, authSession);
     }
 
-    @After
-    public void tearDown() throws IOException {
+    @AfterEach
+    void tearDown() throws IOException {
         server.stop();
     }
 
     @Test
-    public void testGetSuccess() {
+    void testGetSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
         MockRESTData response = httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction);
         assertEquals(mockResponseData.data(), response.data());
     }
 
     @Test
-    public void testGetSuccessWithQueryParams() {
+    void testGetSuccessWithQueryParams() {
         server.enqueueResponse(mockResponseDataStr, 200);
         Map<String, String> queryParams =
                 ImmutableMap.of("maxResults", "10", "pageToken", "abc=123");
@@ -128,7 +128,7 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testGetFail() {
+    void testGetFail() {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
                 BadRequestException.class,
@@ -136,7 +136,7 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testPostSuccess() {
+    void testPostSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
         MockRESTData response =
                 httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, restAuthFunction);
@@ -144,7 +144,7 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testPostFail() {
+    void testPostFail() {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
                 BadRequestException.class,
@@ -157,26 +157,26 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testDeleteSuccess() {
+    void testDeleteSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
         assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, restAuthFunction));
     }
 
     @Test
-    public void testDeleteFail() {
+    void testDeleteFail() {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
                 BadRequestException.class, () -> httpClient.delete(MOCK_PATH, restAuthFunction));
     }
 
     @Test
-    public void testDeleteWithDataSuccess() {
+    void testDeleteWithDataSuccess() {
         server.enqueueResponse(mockResponseDataStr, 200);
         assertDoesNotThrow(() -> httpClient.delete(MOCK_PATH, mockResponseData, restAuthFunction));
     }
 
     @Test
-    public void testDeleteWithDataFail() {
+    void testDeleteWithDataFail() {
         server.enqueueResponse(errorResponseStr, 400);
         assertThrows(
                 BadRequestException.class,
@@ -184,7 +184,7 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testRetry() {
+    void testRetry() {
         HttpClient httpClient = new HttpClient(server.getBaseUrl());
         server.enqueueResponse(mockResponseDataStr, 429);
         server.enqueueResponse(mockResponseDataStr, 200);
@@ -192,7 +192,7 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testUrl() {
+    void testUrl() {
         String queryKey = "pageToken";
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter(
@@ -212,7 +212,7 @@ public class HttpClientTest {
     }
 
     @Test
-    public void testLoggingInterceptorWithRetry() throws IOException {
+    void testLoggingInterceptorWithRetry() throws IOException {
         AtomicInteger retryCount = new AtomicInteger(0);
         LoggingInterceptor loggingInterceptor = spy(new LoggingInterceptor());
         doAnswer(
