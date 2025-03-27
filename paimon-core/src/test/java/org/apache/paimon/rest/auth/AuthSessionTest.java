@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest.auth;
 
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
 import org.apache.paimon.utils.Pair;
@@ -65,7 +64,7 @@ import static org.mockito.Mockito.when;
 
 /** Test for {@link AuthSession}. */
 public class AuthSessionTest {
-    
+
     @TempDir public java.nio.file.Path folder;
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
 
