@@ -159,11 +159,12 @@ under the License.
                                             <arg value="${rootDir}/${generated.docs.dir}/"/>
                                             <arg value="${rootDir}"/>
                                         </java>
-                                        <copy todir="${project.basedir}/../${static.docs.dir}">
+                                        <mkdir dir="${project.basedir}/../${static.docs.dir}"/>
+                                        <move todir="${project.basedir}/../${static.docs.dir}">
                                             <fileset dir="${project.basedir}/../paimon-open-api">
                                                 <include name="rest-catalog-open-api.yaml"/>
                                             </fileset>
-                                        </copy>
+                                        </move>
                                     </target>
                                 </configuration>
                             </execution>

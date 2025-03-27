@@ -1309,6 +1309,53 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal Server Error
+    post:
+      tags:
+        - view
+      summary: Alter view
+      operationId: alterView
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: view
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterViewRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       tags:
         - view
@@ -1521,6 +1568,7 @@ components:
           type: string
         resourceType:
           type: string
+          enum: ["DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN"]
         resourceName:
           type: string
         code:
@@ -1540,6 +1588,80 @@ components:
           $ref: '#/components/schemas/Identifier'
         schema:
           $ref: '#/components/schemas/ViewSchema'
+    AlterViewRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ViewChange'
+    ViewChange:
+      anyOf:
+        - $ref: '#/components/schemas/SetViewOption'
+        - $ref: '#/components/schemas/RemoveViewOption'
+        - $ref: '#/components/schemas/UpdateViewComment'
+        - $ref: '#/components/schemas/AddDialect'
+        - $ref: '#/components/schemas/UpdateDialect'
+        - $ref: '#/components/schemas/DropDialect'
+      required:
+        - action
+      properties:
+        action:
+          type: string
+    SetViewOption:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "setOption"
+        key:
+          type: string
+        value:
+          type: string
+    RemoveViewOption:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "removeOption"
+        key:
+          type: string
+    UpdateViewComment:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "comment"
+        key:
+          type: string
+    AddDialect:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "addDialect"
+        dialect:
+          type: string
+        query:
+          type: string
+    UpdateDialect:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "updateDialect"
+        dialect:
+          type: string
+        query:
+          type: string
+    DropDialect:
+      type: object
+      properties:
+        action:
+          type: string
+          const: "dropDialect"
+        dialect:
+          type: string
     DataField:
       type: object
       properties:
@@ -1600,7 +1722,7 @@ components:
         fields:
           type: array
           items:
-           $ref: '#/components/schemas/DataField'
+            $ref: '#/components/schemas/DataField'
     Identifier:
       type: object
       properties:
@@ -1667,12 +1789,17 @@ components:
         - $ref: '#/components/schemas/UpdateColumnType'
         - $ref: '#/components/schemas/UpdateColumnPosition'
         - $ref: '#/components/schemas/UpdateColumnNullability'
+      required:
+        - action
+      properties:
+        action:
+          type: string
     SetOption:
       type: object
       properties:
         action:
           type: string
-          enum: ["setOption"]
+          const: "setOption"
         key:
           type: string
         value:
@@ -1682,7 +1809,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["removeOption"]
+          const: "removeOption"
         key:
           type: string
     UpdateComment:
@@ -1690,7 +1817,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["updateComment"]
+          const: "updateComment"
         comment:
           type: string
     AddColumn:
@@ -1698,7 +1825,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["addColumn"]
+          const: "addColumn"
         fieldNames:
           type: array
           items:
@@ -1714,7 +1841,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["renameColumn"]
+          const: "renameColumn"
         fieldNames:
           type: array
           items:
@@ -1726,7 +1853,7 @@ components:
       properties:
         action:
           type: string
-          enum: ["dropColumn"]
+          const: "dropColumn"
         fieldNames:
           type: array
           items:
@@ -1736,7 +1863,7 @@ components:
       properties:
         action:
           type: string
-          enum: [ "updateColumnComment" ]
+          const: "updateColumnComment"
         fieldNames:
           type: array
           items:
@@ -1748,7 +1875,7 @@ components:
       properties:
         action:
           type: string
-          enum: [ "updateColumnType" ]
+          const: "updateColumnType"
         fieldNames:
           type: array
           items:
@@ -1762,7 +1889,7 @@ components:
       properties:
         action:
           type: string
-          enum: [ "updateColumnPosition" ]
+          const: "updateColumnPosition"
         move:
           $ref: '#/components/schemas/Move'
     UpdateColumnNullability:
@@ -1770,7 +1897,7 @@ components:
       properties:
         action:
           type: string
-          enum: [ "update_column_nullability" ]
+          const: "update_column_nullability"
         fieldNames:
           type: array
           items:
@@ -1811,12 +1938,17 @@ components:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
         - $ref: '#/components/schemas/TagInstant'
+      required:
+        - type
+      properties:
+        type:
+          type: string
     SnapshotInstant:
       type: object
       properties:
         'type':
           type: string
-          enum: [ "snapshot" ]
+          const: "snapshot"
         snapshotId:
           type: integer
           format: int64
@@ -1825,7 +1957,7 @@ components:
       properties:
         'type':
           type: string
-          enum: [ "tag" ]
+          const: "tag"
         tagName:
           type: string
     Snapshot:
