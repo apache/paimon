@@ -771,6 +771,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 sql(
                         "SELECT * FROM `test_scan_mode$audit_log` "
                                 + "/*+ OPTIONS('incremental-between'='1,8','incremental-between-scan-mode'='delta') */");
-        assertThat(result).containsExactlyInAnyOrder(Row.of("-D", 2, "B"), Row.of("+I", 3, "C"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("+I", 2, "B"), Row.of("-D", 2, "B"), Row.of("+I", 3, "C"));
     }
 }

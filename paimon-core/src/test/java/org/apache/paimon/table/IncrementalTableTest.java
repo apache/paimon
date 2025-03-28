@@ -104,10 +104,13 @@ public class IncrementalTableTest extends TableTestBase {
         List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, "2,5"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 3),
+                        GenericRow.of(1, 2, 3),
+                        GenericRow.of(2, 1, 3),
+                        GenericRow.of(2, 2, 1),
                         GenericRow.of(1, 1, 4),
                         GenericRow.of(1, 2, 4),
-                        GenericRow.of(2, 1, 4),
-                        GenericRow.of(2, 2, 1));
+                        GenericRow.of(2, 1, 4));
     }
 
     @Test
@@ -208,12 +211,14 @@ public class IncrementalTableTest extends TableTestBase {
         List<InternalRow> result = read(auditLog, Pair.of(INCREMENTAL_BETWEEN, "1,3"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(fromString("+I"), 2, 1, 3),
-                        GenericRow.of(fromString("+I"), 2, 2, 1),
-                        GenericRow.of(fromString("+I"), 1, 1, 2),
-                        GenericRow.of(fromString("+I"), 1, 4, 1),
+                        GenericRow.of(fromString("-D"), 1, 1, 1),
                         GenericRow.of(fromString("-D"), 1, 2, 1),
-                        GenericRow.of(fromString("-D"), 1, 3, 1));
+                        GenericRow.of(fromString("+I"), 1, 4, 1),
+                        GenericRow.of(fromString("+I"), 2, 1, 2),
+                        GenericRow.of(fromString("-D"), 1, 3, 1),
+                        GenericRow.of(fromString("+I"), 1, 1, 2),
+                        GenericRow.of(fromString("+I"), 2, 1, 3),
+                        GenericRow.of(fromString("+I"), 2, 2, 1));
     }
 
     @Test
