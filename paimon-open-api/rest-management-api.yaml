@@ -261,6 +261,7 @@ components:
           additionalProperties:
             type: string
         status:
+          description: Status of catalog
           type: string
           enum: ["NEW", "INITIALIZING", "INITIALIZE_FAILED", "RUNNING", "TERMINATED", "STORAGE_OPTIMIZATION_DISABLED", "DELETING", "DELETE_FAILED", "DELETED", "RELEASED","READ_ONLY"]
         owner:
