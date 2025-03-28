@@ -120,28 +120,28 @@ public abstract class HiveCatalogFormatTableITCaseBase {
                     };
 
     @Test
-    void testCsvFormatTable() throws Exception {
+    public void testCsvFormatTable() throws Exception {
         hiveShell.execute(
                 "CREATE TABLE csv_table (a INT COMMENT 'comment a', b STRING COMMENT 'comment b')");
         doTestCSVFormatTable("csv_table");
     }
 
     @Test
-    void testCsvFormatTableWithDelimiter() throws Exception {
+    public void testCsvFormatTableWithDelimiter() throws Exception {
         hiveShell.execute(
                 "CREATE TABLE csv_table_delimiter (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') ROW FORMAT DELIMITED FIELDS TERMINATED BY ';'");
         doTestCSVFormatTable("csv_table_delimiter");
     }
 
     @Test
-    void testPartitionTable() throws Exception {
+    public void testPartitionTable() throws Exception {
         hiveShell.execute(
                 "CREATE TABLE partition_table (a INT COMMENT 'comment a') PARTITIONED BY (b STRING COMMENT 'comment b')");
         doTestCSVFormatTable("partition_table");
     }
 
     @Test
-    void testFlinkCreateCsvFormatTable() throws Exception {
+    public void testFlinkCreateCsvFormatTable() throws Exception {
         tEnv.executeSql(
                         "CREATE TABLE flink_csv_table (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') with ('type'='format-table', 'file.format'='csv')")
                 .await();
@@ -149,21 +149,21 @@ public abstract class HiveCatalogFormatTableITCaseBase {
     }
 
     @Test
-    void testFlinkCreateFormatTableWithDelimiter() throws Exception {
+    public void testFlinkCreateFormatTableWithDelimiter() throws Exception {
         tEnv.executeSql(
                 "CREATE TABLE flink_csv_table_delimiter (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') with ('type'='format-table', 'file.format'='csv', 'field-delimiter'=';')");
         doTestCSVFormatTable("flink_csv_table_delimiter");
     }
 
     @Test
-    void testFlinkCreatePartitionTable() throws Exception {
+    public void testFlinkCreatePartitionTable() throws Exception {
         tEnv.executeSql(
                 "CREATE TABLE flink_partition_table (a INT COMMENT 'comment a', b STRING COMMENT 'comment b') PARTITIONED BY (b) with ('type'='format-table', 'file.format'='csv')");
         doTestCSVFormatTable("flink_partition_table");
     }
 
     @Test
-    void testJsonFormatTable() throws Exception {
+    public void testJsonFormatTable() throws Exception {
         hiveShell.execute(
                 "CREATE TABLE json_table (a INT COMMENT 'comment a', b TIMESTAMP COMMENT 'comment b') "
                         + "ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe' "
@@ -172,7 +172,7 @@ public abstract class HiveCatalogFormatTableITCaseBase {
     }
 
     @Test
-    void testFlinkCreateJsonFormatTable() throws Exception {
+    public void testFlinkCreateJsonFormatTable() throws Exception {
         tEnv.executeSql(
                         "CREATE TABLE flink_json_table (a INT COMMENT 'comment a', b TIMESTAMP COMMENT 'comment b') with ('type'='format-table', 'file.format'='json')")
                 .await();
@@ -228,7 +228,7 @@ public abstract class HiveCatalogFormatTableITCaseBase {
     }
 
     @Test
-    void testListTables() throws Exception {
+    public void testListTables() throws Exception {
         hiveShell.execute("CREATE TABLE list_table ( a INT, b STRING)");
         assertThat(collect("SHOW TABLES")).containsExactlyInAnyOrder(Row.of("list_table"));
     }

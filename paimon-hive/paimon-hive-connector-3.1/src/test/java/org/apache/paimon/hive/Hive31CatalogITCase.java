@@ -57,7 +57,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
             };
 
     @Test
-    void testCustomMetastoreClient() throws Exception {
+    public void testCustomMetastoreClient() throws Exception {
         path = folder.newFolder().toURI().toString();
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
         tEnv = TableEnvironmentImpl.create(settings);
@@ -84,7 +84,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
     }
 
     @Test
-    void testCustomConstructorMetastoreClient() throws Exception {
+    public void testCustomConstructorMetastoreClient() throws Exception {
         path = folder.newFolder().toURI().toString();
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
         Class<?>[] customConstructorMetastoreClientClass = {
@@ -113,7 +113,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
     }
 
     @Test
-    void testCreateExistTableInHive() throws Exception {
+    public void testCreateExistTableInHive() throws Exception {
         tEnv.executeSql(
                 String.join(
                         "\n",
@@ -145,7 +145,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
     }
 
     @Test
-    void testAlterTableFailedInHive() throws Exception {
+    public void testAlterTableFailedInHive() throws Exception {
         tEnv.executeSql(
                         String.join(
                                 "\n",
