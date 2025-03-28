@@ -164,10 +164,13 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                                 String.format("%s,%s", timestampSnapshot2, timestampSnapshot4)));
         assertThat(result3)
                 .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 3),
+                        GenericRow.of(1, 2, 3),
+                        GenericRow.of(2, 1, 3),
+                        GenericRow.of(2, 2, 1),
                         GenericRow.of(1, 1, 4),
                         GenericRow.of(1, 2, 4),
-                        GenericRow.of(2, 1, 4),
-                        GenericRow.of(2, 2, 1));
+                        GenericRow.of(2, 1, 4));
         result3 =
                 read(
                         table,
@@ -178,10 +181,13 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                                         timestampSnapshot2String, timestampSnapshot4String)));
         assertThat(result3)
                 .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 3),
+                        GenericRow.of(1, 2, 3),
+                        GenericRow.of(2, 1, 3),
+                        GenericRow.of(2, 2, 1),
                         GenericRow.of(1, 1, 4),
                         GenericRow.of(1, 2, 4),
-                        GenericRow.of(2, 1, 4),
-                        GenericRow.of(2, 2, 1));
+                        GenericRow.of(2, 1, 4));
     }
 
     @Test
