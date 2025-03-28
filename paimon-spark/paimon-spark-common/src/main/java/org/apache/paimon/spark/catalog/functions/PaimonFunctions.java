@@ -35,7 +35,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** Paimon functions. */
@@ -55,60 +54,6 @@ public class PaimonFunctions {
     @Nullable
     public static UnboundFunction load(String name) {
         return FUNCTIONS.get(name);
-    }
-
-    /**
-     * For now, we only support report bucket partitioning for table scan. So the case `SELECT
-     * bucket(10, col)` would fail since we do not implement {@link
-     * org.apache.spark.sql.connector.catalog.functions.ScalarFunction}
-     */
-    public static class BucketFunction implements UnboundFunction {
-        @Override
-        public BoundFunction bind(StructType inputType) {
-            if (inputType.size() != 2) {
-                throw new UnsupportedOperationException(
-                        "Wrong number of inputs (expected numBuckets and value)");
-            }
-
-            StructField numBucket = inputType.fields()[0];
-            StructField bucketField = inputType.fields()[1];
-            checkArgument(
-                    numBucket.dataType() == IntegerType,
-                    "bucket number field must be integer type");
-
-            return new BoundFunction() {
-                @Override
-                public DataType[] inputTypes() {
-                    return new DataType[] {IntegerType, bucketField.dataType()};
-                }
-
-                @Override
-                public DataType resultType() {
-                    return IntegerType;
-                }
-
-                @Override
-                public String name() {
-                    return "bucket";
-                }
-
-                @Override
-                public String canonicalName() {
-                    // We have to override this method to make it support canonical equivalent
-                    return "paimon.bucket(" + bucketField.dataType().catalogString() + ", int)";
-                }
-            };
-        }
-
-        @Override
-        public String description() {
-            return name();
-        }
-
-        @Override
-        public String name() {
-            return "bucket";
-        }
     }
 
     /**
