@@ -131,6 +131,7 @@ public class IncrementalDeltaStartingScanner extends AbstractStartingScanner {
                                             .collect(Collectors.toList()))) {
                 DataSplit.Builder dataSplitBuilder =
                         DataSplit.builder()
+                                .isStreaming(true)
                                 .withSnapshot(endingSnapshotId)
                                 .withPartition(partition)
                                 .withBucket(bucket)
