@@ -47,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TestCachedClientPool {
 
     @Test
-    void testCacheKeyNotSame() {
+    public void testCacheKeyNotSame() {
         // client1 use cache key type:paimon
         Options options1 = new Options();
         options1.set("type", "paimon");
@@ -73,7 +73,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testCacheKeySame() {
+    public void testCacheKeySame() {
         Options options = new Options();
         options.set("type", "paimon");
         options.set("paimon.catalog.type", "hive");
@@ -93,7 +93,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testCacheKeyUGINotSame() {
+    public void testCacheKeyUGINotSame() {
         // user paimon1 login
         Options options1 = new Options();
         options1.set("type", "paimon");
@@ -132,7 +132,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testCacheKeyUGISame() {
+    public void testCacheKeyUGISame() {
         Options options = new Options();
         options.set("type", "paimon");
         options.set("paimon.catalog.type", "hive");
@@ -165,7 +165,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testCacheKeyOptionNotSame() {
+    public void testCacheKeyOptionNotSame() {
         // client1 use option1 instance
         Options options1 = new Options();
         options1.set("type", "paimon");
@@ -191,7 +191,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testCacheKeyOptionSame1() {
+    public void testCacheKeyOptionSame1() {
         // need use the same option instance
         Options options = new Options();
         options.set("type", "paimon");
@@ -212,7 +212,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testCacheKeyOptionSame2() {
+    public void testCacheKeyOptionSame2() {
         // client1 use option1 instance
         Options options1 = new Options();
         options1.set("type", "paimon");
@@ -238,7 +238,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testCacheKeyOptionAllNotSame() {
+    public void testCacheKeyOptionAllNotSame() {
         // user paimon1 login
         Options options1 = new Options();
         options1.set("type", "paimon");
@@ -278,7 +278,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testCacheKeyOptionAllSame() {
+    public void testCacheKeyOptionAllSame() {
         Options options = new Options();
         options.set("type", "paimon");
         options.set("paimon.catalog.type", "hive");
@@ -311,7 +311,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testLoginPaimon() throws Exception {
+    public void testLoginPaimon() throws Exception {
         // user paimon login
         Options options = new Options();
         options.set("type", "paimon");
@@ -340,7 +340,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testLoginRoot() throws Exception {
+    public void testLoginRoot() throws Exception {
         // user paimon login
         Options options = new Options();
         options.set("type", "paimon");
@@ -367,7 +367,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testLoginHive() throws Exception {
+    public void testLoginHive() throws Exception {
         Catalog catalog =
                 UserGroupInformation.createRemoteUser("hive")
                         .doAs(
@@ -465,7 +465,7 @@ public class TestCachedClientPool {
     }
 
     @Test
-    void testUgi() throws IOException {
+    public void testUgi() throws IOException {
         UserGroupInformation user1 =
                 UserGroupInformation.createProxyUser("hive", UserGroupInformation.getCurrentUser());
         UserGroupInformation user2 =
