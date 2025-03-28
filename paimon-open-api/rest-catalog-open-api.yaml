@@ -48,18 +48,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
+              example: {
+                "overrides": {
+                  "prefix": "prefix"
+                },
+                "defaults": {
+                  "key": "value"
+                }
+              }
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases:
     get:
       tags:
@@ -89,17 +89,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListDatabasesResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     post:
       tags:
         - database
@@ -120,23 +112,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "409":
-          description: Resource has exist
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceHasExistErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}:
     get:
       tags:
@@ -156,29 +136,17 @@ paths:
             type: string
       responses:
         "200":
-          description: OK
+          description: Get a database by databse.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetDatabaseResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     delete:
       tags:
         - database
@@ -199,23 +167,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/properties:
     post:
       tags:
@@ -246,23 +202,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AlterDatabaseResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables:
     get:
       tags:
@@ -297,17 +241,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListTablesResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     post:
       tags:
         - table
@@ -333,17 +269,9 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/table-details:
     get:
       tags:
@@ -378,17 +306,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListTableDetailsResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}:
     get:
       tags:
@@ -419,23 +339,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetTableResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     post:
       tags:
         - table
@@ -465,30 +373,14 @@ paths:
       responses:
         "200":
           description: Success, no content
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "409":
-          description: Resource has exist
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceHasExistErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     delete:
       tags:
         - table
@@ -513,24 +405,12 @@ paths:
       responses:
         "200":
           description: Success, no content
-        "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/tables/rename:
     post:
       tags:
@@ -552,29 +432,13 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "409":
-          description: Resource has exist
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceHasExistErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/commit:
     post:
       tags:
@@ -610,29 +474,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommitTableResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "409":
-          description: Resource has exist
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceHasExistErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/rollback:
     post:
       tags:
@@ -664,23 +512,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/token:
     get:
       tags:
@@ -711,23 +547,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetTableDataTokenResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/snapshot:
     get:
       tags:
@@ -758,23 +582,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetTableSnapshotResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/partitions:
     get:
       tags:
@@ -814,23 +626,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListPartitionsResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/partitions/mark:
     post:
       tags:
@@ -862,23 +662,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches:
     get:
       tags:
@@ -909,23 +697,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListBranchesResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     post:
       tags:
         - branch
@@ -956,23 +732,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}:
     delete:
       tags:
@@ -1004,23 +768,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
     post:
       tags:
@@ -1057,29 +809,13 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "409":
-          description: Resource has exist
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceHasExistErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/views:
     get:
       tags:
@@ -1114,17 +850,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListViewsResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     post:
       tags:
         - view
@@ -1150,23 +878,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/view-details:
     get:
       tags:
@@ -1201,17 +917,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListViewDetailsResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/views/{view}:
     get:
       tags:
@@ -1242,23 +950,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetViewResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     post:
       tags:
         - view
@@ -1289,23 +985,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     delete:
       tags:
         - view
@@ -1331,23 +1015,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/{prefix}/views/rename:
     post:
       tags:
@@ -1369,29 +1041,13 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "409":
-          description: Resource has exist
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceHasExistErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
 components:
   schemas:
     CreateDatabaseRequest:
@@ -1440,6 +1096,54 @@ components:
           type: object
           additionalProperties:
             type: string
+    UnauthorizedErrorResponse:
+      description:
+        Used for 401 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "No auth for this resource",
+            "code": 401
+          }
+    ResourceNotFoundErrorResponse:
+      description:
+        Used for 404 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Resource is not found",
+            "resourceType": "TABLE",
+            "resourceName": "user",
+            "code": 404
+          }
+    ResourceHasExistErrorResponse:
+      description:
+        Used for 409 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Resource has exist",
+            "resourceType": "TABLE",
+            resourceName: "account",
+            "code": 409
+          }
+    ServerErrorResponse:
+      description:
+        Used for server 5xx errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Internal Server Error",
+            "code": 500
+          }
     ErrorResponse:
       type: object
       properties:
@@ -1448,7 +1152,7 @@ components:
         resourceType:
           type: string
           nullable: true
-          enum: ["DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN"]
+          enum: [ "DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN" ]
         resourceName:
           type: string
           nullable: true
@@ -1869,7 +1573,7 @@ components:
           type: string
         commitKind:
           type: string
-          enum: ["APPEND", "COMPACT", "OVERWRITE", "ANALYZE"]
+          enum: [ "APPEND", "COMPACT", "OVERWRITE", "ANALYZE" ]
         timeMillis:
           type: integer
           format: int64
