@@ -260,6 +260,9 @@ components:
           type: object
           additionalProperties:
             type: string
+        status:
+          type: string
+          enum: ["NEW", "INITIALIZING", "INITIALIZE_FAILED", "RUNNING", "TERMINATED", "STORAGE_OPTIMIZATION_DISABLED", "DELETING", "DELETE_FAILED", "DELETED", "RELEASED","READ_ONLY"]
         owner:
           description: Username of current owner of catalog.
           type: string
