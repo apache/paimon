@@ -270,6 +270,8 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -381,6 +383,8 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -439,6 +443,8 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -481,6 +487,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommitTableResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -764,6 +772,8 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -924,6 +934,8 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -1091,6 +1103,8 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -1104,6 +1118,17 @@ components:
   # Reusable Response Objects #
   #############################
   responses:
+    BadRequestErrorResponse:
+      description:
+        Used for 400 errors, means illegal request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Malformed request",
+            "code": 400
+          }
     UnauthorizedErrorResponse:
       description:
         Used for 401 errors.

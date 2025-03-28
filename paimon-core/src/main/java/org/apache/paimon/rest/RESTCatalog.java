@@ -222,6 +222,8 @@ public class RESTCatalog implements Catalog {
             }
         } catch (ForbiddenException e) {
             throw new DatabaseNoPermissionException(name, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 
@@ -287,6 +289,8 @@ public class RESTCatalog implements Catalog {
             }
         } catch (ForbiddenException e) {
             throw new DatabaseNoPermissionException(name, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 
@@ -411,6 +415,8 @@ public class RESTCatalog implements Catalog {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
 
         return response.isSuccess();
@@ -542,6 +548,8 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(fromTable, e);
         } catch (AlreadyExistsException e) {
             throw new TableAlreadyExistException(toTable);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 
@@ -684,6 +692,8 @@ public class RESTCatalog implements Catalog {
             throw new BranchAlreadyExistException(identifier, branch, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 
@@ -811,6 +821,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfExists) {
                 throw new ViewAlreadyExistException(identifier);
             }
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 
@@ -899,6 +911,8 @@ public class RESTCatalog implements Catalog {
             }
         } catch (AlreadyExistsException e) {
             throw new ViewAlreadyExistException(toView);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 
@@ -921,6 +935,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfNotExists) {
                 throw new ViewNotExistException(identifier);
             }
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
         }
     }
 
