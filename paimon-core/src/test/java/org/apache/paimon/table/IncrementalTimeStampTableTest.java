@@ -147,9 +147,12 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                                         timestampEarliestString, timestampSnapshot2String)));
         assertThat(result2)
                 .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 1),
+                        GenericRow.of(1, 2, 1),
+                        GenericRow.of(1, 3, 1),
+                        GenericRow.of(2, 1, 1),
                         GenericRow.of(1, 1, 2),
                         GenericRow.of(1, 2, 2),
-                        GenericRow.of(1, 3, 1),
                         GenericRow.of(1, 4, 1),
                         GenericRow.of(2, 1, 2));
 
