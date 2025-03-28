@@ -1270,6 +1270,63 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testAggregationRemoveRecordOnDelete() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "aggregation");
+                            options.set("aggregation.remove-record-on-delete", "true");
+                        },
+                        rowType);
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
+        // 1. Inserts
+        write.write(GenericRow.of(1, 1, 3, 3));
+        write.write(GenericRow.of(1, 1, 1, 1));
+        write.write(GenericRow.of(1, 1, 2, 2));
+        commit.commit(0, write.prepareCommit(true, 0));
+        List<String> result =
+                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 2]");
+
+        // 2. Update Before
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 2, 2));
+        commit.commit(1, write.prepareCommit(true, 1));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).isEmpty();
+
+        // 3. Update After
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 2, 3));
+        commit.commit(2, write.prepareCommit(true, 2));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 3]");
+
+        // 4. Retracts
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 2, 3));
+        commit.commit(3, write.prepareCommit(true, 3));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).isEmpty();
+
+        // 5. Inserts
+        write.write(GenericRow.of(1, 1, 2, 2));
+        commit.commit(4, write.prepareCommit(true, 4));
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 2]");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testPartialUpdateRemoveRecordOnDelete() throws Exception {
         RowType rowType =
                 RowType.of(
