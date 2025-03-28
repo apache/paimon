@@ -728,7 +728,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
-    @GetMapping("/v1/{prefix}/databases/{database}/views")
+    @GetMapping("/v1/{prefix}/databases/{database}/view-details")
     public ListViewDetailsResponse listViewDetails(
             @PathVariable String prefix,
             @PathVariable String database,

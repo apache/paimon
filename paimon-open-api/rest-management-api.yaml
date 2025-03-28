@@ -156,6 +156,34 @@ paths:
           $ref: '#/components/responses/ResourceNotFoundErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/catalogs/id/{id}:
+    get:
+      tags:
+        - Catalogs
+      operationId: getCatalogById
+      summary: Get a catalog by id
+      description: |
+        Gets the specified catalog.
+      parameters:
+        - name: id
+          in: path
+          description: The id of the catalog.
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The catalog was successfully retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetCatalogResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/ResourceNotFoundErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
 components:
   responses:
     UnauthorizedErrorResponse:
@@ -243,6 +271,10 @@ components:
           type: object
           additionalProperties:
             type: string
+        status:
+          description: Status of catalog
+          type: string
+          enum: ["NEW", "INITIALIZING", "INITIALIZE_FAILED", "RUNNING", "TERMINATED", "STORAGE_OPTIMIZATION_DISABLED", "DELETING", "DELETE_FAILED", "DELETED", "RELEASED","READ_ONLY"]
         owner:
           description: Username of current owner of catalog.
           type: string

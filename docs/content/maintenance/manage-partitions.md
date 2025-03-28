@@ -1,9 +1,9 @@
 ---
-title: "Expire Partition"
-weight: 96
+title: "Manage Partitions"
+weight: 12
 type: docs
 aliases:
-- /flink/expire-partition.html
+- /maintenance/manage-partitions.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -23,6 +23,10 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
+
+# Manage Partitions
+Paimon provides multiple ways to manage partitions, including expire historical partitions by different strategies or 
+mark a partition done to notify the downstream application that the partition has finished writing.
 
 ## Expiring Partitions
 
@@ -138,3 +142,29 @@ More options:
         </tr>
     </tbody>
 </table>
+
+## Partition Mark Done
+
+You can use the option `'partition.mark-done-action'` to configure the action when a partition needs to be mark done.
+- `success-file`: add '_success' file to directory.
+- `done-partition`: add 'xxx.done' partition to metastore.
+- `mark-event`: mark partition event to metastore.
+- `http-report`: report partition mark done to remote http server.
+- `custom`: use policy class to create a mark-partition policy.
+These actions can be configured at the same time: 'done-partition,success-file,mark-event,custom'.
+
+Paimon partition mark done can be triggered both by streaming write and batch write.
+
+### Streaming Mark Done
+
+You can use the options `'partition.idle-time-to-done'` to set a partition idle time to done duration. When a partition 
+has no new data after this time duration, the mark done action will be triggered to indicate that the data is ready.
+
+By default, Flink will use process time as idle time to trigger partition mark done. You can also use watermark to 
+trigger partition mark done. This will make the partition mark done time more accurate when data is delayed. You can
+enable this by setting `'partition.mark-done-action.mode' = 'watermark'`.
+
+### Batch Mark Done
+
+For batch mode, you can trigger partition mark done when end input by setting `'partition.end-input-to-done'='true'`.
+

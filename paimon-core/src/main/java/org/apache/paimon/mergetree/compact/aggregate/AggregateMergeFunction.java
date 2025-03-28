@@ -38,6 +38,7 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -53,11 +54,21 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     private KeyValue latestKv;
     private GenericRow row;
     private KeyValue reused;
+    private boolean currentDeleteRow;
+    private final boolean removeRecordOnDelete;
 
     public AggregateMergeFunction(
             InternalRow.FieldGetter[] getters, FieldAggregator[] aggregators) {
+        this(getters, aggregators, false);
+    }
+
+    public AggregateMergeFunction(
+            InternalRow.FieldGetter[] getters,
+            FieldAggregator[] aggregators,
+            boolean removeRecordOnDelete) {
         this.getters = getters;
         this.aggregators = aggregators;
+        this.removeRecordOnDelete = removeRecordOnDelete;
     }
 
     @Override
@@ -65,6 +76,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         this.latestKv = null;
         this.row = new GenericRow(getters.length);
         Arrays.stream(aggregators).forEach(FieldAggregator::reset);
+        this.currentDeleteRow = false;
     }
 
     @Override
@@ -72,6 +84,12 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         latestKv = kv;
         boolean isRetract =
                 kv.valueKind() != RowKind.INSERT && kv.valueKind() != RowKind.UPDATE_AFTER;
+
+        currentDeleteRow = removeRecordOnDelete && isRetract;
+        if (currentDeleteRow) {
+            return;
+        }
+
         for (int i = 0; i < getters.length; i++) {
             FieldAggregator fieldAggregator = aggregators[i];
             Object accumulator = getters[i].getFieldOrNull(row);
@@ -93,7 +111,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         if (reused == null) {
             reused = new KeyValue();
         }
-        return reused.replace(latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, row);
+        RowKind rowKind = currentDeleteRow ? RowKind.DELETE : RowKind.INSERT;
+        return reused.replace(latestKv.key(), latestKv.sequenceNumber(), rowKind, row);
     }
 
     @Override
@@ -117,6 +136,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         private final List<String> tableNames;
         private final List<DataType> tableTypes;
         private final List<String> primaryKeys;
+        private final boolean removeRecordOnDelete;
 
         private Factory(
                 Options conf,
@@ -127,6 +147,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
             this.tableNames = tableNames;
             this.tableTypes = tableTypes;
             this.primaryKeys = primaryKeys;
+            this.removeRecordOnDelete = conf.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
         }
 
         @Override
@@ -150,7 +171,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                         FieldAggregatorFactory.create(fieldType, fieldName, aggFuncName, options);
             }
 
-            return new AggregateMergeFunction(createFieldGetters(fieldTypes), fieldAggregators);
+            return new AggregateMergeFunction(
+                    createFieldGetters(fieldTypes), fieldAggregators, removeRecordOnDelete);
         }
 
         private String getAggFuncName(String fieldName, List<String> sequenceFields) {

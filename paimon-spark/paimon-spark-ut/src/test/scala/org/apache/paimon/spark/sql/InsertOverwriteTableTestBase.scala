@@ -575,4 +575,37 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
         }
     }
   }
+
+  test("Paimon Insert: dynamic insert overwrite partition") {
+    withTable("my_table") {
+      sql("CREATE TABLE my_table (id INT, pt STRING) PARTITIONED BY (pt)")
+
+      for (mode <- Seq("static", "dynamic")) {
+        withSparkSQLConf("spark.sql.sources.partitionOverwriteMode" -> mode) {
+          sql("INSERT OVERWRITE my_table VALUES (1, 'p1'), (2, 'p2')")
+          // INSERT OVERWRITE table
+          sql("INSERT OVERWRITE my_table VALUES (3, 'p1')")
+          if (mode == "dynamic") {
+            checkAnswer(sql("SELECT * FROM my_table ORDER BY id"), Seq(Row(2, "p2"), Row(3, "p1")))
+          } else {
+            checkAnswer(sql("SELECT * FROM my_table ORDER BY id"), Row(3, "p1"))
+          }
+
+          sql("INSERT OVERWRITE my_table VALUES (1, 'p1'), (2, 'p2')")
+          // INSERT OVERWRITE table PARTITION (pt)
+          sql("INSERT OVERWRITE my_table PARTITION (pt) VALUES (3, 'p1')")
+          if (mode == "dynamic") {
+            checkAnswer(sql("SELECT * FROM my_table ORDER BY id"), Seq(Row(2, "p2"), Row(3, "p1")))
+          } else {
+            checkAnswer(sql("SELECT * FROM my_table ORDER BY id"), Row(3, "p1"))
+          }
+
+          sql("INSERT OVERWRITE my_table VALUES (1, 'p1'), (2, 'p2')")
+          // INSERT OVERWRITE table PARTITION (pt='p1')
+          sql("INSERT OVERWRITE my_table PARTITION (pt='p1') VALUES (3)")
+          checkAnswer(sql("SELECT * FROM my_table ORDER BY id"), Seq(Row(2, "p2"), Row(3, "p1")))
+        }
+      }
+    }
+  }
 }
