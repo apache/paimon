@@ -25,6 +25,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.annotation.Nullable;
+
 /** Response for error. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ErrorResponse implements RESTResponse {
@@ -50,9 +52,11 @@ public class ErrorResponse implements RESTResponse {
     private static final String FIELD_RESOURCE_NAME = "resourceName";
     private static final String FIELD_CODE = "code";
 
+    @Nullable
     @JsonProperty(FIELD_RESOURCE_TYPE)
     private final String resourceType;
 
+    @Nullable
     @JsonProperty(FIELD_RESOURCE_NAME)
     private final String resourceName;
 
@@ -62,17 +66,10 @@ public class ErrorResponse implements RESTResponse {
     @JsonProperty(FIELD_CODE)
     private final Integer code;
 
-    public ErrorResponse(String resourceType, String resourceName, String message, Integer code) {
-        this.resourceType = resourceType;
-        this.resourceName = resourceName;
-        this.code = code;
-        this.message = message;
-    }
-
     @JsonCreator
     public ErrorResponse(
-            @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
-            @JsonProperty(FIELD_RESOURCE_NAME) String resourceName,
+            @Nullable @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
+            @Nullable @JsonProperty(FIELD_RESOURCE_NAME) String resourceName,
             @JsonProperty(FIELD_MESSAGE) String message,
             @JsonProperty(FIELD_CODE) int code) {
         this.resourceType = resourceType;
