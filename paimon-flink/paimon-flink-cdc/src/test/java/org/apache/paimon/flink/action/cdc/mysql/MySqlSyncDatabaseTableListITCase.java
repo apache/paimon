@@ -39,17 +39,17 @@ import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 
 /** Test if the table list in {@link MySqlSyncDatabaseAction} is correct. */
-public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
+class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
 
     @BeforeAll
-    public static void startContainers() {
+    static void startContainers() {
         MYSQL_CONTAINER.withSetupSQL("mysql/tablelist_test_setup.sql");
         start();
     }
 
     @Test
     @Timeout(60)
-    public void testActionRunResult() throws Exception {
+    void testActionRunResult() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put(
                 "database-name",

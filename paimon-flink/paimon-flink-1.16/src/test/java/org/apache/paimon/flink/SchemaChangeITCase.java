@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** ITCase for schema changes. */
 public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
-    public void testSetAndRemoveOption() throws Exception {
+    void testSetAndRemoveOption() throws Exception {
         sql("CREATE TABLE T (a STRING, b STRING, c STRING)");
         sql("ALTER TABLE T SET ('xyc'='unknown1', 'abc'='unknown2')");
 
@@ -45,7 +45,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSetAndResetImmutableOptionsOnEmptyTables() {
+    void testSetAndResetImmutableOptionsOnEmptyTables() {
         sql("CREATE TABLE T1 (a INT, b INT)");
         sql(
                 "ALTER TABLE T1 SET ('primary-key' = 'a', 'bucket' = '1', 'merge-engine' = 'first-row')");
@@ -64,7 +64,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSetAndResetImmutableOptionsOnNonEmptyTables() {
+    void testSetAndResetImmutableOptionsOnNonEmptyTables() {
         // bucket-key is immutable
         sql("CREATE TABLE T1 (a STRING, b STRING, c STRING)");
         sql("INSERT INTO T1 VALUES ('a', 'b', 'c')");

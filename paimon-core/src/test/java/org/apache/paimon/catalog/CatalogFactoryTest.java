@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CatalogFactoryTest {
 
     @Test
-    public void testAutomaticCreatePath(@TempDir java.nio.file.Path path) {
+    void testAutomaticCreatePath(@TempDir java.nio.file.Path path) {
         Path root = new Path(path.toUri().toString());
         Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
@@ -50,7 +50,7 @@ public class CatalogFactoryTest {
     }
 
     @Test
-    public void testNotDirectory(@TempDir java.nio.file.Path path) throws IOException {
+    void testNotDirectory(@TempDir java.nio.file.Path path) throws IOException {
         Path root = new Path(path.toUri().toString());
         Path warehouse = new Path(root, "warehouse");
         LocalFileIO.create().tryToWriteAtomic(warehouse, "");
@@ -61,7 +61,7 @@ public class CatalogFactoryTest {
     }
 
     @Test
-    public void testNonManagedTable(@TempDir java.nio.file.Path path) {
+    void testNonManagedTable(@TempDir java.nio.file.Path path) {
         Path root = new Path(path.toUri().toString());
         Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
@@ -71,7 +71,7 @@ public class CatalogFactoryTest {
     }
 
     @Test
-    public void testContextDefaultHadoopConf(@TempDir java.nio.file.Path path) {
+    void testContextDefaultHadoopConf(@TempDir java.nio.file.Path path) {
         Path root = new Path(path.toUri().toString());
         String defaultFS = "master:9999";
         String replication = "8";
@@ -88,7 +88,7 @@ public class CatalogFactoryTest {
     }
 
     @Test
-    public void testContextSerializable() throws IOException, ClassNotFoundException {
+    void testContextSerializable() throws IOException, ClassNotFoundException {
         Configuration conf = new Configuration(false);
         conf.set("my_key", "my_value");
         CatalogContext context =

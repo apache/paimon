@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Container;
 
 /** Tests for {@code FlinkActions}. */
-public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
+class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkActionsE2eTest.class);
 
@@ -33,7 +33,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
     }
 
     @Test
-    public void testDropPartition() throws Exception {
+    void testDropPartition() throws Exception {
         String tableDdl =
                 "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + "    dt STRING,\n"
@@ -92,7 +92,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
     }
 
     @Test
-    public void testDelete() throws Exception {
+    void testDelete() throws Exception {
         String tableDdl =
                 "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + "    dt STRING,\n"
@@ -149,7 +149,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
     }
 
     @Test
-    public void testMergeInto() throws Exception {
+    void testMergeInto() throws Exception {
         String tableTDdl =
                 "CREATE TABLE IF NOT EXISTS T (\n"
                         + "    k INT,\n"
@@ -215,7 +215,7 @@ public class FlinkActionsE2eTest extends FlinkActionsE2eTestBase {
     }
 
     @Test
-    public void testCreateAndDeleteTag() throws Exception {
+    void testCreateAndDeleteTag() throws Exception {
         String tableTDdl =
                 "CREATE TABLE IF NOT EXISTS T (\n"
                         + "    k INT,\n"

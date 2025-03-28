@@ -33,10 +33,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link ExpireTagsProcedure}. */
-public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
+class ExpireTagsProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testExpireTagsByTagCreateTimeAndTagTimeRetained() throws Exception {
+    void testExpireTagsByTagCreateTimeAndTagTimeRetained() throws Exception {
         sql(
                 "CREATE TABLE T (id STRING, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"
@@ -71,7 +71,7 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExpireTagsByOlderThanTime() throws Exception {
+    void testExpireTagsByOlderThanTime() throws Exception {
         sql(
                 "CREATE TABLE T (id STRING, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"

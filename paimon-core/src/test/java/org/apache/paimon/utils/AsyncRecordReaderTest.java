@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class AsyncRecordReaderTest {
 
     @Test
-    public void testNormal() throws IOException {
+    void testNormal() throws IOException {
         Queue<List<Integer>> queue = new LinkedList<>();
         queue.add(Arrays.asList(1, 5, 6));
         queue.add(Arrays.asList(4, 6, 8));
@@ -81,7 +81,7 @@ public class AsyncRecordReaderTest {
     }
 
     @Test
-    public void testNonBlockingWhenException() {
+    void testNonBlockingWhenException() {
         String message = "Test Exception";
         RecordReader<Integer> reader =
                 new RecordReader<Integer>() {
@@ -101,7 +101,7 @@ public class AsyncRecordReaderTest {
     }
 
     @Test
-    public void testClassLoader() throws IOException {
+    void testClassLoader() throws IOException {
         ClassLoader goodClassLoader = Thread.currentThread().getContextClassLoader();
         try {
             ClassLoader badClassLoader =

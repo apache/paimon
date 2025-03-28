@@ -36,10 +36,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FlinkCdcMultiTableSink}. */
-public class FlinkCdcMultiTableSinkTest {
+class FlinkCdcMultiTableSinkTest {
 
     @Test
-    public void testTransformationParallelism() {
+    void testTransformationParallelism() {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(8);
         int inputParallelism = ThreadLocalRandom.current().nextInt(8) + 1;

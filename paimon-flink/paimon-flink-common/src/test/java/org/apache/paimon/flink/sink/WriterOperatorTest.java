@@ -66,20 +66,20 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TableWriteOperator}. */
-public class WriterOperatorTest {
+class WriterOperatorTest {
 
     @TempDir public java.nio.file.Path tempDir;
     private Path tablePath;
     private String commitUser;
 
     @BeforeEach
-    public void before() {
+    void before() {
         tablePath = new Path(tempDir.toString());
         commitUser = UUID.randomUUID().toString();
     }
 
     @Test
-    public void testPrimaryKeyTableMetrics() throws Exception {
+    void testPrimaryKeyTableMetrics() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"a", "b"});
@@ -97,7 +97,7 @@ public class WriterOperatorTest {
     }
 
     @Test
-    public void testAppendOnlyTableMetrics() throws Exception {
+    void testAppendOnlyTableMetrics() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"a", "b"});
@@ -160,7 +160,7 @@ public class WriterOperatorTest {
     }
 
     @Test
-    public void testAsyncLookupWithFailure() throws Exception {
+    void testAsyncLookupWithFailure() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
@@ -244,7 +244,7 @@ public class WriterOperatorTest {
     }
 
     @Test
-    public void testGentleLookupWithFailure() throws Exception {
+    void testGentleLookupWithFailure() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
@@ -368,12 +368,12 @@ public class WriterOperatorTest {
     }
 
     @Test
-    public void testChangelog() throws Exception {
+    void testChangelog() throws Exception {
         testChangelog(false);
     }
 
     @Test
-    public void testChangelogWithInsertOnly() throws Exception {
+    void testChangelogWithInsertOnly() throws Exception {
         testChangelog(true);
     }
 
@@ -447,7 +447,7 @@ public class WriterOperatorTest {
     }
 
     @Test
-    public void testNumWritersMetric() throws Exception {
+    void testNumWritersMetric() throws Exception {
         String tableName = tablePath.getName();
         RowType rowType =
                 RowType.of(

@@ -30,15 +30,15 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link ReplaceTagAction}. */
-public class ReplaceTagActionTest extends ActionITCaseBase {
+class ReplaceTagActionTest extends ActionITCaseBase {
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         init(warehouse);
     }
 
     @Test
-    public void testReplaceTag() throws Exception {
+    void testReplaceTag() throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T (id INT, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"

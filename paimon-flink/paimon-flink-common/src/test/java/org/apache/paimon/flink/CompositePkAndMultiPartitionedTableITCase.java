@@ -44,18 +44,18 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertOverwrit
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 
 /** Paimon IT case when the table has composite primary keys and multiple partition fields. */
-public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase {
+class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase {
 
     private final Map<String, String> staticPartitionOverwrite =
             Collections.singletonMap(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         init(getTempDirPath());
     }
 
     @Test
-    public void testBatchWriteWithMultiPartitionedRecordsWithMultiPk() throws Exception {
+    void testBatchWriteWithMultiPartitionedRecordsWithMultiPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // to_currency is USD, dt = 2022-01-01, hh = 11
@@ -241,7 +241,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
     }
 
     @Test
-    public void testBatchWriteWithSinglePartitionedRecordsWithMultiPk() throws Exception {
+    void testBatchWriteWithSinglePartitionedRecordsWithMultiPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // to_currency is USD
@@ -391,7 +391,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
     }
 
     @Test
-    public void testBatchWriteWithNonPartitionedRecordsWithMultiPk() throws Exception {
+    void testBatchWriteWithNonPartitionedRecordsWithMultiPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // to_currency is USD
@@ -484,7 +484,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
     }
 
     @Test
-    public void testBatchWriteMultiPartitionedRecordsWithOnePk() throws Exception {
+    void testBatchWriteMultiPartitionedRecordsWithOnePk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // dt = 2022-01-01, hh = 00
@@ -574,7 +574,7 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
     }
 
     @Test
-    public void testBatchWriteMultiPartitionedRecordsWithoutPk() throws Exception {
+    void testBatchWriteMultiPartitionedRecordsWithoutPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // dt = 2022-01-01, hh = 00

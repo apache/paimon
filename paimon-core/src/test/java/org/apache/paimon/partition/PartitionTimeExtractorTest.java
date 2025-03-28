@@ -31,10 +31,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PartitionTimeExtractor}. */
-public class PartitionTimeExtractorTest {
+class PartitionTimeExtractorTest {
 
     @Test
-    public void testDefault() {
+    void testDefault() {
         PartitionTimeExtractor extractor = new PartitionTimeExtractor(null, null);
         assertThat(
                         extractor.extract(
@@ -60,7 +60,7 @@ public class PartitionTimeExtractorTest {
     }
 
     @Test
-    public void testPattern() {
+    void testPattern() {
         PartitionTimeExtractor extractor =
                 new PartitionTimeExtractor("$year-$month-$day 00:00:00", null);
         assertThat(
@@ -84,7 +84,7 @@ public class PartitionTimeExtractorTest {
     }
 
     @Test
-    public void testFormatter() {
+    void testFormatter() {
         PartitionTimeExtractor extractor = new PartitionTimeExtractor(null, "yyyyMMdd");
         assertThat(
                         extractor.extract(
@@ -93,7 +93,7 @@ public class PartitionTimeExtractorTest {
     }
 
     @Test
-    public void testExtractNonDateFormattedPartition() {
+    void testExtractNonDateFormattedPartition() {
         PartitionTimeExtractor extractor = new PartitionTimeExtractor("$ds", "yyyyMMdd");
         assertThatThrownBy(
                         () ->

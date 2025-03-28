@@ -57,7 +57,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testOnlyTimestampMillis() {
+    void testOnlyTimestampMillis() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_TIMESTAMP.toString());
         options.put(
@@ -68,7 +68,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testOnlyTimestamp() {
+    void testOnlyTimestamp() {
         String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Map<String, String> options = new HashMap<>();
@@ -79,7 +79,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testFromTimestampConflict() {
+    void testFromTimestampConflict() {
         String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Map<String, String> options = new HashMap<>();
@@ -94,7 +94,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testFromSnapshotConflict() {
+    void testFromSnapshotConflict() {
         String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Map<String, String> options = new HashMap<>();
@@ -107,7 +107,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testRecordLevelTimeField() {
+    void testRecordLevelTimeField() {
         Map<String, String> options = new HashMap<>(2);
         options.put(CoreOptions.RECORD_LEVEL_TIME_FIELD.key(), "f0");
         options.put(CoreOptions.RECORD_LEVEL_EXPIRE_TIME.key(), "1 m");

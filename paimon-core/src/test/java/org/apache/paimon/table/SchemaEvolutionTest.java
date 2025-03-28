@@ -85,7 +85,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testDefaultValue() throws Exception {
+    void testDefaultValue() throws Exception {
         {
             Map<String, String> option = new HashMap<>();
             option.put(
@@ -205,7 +205,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testAddField() throws Exception {
+    void testAddField() throws Exception {
         Schema schema =
                 new Schema(
                         RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
@@ -274,7 +274,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testAddDuplicateField() throws Exception {
+    void testAddDuplicateField() throws Exception {
         final String columnName = "f3";
         Schema schema =
                 new Schema(
@@ -299,7 +299,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testUpdateFieldType() throws Exception {
+    void testUpdateFieldType() throws Exception {
         Schema schema =
                 Schema.newBuilder()
                         .column("f0", DataTypes.INT(), "f0 field")
@@ -323,7 +323,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testRenameField() throws Exception {
+    void testRenameField() throws Exception {
         Schema schema =
                 new Schema(
                         RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
@@ -357,7 +357,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testRenamePrimaryKeyColumn() throws Exception {
+    void testRenamePrimaryKeyColumn() throws Exception {
         Schema schema =
                 new Schema(
                         RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
@@ -381,7 +381,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testRenameBucketKeyColumn() throws Exception {
+    void testRenameBucketKeyColumn() throws Exception {
         Schema schema =
                 new Schema(
                         RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
@@ -402,7 +402,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testDropField() throws Exception {
+    void testDropField() throws Exception {
         Schema schema =
                 new Schema(
                         RowType.of(
@@ -438,7 +438,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testDropAllFields() throws Exception {
+    void testDropAllFields() throws Exception {
         Schema schema =
                 new Schema(
                         RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
@@ -471,7 +471,7 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testCreateAlterSystemField() throws Exception {
+    void testCreateAlterSystemField() throws Exception {
         Schema schema2 =
                 new Schema(
                         RowType.of(

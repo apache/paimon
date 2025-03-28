@@ -42,21 +42,21 @@ class JavaCodeSplitterTest {
     }
 
     @Test
-    public void testNullCode() {
+    void testNullCode() {
         assertThatThrownBy(() -> JavaCodeSplitter.split(null, 4000, 10000))
                 .cause()
                 .hasMessage("code cannot be empty");
     }
 
     @Test
-    public void testEmptyCode() {
+    void testEmptyCode() {
         assertThatThrownBy(() -> JavaCodeSplitter.split("", 4000, 10000))
                 .cause()
                 .hasMessage("code cannot be empty");
     }
 
     @Test
-    public void testWrongMaxMethodLength() {
+    void testWrongMaxMethodLength() {
         assertThatThrownBy(
                         () ->
                                 JavaCodeSplitter.split(
@@ -66,7 +66,7 @@ class JavaCodeSplitterTest {
     }
 
     @Test
-    public void testWrongMaxClassMemberCount() {
+    void testWrongMaxClassMemberCount() {
         assertThatThrownBy(
                         () -> JavaCodeSplitter.split("public interface DummyInterface {}", 10, 0))
                 .cause()

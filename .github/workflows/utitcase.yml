@@ -47,7 +47,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build And Test Others
-        timeout-minutes: 60
+        timeout-minutes: 90
         run: |
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)

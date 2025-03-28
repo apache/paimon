@@ -66,7 +66,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneTable(String invoker) throws Exception {
+    void testCloneTable(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
@@ -129,7 +129,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneTableWithSourceTableExternalPath(String invoker) throws Exception {
+    void testCloneTableWithSourceTableExternalPath(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareDataWithExternalPath(sourceWarehouse);
 
@@ -192,7 +192,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneDatabase(String invoker) throws Exception {
+    void testCloneDatabase(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
@@ -256,7 +256,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneWarehouse(String invoker) throws Exception {
+    void testCloneWarehouse(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
@@ -558,7 +558,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneWithSchemaEvolution(String invoker) throws Exception {
+    void testCloneWithSchemaEvolution(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
@@ -768,7 +768,7 @@ public class CloneActionITCase extends ActionITCaseBase {
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     @Timeout(180)
-    public void testCloneTableWithExpiration(String invoker) throws Exception {
+    void testCloneTableWithExpiration(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
 
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
@@ -929,7 +929,7 @@ public class CloneActionITCase extends ActionITCaseBase {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testEmptySourceCatalog() {
+    void testEmptySourceCatalog() {
         String sourceWarehouse = getTempDirPath("source-ware");
 
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();

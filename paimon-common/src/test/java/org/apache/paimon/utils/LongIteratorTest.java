@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LongIteratorTest {
 
     @Test
-    public void testRange() {
+    void testRange() {
         LongIterator iterator = LongIterator.fromRange(5, 10);
         List<Long> list = new ArrayList<>();
         while (iterator.hasNext()) {
@@ -38,7 +38,7 @@ class LongIteratorTest {
     }
 
     @Test
-    public void testFromArray() {
+    void testFromArray() {
         long[] array = new long[] {5L, 6L, 7L, 8L, 9L};
         LongIterator iterator = LongIterator.fromArray(array);
         List<Long> list = new ArrayList<>();

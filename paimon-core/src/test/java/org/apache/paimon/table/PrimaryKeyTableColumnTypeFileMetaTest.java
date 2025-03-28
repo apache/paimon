@@ -80,7 +80,7 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
 
     @Override
     @Test
-    public void testTableSplitFilterNormalFields() throws Exception {
+    void testTableSplitFilterNormalFields() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);

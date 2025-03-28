@@ -28,10 +28,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link PaimonStringObjectInspector}. */
-public class PaimonStringObjectInspectorTest {
+class PaimonStringObjectInspectorTest {
 
     @Test
-    public void testCategoryAndClass() {
+    void testCategoryAndClass() {
         PaimonStringObjectInspector oi = new PaimonStringObjectInspector();
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
@@ -43,7 +43,7 @@ public class PaimonStringObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveJavaObject() {
+    void testGetPrimitiveJavaObject() {
         PaimonStringObjectInspector oi = new PaimonStringObjectInspector();
 
         BinaryString input = BinaryString.fromString("testString");
@@ -53,7 +53,7 @@ public class PaimonStringObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveWritableObject() {
+    void testGetPrimitiveWritableObject() {
         PaimonStringObjectInspector oi = new PaimonStringObjectInspector();
 
         BinaryString input = BinaryString.fromString("testString");
@@ -63,7 +63,7 @@ public class PaimonStringObjectInspectorTest {
     }
 
     @Test
-    public void testCopyObject() {
+    void testCopyObject() {
         PaimonStringObjectInspector oi = new PaimonStringObjectInspector();
 
         BinaryString input = BinaryString.fromString("testString");

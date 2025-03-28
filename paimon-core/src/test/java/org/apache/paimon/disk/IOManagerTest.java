@@ -27,12 +27,12 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link IOManager}. */
-public class IOManagerTest {
+class IOManagerTest {
 
     @TempDir Path tempDir;
 
     @Test
-    public void channelEnumerator() throws Exception {
+    void channelEnumerator() throws Exception {
         File tempPath = tempDir.toFile();
 
         String[] tempDirs =

@@ -73,7 +73,7 @@ import java.util.function.Predicate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CdcRecordStoreMultiWriteOperator}. */
-public class CdcRecordStoreMultiWriteOperatorTest {
+class CdcRecordStoreMultiWriteOperatorTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -87,7 +87,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     private Schema firstTableSchema;
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         commitUser = UUID.randomUUID().toString();
 
@@ -146,7 +146,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     }
 
     @AfterEach
-    public void after() throws Exception {
+    void after() throws Exception {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
@@ -159,7 +159,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testAsyncTableCreate() throws Exception {
+    void testAsyncTableCreate() throws Exception {
         // the async table will have same row type, partitions, and pks as firstTable
         Identifier tableId = Identifier.create(databaseName, "async_new_table");
 
@@ -209,7 +209,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testInitializeState() throws Exception {
+    void testInitializeState() throws Exception {
         // the async table will have same row type, partitions, and pks as firstTable
         Identifier tableId = Identifier.create(databaseName, "async_new_table");
         long timestamp = 1;
@@ -279,7 +279,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testSingleTableAddColumn() throws Exception {
+    void testSingleTableAddColumn() throws Exception {
 
         Identifier tableId = firstTable;
         FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
@@ -356,7 +356,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testSingleTableUpdateColumnType() throws Exception {
+    void testSingleTableUpdateColumnType() throws Exception {
         Identifier tableId = secondTable;
         FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
 
@@ -461,7 +461,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testMultiTableUpdateColumnType() throws Exception {
+    void testMultiTableUpdateColumnType() throws Exception {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
 
@@ -618,7 +618,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testUsingTheSameCompactExecutor() throws Exception {
+    void testUsingTheSameCompactExecutor() throws Exception {
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
                 createTestHarness(catalogLoader);
         harness.open();

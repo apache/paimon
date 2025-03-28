@@ -69,7 +69,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
     protected StreamExecutionEnvironment env;
 
     @BeforeEach
-    public void setEnv() {
+    void setEnv() {
         env =
                 streamExecutionEnvironmentBuilder()
                         .streamingMode()
@@ -79,7 +79,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
     }
 
     @AfterEach
-    public void closeEnv() throws Exception {
+    void closeEnv() throws Exception {
         env.close();
     }
 

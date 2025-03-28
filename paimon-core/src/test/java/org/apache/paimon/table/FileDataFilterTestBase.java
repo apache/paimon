@@ -150,7 +150,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testReadFilterExistField() throws Exception {
+    void testReadFilterExistField() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
@@ -190,7 +190,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testReadFilterNonExistField() throws Exception {
+    void testReadFilterNonExistField() throws Exception {
         writeAndCheckFileResult(
                 schemas -> null,
                 (files, schemas) -> {
@@ -231,7 +231,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testReadFilterMultipleFields() throws Exception {
+    void testReadFilterMultipleFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> null,
                 (files, schemas) -> {
@@ -280,7 +280,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testBatchProjection() throws Exception {
+    void testBatchProjection() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -327,7 +327,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testStreamingReadWrite() throws Exception {
+    void testStreamingReadWrite() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -370,7 +370,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testStreamingProjection() throws Exception {
+    void testStreamingProjection() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -409,7 +409,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testStreamingFilter() throws Exception {
+    void testStreamingFilter() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));

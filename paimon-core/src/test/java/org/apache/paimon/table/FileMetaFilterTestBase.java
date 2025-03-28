@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBase {
 
     @Test
-    public void testTableSplit() throws Exception {
+    void testTableSplit() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -120,7 +120,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testTableSplitFilterExistFields() throws Exception {
+    void testTableSplitFilterExistFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -216,7 +216,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testTableSplitFilterNewFields() throws Exception {
+    void testTableSplitFilterNewFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -296,7 +296,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testTableSplitFilterPartition() throws Exception {
+    void testTableSplitFilterPartition() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -315,7 +315,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testTableSplitFilterPrimaryKey() throws Exception {
+    void testTableSplitFilterPrimaryKey() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);

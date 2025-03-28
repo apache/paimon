@@ -31,10 +31,10 @@ import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.ro
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for the {@link PendingSplitsCheckpointSerializer}. */
-public class PendingSplitsCheckpointSerializerTest {
+class PendingSplitsCheckpointSerializerTest {
 
     @Test
-    public void serializeEmptyCheckpoint() throws Exception {
+    void serializeEmptyCheckpoint() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(Collections.emptyList(), 5L);
 
@@ -44,7 +44,7 @@ public class PendingSplitsCheckpointSerializerTest {
     }
 
     @Test
-    public void serializeSomeSplits() throws Exception {
+    void serializeSomeSplits() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(
                         Arrays.asList(testSplit1(), testSplit2(), testSplit3()), 3L);
@@ -55,7 +55,7 @@ public class PendingSplitsCheckpointSerializerTest {
     }
 
     @Test
-    public void serializeSplitsAndContinuous() throws Exception {
+    void serializeSplitsAndContinuous() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(
                         Arrays.asList(testSplit1(), testSplit2(), testSplit3()), 20L);
@@ -66,7 +66,7 @@ public class PendingSplitsCheckpointSerializerTest {
     }
 
     @Test
-    public void repeatedSerialization() throws Exception {
+    void repeatedSerialization() throws Exception {
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(Arrays.asList(testSplit3(), testSplit1()), 5L);
 

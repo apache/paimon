@@ -42,12 +42,12 @@ import static org.apache.paimon.hive.RandomGenericRowDataGenerator.generate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link PaimonSerDe}. */
-public class PaimonSerDeTest {
+class PaimonSerDeTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testInitialize() throws Exception {
+    void testInitialize() throws Exception {
         PaimonSerDe serDe = createInitializedSerDe();
         ObjectInspector o = serDe.getObjectInspector();
         assertThat(o).isInstanceOf(PaimonInternalRowObjectInspector.class);
@@ -63,7 +63,7 @@ public class PaimonSerDeTest {
     }
 
     @Test
-    public void testDeserialize() throws Exception {
+    void testDeserialize() throws Exception {
         PaimonSerDe serDe = createInitializedSerDe();
         GenericRow rowData = generate();
         RowDataContainer container = new RowDataContainer();

@@ -113,7 +113,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
     protected abstract KeyValue getExpectedResult(int idx);
 
     @Test
-    public void testFullChangelogMergeFunctionWrapper() {
+    void testFullChangelogMergeFunctionWrapper() {
         for (int i = 0; i < INPUT_KVS.size(); i++) {
             wrapper.reset();
             List<KeyValue> kvs = INPUT_KVS.get(i);
@@ -223,7 +223,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
         }
 
         @Test
-        public void testFullChangelogMergeFunctionWrapperWithIgnoreFields() {
+        void testFullChangelogMergeFunctionWrapperWithIgnoreFields() {
             RowType valueType =
                     RowType.builder()
                             .fields(

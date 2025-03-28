@@ -38,10 +38,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for table with branches using SQL. */
-public class BranchSqlITCase extends CatalogITCaseBase {
+class BranchSqlITCase extends CatalogITCaseBase {
 
     @Test
-    public void testAlterBranchTable() throws Exception {
+    void testAlterBranchTable() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -102,7 +102,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateBranchFromTag() throws Exception {
+    void testCreateBranchFromTag() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -142,7 +142,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateEmptyBranch() throws Exception {
+    void testCreateEmptyBranch() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -172,7 +172,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDeleteBranchTable() throws Exception {
+    void testDeleteBranchTable() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -206,7 +206,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchFastForward() throws Exception {
+    void testBranchFastForward() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -252,7 +252,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFallbackBranchBatchRead() throws Exception {
+    void testFallbackBranchBatchRead() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
         sql("INSERT INTO t VALUES (1, 10, 'apple'), (1, 20, 'banana')");
@@ -308,7 +308,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCrossPartitionFallbackBranchBatchRead() throws Exception {
+    void testCrossPartitionFallbackBranchBatchRead() throws Exception {
         sql(
                 "CREATE TABLE t ( pk INT PRIMARY KEY NOT ENFORCED, name STRING, dt STRING ) PARTITIONED BY (dt) WITH ( 'bucket' = '-1' )");
         sql(
@@ -329,7 +329,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDifferentRowTypes() throws Exception {
+    void testDifferentRowTypes() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
         sql("CALL sys.create_branch('default.t', 'pk')");
@@ -349,7 +349,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchOptionsTable() throws Exception {
+    void testBranchOptionsTable() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT, k INT, v STRING, PRIMARY KEY (pt, k) NOT ENFORCED ) "
                         + "PARTITIONED BY (pt) WITH ( 'bucket' = '2' )");
@@ -377,7 +377,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchSchemasTable() throws Exception {
+    void testBranchSchemasTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
         sql("CALL sys.create_branch('default.t', 'b1')");
@@ -394,7 +394,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchAuditLogTable() throws Exception {
+    void testBranchAuditLogTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
         assertThat(collectResult("SELECT * FROM t$audit_log"))
@@ -409,7 +409,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchReadOptimizedTable() throws Exception {
+    void testBranchReadOptimizedTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
         assertThat(collectResult("SELECT * FROM t$ro")).containsExactlyInAnyOrder("+I[1, 2]");
@@ -423,7 +423,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchFilesTable() throws Exception {
+    void testBranchFilesTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
 
@@ -442,7 +442,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchTagsTable() throws Exception {
+    void testBranchTagsTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
         paimonTable("t").createTag("tag1", 1);
@@ -463,7 +463,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testBranchConsumersTable() throws Exception {
+    void testBranchConsumersTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2), (3,4)");
 
@@ -491,7 +491,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchManifestsTable() {
+    void testBranchManifestsTable() {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
 
@@ -518,7 +518,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchSnapshotsTable() throws Exception {
+    void testBranchSnapshotsTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
 
@@ -539,7 +539,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchPartitionsTable() throws Exception {
+    void testBranchPartitionsTable() throws Exception {
         sql("CREATE TABLE t (a INT, b INT,c STRING) PARTITIONED BY (a)");
         assertThat(sql("SELECT * FROM t$partitions")).isEmpty();
 
@@ -564,7 +564,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCannotSetEmptyFallbackBranch() {
+    void testCannotSetEmptyFallbackBranch() {
         String errMsg =
                 "Cannot set 'scan.fallback-branch' = 'test' because the branch 'test' isn't existed.";
         assertThatThrownBy(
@@ -582,7 +582,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadBranchTableWithMultiSchemaIds() throws Exception {
+    void testReadBranchTableWithMultiSchemaIds() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"

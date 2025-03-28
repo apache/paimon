@@ -38,7 +38,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCompactionInStreamingMode() throws Exception {
+    void testCompactionInStreamingMode() throws Exception {
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");

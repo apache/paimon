@@ -29,11 +29,11 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 
 /** ITCase for deletion vector table. */
-public class DeletionVectorITCase extends CatalogITCaseBase {
+class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"input"})
-    public void testStreamingReadDVTableWhenChangelogProducerIsInput(String changelogProducer)
+    void testStreamingReadDVTableWhenChangelogProducerIsInput(String changelogProducer)
             throws Exception {
         sql(
                 String.format(
@@ -80,7 +80,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"none", "lookup"})
-    public void testStreamingReadDVTable(String changelogProducer) throws Exception {
+    void testStreamingReadDVTable(String changelogProducer) throws Exception {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
@@ -132,7 +132,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"none", "lookup"})
-    public void testBatchReadDVTable(String changelogProducer) {
+    void testBatchReadDVTable(String changelogProducer) {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
@@ -164,7 +164,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"none", "lookup"})
-    public void testDVTableWithAggregationMergeEngine(String changelogProducer) throws Exception {
+    void testDVTableWithAggregationMergeEngine(String changelogProducer) throws Exception {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, v INT) "
@@ -204,7 +204,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"none", "lookup"})
-    public void testDVTableWithPartialUpdateMergeEngine(String changelogProducer) throws Exception {
+    void testDVTableWithPartialUpdateMergeEngine(String changelogProducer) throws Exception {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, v1 STRING, v2 STRING) "
@@ -249,7 +249,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"none", "lookup"})
-    public void testBatchReadDVTableWithSequenceField(String changelogProducer) {
+    void testBatchReadDVTableWithSequenceField(String changelogProducer) {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, sequence INT, name STRING) "
@@ -265,7 +265,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadTagWithDv() {
+    void testReadTagWithDv() {
         sql(
                 "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) WITH ("
                         + "'deletion-vectors.enabled' = 'true', "

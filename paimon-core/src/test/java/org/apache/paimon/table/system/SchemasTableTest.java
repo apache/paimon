@@ -72,7 +72,7 @@ public class SchemasTableTest extends TableTestBase {
     }
 
     @Test
-    public void testSchemasTable() throws Exception {
+    void testSchemasTable() throws Exception {
         List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(schemasTable);
         assertThat(result).containsExactlyElementsOf(expectRow);

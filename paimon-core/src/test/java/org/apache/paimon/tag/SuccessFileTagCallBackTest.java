@@ -44,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SuccessFileTagCallBackTest extends PrimaryKeyTableTestBase {
 
     @Test
-    public void testWithSuccessFile() throws IOException {
+    void testWithSuccessFile() throws IOException {
         Options options = new Options();
         options.set(CoreOptions.TAG_CREATE_SUCCESS_FILE, true);
         options.set(TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.WATERMARK);
@@ -78,7 +78,7 @@ public class SuccessFileTagCallBackTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testWithoutSuccessFile() throws IOException {
+    void testWithoutSuccessFile() throws IOException {
         Options options = new Options();
         options.set(CoreOptions.TAG_CREATE_SUCCESS_FILE, false);
         options.set(TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.WATERMARK);

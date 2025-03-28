@@ -64,14 +64,14 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeAll
-    public static void startContainers() {
+    static void startContainers() {
         MYSQL_CONTAINER.withSetupSQL("mysql/sync_database_setup.sql");
         start();
     }
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_sync_database");
 
@@ -200,7 +200,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testSpecifiedMySqlTable() {
+    void testSpecifiedMySqlTable() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_sync_database");
         mySqlConfig.put("table-name", "my_table");
@@ -216,7 +216,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testInvalidDatabase() {
+    void testInvalidDatabase() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "invalid");
 
@@ -230,7 +230,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIgnoreIncompatibleTables() throws Exception {
+    void testIgnoreIncompatibleTables() throws Exception {
         // create an incompatible table
         createFileStoreTable(
                 "incompatible",
@@ -278,7 +278,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTableAffix() throws Exception {
+    void testTableAffix() throws Exception {
         // create table t1
         createFileStoreTable(
                 "test_prefix_t1_test_suffix",
@@ -409,7 +409,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIncludingTables() throws Exception {
+    void testIncludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_including",
                 "flink|paimon.+",
@@ -420,7 +420,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testExcludingTables() throws Exception {
+    void testExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_excluding",
                 null,
@@ -431,7 +431,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIncludingAndExcludingTables() throws Exception {
+    void testIncludingAndExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_in_excluding",
                 "flink|paimon.+",
@@ -466,7 +466,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIgnoreCaseDivided() throws Exception {
+    void testIgnoreCaseDivided() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_ignore_CASE_divided");
 
@@ -487,7 +487,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIgnoreCaseCombined() throws Exception {
+    void testIgnoreCaseCombined() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_ignore_CASE_combined");
 
@@ -558,37 +558,37 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(600)
-    public void testNewlyAddedTables() throws Exception {
+    void testNewlyAddedTables() throws Exception {
         testNewlyAddedTable(1, true, false, "paimon_sync_database_newly_added_tables");
     }
 
     @Test
     @Timeout(600)
-    public void testNewlyAddedTableSingleTable() throws Exception {
+    void testNewlyAddedTableSingleTable() throws Exception {
         testNewlyAddedTable(1, false, false, "paimon_sync_database_newly_added_tables_1");
     }
 
     @Test
     @Timeout(600)
-    public void testNewlyAddedTableMultipleTables() throws Exception {
+    void testNewlyAddedTableMultipleTables() throws Exception {
         testNewlyAddedTable(3, false, false, "paimon_sync_database_newly_added_tables_2");
     }
 
     @Test
     @Timeout(600)
-    public void testNewlyAddedTableSchemaChange() throws Exception {
+    void testNewlyAddedTableSchemaChange() throws Exception {
         testNewlyAddedTable(1, false, true, "paimon_sync_database_newly_added_tables_3");
     }
 
     @Test
     @Timeout(600)
-    public void testNewlyAddedTableSingleTableWithSavepoint() throws Exception {
+    void testNewlyAddedTableSingleTableWithSavepoint() throws Exception {
         testNewlyAddedTable(1, true, true, "paimon_sync_database_newly_added_tables_4");
     }
 
     @Test
     @Timeout(120)
-    public void testAddIgnoredTable() throws Exception {
+    void testAddIgnoredTable() throws Exception {
         String mySqlDatabase = "paimon_sync_database_add_ignored_table";
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -649,7 +649,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         }
     }
 
-    public void testNewlyAddedTable(
+    void testNewlyAddedTable(
             int numOfNewlyAddedTables,
             boolean testSavepointRecovery,
             boolean testSchemaChange,
@@ -901,7 +901,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(240)
-    public void testSyncManyTableWithLimitedMemory() throws Exception {
+    void testSyncManyTableWithLimitedMemory() throws Exception {
         String databaseName = "many_table_sync_test";
         int newTableCount = 100;
         int recordsCount = 100;
@@ -957,7 +957,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSyncMultipleShards() throws Exception {
+    void testSyncMultipleShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 
         // test table list
@@ -1071,7 +1071,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSyncMultipleShardsWithoutMerging() throws Exception {
+    void testSyncMultipleShardsWithoutMerging() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "without_merging_shard_.*");
 
@@ -1177,7 +1177,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testMonitoredAndExcludedTablesWithMering() throws Exception {
+    void testMonitoredAndExcludedTablesWithMering() throws Exception {
         // create an incompatible table named t2
         createFileStoreTable(
                 "t2",
@@ -1216,7 +1216,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testNewlyAddedTablesOptionsChange() throws Exception {
+    void testNewlyAddedTablesOptionsChange() throws Exception {
         try (Statement statement = getStatement()) {
             statement.execute("USE " + "newly_added_tables_option_schange");
             statement.executeUpdate("INSERT INTO t1 VALUES (1, 'one')");
@@ -1266,7 +1266,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testCatalogAndTableConfig() {
+    void testCatalogAndTableConfig() {
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(getBasicMySqlConfig())
                         .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
@@ -1280,7 +1280,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testMetadataColumns() throws Exception {
+    void testMetadataColumns() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "metadata");
 
@@ -1362,7 +1362,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSpecifyKeys() throws Exception {
+    void testSpecifyKeys() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "test_specify_keys");
 

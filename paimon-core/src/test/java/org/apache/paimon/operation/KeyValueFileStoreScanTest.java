@@ -91,7 +91,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithPartitionFilter() throws Exception {
+    void testWithPartitionFilter() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(random.nextInt(1000) + 1);
         List<BinaryRow> partitions =
@@ -124,7 +124,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithKeyFilter() throws Exception {
+    void testWithKeyFilter() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(random.nextInt(1000) + 1);
         Snapshot snapshot = writeData(data);
@@ -145,7 +145,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithValueFilterBucket() throws Exception {
+    void testWithValueFilterBucket() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         // 0 <= item <= 999
         List<KeyValue> data = generateData(100, 0, (long) random.nextInt(1000));
@@ -177,7 +177,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithValueFilterPartition() throws Exception {
+    void testWithValueFilterPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(100, 0, (long) Math.abs(random.nextInt(1000)));
         writeData(data, 0);
@@ -205,7 +205,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithBucket() throws Exception {
+    void testWithBucket() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(random.nextInt(1000) + 1);
         Snapshot snapshot = writeData(data);
@@ -225,7 +225,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithSnapshot() throws Exception {
+    void testWithSnapshot() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numCommits = random.nextInt(10) + 1;
         int wantedCommit = random.nextInt(numCommits);
@@ -251,7 +251,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testDropStatsInPlan() throws Exception {
+    void testDropStatsInPlan() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(100, 0, (long) Math.abs(random.nextInt(1000)));
         writeData(data, 0);

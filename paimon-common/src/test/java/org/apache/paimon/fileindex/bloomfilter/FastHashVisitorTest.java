@@ -32,21 +32,21 @@ public class FastHashVisitorTest {
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testTinyIntType() {
+    void testTinyIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.TINYINT());
         byte c = (byte) RANDOM.nextInt();
         Assertions.assertThat(function.hash(c)).isEqualTo(FastHash.FastHashVisitor.getLongHash(c));
     }
 
     @Test
-    public void testSmallIntType() {
+    void testSmallIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.SMALLINT());
         short c = (short) RANDOM.nextInt();
         Assertions.assertThat(function.hash(c)).isEqualTo(FastHash.FastHashVisitor.getLongHash(c));
     }
 
     @Test
-    public void testIntType() {
+    void testIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.INT());
         int c = RANDOM.nextInt();
         Assertions.assertThat(function.hash(c))
@@ -54,7 +54,7 @@ public class FastHashVisitorTest {
     }
 
     @Test
-    public void testBigIntType() {
+    void testBigIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.BIGINT());
         long c = RANDOM.nextLong();
         Assertions.assertThat(function.hash(c))
@@ -62,7 +62,7 @@ public class FastHashVisitorTest {
     }
 
     @Test
-    public void testFloatType() {
+    void testFloatType() {
         FastHash function = FastHash.getHashFunction(DataTypes.FLOAT());
         float c = RANDOM.nextFloat();
         Assertions.assertThat(function.hash(c))
@@ -70,7 +70,7 @@ public class FastHashVisitorTest {
     }
 
     @Test
-    public void testDoubleType() {
+    void testDoubleType() {
         FastHash function = FastHash.getHashFunction(DataTypes.DOUBLE());
         double c = RANDOM.nextDouble();
         Assertions.assertThat(function.hash(c))
@@ -78,7 +78,7 @@ public class FastHashVisitorTest {
     }
 
     @Test
-    public void testDateType() {
+    void testDateType() {
         FastHash function = FastHash.getHashFunction(DataTypes.DATE());
         int c = RANDOM.nextInt();
         Assertions.assertThat(function.hash(c))
@@ -86,7 +86,7 @@ public class FastHashVisitorTest {
     }
 
     @Test
-    public void testTimestampType() {
+    void testTimestampType() {
         FastHash function = FastHash.getHashFunction(DataTypes.TIMESTAMP_MILLIS());
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
         Assertions.assertThat(function.hash(c))
@@ -94,7 +94,7 @@ public class FastHashVisitorTest {
     }
 
     @Test
-    public void testLocalZonedTimestampType() {
+    void testLocalZonedTimestampType() {
         FastHash function = FastHash.getHashFunction(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
         Assertions.assertThat(function.hash(c))

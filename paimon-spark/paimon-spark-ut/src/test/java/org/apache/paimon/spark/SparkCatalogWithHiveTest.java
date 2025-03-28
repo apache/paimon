@@ -38,25 +38,25 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base tests for spark read. */
-public class SparkCatalogWithHiveTest {
+class SparkCatalogWithHiveTest {
 
     private static TestHiveMetastore testHiveMetastore;
 
     private static final int PORT = 9087;
 
     @BeforeAll
-    public static void startMetastore() {
+    static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
         testHiveMetastore.start(PORT);
     }
 
     @AfterAll
-    public static void closeMetastore() throws Exception {
+    static void closeMetastore() throws Exception {
         testHiveMetastore.stop();
     }
 
     @Test
-    public void testCreateFormatTable(@TempDir java.nio.file.Path tempDir) {
+    void testCreateFormatTable(@TempDir java.nio.file.Path tempDir) {
         Path warehousePath = new Path("file:" + tempDir.toString());
         SparkSession spark =
                 SparkSession.builder()
@@ -131,7 +131,7 @@ public class SparkCatalogWithHiveTest {
     }
 
     @Test
-    public void testSpecifyHiveConfDir(@TempDir java.nio.file.Path tempDir) {
+    void testSpecifyHiveConfDir(@TempDir java.nio.file.Path tempDir) {
         Path warehousePath = new Path("file:" + tempDir.toString());
         SparkSession spark =
                 SparkSession.builder()
@@ -157,7 +157,7 @@ public class SparkCatalogWithHiveTest {
     }
 
     @Test
-    public void testCreateExternalTable(@TempDir java.nio.file.Path tempDir) {
+    void testCreateExternalTable(@TempDir java.nio.file.Path tempDir) {
         Path warehousePath = new Path("file:" + tempDir.toString());
         SparkSession spark =
                 SparkSession.builder()

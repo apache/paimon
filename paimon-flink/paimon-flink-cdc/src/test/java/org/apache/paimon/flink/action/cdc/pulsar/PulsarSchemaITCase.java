@@ -39,11 +39,11 @@ import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.getDat
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for building schema from Pulsar. */
-public class PulsarSchemaITCase extends PulsarActionITCaseBase {
+class PulsarSchemaITCase extends PulsarActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testPulsarSchema() throws Exception {
+    void testPulsarSchema() throws Exception {
         String topic = "test_pulsar_schema";
         createTopic(topic);
 

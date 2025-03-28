@@ -80,14 +80,14 @@ public class AggregationFieldsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAggregationFieldsRecord() throws Exception {
+    void testAggregationFieldsRecord() throws Exception {
         List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(aggregationFieldsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
     @Test
-    public void testBranchAggregationFieldsRecord() throws Exception {
+    void testBranchAggregationFieldsRecord() throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier(tableName));
         table.createBranch("b1");
         // verify that branch file exist

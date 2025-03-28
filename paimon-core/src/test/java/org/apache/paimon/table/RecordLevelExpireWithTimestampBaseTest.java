@@ -42,7 +42,7 @@ abstract class RecordLevelExpireWithTimestampBaseTest extends PrimaryKeyTableTes
     }
 
     @Test
-    public void testTimestampTypeExpire() throws Exception {
+    void testTimestampTypeExpire() throws Exception {
         long millis = System.currentTimeMillis();
         Timestamp timestamp1 = Timestamp.fromEpochMillis(millis - 60 * 1000);
         Timestamp timestamp2 = Timestamp.fromEpochMillis(millis);

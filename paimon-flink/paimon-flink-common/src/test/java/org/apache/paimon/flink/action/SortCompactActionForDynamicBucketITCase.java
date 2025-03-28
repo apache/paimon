@@ -46,12 +46,12 @@ import java.util.List;
 import java.util.Random;
 
 /** Sort Compact Action tests for dynamic bucket table. */
-public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
+class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
 
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testDynamicBucketSort() throws Exception {
+    void testDynamicBucketSort() throws Exception {
         createTable();
 
         commit(writeData(100));
@@ -78,7 +78,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testDynamicBucketSortWithOrderAndZorder() throws Exception {
+    void testDynamicBucketSortWithOrderAndZorder() throws Exception {
         createTable();
 
         commit(writeData(100));
@@ -108,7 +108,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testDynamicBucketSortWithOrderAndHilbert() throws Exception {
+    void testDynamicBucketSortWithOrderAndHilbert() throws Exception {
         createTable();
 
         commit(writeData(100));
@@ -138,7 +138,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testDynamicBucketSortWithStringType() throws Exception {
+    void testDynamicBucketSortWithStringType() throws Exception {
         createTable();
 
         commit(writeData(100));

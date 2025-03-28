@@ -38,32 +38,32 @@ public class LevelsTest {
     private final Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
 
     @Test
-    public void testNonEmptyHighestLevelNo() {
+    void testNonEmptyHighestLevelNo() {
         Levels levels = new Levels(comparator, Collections.emptyList(), 3);
         assertThat(levels.nonEmptyHighestLevel()).isEqualTo(-1);
     }
 
     @Test
-    public void testNonEmptyHighestLevel0() {
+    void testNonEmptyHighestLevel0() {
         Levels levels = new Levels(comparator, Arrays.asList(newFile(0), newFile(0)), 3);
         assertThat(levels.nonEmptyHighestLevel()).isEqualTo(0);
     }
 
     @Test
-    public void testNonEmptyHighestLevel1() {
+    void testNonEmptyHighestLevel1() {
         Levels levels = new Levels(comparator, Arrays.asList(newFile(0), newFile(1)), 3);
         assertThat(levels.nonEmptyHighestLevel()).isEqualTo(1);
     }
 
     @Test
-    public void testNonEmptyHighestLevel2() {
+    void testNonEmptyHighestLevel2() {
         Levels levels =
                 new Levels(comparator, Arrays.asList(newFile(0), newFile(1), newFile(2)), 3);
         assertThat(levels.nonEmptyHighestLevel()).isEqualTo(2);
     }
 
     @Test
-    public void testLevel0WithSameSequenceNumbers() {
+    void testLevel0WithSameSequenceNumbers() {
         Levels levels = new Levels(comparator, Arrays.asList(newFile(0), newFile(0)), 3);
         assertThat(levels.allFiles()).hasSize(2);
     }

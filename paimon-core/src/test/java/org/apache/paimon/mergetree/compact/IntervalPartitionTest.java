@@ -46,26 +46,26 @@ import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link IntervalPartition}. */
-public class IntervalPartitionTest {
+class IntervalPartitionTest {
 
     private static final RecordComparator COMPARATOR = (o1, o2) -> o1.getInt(0) - o2.getInt(0);
 
     @Test
-    public void testSameMinKey() {
+    void testSameMinKey() {
         runTest(
                 "[100, 200], [100, 400], [100, 300], [100, 500]",
                 "[100, 200] | [100, 300] | [100, 400] | [100, 500]");
     }
 
     @Test
-    public void testSameMaxKey() {
+    void testSameMaxKey() {
         runTest(
                 "[100, 500], [300, 500], [200, 500], [400, 500]",
                 "[100, 500] | [200, 500] | [300, 500] | [400, 500]");
     }
 
     @Test
-    public void testSectionPartitioning() {
+    void testSectionPartitioning() {
         // 0    5    10   15   20   25   30
         // |--------|
         //      |-|
@@ -99,7 +99,7 @@ public class IntervalPartitionTest {
     }
 
     @RepeatedTest(100)
-    public void randomTest() {
+    void randomTest() {
         ThreadLocalRandom r = ThreadLocalRandom.current();
         List<int[]> intervals = new ArrayList<>();
         // construct some sorted runs

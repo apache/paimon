@@ -121,7 +121,7 @@ public class FlinkBatchJobPartitionMarkdoneITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testFlinkBatchJobPartitionMarkdoneBySQL() throws Exception {
+    void testFlinkBatchJobPartitionMarkdoneBySQL() throws Exception {
         batchSql(
                 "INSERT INTO T /*+ OPTIONS('partition.end-input-to-done'= 'true') */ VALUES (0, 'p1', 1), (0, 'p2', 2)");
 
@@ -129,7 +129,7 @@ public class FlinkBatchJobPartitionMarkdoneITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testFlinkBatchJobPartitionMarkdone() throws Exception {
+    void testFlinkBatchJobPartitionMarkdone() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write

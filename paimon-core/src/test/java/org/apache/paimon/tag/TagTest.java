@@ -20,7 +20,7 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.Snapshot;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -53,7 +53,7 @@ public class TagTest {
                     null);
 
     @Test
-    public void testFromJson() {
+    void testFromJson() {
         Tag tag = Tag.fromJson(snapshot.toJson());
         assertEquals(
                 "{\n"
@@ -74,7 +74,7 @@ public class TagTest {
     }
 
     @Test
-    public void testFromSnapshotAndTagTtl() {
+    void testFromSnapshotAndTagTtl() {
         Tag tag =
                 Tag.fromSnapshotAndTagTtl(
                         snapshot,

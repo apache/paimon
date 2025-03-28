@@ -35,12 +35,12 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link HashIndexFile}. */
-public class HashIndexFileTest {
+class HashIndexFileTest {
 
     @TempDir java.nio.file.Path tempPath;
 
     @Test
-    public void test() throws IOException {
+    void test() throws IOException {
         Path dir = new Path(tempPath.toUri());
         PathFactory pathFactory =
                 new PathFactory() {

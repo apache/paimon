@@ -68,14 +68,14 @@ public class BinaryExternalSortBufferTest {
     }
 
     @BeforeEach
-    public void beforeTest() {
+    void beforeTest() {
         ioManager = IOManager.create(tempDir.toString());
         initMemorySegmentPool(MEMORY_SIZE);
         this.serializer = new BinaryRowSerializer(2);
     }
 
     @AfterEach
-    public void afterTest() throws Exception {
+    void afterTest() throws Exception {
         assertAfterTest();
         this.ioManager.close();
     }
@@ -97,7 +97,7 @@ public class BinaryExternalSortBufferTest {
     }
 
     @Test
-    public void testSortNoSpill() throws Exception {
+    void testSortNoSpill() throws Exception {
         int size = 1_000_000;
 
         MockBinaryRowReader reader = new MockBinaryRowReader(size);
@@ -122,7 +122,7 @@ public class BinaryExternalSortBufferTest {
     }
 
     @Test
-    public void testSort() throws Exception {
+    void testSort() throws Exception {
         int size = 10_000;
 
         MockBinaryRowReader reader = new MockBinaryRowReader(size);
@@ -148,7 +148,7 @@ public class BinaryExternalSortBufferTest {
     }
 
     @Test
-    public void testSortIntStringWithRepeat() throws Exception {
+    void testSortIntStringWithRepeat() throws Exception {
         int size = 10_000;
 
         BinaryExternalSortBuffer sorter = createBuffer();
@@ -176,7 +176,7 @@ public class BinaryExternalSortBufferTest {
     }
 
     @Test
-    public void testRepeatUsingWhenSpill() throws Exception {
+    void testRepeatUsingWhenSpill() throws Exception {
         BinaryExternalSortBuffer sorter = createBuffer();
         innerTestSpilling(sorter);
         assertAfterTest();
@@ -184,7 +184,7 @@ public class BinaryExternalSortBufferTest {
     }
 
     @Test
-    public void testSpilling() throws Exception {
+    void testSpilling() throws Exception {
         innerTestSpilling(createBuffer());
     }
 
@@ -208,7 +208,7 @@ public class BinaryExternalSortBufferTest {
     }
 
     @Test
-    public void testMergeManyTimes() throws Exception {
+    void testMergeManyTimes() throws Exception {
         int size = 1000_000;
 
         MockBinaryRowReader reader = new MockBinaryRowReader(size);
@@ -230,7 +230,7 @@ public class BinaryExternalSortBufferTest {
     }
 
     @Test
-    public void testSpillingRandom() throws Exception {
+    void testSpillingRandom() throws Exception {
         int size = 1000_000;
 
         MockBinaryRowReader reader = new MockBinaryRowReader(size);
@@ -265,7 +265,7 @@ public class BinaryExternalSortBufferTest {
     }
 
     @Test
-    public void testSpillingMaxDiskSize() throws Exception {
+    void testSpillingMaxDiskSize() throws Exception {
         BinaryExternalSortBuffer sorter = createBuffer(128, MemorySize.ofKibiBytes(10));
         int size = 1000_000;
 

@@ -49,7 +49,7 @@ public abstract class ReducerMergeFunctionWrapperTestBase {
 
     @MethodSource("provideKeyValuesToMerge")
     @ParameterizedTest
-    public void testReducerMergeFunctionWrapper(List<KeyValue> kvs) {
+    void testReducerMergeFunctionWrapper(List<KeyValue> kvs) {
         KeyValue expectedKv = getExpected(kvs);
         kvs.forEach(kv -> wrapper.add(kv));
         KeyValue mergedKv = wrapper.getResult();

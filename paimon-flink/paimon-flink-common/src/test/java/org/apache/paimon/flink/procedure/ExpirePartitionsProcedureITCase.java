@@ -33,10 +33,10 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link ExpirePartitionsProcedure}. */
-public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
+class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testExpirePartitionsProcedure() throws Exception {
+    void testExpirePartitionsProcedure() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -69,7 +69,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testShowExpirePartitionsProcedureResults() throws Exception {
+    void testShowExpirePartitionsProcedureResults() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -117,7 +117,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionExpireValuesTimeStrategy() throws Exception {
+    void testPartitionExpireValuesTimeStrategy() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -150,7 +150,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionExpireUpdateTimeStrategy() throws Exception {
+    void testPartitionExpireUpdateTimeStrategy() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -199,7 +199,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionExpireUpdateTimeStrategyInOnePartition() throws Exception {
+    void testPartitionExpireUpdateTimeStrategyInOnePartition() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -251,7 +251,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionExpireWithNonDateFormatPartition() throws Exception {
+    void testPartitionExpireWithNonDateFormatPartition() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -298,7 +298,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionExpireWithTimePartition() throws Exception {
+    void testPartitionExpireWithTimePartition() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -348,7 +348,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSortAndLimitExpirePartition() throws Exception {
+    void testSortAndLimitExpirePartition() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -403,7 +403,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNullPartitionExpire() {
+    void testNullPartitionExpire() {
         sql("CREATE TABLE T (k INT, ds STRING) PARTITIONED BY (ds);");
         sql("INSERT INTO T VALUES (1, CAST (NULL AS STRING))");
         assertThat(
@@ -416,7 +416,7 @@ public class ExpirePartitionsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExpirePartitionsWithDefaultNum() throws Exception {
+    void testExpirePartitionsWithDefaultNum() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"

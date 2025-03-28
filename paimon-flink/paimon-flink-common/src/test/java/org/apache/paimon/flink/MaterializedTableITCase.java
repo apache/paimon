@@ -99,7 +99,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test the support of Materialized Table. */
-public class MaterializedTableITCase {
+class MaterializedTableITCase {
     private static final String FILE_CATALOG_STORE = "file_store";
     private static final String TEST_CATALOG_PREFIX = "test_catalog";
     protected static final String TEST_DEFAULT_DATABASE = "default";

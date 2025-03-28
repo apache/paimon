@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.condition.JRE.JAVA_11;
 
 /** Tests for reading paimon from Spark3. */
 @DisabledOnJre(JAVA_11)
-public class SparkE2eTest extends E2eReaderTestBase {
+class SparkE2eTest extends E2eReaderTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkE2eTest.class);
 
@@ -42,7 +42,7 @@ public class SparkE2eTest extends E2eReaderTestBase {
     }
 
     @Test
-    public void testFlinkWriteAndSparkRead() throws Exception {
+    void testFlinkWriteAndSparkRead() throws Exception {
         String warehousePath = TEST_DATA_DIR + "/" + UUID.randomUUID() + "_warehouse";
         final String table = "T";
         final String sparkTable = String.format("paimon.default.%s", table);

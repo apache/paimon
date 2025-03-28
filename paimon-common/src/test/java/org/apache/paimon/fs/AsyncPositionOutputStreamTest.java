@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class AsyncPositionOutputStreamTest {
 
     @Test
-    public void testHugeWriteByteArray() throws IOException {
+    void testHugeWriteByteArray() throws IOException {
         ByteArrayPositionOutputStream result = new ByteArrayPositionOutputStream();
         AsyncPositionOutputStream out = new AsyncPositionOutputStream(result);
         int len = 10 * 1024;
@@ -49,7 +49,7 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
-    public void testHugeWriteByte() throws IOException {
+    void testHugeWriteByte() throws IOException {
         ByteArrayPositionOutputStream result = new ByteArrayPositionOutputStream();
         AsyncPositionOutputStream out = new AsyncPositionOutputStream(result);
         int len = 64 * 1024 + 20;
@@ -66,7 +66,7 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
-    public void testNormal() throws IOException {
+    void testNormal() throws IOException {
         ByteArrayPositionOutputStream byteOut = new ByteArrayPositionOutputStream();
         AsyncPositionOutputStream out = new AsyncPositionOutputStream(byteOut);
         out.write(1);
@@ -77,7 +77,7 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
-    public void testGetPos() throws IOException {
+    void testGetPos() throws IOException {
         AsyncPositionOutputStream out =
                 new AsyncPositionOutputStream(new ByteArrayPositionOutputStream());
         out.write(new byte[] {1, 2, 3});
@@ -87,7 +87,7 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
-    public void testFlush() throws IOException {
+    void testFlush() throws IOException {
         ByteArrayPositionOutputStream byteOut =
                 new ByteArrayPositionOutputStream() {
                     @Override
@@ -117,7 +117,7 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
-    public void testFlushWithException() throws IOException {
+    void testFlushWithException() throws IOException {
         String msg = "your exception!";
         ByteArrayPositionOutputStream byteOut =
                 new ByteArrayPositionOutputStream() {
@@ -137,7 +137,7 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
-    public void testClose() throws IOException {
+    void testClose() throws IOException {
         ByteArrayPositionOutputStream byteOut =
                 new ByteArrayPositionOutputStream() {
                     @Override
@@ -158,7 +158,7 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
-    public void testThrowException() throws IOException {
+    void testThrowException() throws IOException {
         String msg = "your exception!";
         ByteArrayPositionOutputStream out =
                 new ByteArrayPositionOutputStream() {
@@ -175,7 +175,7 @@ class AsyncPositionOutputStreamTest {
     }
 
     @Test
-    public void testCloseFlushThrowsException() throws Exception {
+    void testCloseFlushThrowsException() throws Exception {
         AsyncPositionOutputStream asyncPositionOutputStream =
                 new AsyncPositionOutputStream(new ByteArrayPositionOutputStream());
         asyncPositionOutputStream.close();

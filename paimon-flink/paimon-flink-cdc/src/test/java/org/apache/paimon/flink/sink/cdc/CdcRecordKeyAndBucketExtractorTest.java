@@ -45,7 +45,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.apache.paimon.types.DataTypesTest.assertThat;
 
 /** Tests for {@link CdcRecordKeyAndBucketExtractor}. */
-public class CdcRecordKeyAndBucketExtractorTest {
+class CdcRecordKeyAndBucketExtractorTest {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -62,7 +62,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testExtract() throws Exception {
+    void testExtract() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableSchema schema = createTableSchema();
         RowDataKeyAndBucketExtractor expected = new RowDataKeyAndBucketExtractor(schema);
@@ -106,7 +106,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
     }
 
     @Test
-    public void testNullPartition() throws Exception {
+    void testNullPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableSchema schema = createTableSchema();
         RowDataKeyAndBucketExtractor expected = new RowDataKeyAndBucketExtractor(schema);
@@ -140,7 +140,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
     }
 
     @Test
-    public void testEmptyPartition() throws Exception {
+    void testEmptyPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableSchema schema = createTableSchema();
         RowDataKeyAndBucketExtractor expected = new RowDataKeyAndBucketExtractor(schema);

@@ -32,7 +32,7 @@ public class LocalFileIOTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testCopy() throws Exception {
+    void testCopy() throws Exception {
         Path srcFile = new Path(tempDir.resolve("src.txt").toUri());
         Path dstFile = new Path(tempDir.resolve("dst.txt").toUri());
 

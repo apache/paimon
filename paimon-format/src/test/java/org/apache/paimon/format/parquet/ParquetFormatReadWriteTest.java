@@ -55,7 +55,7 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testEnableBloomFilter(boolean enabled) throws Exception {
+    void testEnableBloomFilter(boolean enabled) throws Exception {
         Options options = new Options();
         options.set("parquet.bloom.filter.enabled", String.valueOf(enabled));
         ParquetFileFormat format =

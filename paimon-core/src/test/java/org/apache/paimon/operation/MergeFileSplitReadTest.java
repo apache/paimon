@@ -67,12 +67,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link MergeFileSplitRead}. */
-public class MergeFileSplitReadTest {
+class MergeFileSplitReadTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testKeyProjection() throws Exception {
+    void testKeyProjection() throws Exception {
         // (a, b, c) -> (b, a), c is the partition, all integers are in range [0, 2]
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -165,7 +165,7 @@ public class MergeFileSplitReadTest {
     }
 
     @Test
-    public void testValueProjection() throws Exception {
+    void testValueProjection() throws Exception {
         // (dt, hr, shopId, orderId, itemId, priceAmount, comment) -> (shopId, itemId, dt, hr)
 
         TestKeyValueGenerator gen = new TestKeyValueGenerator();

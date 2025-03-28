@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class Int2ShortHashMapTest {
 
     @Test
-    public void testRandom() {
+    void testRandom() {
         Map<Integer, Short> values = new HashMap<>();
         Random rnd = new Random();
         for (int i = 0; i < rnd.nextInt(100); i++) {
@@ -56,7 +56,7 @@ public class Int2ShortHashMapTest {
     }
 
     @Test
-    public void testCapacity() {
+    void testCapacity() {
         assertThrows(RuntimeException.class, () -> new Int2ShortHashMap(1073741824));
     }
 }

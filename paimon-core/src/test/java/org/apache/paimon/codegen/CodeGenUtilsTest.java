@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CodeGenUtilsTest {
 
     @Test
-    public void testProjectionCodegenCache() {
+    void testProjectionCodegenCache() {
         assertClassEquals(
                 () ->
                         newProjection(
@@ -46,7 +46,7 @@ class CodeGenUtilsTest {
     }
 
     @Test
-    public void testProjectionCodegenCacheMiss() {
+    void testProjectionCodegenCacheMiss() {
         assertClassNotEquals(
                 newProjection(RowType.builder().fields(STRING(), INT()).build(), new int[] {0, 1}),
                 newProjection(
@@ -55,13 +55,13 @@ class CodeGenUtilsTest {
     }
 
     @Test
-    public void testNormalizedKeyComputerCodegenCache() {
+    void testNormalizedKeyComputerCodegenCache() {
         assertClassEquals(
                 () -> newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
     }
 
     @Test
-    public void testNormalizedKeyComputerCodegenCacheMiss() {
+    void testNormalizedKeyComputerCodegenCacheMiss() {
         assertClassNotEquals(
                 newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}),
                 newNormalizedKeyComputer(
@@ -69,13 +69,13 @@ class CodeGenUtilsTest {
     }
 
     @Test
-    public void testRecordComparatorCodegenCache() {
+    void testRecordComparatorCodegenCache() {
         assertClassEquals(
                 () -> newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true));
     }
 
     @Test
-    public void testRecordComparatorCodegenCacheMiss() {
+    void testRecordComparatorCodegenCacheMiss() {
         assertClassNotEquals(
                 newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true),
                 newRecordComparator(
@@ -83,19 +83,19 @@ class CodeGenUtilsTest {
     }
 
     @Test
-    public void testRecordEqualiserCodegenCache() {
+    void testRecordEqualiserCodegenCache() {
         assertClassEquals(() -> newRecordEqualiser(Arrays.asList(STRING(), INT())));
     }
 
     @Test
-    public void testRecordEqualiserCodegenCacheMiss() {
+    void testRecordEqualiserCodegenCacheMiss() {
         assertClassNotEquals(
                 newRecordEqualiser(Arrays.asList(STRING(), INT())),
                 newRecordEqualiser(Arrays.asList(STRING(), INT(), DOUBLE())));
     }
 
     @Test
-    public void testHybridNotEqual() {
+    void testHybridNotEqual() {
         assertClassNotEquals(
                 newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true),
                 newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}));

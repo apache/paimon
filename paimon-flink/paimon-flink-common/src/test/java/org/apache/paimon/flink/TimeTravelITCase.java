@@ -30,14 +30,14 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT case for flink time travel. */
-public class TimeTravelITCase extends CatalogITCaseBase {
+class TimeTravelITCase extends CatalogITCaseBase {
 
     // -------------------------------------------------------
     //                          Batch
     // -------------------------------------------------------
 
     @Test
-    public void testTravelToTimestampString() throws Exception {
+    void testTravelToTimestampString() throws Exception {
         sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -57,7 +57,7 @@ public class TimeTravelITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExpression() throws Exception {
+    void testExpression() throws Exception {
         sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -82,7 +82,7 @@ public class TimeTravelITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTravelToOldSchema() throws Exception {
+    void testTravelToOldSchema() throws Exception {
         // old schema
         sql("CREATE TABLE t (k INT, v STRING)");
 
@@ -109,7 +109,7 @@ public class TimeTravelITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTravelToNonExistedTimestamp() {
+    void testTravelToNonExistedTimestamp() {
         sql("CREATE TABLE t (k INT, v STRING)");
         sql("INSERT INTO t VALUES(1, 'hello'), (2, 'world')");
         assertThat(
@@ -119,7 +119,7 @@ public class TimeTravelITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSystemTableTimeTravel() throws Exception {
+    void testSystemTableTimeTravel() throws Exception {
         sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -145,7 +145,7 @@ public class TimeTravelITCase extends CatalogITCaseBase {
     // -------------------------------------------------------
 
     @Test
-    public void testStreamingTravel() throws Exception {
+    void testStreamingTravel() throws Exception {
         sql("CREATE TABLE t (k INT PRIMARY KEY NOT ENFORCED, v STRING)");
 
         BlockingIterator<Row, Row> streamIter =

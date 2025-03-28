@@ -51,7 +51,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
     private static final String TABLE = "mock_table";
 
     @AfterEach
-    public void tearDown() {
+    void tearDown() {
         // clean up all the topics
         try (AdminClient admin = createAdminClient()) {
             Set<String> topics = admin.listTopics().names().get();
@@ -62,7 +62,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testRegisterTopic() {
+    void testRegisterTopic() {
         String topic = "register-topic";
 
         Map<String, String> result =
@@ -72,7 +72,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testRegisterTopicAuto() {
+    void testRegisterTopicAuto() {
         Map<String, String> result =
                 createKafkaLogStoreRegister(getBootstrapServers()).registerTopic();
 
@@ -97,7 +97,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testRegisterTopicException() {
+    void testRegisterTopicException() {
         String topic = "register-topic";
         String invalidBootstrapServers = "invalid-bootstrap-servers:9092";
 
@@ -110,7 +110,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testRegisterTopicExist() {
+    void testRegisterTopicExist() {
         String topic = "topic-exist";
         createTopic(topic, 1, 1);
 
@@ -124,7 +124,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testUnregisterTopic() {
+    void testUnregisterTopic() {
         String topic = "unregister-topic";
         createTopic(topic, 2, 1);
 
@@ -133,7 +133,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testUnregisterTopicException() {
+    void testUnregisterTopicException() {
         String topic = "not_exist_topic";
 
         assertThatCode(

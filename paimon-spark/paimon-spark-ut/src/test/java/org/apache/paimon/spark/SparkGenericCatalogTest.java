@@ -34,14 +34,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Base tests for spark read. */
-public class SparkGenericCatalogTest {
+class SparkGenericCatalogTest {
 
     protected SparkSession spark = null;
 
     protected Path warehousePath = null;
 
     @BeforeEach
-    public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
+    void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         warehousePath = new Path("file:" + tempDir.toString());
         spark =
                 SparkSession.builder()
@@ -57,7 +57,7 @@ public class SparkGenericCatalogTest {
     }
 
     @AfterEach
-    public void stopMetastoreAndSpark() {
+    void stopMetastoreAndSpark() {
         if (spark != null) {
             spark.stop();
             spark = null;
@@ -65,7 +65,7 @@ public class SparkGenericCatalogTest {
     }
 
     @Test
-    public void testPaimonTable() {
+    void testPaimonTable() {
         spark.sql(
                 "CREATE TABLE PT (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
                         + " ('file.format'='avro')");
@@ -82,7 +82,7 @@ public class SparkGenericCatalogTest {
     }
 
     @Test
-    public void testSparkSessionReload() {
+    void testSparkSessionReload() {
         spark.sql("CREATE DATABASE my_db");
         spark.close();
 
@@ -107,13 +107,13 @@ public class SparkGenericCatalogTest {
     }
 
     @Test
-    public void testCsvTable() {
+    void testCsvTable() {
         spark.sql("CREATE TABLE CT (a INT, b INT, c STRING) USING csv");
         testReadWrite("CT");
     }
 
     @Test
-    public void testStructTable() {
+    void testStructTable() {
         spark.sql(
                 "CREATE TABLE ST (a INT, b STRUCT<b1: STRING, b2: STRING, b3: STRING>) USING paimon");
     }

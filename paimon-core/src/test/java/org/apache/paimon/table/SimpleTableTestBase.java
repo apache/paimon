@@ -198,7 +198,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testChangeFormat() throws Exception {
+    void testChangeFormat() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC));
 
@@ -244,7 +244,7 @@ public abstract class SimpleTableTestBase {
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"avro", "orc", "parquet"})
-    public void testMultipleCommits(String format) throws Exception {
+    void testMultipleCommits(String format) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.setString(FILE_FORMAT.key(), format));
         StreamTableWrite write = table.newWrite(commitUser);
@@ -270,7 +270,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testOverwrite() throws Exception {
+    void testOverwrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         StreamTableWrite write = table.newWrite(commitUser);
@@ -303,7 +303,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testBucketFilter() throws Exception {
+    void testBucketFilter() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -333,7 +333,7 @@ public abstract class SimpleTableTestBase {
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"avro", "orc", "parquet"})
-    public void testReadRowType(String format) throws Exception {
+    void testReadRowType(String format) throws Exception {
         RowType writeType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "pt", DataTypes.INT()),
@@ -407,7 +407,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testBucketFilterConflictWithShard() throws Exception {
+    void testBucketFilterConflictWithShard() throws Exception {
         String exceptionMessage = "Bucket filter and shard configuration cannot be used together";
         FileStoreTable table =
                 createFileStoreTable(
@@ -434,7 +434,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testAbort() throws Exception {
+    void testAbort() throws Exception {
         FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 1));
         StreamTableWrite write = table.newWrite(commitUser);
         write.write(rowData(1, 2, 3L));
@@ -451,7 +451,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testReadFilter() throws Exception {
+    void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
         if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
             // TODO support parquet reader filter push down
@@ -487,7 +487,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testPartitionEmptyWriter() throws Exception {
+    void testPartitionEmptyWriter() throws Exception {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -537,7 +537,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testManifestCache() throws Exception {
+    void testManifestCache() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf ->
@@ -577,7 +577,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testWriteWithoutCompactionAndExpiration() throws Exception {
+    void testWriteWithoutCompactionAndExpiration() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -615,7 +615,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testCopyWithLatestSchema() throws Exception {
+    void testCopyWithLatestSchema() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(SNAPSHOT_NUM_RETAINED_MAX, 100));
         StreamTableWrite write = table.newWrite(commitUser);
@@ -654,7 +654,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testConsumerIdNotBlank() throws Exception {
+    void testConsumerIdNotBlank() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
@@ -680,7 +680,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testConsumeId() throws Exception {
+    void testConsumeId() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
@@ -776,7 +776,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testRollbackToSnapshotSkipNonExistentSnapshot() throws Exception {
+    void testRollbackToSnapshotSkipNonExistentSnapshot() throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
         FileStoreTable table = prepareRollbackTable(commitTimes);
 
@@ -801,7 +801,7 @@ public abstract class SimpleTableTestBase {
 
     // All tags are after the rollback snapshot
     @Test
-    public void testRollbackToSnapshotCase0() throws Exception {
+    void testRollbackToSnapshotCase0() throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
         FileStoreTable table = prepareRollbackTable(commitTimes);
 
@@ -842,7 +842,7 @@ public abstract class SimpleTableTestBase {
 
     // One tag is at the rollback snapshot and others are after it
     @Test
-    public void testRollbackToSnapshotCase1() throws Exception {
+    void testRollbackToSnapshotCase1() throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
         FileStoreTable table = prepareRollbackTable(commitTimes);
 
@@ -881,7 +881,7 @@ public abstract class SimpleTableTestBase {
 
     // One tag is before the rollback snapshot and others are after it
     @Test
-    public void testRollbackToSnapshotCase2() throws Exception {
+    void testRollbackToSnapshotCase2() throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
         FileStoreTable table = prepareRollbackTable(commitTimes);
 
@@ -928,7 +928,7 @@ public abstract class SimpleTableTestBase {
 
     @ParameterizedTest(name = "expire snapshots = {0}")
     @ValueSource(booleans = {true, false})
-    public void testRollbackToTag(boolean expire) throws Exception {
+    void testRollbackToTag(boolean expire) throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
         FileStoreTable table = prepareRollbackTable(commitTimes);
 
@@ -1000,7 +1000,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testCreateTag() throws Exception {
+    void testCreateTag() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         try (StreamTableWrite write = table.newWrite(commitUser);
@@ -1026,7 +1026,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testCreateTagOnExpiredSnapshot() throws Exception {
+    void testCreateTagOnExpiredSnapshot() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -1062,7 +1062,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testCreateSameTagName() throws Exception {
+    void testCreateSameTagName() throws Exception {
         FileStoreTable table = createFileStoreTable();
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser)) {
@@ -1085,7 +1085,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testCreateBranch() throws Exception {
+    void testCreateBranch() throws Exception {
         FileStoreTable table = createFileStoreTable();
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser)) {
@@ -1138,7 +1138,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testUnsupportedBranchName() throws Exception {
+    void testUnsupportedBranchName() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         try (StreamTableWrite write = table.newWrite(commitUser);
@@ -1181,7 +1181,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testDeleteBranch() throws Exception {
+    void testDeleteBranch() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         try (StreamTableWrite write = table.newWrite(commitUser);
@@ -1222,7 +1222,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testFastForward() throws Exception {
+    void testFastForward() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
         FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
@@ -1350,7 +1350,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testUnsupportedTagName() throws Exception {
+    void testUnsupportedTagName() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         try (StreamTableWrite write = table.newWrite(commitUser);
@@ -1366,7 +1366,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testDeleteTag() throws Exception {
+    void testDeleteTag() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         try (StreamTableWrite write = table.newWrite(commitUser);
@@ -1383,7 +1383,7 @@ public abstract class SimpleTableTestBase {
 
     @Test
     @Timeout(120)
-    public void testAsyncExpireExecutionMode() throws Exception {
+    void testAsyncExpireExecutionMode() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         Map<String, String> options = new HashMap<>();
@@ -1469,7 +1469,7 @@ public abstract class SimpleTableTestBase {
 
     @Test
     @Timeout(120)
-    public void testExpireWithLimit() throws Exception {
+    void testExpireWithLimit() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         Map<String, String> options = new HashMap<>();
@@ -1533,7 +1533,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testBranchWriteAndRead() throws Exception {
+    void testBranchWriteAndRead() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         generateBranch(table);
@@ -1594,7 +1594,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testDataSplitNotIncludeDvFilesWhenStreamingRead() throws Exception {
+    void testDataSplitNotIncludeDvFilesWhenStreamingRead() throws Exception {
         FileStoreTable table = createFileStoreTable();
         Map<String, String> options = new HashMap<>();
         options.put(DELETION_VECTORS_ENABLED.key(), "true");
@@ -1619,7 +1619,7 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
-    public void testDataSplitNotIncludeDvFilesWhenStreamingReadChanges() throws Exception {
+    void testDataSplitNotIncludeDvFilesWhenStreamingReadChanges() throws Exception {
         FileStoreTable table = createFileStoreTable();
         Map<String, String> options = new HashMap<>();
         options.put(DELETION_VECTORS_ENABLED.key(), "true");

@@ -60,7 +60,7 @@ public class ListUnexistingFilesTest {
 
     @ParameterizedTest
     @ValueSource(ints = {-1, 3})
-    public void testListFiles(int bucket) throws Exception {
+    void testListFiles(int bucket) throws Exception {
         int numPartitions = 2;
         int numFiles = 10;
         int[] numDeletes = new int[numPartitions];

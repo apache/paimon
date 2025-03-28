@@ -52,7 +52,7 @@ public class RowDataTest {
     private Variant variant;
 
     @BeforeEach
-    public void before() {
+    void before() {
         str = BinaryString.fromString("haha");
         decimal1 = Decimal.fromUnscaledLong(10, 5, 0);
         decimal2 = Decimal.fromBigDecimal(new BigDecimal(11), 20, 0);
@@ -78,14 +78,14 @@ public class RowDataTest {
     }
 
     @Test
-    public void testBinaryRow() {
+    void testBinaryRow() {
         BinaryRow binaryRow = getBinaryRow();
         testGetters(binaryRow);
         testSetters(binaryRow);
     }
 
     @Test
-    public void testNestedRow() {
+    void testNestedRow() {
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         writer.writeRow(0, getBinaryRow(), null);
@@ -97,7 +97,7 @@ public class RowDataTest {
     }
 
     @Test
-    public void testSafeBinaryRow() {
+    void testSafeBinaryRow() {
         BinaryRow binaryRow = getBinaryRow();
         SafeBinaryRow row = new SafeBinaryRow(binaryRow.getFieldCount(), binaryRow.toBytes(), 0);
         assertThat(row.getFieldCount()).isEqualTo(19);
@@ -166,7 +166,7 @@ public class RowDataTest {
     }
 
     @Test
-    public void testGenericRow() {
+    void testGenericRow() {
         GenericRow row = new GenericRow(19);
         row.setField(0, true);
         row.setField(1, (byte) 1);
@@ -191,7 +191,7 @@ public class RowDataTest {
     }
 
     @Test
-    public void testJoinedRow() {
+    void testJoinedRow() {
         GenericRow row1 = new GenericRow(5);
         row1.setField(0, true);
         row1.setField(1, (byte) 1);

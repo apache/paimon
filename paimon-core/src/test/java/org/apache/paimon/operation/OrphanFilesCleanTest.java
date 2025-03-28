@@ -18,15 +18,15 @@
 
 package org.apache.paimon.operation;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Utils for {@link OrphanFilesClean}. */
-public class OrphanFilesCleanTest {
+class OrphanFilesCleanTest {
 
     @Test
-    public void testOlderThanMillis() {
+    void testOlderThanMillis() {
         // normal olderThan
         OrphanFilesClean.olderThanMillis(null);
         OrphanFilesClean.olderThanMillis("2024-12-21 23:00:00");

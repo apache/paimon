@@ -22,59 +22,59 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
-public class KafkaOggSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
+class KafkaOggSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
     private static final String OGG = "ogg";
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionMultiTopic() throws Exception {
+    void testSchemaEvolutionMultiTopic() throws Exception {
         testSchemaEvolutionMultiTopic(OGG);
     }
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionOneTopic() throws Exception {
+    void testSchemaEvolutionOneTopic() throws Exception {
         testSchemaEvolutionOneTopic(OGG);
     }
 
     @Test
-    public void testTopicIsEmpty() {
+    void testTopicIsEmpty() {
         testTopicIsEmpty(OGG);
     }
 
     @Test
     @Timeout(60)
-    public void testTableAffixMultiTopic() throws Exception {
+    void testTableAffixMultiTopic() throws Exception {
         testTableAffixMultiTopic(OGG);
     }
 
     @Test
     @Timeout(60)
-    public void testTableAffixOneTopic() throws Exception {
+    void testTableAffixOneTopic() throws Exception {
         testTableAffixOneTopic(OGG);
     }
 
     @Test
     @Timeout(60)
-    public void testIncludingTables() throws Exception {
+    void testIncludingTables() throws Exception {
         testIncludingTables(OGG);
     }
 
     @Test
     @Timeout(60)
-    public void testExcludingTables() throws Exception {
+    void testExcludingTables() throws Exception {
         testExcludingTables(OGG);
     }
 
     @Test
     @Timeout(60)
-    public void testIncludingAndExcludingTables() throws Exception {
+    void testIncludingAndExcludingTables() throws Exception {
         testIncludingAndExcludingTables(OGG);
     }
 
     @Test
     @Timeout(60)
-    public void testCaseInsensitive() throws Exception {
+    void testCaseInsensitive() throws Exception {
         testCaseInsensitive(OGG);
     }
 }

@@ -101,7 +101,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     private final Timer loggingTimer = new Timer("Debug Logging Timer");
 
     @BeforeEach
-    public void setup() {
+    void setup() {
         env = streamExecutionEnvironmentBuilder().streamingMode().build();
         tEnv = StreamTableEnvironment.create(env);
         tEnv.getConfig()
@@ -123,7 +123,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     }
 
     @AfterEach
-    public void after() throws ExecutionException, InterruptedException {
+    void after() throws ExecutionException, InterruptedException {
         // Cancel timer for debug logging
         cancelTimeoutLogger();
         // Delete topics for avoid reusing topics of Kafka cluster

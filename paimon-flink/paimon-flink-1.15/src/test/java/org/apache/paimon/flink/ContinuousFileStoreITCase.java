@@ -49,22 +49,22 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWithoutPrimaryKey() throws Exception {
+    void testWithoutPrimaryKey() throws Exception {
         testSimple("T1");
     }
 
     @Test
-    public void testWithPrimaryKey() throws Exception {
+    void testWithPrimaryKey() throws Exception {
         testSimple("T2");
     }
 
     @Test
-    public void testProjectionWithoutPrimaryKey() throws Exception {
+    void testProjectionWithoutPrimaryKey() throws Exception {
         testProjection("T1");
     }
 
     @Test
-    public void testProjectionWithPrimaryKey() throws Exception {
+    void testProjectionWithPrimaryKey() throws Exception {
         testProjection("T2");
     }
 
@@ -95,7 +95,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testContinuousLatest() throws Exception {
+    void testContinuousLatest() throws Exception {
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
 
         BlockingIterator<Row, Row> iterator =
@@ -109,7 +109,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testContinuousFromTimestamp() throws Exception {
+    void testContinuousFromTimestamp() throws Exception {
         String sql =
                 "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp', 'log.scan.timestamp-millis'='%s') */";
 
@@ -170,7 +170,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLackStartupTimestamp() {
+    void testLackStartupTimestamp() {
         assertThatThrownBy(
                         () ->
                                 streamSqlIter(
@@ -179,7 +179,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConfigureStartupTimestamp() throws Exception {
+    void testConfigureStartupTimestamp() throws Exception {
         // Configure 'log.scan.timestamp-millis' without 'log.scan'.
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
@@ -202,7 +202,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConfigureStartupSnapshot() throws Exception {
+    void testConfigureStartupSnapshot() throws Exception {
         // Configure 'scan.snapshot-id' without 'scan.mode'.
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
@@ -251,7 +251,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConfigureStartupSnapshotFull() throws Exception {
+    void testConfigureStartupSnapshotFull() throws Exception {
         // Configure 'scan.snapshot-id' with 'scan.mode'='from-snapshot-full'.
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
@@ -297,7 +297,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreOverwrite() throws Exception {
+    void testIgnoreOverwrite() throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM T1"));
 
@@ -314,7 +314,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testUnsupportedUpsert() {
+    void testUnsupportedUpsert() {
         assertThatThrownBy(
                 () ->
                         streamSqlIter(
@@ -323,7 +323,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testUnsupportedEventual() {
+    void testUnsupportedEventual() {
         assertThatThrownBy(
                 () ->
                         streamSqlIter(
@@ -332,7 +332,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFlinkMemoryPool() {
+    void testFlinkMemoryPool() {
         // Check if the configuration is effective
         assertThatThrownBy(
                         () ->

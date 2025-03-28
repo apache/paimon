@@ -40,10 +40,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * IT cases for {@link UnawareBucketNewFilesCompactionCoordinatorOperator} and {@link
  * UnawareBucketNewFilesCompactionWorkerOperator}.
  */
-public class UnawareBucketNewFilesCompactionITCase extends AbstractTestBase {
+class UnawareBucketNewFilesCompactionITCase extends AbstractTestBase {
 
     @Test
-    public void testCompactNewFiles() throws Exception {
+    void testCompactNewFiles() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
                 tableEnvironmentBuilder()

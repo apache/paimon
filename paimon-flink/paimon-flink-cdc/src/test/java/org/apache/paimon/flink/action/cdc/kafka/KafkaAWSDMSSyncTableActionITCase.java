@@ -28,55 +28,55 @@ public class KafkaAWSDMSSyncTableActionITCase extends KafkaSyncTableActionITCase
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution", AWSDMS);
     }
 
     @Test
     @Timeout(60)
-    public void testAssertSchemaCompatible() throws Exception {
+    void testAssertSchemaCompatible() throws Exception {
         testAssertSchemaCompatible(AWSDMS);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionSpecific() throws Exception {
+    void testStarUpOptionSpecific() throws Exception {
         testStarUpOptionSpecific(AWSDMS);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionLatest() throws Exception {
+    void testStarUpOptionLatest() throws Exception {
         testStarUpOptionLatest(AWSDMS);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionTimestamp() throws Exception {
+    void testStarUpOptionTimestamp() throws Exception {
         testStarUpOptionTimestamp(AWSDMS);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionEarliest() throws Exception {
+    void testStarUpOptionEarliest() throws Exception {
         testStarUpOptionEarliest(AWSDMS);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionGroup() throws Exception {
+    void testStarUpOptionGroup() throws Exception {
         testStarUpOptionGroup(AWSDMS);
     }
 
     @Test
     @Timeout(60)
-    public void testComputedColumn() throws Exception {
+    void testComputedColumn() throws Exception {
         testComputedColumn(AWSDMS);
     }
 
     @Test
     @Timeout(60)
-    public void testFieldValNullSyncTable() throws Exception {
+    void testFieldValNullSyncTable() throws Exception {
         testTableFiledValNull(AWSDMS);
     }
 }

@@ -56,7 +56,7 @@ public class IteratorSourcesITCase extends TestLogger {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testParallelSourceExecution() throws Exception {
+    void testParallelSourceExecution() throws Exception {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(PARALLELISM);
 

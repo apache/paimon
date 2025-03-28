@@ -96,7 +96,7 @@ public abstract class CatalogTestBase {
                     "");
 
     @BeforeEach
-    public void setUp() throws Exception {
+    protected void setUp() throws Exception {
         warehouse = tempFile.toUri().toString();
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
@@ -106,7 +106,7 @@ public abstract class CatalogTestBase {
     }
 
     @AfterEach
-    void tearDown() throws Exception {
+    public void tearDown() throws Exception {
         if (catalog != null) {
             List<String> dbs = catalog.listDatabases();
             for (String db : dbs) {

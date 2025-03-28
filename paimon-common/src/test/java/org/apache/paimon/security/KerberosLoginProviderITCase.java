@@ -48,7 +48,7 @@ import static org.mockito.Mockito.when;
 public class KerberosLoginProviderITCase {
 
     @Test
-    public void isLoginPossibleMustReturnFalseByDefault() throws IOException {
+    void isLoginPossibleMustReturnFalseByDefault() throws IOException {
         Options options = new Options();
         KerberosLoginProvider kerberosLoginProvider = new KerberosLoginProvider(options);
 
@@ -61,7 +61,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void isLoginPossibleMustReturnFalseWithNonKerberos() throws IOException {
+    void isLoginPossibleMustReturnFalseWithNonKerberos() throws IOException {
         Options options = new Options();
         KerberosLoginProvider kerberosLoginProvider = new KerberosLoginProvider(options);
 
@@ -75,7 +75,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void isLoginPossibleMustReturnTrueWithKeytab(@TempDir Path tmpDir) throws IOException {
+    void isLoginPossibleMustReturnTrueWithKeytab(@TempDir Path tmpDir) throws IOException {
         Options options = new Options();
         options.set(KERBEROS_LOGIN_PRINCIPAL, "principal");
         final Path keyTab = Files.createFile(tmpDir.resolve("test.keytab"));
@@ -92,7 +92,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void isLoginPossibleMustReturnTrueWithTGT() throws IOException {
+    void isLoginPossibleMustReturnTrueWithTGT() throws IOException {
         Options options = new Options();
         options.set(KERBEROS_LOGIN_USETICKETCACHE, true);
         KerberosLoginProvider kerberosLoginProvider = new KerberosLoginProvider(options);
@@ -108,7 +108,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void isLoginPossibleMustThrowExceptionWithProxyUser() {
+    void isLoginPossibleMustThrowExceptionWithProxyUser() {
         Options options = new Options();
         KerberosLoginProvider kerberosLoginProvider = new KerberosLoginProvider(options);
 
@@ -125,7 +125,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void doLoginMustLoginWithKeytab(@TempDir Path tmpDir) throws IOException {
+    void doLoginMustLoginWithKeytab(@TempDir Path tmpDir) throws IOException {
         Options options = new Options();
         options.set(KERBEROS_LOGIN_PRINCIPAL, "principal");
         final Path keyTab = Files.createFile(tmpDir.resolve("test.keytab"));
@@ -142,7 +142,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void doLoginMustLoginWithTGT() throws IOException {
+    void doLoginMustLoginWithTGT() throws IOException {
         Options options = new Options();
         options.set(KERBEROS_LOGIN_USETICKETCACHE, true);
         KerberosLoginProvider kerberosLoginProvider = new KerberosLoginProvider(options);
@@ -158,7 +158,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void doLoginMustThrowExceptionWithProxyUser() {
+    void doLoginMustThrowExceptionWithProxyUser() {
         Options options = new Options();
         KerberosLoginProvider kerberosLoginProvider = new KerberosLoginProvider(options);
 

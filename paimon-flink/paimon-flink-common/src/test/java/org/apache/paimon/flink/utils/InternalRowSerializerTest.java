@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Random;
 
 /** Tests for {@link InternalRowTypeSerializer}. */
-public class InternalRowSerializerTest {
+class InternalRowSerializerTest {
 
     private static final Random RANDOM = new Random();
     private static final RowType rowType =
@@ -44,7 +44,7 @@ public class InternalRowSerializerTest {
                     .build();
 
     @Test
-    public void testSerializeAndDeserilize() throws Exception {
+    void testSerializeAndDeserilize() throws Exception {
         DataOutputSerializer dataOutputSerializer = new DataOutputSerializer(100);
         InternalRowTypeSerializer internalRowTypeSerializer =
                 new InternalRowTypeSerializer(rowType.getFieldTypes().toArray(new DataType[0]));
@@ -61,7 +61,7 @@ public class InternalRowSerializerTest {
     }
 
     @Test
-    public void testEqual() {
+    void testEqual() {
         InternalRowTypeSerializer internalRowTypeSerializer =
                 new InternalRowTypeSerializer(rowType.getFieldTypes().toArray(new DataType[0]));
 
@@ -70,7 +70,7 @@ public class InternalRowSerializerTest {
     }
 
     @Test
-    public void testCopyFromView() {
+    void testCopyFromView() {
         InternalRowTypeSerializer internalRowTypeSerializer =
                 new InternalRowTypeSerializer(rowType.getFieldTypes().toArray(new DataType[0]));
 

@@ -203,32 +203,32 @@ public abstract class MergeTreeTestBase {
     }
 
     @Test
-    public void testEmpty() throws Exception {
+    void testEmpty() throws Exception {
         doTestWriteRead(0);
     }
 
     @Test
-    public void test1() throws Exception {
+    void test1() throws Exception {
         doTestWriteRead(1);
     }
 
     @Test
-    public void test2() throws Exception {
+    void test2() throws Exception {
         doTestWriteRead(new Random().nextInt(2));
     }
 
     @Test
-    public void test8() throws Exception {
+    void test8() throws Exception {
         doTestWriteRead(new Random().nextInt(8));
     }
 
     @Test
-    public void testRandom() throws Exception {
+    void testRandom() throws Exception {
         doTestWriteRead(new Random().nextInt(20));
     }
 
     @Test
-    public void testRestore() throws Exception {
+    void testRestore() throws Exception {
         List<TestRecord> expected = new ArrayList<>(writeBatch());
         List<DataFileMeta> newFiles = writer.prepareCommit(true).newFilesIncrement().newFiles();
         writer = createMergeTreeWriter(newFiles);
@@ -239,7 +239,7 @@ public abstract class MergeTreeTestBase {
     }
 
     @Test
-    public void testPrepareCommitWaitCompaction() throws Exception {
+    void testPrepareCommitWaitCompaction() throws Exception {
 
         List<DataFileMeta> newFiles = generateDataFileToCommit();
 
@@ -269,7 +269,7 @@ public abstract class MergeTreeTestBase {
     }
 
     @Test
-    public void testPrepareCommitRecycleReference() throws Exception {
+    void testPrepareCommitRecycleReference() throws Exception {
 
         List<DataFileMeta> dataFileMetas = generateDataFileToCommit();
 
@@ -327,7 +327,7 @@ public abstract class MergeTreeTestBase {
 
     @ParameterizedTest
     @ValueSource(longs = {1, 1024 * 1024})
-    public void testCloseUpgrade(long targetFileSize) throws Exception {
+    void testCloseUpgrade(long targetFileSize) throws Exception {
         // To generate a large number of upgrade files
         recreateMergeTree(targetFileSize);
 
@@ -356,12 +356,12 @@ public abstract class MergeTreeTestBase {
     }
 
     @Test
-    public void testWriteMany() throws Exception {
+    void testWriteMany() throws Exception {
         doTestWriteRead(3, 20_000);
     }
 
     @Test
-    public void testChangelog() throws Exception {
+    void testChangelog() throws Exception {
         writer =
                 createMergeTreeWriter(
                         Collections.emptyList(),
@@ -372,7 +372,7 @@ public abstract class MergeTreeTestBase {
     }
 
     @Test
-    public void testChangelogFromCopyingData() throws Exception {
+    void testChangelogFromCopyingData() throws Exception {
         writer =
                 createMergeTreeWriter(
                         Collections.emptyList(),

@@ -42,11 +42,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /** IT Case for {@link RewriteFileIndexProcedure}. */
-public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
+class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testFileIndexProcedureSchemaEvolution(boolean isNamedArgument) throws Exception {
+    void testFileIndexProcedureSchemaEvolution(boolean isNamedArgument) throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -103,7 +103,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testPartitionFilter(boolean isNamedArgument) throws Exception {
+    void testPartitionFilter(boolean isNamedArgument) throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -158,7 +158,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testFileIndexProcedureDropIndex(boolean isNamedArgument) throws Exception {
+    void testFileIndexProcedureDropIndex(boolean isNamedArgument) throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"

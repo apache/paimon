@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class PredicateBuilderTest {
 
     @Test
-    public void testBetween() {
+    void testBetween() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         Predicate predicate = builder.between(0, 1, 3);
 
@@ -57,7 +57,7 @@ public class PredicateBuilderTest {
     }
 
     @Test
-    public void testBetweenNull() {
+    void testBetweenNull() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         Predicate predicate = builder.between(0, 1, null);
 
@@ -80,7 +80,7 @@ public class PredicateBuilderTest {
     }
 
     @Test
-    public void testSplitAnd() {
+    void testSplitAnd() {
         PredicateBuilder builder =
                 new PredicateBuilder(
                         RowType.of(

@@ -52,10 +52,10 @@ import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link org.apache.paimon.crosspartition.IndexBootstrap}. */
-public class IndexBootstrapTest extends TableTestBase {
+class IndexBootstrapTest extends TableTestBase {
 
     @Test
-    public void testBoostrap() throws Exception {
+    void testBoostrap() throws Exception {
         Table table = createTable();
 
         write(
@@ -114,7 +114,7 @@ public class IndexBootstrapTest extends TableTestBase {
     }
 
     @Test
-    public void testBootstrapType() throws Exception {
+    void testBootstrapType() throws Exception {
         FileStoreTable table = (FileStoreTable) createTable();
         RowType indexRowType = IndexBootstrap.bootstrapType(table.schema());
         assertThat(indexRowType.getFieldNames()).contains(BUCKET_FIELD);
@@ -123,7 +123,7 @@ public class IndexBootstrapTest extends TableTestBase {
     }
 
     @Test
-    public void testFilterSplit() {
+    void testFilterSplit() {
         assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 50, 230)).isTrue();
         assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 50, 300)).isFalse();
         assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 200, 230)).isTrue();

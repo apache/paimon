@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase {
 
     @Test
-    public void testScan() throws Exception {
+    void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         ChangelogManager changelogManager = table.changelogManager();
         StreamTableWrite write = table.newWrite(commitUser);
@@ -80,7 +80,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
     }
 
     @Test
-    public void testNoSnapshot() {
+    void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(
@@ -92,7 +92,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
     }
 
     @Test
-    public void testNoSnapshotBeforeTimestamp() throws Exception {
+    void testNoSnapshotBeforeTimestamp() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -120,7 +120,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
 
     @ParameterizedTest(name = "changelog-producer = {0}")
     @ValueSource(strings = {"none", "input"})
-    public void testScanFromChangelog(String changelogProducer) throws Exception {
+    void testScanFromChangelog(String changelogProducer) throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 2);
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);

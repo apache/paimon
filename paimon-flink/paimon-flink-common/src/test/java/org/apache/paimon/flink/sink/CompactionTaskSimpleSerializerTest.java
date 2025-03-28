@@ -36,7 +36,7 @@ import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CompactionTaskSimpleSerializer}. */
-public class CompactionTaskSimpleSerializerTest {
+class CompactionTaskSimpleSerializerTest {
 
     private final CompactionTaskSerializer compactionTaskSerializer =
             new CompactionTaskSerializer();
@@ -47,7 +47,7 @@ public class CompactionTaskSimpleSerializerTest {
     private final BinaryRow partition = BinaryRow.EMPTY_ROW;
 
     @Test
-    public void testSerializer() throws IOException {
+    void testSerializer() throws IOException {
 
         UnawareAppendCompactionTask task1 =
                 new UnawareAppendCompactionTask(partition, newFiles(20));

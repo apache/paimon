@@ -71,14 +71,14 @@ import static org.apache.paimon.CoreOptions.CONSUMER_ID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link MonitorSource} and {@link ReadOperator}. */
-public class OperatorSourceTest {
+class OperatorSourceTest {
 
     @TempDir Path tempDir;
 
     private Table table;
 
     @BeforeEach
-    public void before()
+    void before()
             throws Catalog.TableAlreadyExistException, Catalog.DatabaseNotExistException,
                     Catalog.TableNotExistException, Catalog.DatabaseAlreadyExistException {
         Catalog catalog =
@@ -122,7 +122,7 @@ public class OperatorSourceTest {
     }
 
     @Test
-    public void testMonitorSource() throws Exception {
+    void testMonitorSource() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         // 1. run first
         OperatorSubtaskState snapshot;
@@ -182,7 +182,7 @@ public class OperatorSourceTest {
     }
 
     @Test
-    public void testReadOperator() throws Exception {
+    void testReadOperator() throws Exception {
         ReadOperator readOperator = new ReadOperator(table.newReadBuilder(), null);
         OneInputStreamOperatorTestHarness<Split, RowData> harness =
                 new OneInputStreamOperatorTestHarness<>(readOperator);
@@ -204,7 +204,7 @@ public class OperatorSourceTest {
     }
 
     @Test
-    public void testReadOperatorMetricsRegisterAndUpdate() throws Exception {
+    void testReadOperatorMetricsRegisterAndUpdate() throws Exception {
         ReadOperator readOperator = new ReadOperator(table.newReadBuilder(), null);
         OneInputStreamOperatorTestHarness<Split, RowData> harness =
                 new OneInputStreamOperatorTestHarness<>(readOperator);

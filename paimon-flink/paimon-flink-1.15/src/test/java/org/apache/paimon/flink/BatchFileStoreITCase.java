@@ -44,7 +44,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testOverwriteEmpty() {
+    void testOverwriteEmpty() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
@@ -53,7 +53,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTimeTravelRead() throws Exception {
+    void testTimeTravelRead() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         long time1 = System.currentTimeMillis();
 

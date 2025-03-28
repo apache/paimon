@@ -58,7 +58,7 @@ public class CommitStatsTest {
     }
 
     @Test
-    public void testCalcChangedPartitionsAndBuckets() {
+    void testCalcChangedPartitionsAndBuckets() {
         assertThat(CommitStats.numChangedBuckets(files)).isEqualTo(3);
         assertThat(CommitStats.numChangedPartitions(files)).isEqualTo(3);
         assertThat(CommitStats.changedPartBuckets(files).get(row(1))).containsExactly(1);
@@ -69,7 +69,7 @@ public class CommitStatsTest {
     }
 
     @Test
-    public void testFailedAppendSnapshot() {
+    void testFailedAppendSnapshot() {
         CommitStats commitStats =
                 new CommitStats(
                         Collections.emptyList(),
@@ -97,7 +97,7 @@ public class CommitStatsTest {
     }
 
     @Test
-    public void testFailedCompactSnapshot() {
+    void testFailedCompactSnapshot() {
         CommitStats commitStats =
                 new CommitStats(
                         appendDataFiles,
@@ -125,7 +125,7 @@ public class CommitStatsTest {
     }
 
     @Test
-    public void testSucceedAllSnapshot() {
+    void testSucceedAllSnapshot() {
         CommitStats commitStats =
                 new CommitStats(
                         appendDataFiles,

@@ -76,7 +76,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupEmptyTable(LookupCacheMode cacheMode) throws Exception {
+    void testLookupEmptyTable(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
@@ -105,7 +105,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookup(LookupCacheMode cacheMode) throws Exception {
+    void testLookup(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -136,7 +136,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupIgnoreScanOptions() throws Exception {
+    void testLookupIgnoreScanOptions() throws Exception {
         sql(
                 "CREATE TABLE d (\n"
                         + "  pt INT,\n"
@@ -173,7 +173,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupProjection(LookupCacheMode cacheMode) throws Exception {
+    void testLookupProjection(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -203,7 +203,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupFilterPk(LookupCacheMode cacheMode) throws Exception {
+    void testLookupFilterPk(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -233,7 +233,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupFilterSelect(LookupCacheMode cacheMode) throws Exception {
+    void testLookupFilterSelect(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -263,7 +263,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupFilterUnSelect(LookupCacheMode cacheMode) throws Exception {
+    void testLookupFilterUnSelect(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -293,7 +293,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupFilterUnSelectAndUpdate(LookupCacheMode cacheMode) throws Exception {
+    void testLookupFilterUnSelectAndUpdate(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -322,7 +322,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupUpdateAfterLeafPredicate0() throws Exception {
+    void testLookupUpdateAfterLeafPredicate0() throws Exception {
         sql(
                 "CREATE TABLE fact (\n"
                         + "  name string,\n"
@@ -369,7 +369,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupUpdateAfterLeafPredicate1() throws Exception {
+    void testLookupUpdateAfterLeafPredicate1() throws Exception {
         sql(
                 "CREATE TABLE fact (\n"
                         + "  name string,\n"
@@ -418,7 +418,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupUpdateAfterLeafPredicate2() throws Exception {
+    void testLookupUpdateAfterLeafPredicate2() throws Exception {
         sql("CREATE TABLE fact (name STRING, i INT, `proctime` AS PROCTIME())");
         sql(
                 "CREATE TABLE dim (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
@@ -441,7 +441,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupUpdateAfterCompoundPredicate() throws Exception {
+    void testLookupUpdateAfterCompoundPredicate() throws Exception {
         sql("CREATE TABLE fact (name STRING, i INT, `proctime` AS PROCTIME())");
         sql(
                 "CREATE TABLE dim (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
@@ -465,7 +465,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNonPkLookup() throws Exception {
+    void testNonPkLookup() throws Exception {
         initTable(LookupCacheMode.AUTO);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -497,7 +497,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNonPkLookupProjection() throws Exception {
+    void testNonPkLookupProjection() throws Exception {
         initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -523,7 +523,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNonPkLookupFilterPk() throws Exception {
+    void testNonPkLookupFilterPk() throws Exception {
         initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -548,7 +548,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNonPkLookupFilterSelect() throws Exception {
+    void testNonPkLookupFilterSelect() throws Exception {
         initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -574,7 +574,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNonPkLookupFilterUnSelect() throws Exception {
+    void testNonPkLookupFilterUnSelect() throws Exception {
         initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -600,7 +600,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNonPkLookupFilterUnSelectAndUpdate() throws Exception {
+    void testNonPkLookupFilterUnSelectAndUpdate() throws Exception {
         initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -627,7 +627,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testRepeatRefresh(LookupCacheMode cacheMode) throws Exception {
+    void testRepeatRefresh(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -657,7 +657,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupPartialUpdateIllegal() {
+    void testLookupPartialUpdateIllegal() {
         sql(
                 "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('merge-engine'='partial-update','continuous.discovery-interval'='1 ms')");
@@ -672,7 +672,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupPartialUpdate() throws Exception {
+    void testLookupPartialUpdate() throws Exception {
         testLookupPartialUpdate("none");
         testLookupPartialUpdate("zstd");
     }
@@ -705,7 +705,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testRetryLookup(LookupCacheMode cacheMode) throws Exception {
+    void testRetryLookup(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -729,7 +729,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testAsyncRetryLookup(LookupCacheMode cacheMode) throws Exception {
+    void testAsyncRetryLookup(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -753,7 +753,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupPartitionedTable() throws Exception {
+    void testLookupPartitionedTable() throws Exception {
         initTable(LookupCacheMode.AUTO);
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN PARTITIONED_DIM for system_time as of T.proctime AS D ON T.i = D.i";
@@ -782,7 +782,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupMaxPtPartitionedTable(LookupCacheMode mode) throws Exception {
+    void testLookupMaxPtPartitionedTable(LookupCacheMode mode) throws Exception {
         boolean testDynamicBucket = ThreadLocalRandom.current().nextBoolean();
         String primaryKeys;
         String bucket;
@@ -822,7 +822,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupNonPkAppendTable() throws Exception {
+    void testLookupNonPkAppendTable() throws Exception {
         sql(
                 "CREATE TABLE DIM_NO_PK (i INT, j INT, k1 INT, k2 INT) "
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')");
@@ -857,7 +857,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWithSequenceFieldTable() throws Exception {
+    void testWithSequenceFieldTable() throws Exception {
         sql(
                 "CREATE TABLE DIM_WITH_SEQUENCE (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('continuous.discovery-interval'='1 ms', 'sequence.field' = 'j')");
@@ -890,7 +890,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAsyncRetryLookupWithSequenceField() throws Exception {
+    void testAsyncRetryLookupWithSequenceField() throws Exception {
         sql(
                 "CREATE TABLE DIM_WITH_SEQUENCE (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('continuous.discovery-interval'='1 ms', 'sequence.field' = 'j')");
@@ -915,7 +915,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAsyncRetryLookupSecKeyWithSequenceField() throws Exception {
+    void testAsyncRetryLookupSecKeyWithSequenceField() throws Exception {
         sql(
                 "CREATE TABLE DIM_WITH_SEQUENCE (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('continuous.discovery-interval'='1 ms', 'sequence.field' = 'j')");
@@ -943,7 +943,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testPartialCacheBucketKeyOrder(LookupCacheMode mode) throws Exception {
+    void testPartialCacheBucketKeyOrder(LookupCacheMode mode) throws Exception {
         sql(
                 "CREATE TABLE DIM (k2 INT, k1 INT, j INT , i INT, PRIMARY KEY(i, j) NOT ENFORCED) WITH"
                         + " ('continuous.discovery-interval'='1 ms', 'lookup.cache'='%s', 'bucket' = '2', 'bucket-key' = 'j')",
@@ -981,7 +981,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testOverwriteDimTable(boolean isPkTable) throws Exception {
+    void testOverwriteDimTable(boolean isPkTable) throws Exception {
         sql(
                 "CREATE TABLE DIM (i INT %s, v int, pt STRING) "
                         + "PARTITIONED BY (pt) WITH ('continuous.discovery-interval'='1 ms')",
@@ -1009,7 +1009,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupMaxTwoPt0(LookupCacheMode mode) throws Exception {
+    void testLookupMaxTwoPt0(LookupCacheMode mode) throws Exception {
         sql(
                 "CREATE TABLE PARTITIONED_DIM (pt STRING, i INT, v INT)"
                         + "PARTITIONED BY (`pt`) WITH ("
@@ -1048,7 +1048,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupSpecifiedPartition(LookupCacheMode mode) throws Exception {
+    void testLookupSpecifiedPartition(LookupCacheMode mode) throws Exception {
         sql(
                 "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED) "
                         + "PARTITIONED BY (pt) WITH ( "

@@ -34,14 +34,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class BucketedAppendCompactManagerTest {
 
     @Test
-    public void testPickEmptyAndNotRelease() {
+    void testPickEmptyAndNotRelease() {
         // 1~50 is small enough, so hold it
         List<DataFileMeta> toCompact = Collections.singletonList(newFile(1L, 50L));
         innerTest(toCompact, false, Collections.emptyList(), toCompact);
     }
 
     @Test
-    public void testPickEmptyAndRelease() {
+    void testPickEmptyAndRelease() {
         // large file, release
         innerTest(
                 Collections.singletonList(newFile(1L, 1024L)),
@@ -125,7 +125,7 @@ public class BucketedAppendCompactManagerTest {
     }
 
     @Test
-    public void testPick() {
+    void testPick() {
         // fileNum is 13 (which > 12) and totalFileSize is 130 (which < 1024)
         List<DataFileMeta> toCompact1 =
                 Arrays.asList(

@@ -43,10 +43,10 @@ import static org.apache.paimon.data.BinaryRow.singleColumn;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Compatibility Test for {@link ManifestCommittableSerializer}. */
-public class ManifestCommittableSerializerCompatibilityTest {
+class ManifestCommittableSerializerCompatibilityTest {
 
     @Test
-    public void testCompatibilityToV3CommitV7() throws IOException {
+    void testCompatibilityToV3CommitV7() throws IOException {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -118,7 +118,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
     }
 
     @Test
-    public void testCompatibilityToV3CommitV6() throws IOException {
+    void testCompatibilityToV3CommitV6() throws IOException {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -190,7 +190,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
     }
 
     @Test
-    public void testCompatibilityToV3CommitV5() throws IOException {
+    void testCompatibilityToV3CommitV5() throws IOException {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -261,7 +261,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
     }
 
     @Test
-    public void testCompatibilityToV3CommitV4() throws IOException {
+    void testCompatibilityToV3CommitV4() throws IOException {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -333,7 +333,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
     }
 
     @Test
-    public void testCompatibilityToV3CommitV3() throws IOException {
+    void testCompatibilityToV3CommitV3() throws IOException {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -405,7 +405,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
     }
 
     @Test
-    public void testCompatibilityToV2CommitV2() throws IOException {
+    void testCompatibilityToV2CommitV2() throws IOException {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -477,7 +477,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
     }
 
     @Test
-    public void testCompatibilityToVersion2PaimonV07() throws IOException {
+    void testCompatibilityToVersion2PaimonV07() throws IOException {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),

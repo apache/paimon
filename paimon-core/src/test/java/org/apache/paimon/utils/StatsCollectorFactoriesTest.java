@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link StatsCollectorFactories}. */
 public class StatsCollectorFactoriesTest {
     @Test
-    public void testFieldStats() {
+    void testFieldStats() {
         RowType type =
                 new RowType(
                         Arrays.asList(

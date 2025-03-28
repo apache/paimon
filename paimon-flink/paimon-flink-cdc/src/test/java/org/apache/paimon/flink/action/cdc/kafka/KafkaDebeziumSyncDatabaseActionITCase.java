@@ -29,54 +29,54 @@ public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActi
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionMultiTopic() throws Exception {
+    void testSchemaEvolutionMultiTopic() throws Exception {
         testSchemaEvolutionMultiTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionOneTopic() throws Exception {
+    void testSchemaEvolutionOneTopic() throws Exception {
         testSchemaEvolutionOneTopic(DEBEZIUM);
     }
 
     @Test
-    public void testTopicIsEmpty() {
+    void testTopicIsEmpty() {
         testTopicIsEmpty(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
-    public void testTableAffixMultiTopic() throws Exception {
+    void testTableAffixMultiTopic() throws Exception {
         testTableAffixMultiTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
-    public void testTableAffixOneTopic() throws Exception {
+    void testTableAffixOneTopic() throws Exception {
         testTableAffixOneTopic(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
-    public void testIncludingTables() throws Exception {
+    void testIncludingTables() throws Exception {
         testIncludingTables(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
-    public void testExcludingTables() throws Exception {
+    void testExcludingTables() throws Exception {
         testExcludingTables(DEBEZIUM);
     }
 
     @Disabled // TODO How to append table in combined mode?
     @Test
     @Timeout(60)
-    public void testIncludingAndExcludingTables() throws Exception {
+    void testIncludingAndExcludingTables() throws Exception {
         testIncludingAndExcludingTables(DEBEZIUM);
     }
 }

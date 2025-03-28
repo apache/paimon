@@ -83,7 +83,7 @@ public class PartitionsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPartitionRecordCount() throws Exception {
+    void testPartitionRecordCount() throws Exception {
         List<InternalRow> expectedRow = new ArrayList<>();
         expectedRow.add(GenericRow.of(BinaryString.fromString("{1}"), 2L));
         expectedRow.add(GenericRow.of(BinaryString.fromString("{2}"), 1L));
@@ -95,7 +95,7 @@ public class PartitionsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPartitionTimeTravel() throws Exception {
+    void testPartitionTimeTravel() throws Exception {
         List<InternalRow> expectedRow = new ArrayList<>();
         expectedRow.add(GenericRow.of(BinaryString.fromString("{1}"), 1L));
         expectedRow.add(GenericRow.of(BinaryString.fromString("{3}"), 1L));
@@ -110,7 +110,7 @@ public class PartitionsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPartitionValue() throws Exception {
+    void testPartitionValue() throws Exception {
         write(table, GenericRow.of(2, 1, 3), GenericRow.of(3, 1, 4));
         List<InternalRow> expectedRow = new ArrayList<>();
         expectedRow.add(GenericRow.of(BinaryString.fromString("{1}"), 4L, 3L));

@@ -26,10 +26,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link PurgeFilesProcedure}. */
-public class PurgeFilesProcedureITCase extends CatalogITCaseBase {
+class PurgeFilesProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testPurgeFiles() throws Exception {
+    void testPurgeFiles() throws Exception {
         sql(
                 "CREATE TABLE T (id INT, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"

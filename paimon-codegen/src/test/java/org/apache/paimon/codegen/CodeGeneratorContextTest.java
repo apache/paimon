@@ -27,7 +27,7 @@ import java.io.Serializable;
 public class CodeGeneratorContextTest {
 
     @Test
-    public void testAddReusableObjectInternal() {
+    void testAddReusableObjectInternal() {
         Object o = new TestClass();
         Thread.currentThread()
                 .setContextClassLoader(ClassLoader.getSystemClassLoader().getParent());

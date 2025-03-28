@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 /** Tests for reading and writing log store in stream jobs. */
-public class LogStoreE2eTest extends E2eTestBase {
+class LogStoreE2eTest extends E2eTestBase {
 
     private String topicName;
 
@@ -44,7 +44,7 @@ public class LogStoreE2eTest extends E2eTestBase {
     }
 
     @Test
-    public void testWithPk() throws Exception {
+    void testWithPk() throws Exception {
         String catalogDdl =
                 String.format(
                         "CREATE CATALOG ts_catalog WITH (\n"

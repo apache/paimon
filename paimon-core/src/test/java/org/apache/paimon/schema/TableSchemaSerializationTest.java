@@ -39,10 +39,10 @@ import static org.apache.paimon.schema.TableSchemaTest.newRowType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for serialize {@link TableSchema}. */
-public class TableSchemaSerializationTest {
+class TableSchemaSerializationTest {
 
     @Test
-    public void testSchema() {
+    void testSchema() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", new IntType()),

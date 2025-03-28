@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class NestedRowTest {
 
     @Test
-    public void testNestedRowWithOneSegment() {
+    void testNestedRowWithOneSegment() {
         BinaryRow row = getBinaryRow();
         InternalRow nestedRow = row.getRow(0, 5);
         assertThat(1).isEqualTo(nestedRow.getInt(0));
@@ -41,7 +41,7 @@ public class NestedRowTest {
     }
 
     @Test
-    public void testNestedRowWithMultipleSegments() {
+    void testNestedRowWithMultipleSegments() {
         BinaryRow row = getBinaryRow();
 
         MemorySegment[] segments = splitBytes(row.getSegments()[0].getHeapMemory(), 3);
@@ -56,7 +56,7 @@ public class NestedRowTest {
     }
 
     @Test
-    public void testNestInNestedRow() {
+    void testNestInNestedRow() {
         // layer1
         GenericRow gRow = new GenericRow(4);
         gRow.setField(0, 1);

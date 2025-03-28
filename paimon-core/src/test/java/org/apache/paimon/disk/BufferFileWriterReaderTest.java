@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
 /** Test for {@link BufferFileReader} and {@link BufferFileWriter}. */
-public class BufferFileWriterReaderTest {
+class BufferFileWriterReaderTest {
 
     private static final int BUFFER_SIZE = 32 * 1024;
 
@@ -51,7 +51,7 @@ public class BufferFileWriterReaderTest {
     private BufferFileReader reader;
 
     @AfterEach
-    public void shutdown() throws Exception {
+    void shutdown() throws Exception {
         if (writer != null) {
             writer.deleteChannel();
         }
@@ -64,7 +64,7 @@ public class BufferFileWriterReaderTest {
     }
 
     @BeforeEach
-    public void setUpWriterAndReader() {
+    void setUpWriterAndReader() {
         this.ioManager = IOManager.create(tempDir.toFile().getAbsolutePath());
         FileIOChannel.ID channel = ioManager.createChannel();
 
@@ -85,7 +85,7 @@ public class BufferFileWriterReaderTest {
     }
 
     @Test
-    public void testWriteRead() throws IOException {
+    void testWriteRead() throws IOException {
         int numBuffers = 1024;
         int currentNumber = 0;
 

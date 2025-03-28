@@ -39,11 +39,11 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link MongoDBSyncDatabaseAction}. */
-public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
+class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         writeRecordsToMongoDB("test-data-1", database, "database");
         writeRecordsToMongoDB("test-data-2", database, "database");
 
@@ -119,7 +119,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    public void testCatalogAndTableConfig() {
+    void testCatalogAndTableConfig() {
         MongoDBSyncDatabaseAction action =
                 syncDatabaseActionBuilder(getBasicMongoDBConfig())
                         .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
@@ -133,7 +133,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testMongoDBNestedDataSynchronizationAndVerification() throws Exception {
+    void testMongoDBNestedDataSynchronizationAndVerification() throws Exception {
         writeRecordsToMongoDB("test-data-5", database, "database");
         writeRecordsToMongoDB("test-data-6", database, "database");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -186,7 +186,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testDynamicTableCreationInMongoDB() throws Exception {
+    void testDynamicTableCreationInMongoDB() throws Exception {
         String dbName = database + UUID.randomUUID();
         writeRecordsToMongoDB("test-data-5", dbName, "database");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -244,7 +244,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTableAffix() throws Exception {
+    void testTableAffix() throws Exception {
         // create table t1
         createFileStoreTable(
                 "test_prefix_t1_test_suffix",
@@ -283,7 +283,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testNewlyAddedTablesOptionsChange() throws Exception {
+    void testNewlyAddedTablesOptionsChange() throws Exception {
         String dbName = database + UUID.randomUUID();
         writeRecordsToMongoDB("test-data-5", dbName, "database");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();

@@ -39,17 +39,17 @@ import static org.apache.paimon.predicate.PredicateBuilder.or;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link PartitionPredicate}. */
-public class PartitionPredicateTest {
+class PartitionPredicateTest {
 
     @Test
-    public void testNoPartition() {
+    void testNoPartition() {
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(RowType.of(), Collections.singletonList(EMPTY_ROW));
         assertThat(predicate).isNull();
     }
 
     @Test
-    public void testPartition() {
+    void testPartition() {
         RowType type = DataTypes.ROW(DataTypes.INT(), DataTypes.INT());
         PredicateBuilder builder = new PredicateBuilder(type);
         Predicate predicate =
@@ -121,7 +121,7 @@ public class PartitionPredicateTest {
     }
 
     @Test
-    public void testPartitionWithMultiFields() {
+    void testPartitionWithMultiFields() {
         RowType type = DataTypes.ROW(DataTypes.INT(), DataTypes.INT());
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(type, Collections.singletonList(createPart(3, 4)));

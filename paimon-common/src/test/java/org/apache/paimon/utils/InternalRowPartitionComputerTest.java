@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class InternalRowPartitionComputerTest {
 
     @Test
-    public void testPartitionToString() {
+    void testPartitionToString() {
         RowType rowType = RowType.of();
         BinaryRow binaryRow = new BinaryRow(0);
         assertThat(InternalRowPartitionComputer.partToSimpleString(rowType, binaryRow, "-", 30))

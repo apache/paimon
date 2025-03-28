@@ -43,10 +43,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for {@link AutoTagForSavepointCommitterOperator}. */
-public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorTest {
+class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorTest {
 
     @Test
-    public void testAutoTagForSavepoint() throws Exception {
+    void testAutoTagForSavepoint() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
@@ -96,7 +96,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
     }
 
     @Test
-    public void testRestore() throws Exception {
+    void testRestore() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
@@ -148,7 +148,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
     }
 
     @Test
-    public void testAbortSavepointAndCleanTag() throws Exception {
+    void testAbortSavepointAndCleanTag() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =

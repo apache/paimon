@@ -43,7 +43,7 @@ public class FlinkActionITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDeleteAction() throws Exception {
+    void testDeleteAction() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 'Hi'), (2, 'Hello'), (3, 'World')");
 
         DeleteAction action =

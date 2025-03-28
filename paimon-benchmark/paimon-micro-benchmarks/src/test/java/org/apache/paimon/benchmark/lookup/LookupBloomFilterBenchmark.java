@@ -42,17 +42,17 @@ public class LookupBloomFilterBenchmark extends AbstractLookupBenchmark {
     @TempDir Path tempDir;
 
     @Test
-    public void testHighMatch() throws Exception {
+    void testHighMatch() throws Exception {
         innerTest("lookup", generateSequenceInputs(0, 100000), generateRandomInputs(0, 100000));
     }
 
     @Test
-    public void testHalfMatch() throws Exception {
+    void testHalfMatch() throws Exception {
         innerTest("lookup", generateSequenceInputs(0, 100000), generateRandomInputs(50000, 150000));
     }
 
     @Test
-    public void testLowMatch() throws Exception {
+    void testLowMatch() throws Exception {
         innerTest(
                 "lookup", generateSequenceInputs(0, 100000), generateRandomInputs(100000, 200000));
     }

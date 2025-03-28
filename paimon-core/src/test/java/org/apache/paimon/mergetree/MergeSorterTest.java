@@ -88,7 +88,7 @@ public class MergeSorterTest {
     }
 
     @BeforeEach
-    public void beforeTest() {
+    void beforeTest() {
         ioManager = IOManager.create(tempDir.toString());
         Options options = new Options();
         options.set(CoreOptions.SORT_SPILL_BUFFER_SIZE, new MemorySize(MEMORY_SIZE));
@@ -98,7 +98,7 @@ public class MergeSorterTest {
     }
 
     @AfterEach
-    public void afterTest() throws Exception {
+    void afterTest() throws Exception {
         assertThat(sorter.memoryPool().freePages()).isEqualTo(totalPages);
         List<File> files =
                 Files.walk(tempDir)
@@ -110,12 +110,12 @@ public class MergeSorterTest {
     }
 
     @TestTemplate
-    public void testSortAndMerge() throws Exception {
+    void testSortAndMerge() throws Exception {
         innerTest(null);
     }
 
     @TestTemplate
-    public void testWithUserDefineSequence() throws Exception {
+    void testWithUserDefineSequence() throws Exception {
         innerTest(
                 new FieldsComparator() {
                     @Override

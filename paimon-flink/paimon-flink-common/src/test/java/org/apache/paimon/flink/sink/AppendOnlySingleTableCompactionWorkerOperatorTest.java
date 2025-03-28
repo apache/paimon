@@ -53,7 +53,7 @@ import java.util.stream.Collectors;
 public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTestBase {
 
     @RepeatedTest(100)
-    public void testAsyncCompactionWorks() throws Exception {
+    void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
                 new AppendOnlySingleTableCompactionWorkerOperator.Factory(getTableDefault(), "user")
@@ -120,7 +120,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
     }
 
     @Test
-    public void testAsyncCompactionFileDeletedWhenShutdown() throws Exception {
+    void testAsyncCompactionFileDeletedWhenShutdown() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
                 new AppendOnlySingleTableCompactionWorkerOperator.Factory(getTableDefault(), "user")

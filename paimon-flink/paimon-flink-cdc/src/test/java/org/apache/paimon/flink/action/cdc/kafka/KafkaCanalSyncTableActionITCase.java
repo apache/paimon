@@ -62,13 +62,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution");
     }
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionWithMissingDdl() throws Exception {
+    void testSchemaEvolutionWithMissingDdl() throws Exception {
         runSingleTableSchemaEvolution("schemaevolutionmissingddl");
     }
 
@@ -204,7 +204,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testMultipleSchemaEvolutions() throws Exception {
+    void testMultipleSchemaEvolutions() throws Exception {
         final String topic = "schema_evolution_multiple";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/schemaevolutionmultiple/canal-data-1.txt");
@@ -264,7 +264,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testAllTypes() throws Exception {
+    void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
         for (int i = 0; i < 2; i++) {
@@ -533,7 +533,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testNotSupportFormat() throws Exception {
+    void testNotSupportFormat() throws Exception {
         final String topic = "not_support";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/schemaevolution/canal-data-1.txt");
@@ -556,7 +556,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(120)
-    public void testKafkaNoNonDdlData() throws Exception {
+    void testKafkaNoNonDdlData() throws Exception {
         final String topic = "no_non_ddl_data";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/nononddldata/canal-data-1.txt");
@@ -579,7 +579,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testAssertSchemaCompatible() throws Exception {
+    void testAssertSchemaCompatible() throws Exception {
         final String topic = "assert_schema_compatible";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/schemaevolution/canal-data-1.txt");
@@ -616,7 +616,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionSpecific() throws Exception {
+    void testStarUpOptionSpecific() throws Exception {
         final String topic = "start_up_specific";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/startupmode/canal-data-1.txt");
@@ -652,7 +652,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(120)
-    public void testStarUpOptionLatest() throws Exception {
+    void testStarUpOptionLatest() throws Exception {
         final String topic = "start_up_latest";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, true, "kafka/canal/table/startupmode/canal-data-1.txt");
@@ -692,7 +692,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionTimestamp() throws Exception {
+    void testStarUpOptionTimestamp() throws Exception {
         final String topic = "start_up_timestamp";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, true, "kafka/canal/table/startupmode/canal-data-1.txt");
@@ -731,7 +731,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionEarliest() throws Exception {
+    void testStarUpOptionEarliest() throws Exception {
         final String topic = "start_up_earliest";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/startupmode/canal-data-1.txt");
@@ -770,7 +770,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionGroup() throws Exception {
+    void testStarUpOptionGroup() throws Exception {
         final String topic = "start_up_group";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/startupmode/canal-data-1.txt");
@@ -809,7 +809,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testComputedColumn() throws Exception {
+    void testComputedColumn() throws Exception {
         String topic = "computed_column";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/computedcolumn/canal-data-1.txt");
@@ -841,7 +841,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testTypeMappingToString() throws Exception {
+    void testTypeMappingToString() throws Exception {
         final String topic = "map-to-string";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/tostring/canal-data-1.txt");
@@ -871,7 +871,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     }
 
     @Test
-    public void testCatalogAndTableConfig() {
+    void testCatalogAndTableConfig() {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(getBasicKafkaConfig())
                         .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
@@ -886,7 +886,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     @ParameterizedTest(name = "ignore-delete = {0}")
     @ValueSource(booleans = {true, false})
     @Timeout(60)
-    public void testCDCOperations(boolean ignoreDelete) throws Exception {
+    void testCDCOperations(boolean ignoreDelete) throws Exception {
         final String topic = "event-insert" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/event/event-row.txt");
@@ -960,7 +960,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(120)
-    public void testSyncWithInitialEmptyTopic() throws Exception {
+    void testSyncWithInitialEmptyTopic() throws Exception {
         String topic = "initial_empty_topic";
         createTestTopic(topic, 1, 1);
         createFileStoreTable(
@@ -1004,7 +1004,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testSynchronizeIncompleteJson() throws Exception {
+    void testSynchronizeIncompleteJson() throws Exception {
         String topic = "incomplete";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/incomplete/canal-data-1.txt");
@@ -1035,7 +1035,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testSynchronizeNonPkTable() throws Exception {
+    void testSynchronizeNonPkTable() throws Exception {
         String topic = "non_pk";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/nonpk/canal-data-1.txt");
@@ -1065,7 +1065,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testMissingDecimalPrecision() throws Exception {
+    void testMissingDecimalPrecision() throws Exception {
         String topic = "missing-decimal-precision";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/incomplete/canal-data-2.txt");
@@ -1094,7 +1094,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     @ParameterizedTest(name = "triggerSchemaRetrievalException = {0}")
     @ValueSource(booleans = {true, false})
     @Timeout(60)
-    public void testComputedColumnWithCaseInsensitive(boolean triggerSchemaRetrievalException)
+    void testComputedColumnWithCaseInsensitive(boolean triggerSchemaRetrievalException)
             throws Exception {
         String topic = "computed_column_with_case_insensitive" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
@@ -1146,13 +1146,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
-    public void testWaterMarkSyncTable() throws Exception {
+    void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(CANAL);
     }
 
     @Test
     @Timeout(60)
-    public void testDecimalNoChange() throws Exception {
+    void testDecimalNoChange() throws Exception {
         String topic = "decimal-no-change";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/typenochange/canal-data-3.txt");

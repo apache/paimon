@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class TableWriterBenchmark extends TableBenchmark {
 
     @Test
-    public void testAvro() throws Exception {
+    void testAvro() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         innerTest("avro", options);
@@ -48,7 +48,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testAvroWithoutStats() throws Exception {
+    void testAvroWithoutStats() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
         options.set(CoreOptions.METADATA_STATS_MODE, "none");
@@ -63,7 +63,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testOrcNoCompression() throws Exception {
+    void testOrcNoCompression() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);
         options.set("orc.compress", "none");
@@ -78,7 +78,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testParquet() throws Exception {
+    void testParquet() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET);
         innerTest("parquet", options);
@@ -92,7 +92,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testOrc() throws Exception {
+    void testOrc() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC);
         innerTest("orc", options);
@@ -106,7 +106,7 @@ public class TableWriterBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testParquetLookupCompaction() throws Exception {
+    void testParquetLookupCompaction() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_PARQUET);
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);

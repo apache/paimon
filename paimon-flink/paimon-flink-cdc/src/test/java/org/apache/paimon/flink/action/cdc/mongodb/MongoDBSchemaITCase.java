@@ -44,10 +44,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link MongoDBSchemaUtils}. */
-public class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
+class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
 
     @BeforeAll
-    public static void initMongoDB() {
+    static void initMongoDB() {
         // Create a real MongoDB client and insert a document to infer the schema
         MongoClientSettings.Builder settingsBuilder =
                 MongoClientSettings.builder()
@@ -74,7 +74,7 @@ public class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    public void testCreateSchemaFromValidConfig() {
+    void testCreateSchemaFromValidConfig() {
         Configuration mongodbConfig = new Configuration();
         mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
         mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
@@ -87,7 +87,7 @@ public class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    public void testCreateSchemaFromInvalidHost() {
+    void testCreateSchemaFromInvalidHost() {
         Configuration mongodbConfig = new Configuration();
         mongodbConfig.set(MongoDBSourceOptions.HOSTS, "127.0.0.1:12345");
         mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
@@ -101,7 +101,7 @@ public class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    public void testCreateSchemaFromIncompleteConfig() {
+    void testCreateSchemaFromIncompleteConfig() {
         // Create a Configuration object with missing necessary settings
         Configuration mongodbConfig = new Configuration();
         mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
@@ -112,7 +112,7 @@ public class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    public void testCreateSchemaFromDynamicConfig() {
+    void testCreateSchemaFromDynamicConfig() {
         // Create a Configuration object with the necessary settings
         Configuration mongodbConfig = new Configuration();
         mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
@@ -137,7 +137,7 @@ public class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    public void testCreateSchemaFromInvalidDatabase() {
+    void testCreateSchemaFromInvalidDatabase() {
         Configuration mongodbConfig = new Configuration();
         mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
         mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);
@@ -151,7 +151,7 @@ public class MongoDBSchemaITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    public void testCreateSchemaFromInvalidCollection() {
+    void testCreateSchemaFromInvalidCollection() {
         Configuration mongodbConfig = new Configuration();
         mongodbConfig.set(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
         mongodbConfig.set(MongoDBSourceOptions.USERNAME, MongoDBContainer.PAIMON_USER);

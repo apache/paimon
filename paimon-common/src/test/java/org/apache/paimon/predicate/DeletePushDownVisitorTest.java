@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DeletePushDownVisitorTest {
 
     @Test
-    public void testPartitionKeyNotPushDown() {
+    void testPartitionKeyNotPushDown() {
         List<String> partitionKeys = Arrays.asList("b", "c", "d");
 
         Predicate predicateB =

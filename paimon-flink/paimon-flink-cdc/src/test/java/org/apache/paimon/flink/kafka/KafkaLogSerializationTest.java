@@ -46,37 +46,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link KafkaLogSerializationSchema} and {@link KafkaLogDeserializationSchema}. */
-public class KafkaLogSerializationTest {
+class KafkaLogSerializationTest {
 
     private static final String TOPIC = "my_topic";
 
     @Test
-    public void testKeyed() throws Exception {
+    void testKeyed() throws Exception {
         checkKeyed(LogChangelogMode.AUTO, 1, 3, 5);
         checkKeyed(LogChangelogMode.UPSERT, 3, 6, 9);
         checkKeyed(LogChangelogMode.ALL, 2, 5, 3);
     }
 
     @Test
-    public void testNonKeyedUpsert() {
+    void testNonKeyedUpsert() {
         assertThatThrownBy(() -> checkNonKeyed(LogChangelogMode.UPSERT, 3, 6, 9))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    public void testNonKeyed() throws Exception {
+    void testNonKeyed() throws Exception {
         checkNonKeyed(LogChangelogMode.AUTO, 1, 3, 5);
         checkNonKeyed(LogChangelogMode.ALL, 2, 5, 3);
     }
 
     @Test
-    public void testUnawareBucket() throws Exception {
+    void testUnawareBucket() throws Exception {
         checkNonKeyed(LogChangelogMode.AUTO, -1, 3, 5);
         checkNonKeyed(LogChangelogMode.ALL, -1, 5, 3);
     }
 
     @Test
-    public void testNonKeyedWithInsertOnlyFormat() throws Exception {
+    void testNonKeyedWithInsertOnlyFormat() throws Exception {
         check(
                 LogChangelogMode.AUTO,
                 false,
@@ -96,7 +96,7 @@ public class KafkaLogSerializationTest {
     }
 
     @Test
-    public void testKeyedWithInsertOnlyFormat() throws Exception {
+    void testKeyedWithInsertOnlyFormat() throws Exception {
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(LOG_FORMAT.key(), "json");
 

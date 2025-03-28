@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SnapshotTest {
 
     @Test
-    public void testJsonIgnoreProperties() {
+    void testJsonIgnoreProperties() {
         Snapshot.fromJson(
                 "{\n"
                         + "  \"version\" : 3,\n"
@@ -52,7 +52,7 @@ public class SnapshotTest {
     }
 
     @Test
-    public void testSnapshotWithSizes() {
+    void testSnapshotWithSizes() {
         String json =
                 "{\n"
                         + "  \"version\" : 3,\n"

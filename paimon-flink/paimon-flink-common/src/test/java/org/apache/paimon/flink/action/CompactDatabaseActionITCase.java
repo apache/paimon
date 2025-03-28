@@ -106,7 +106,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     @ParameterizedTest(name = "mode = {0}, invoker = {1}")
     @MethodSource("testData")
     @Timeout(6000)
-    public void testStreamCompactForUnawareTable(String mode, String invoker) throws Exception {
+    void testStreamCompactForUnawareTable(String mode, String invoker) throws Exception {
 
         // step0. create tables
         Map<Identifier, FileStoreTable> tableToCompaction = new HashMap<>();
@@ -212,7 +212,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     @ParameterizedTest(name = "mode = {0}, invoker = {1}")
     @MethodSource("testData")
     @Timeout(60)
-    public void testBatchCompact(String mode, String invoker) throws Exception {
+    void testBatchCompact(String mode, String invoker) throws Exception {
         List<FileStoreTable> tables = new ArrayList<>();
 
         for (String dbName : DATABASE_NAMES) {
@@ -301,7 +301,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     @ParameterizedTest(name = "mode = {0}, invoker = {1}")
     @MethodSource("testData")
-    public void testStreamingCompact(String mode, String invoker) throws Exception {
+    void testStreamingCompact(String mode, String invoker) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
         options.put(
@@ -554,7 +554,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     @ParameterizedTest(name = "mode = {0}, invoker = {1}")
     @MethodSource("testData")
     @Timeout(60)
-    public void testHistoryPartitionCompact(String mode, String invoker) throws Exception {
+    void testHistoryPartitionCompact(String mode, String invoker) throws Exception {
         List<FileStoreTable> tables = new ArrayList<>();
         String partitionIdleTime = "10s";
 
@@ -866,7 +866,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    public void testUnawareBucketStreamingCompact() throws Exception {
+    void testUnawareBucketStreamingCompact() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
         // test that dedicated compact job will expire snapshots
@@ -941,7 +941,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    public void testUnawareBucketBatchCompact() throws Exception {
+    void testUnawareBucketBatchCompact() throws Exception {
         Map<String, String> options = new HashMap<>();
         // test that dedicated compact job will expire snapshots
         options.put(CoreOptions.BUCKET.key(), "-1");
@@ -1001,7 +1001,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     @ParameterizedTest(name = "type = {0}")
     @ValueSource(strings = {"pk", "unaware"})
-    public void testCombinedModeWithDynamicOptions(String type) throws Exception {
+    void testCombinedModeWithDynamicOptions(String type) throws Exception {
         // create table and commit data
         Map<String, String> options = new HashMap<>();
         List<String> keys;

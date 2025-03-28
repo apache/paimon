@@ -77,7 +77,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                     changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         init(warehouse);
 
         // prepare target table T
@@ -89,8 +89,8 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "changelog-producer = {0}")
     @MethodSource("producerTestData")
-    public void testVariousChangelogProducer(
-            CoreOptions.ChangelogProducer producer, List<Row> expected) throws Exception {
+    void testVariousChangelogProducer(CoreOptions.ChangelogProducer producer, List<Row> expected)
+            throws Exception {
         // re-create target table with given producer
         sEnv.executeSql("DROP TABLE T");
         prepareTargetTable(producer);
@@ -143,7 +143,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testTargetAlias(boolean inDefault, String invoker) throws Exception {
+    void testTargetAlias(boolean inDefault, String invoker) throws Exception {
         MergeIntoActionBuilder action;
 
         if (!inDefault) {
@@ -207,7 +207,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testSourceName(boolean inDefault, String invoker) throws Exception {
+    void testSourceName(boolean inDefault, String invoker) throws Exception {
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, "default", "T");
         String sourceTableName = "S";
 
@@ -272,7 +272,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testSqls(boolean useCatalog, String invoker) throws Exception {
+    void testSqls(boolean useCatalog, String invoker) throws Exception {
         // drop table S
         sEnv.executeSql("DROP TABLE S");
 
@@ -355,7 +355,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testMatchedUpsertSetAll(boolean qualified, String invoker) throws Exception {
+    void testMatchedUpsertSetAll(boolean qualified, String invoker) throws Exception {
         // build MergeIntoAction
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
@@ -418,7 +418,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testNotMatchedInsertAll(boolean qualified, String invoker) throws Exception {
+    void testNotMatchedInsertAll(boolean qualified, String invoker) throws Exception {
         // build MergeIntoAction
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
@@ -477,7 +477,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testProcedureWithDeleteConditionTrue() throws Exception {
+    void testProcedureWithDeleteConditionTrue() throws Exception {
         String procedureStatement =
                 String.format(
                         "CALL sys.merge_into('%s.T', '', '', 'S', 'T.k = S.k AND T.dt = S.dt', '', '', '', '', 'TRUE')",
@@ -504,7 +504,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testNonPkTable() {
+    void testNonPkTable() {
         String nonPkTable =
                 createTable(
                         Collections.singletonList("k int"),
@@ -520,7 +520,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testIncompatibleSchema() {
+    void testIncompatibleSchema() {
         // build MergeIntoAction
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceTable("S")
@@ -536,7 +536,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testIllegalSourceName() throws Exception {
+    void testIllegalSourceName() throws Exception {
         // create source table in a new database
         sEnv.executeSql("DROP TABLE S");
         sEnv.executeSql("CREATE DATABASE test_db");
@@ -554,7 +554,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testIllegalSourceNameSqlCase() {
+    void testIllegalSourceNameSqlCase() {
         // drop table S
         sEnv.executeSql("DROP TABLE S");
 
@@ -573,7 +573,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testNotMatchedBySourceUpsert(boolean qualified, String invoker) throws Exception {
+    void testNotMatchedBySourceUpsert(boolean qualified, String invoker) throws Exception {
         sEnv.executeSql("DROP TABLE T");
         prepareTargetTable(CoreOptions.ChangelogProducer.INPUT);
 
@@ -635,7 +635,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testNotMatchedBySourceDelete(boolean qualified, String invoker) throws Exception {
+    void testNotMatchedBySourceDelete(boolean qualified, String invoker) throws Exception {
         // build MergeIntoAction
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
@@ -689,7 +689,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testSqlWithKeywordCase() throws Exception {
+    void testSqlWithKeywordCase() throws Exception {
         // drop table S
         sEnv.executeSql("DROP TABLE T");
         sEnv.executeSql(

@@ -64,7 +64,7 @@ import java.util.function.Predicate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CdcRecordStoreWriteOperator}. */
-public class CdcRecordStoreWriteOperatorTest {
+class CdcRecordStoreWriteOperatorTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -72,13 +72,13 @@ public class CdcRecordStoreWriteOperatorTest {
     private String commitUser;
 
     @BeforeEach
-    public void before() {
+    void before() {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         commitUser = UUID.randomUUID().toString();
     }
 
     @AfterEach
-    public void after() {
+    void after() {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
@@ -87,7 +87,7 @@ public class CdcRecordStoreWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testAddColumn() throws Exception {
+    void testAddColumn() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()},
@@ -147,7 +147,7 @@ public class CdcRecordStoreWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testUpdateColumnType() throws Exception {
+    void testUpdateColumnType() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {

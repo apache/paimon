@@ -60,7 +60,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class BinaryRowTest {
 
     @Test
-    public void testBasic() {
+    void testBasic() {
         // consider header 1 byte.
         assertThat(new BinaryRow(0).getFixedLengthPartSize()).isEqualTo(8);
         assertThat(new BinaryRow(1).getFixedLengthPartSize()).isEqualTo(16);
@@ -76,7 +76,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testSetAndGet() throws IOException, ClassNotFoundException {
+    void testSetAndGet() throws IOException, ClassNotFoundException {
         MemorySegment segment = MemorySegment.wrap(new byte[100]);
         BinaryRow row = new BinaryRow(9);
         row.pointTo(segment, 20, 80);
@@ -108,7 +108,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testWriter() {
+    void testWriter() {
 
         int arity = 13;
         BinaryRow row = new BinaryRow(arity);
@@ -148,7 +148,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testWriteString() {
+    void testWriteString() {
         {
             // litter byte[]
             BinaryRow row = new BinaryRow(1);
@@ -179,7 +179,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testPagesSer() throws IOException {
+    void testPagesSer() throws IOException {
         MemorySegment[] memorySegments = new MemorySegment[5];
         ArrayList<MemorySegment> memorySegmentList = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
@@ -272,7 +272,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testReuseWriter() {
+    void testReuseWriter() {
         BinaryRow row = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         writer.writeString(0, fromString("01234567"));
@@ -290,7 +290,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void anyNullTest() {
+    void anyNullTest() {
         {
             BinaryRow row = new BinaryRow(3);
             BinaryRowWriter writer = new BinaryRowWriter(row);
@@ -323,7 +323,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testSingleSegmentBinaryRowHashCode() {
+    void testSingleSegmentBinaryRowHashCode() {
         final Random rnd = new Random(System.currentTimeMillis());
         // test hash stabilization
         BinaryRow row = new BinaryRow(13);
@@ -368,7 +368,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testHeaderSize() {
+    void testHeaderSize() {
         assertThat(BinaryRow.calculateBitSetWidthInBytes(56)).isEqualTo(8);
         assertThat(BinaryRow.calculateBitSetWidthInBytes(57)).isEqualTo(16);
         assertThat(BinaryRow.calculateBitSetWidthInBytes(120)).isEqualTo(16);
@@ -376,7 +376,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testHeader() {
+    void testHeader() {
         BinaryRow row = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(row);
 
@@ -394,7 +394,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testDecimal() {
+    void testDecimal() {
         // 1.compact
         {
             int precision = 4;
@@ -432,7 +432,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testNested() {
+    void testNested() {
         BinaryRow row = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         writer.writeRow(
@@ -449,7 +449,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testBinary() {
+    void testBinary() {
         BinaryRow row = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         byte[] bytes1 = new byte[] {1, -1, 5};
@@ -463,7 +463,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testBinaryArray() {
+    void testBinaryArray() {
         // 1. array test
         BinaryArray array = new BinaryArray();
         BinaryArrayWriter arrayWriter =
@@ -494,7 +494,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testGenericArray() {
+    void testGenericArray() {
         // 1. array test
         Integer[] javaArray = {6, null, 666};
         GenericArray array = new GenericArray(javaArray);
@@ -517,7 +517,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testBinaryMap() {
+    void testBinaryMap() {
         BinaryArray array1 = new BinaryArray();
         BinaryArrayWriter writer1 =
                 new BinaryArrayWriter(
@@ -562,7 +562,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testGenericMap() {
+    void testGenericMap() {
         Map<Object, Object> javaMap = new HashMap<>();
         javaMap.put(6, fromString("6"));
         javaMap.put(5, fromString("5"));
@@ -588,7 +588,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testSerializeVariousSize() throws IOException {
+    void testSerializeVariousSize() throws IOException {
         // in this test, we are going to start serializing from the i-th byte (i in 0...`segSize`)
         // and the size of the row we're going to serialize is j bytes
         // (j in `rowFixLength` to the maximum length we can write)
@@ -668,7 +668,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testZeroOutPaddingString() {
+    void testZeroOutPaddingString() {
 
         Random random = new Random();
         byte[] bytes = new byte[1024];
@@ -696,7 +696,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testHashAndCopy() throws IOException {
+    void testHashAndCopy() throws IOException {
         MemorySegment[] segments = new MemorySegment[3];
         for (int i = 0; i < 3; i++) {
             segments[i] = MemorySegment.wrap(new byte[64]);
@@ -737,7 +737,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testSerializerPages() throws IOException {
+    void testSerializerPages() throws IOException {
         // Boundary tests
         BinaryRow row24 = DataFormatTestUtil.get24BytesBinaryRow();
         BinaryRow row160 = DataFormatTestUtil.get160BytesBinaryRow();
@@ -844,7 +844,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testTimestampData() {
+    void testTimestampData() {
         // 1. compact
         {
             final int precision = 3;
@@ -889,7 +889,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testNestedRowWithBinaryRowEquals() {
+    void testNestedRowWithBinaryRowEquals() {
         BinaryRow nestedBinaryRow = new BinaryRow(2);
         {
             BinaryRowWriter writer = new BinaryRowWriter(nestedBinaryRow);
@@ -918,7 +918,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testVariant() {
+    void testVariant() {
         BinaryRow row = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(row);
 
@@ -931,7 +931,7 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testVariantArray() {
+    void testVariantArray() {
         // 1. array test
         BinaryArray array = new BinaryArray();
         BinaryArrayWriter arrayWriter =

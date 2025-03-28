@@ -43,10 +43,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link TableSchema}. */
-public class TableSchemaTest {
+class TableSchemaTest {
 
     @Test
-    public void testTableSchemaCopy() {
+    void testTableSchemaCopy() {
         Map<String, String> options = new HashMap<>();
         options.put("my-key", "my-value");
         TableSchema schema =
@@ -63,7 +63,7 @@ public class TableSchemaTest {
     }
 
     @Test
-    public void testCrossPartition() {
+    void testCrossPartition() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
@@ -90,7 +90,7 @@ public class TableSchemaTest {
     }
 
     @Test
-    public void testInvalidFieldIds() {
+    void testInvalidFieldIds() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
@@ -102,7 +102,7 @@ public class TableSchemaTest {
     }
 
     @Test
-    public void testHighestFieldId() {
+    void testHighestFieldId() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
@@ -142,7 +142,7 @@ public class TableSchemaTest {
     }
 
     @Test
-    public void testSequenceField() {
+    void testSequenceField() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
@@ -181,7 +181,7 @@ public class TableSchemaTest {
     }
 
     @Test
-    public void testFieldsPrefix() {
+    void testFieldsPrefix() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
@@ -199,7 +199,7 @@ public class TableSchemaTest {
     }
 
     @Test
-    public void testBucket() {
+    void testBucket() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),

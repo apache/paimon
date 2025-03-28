@@ -69,7 +69,7 @@ public class ConsumersTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPartitionRecordCount() throws Exception {
+    void testPartitionRecordCount() throws Exception {
         List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(consumersTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);

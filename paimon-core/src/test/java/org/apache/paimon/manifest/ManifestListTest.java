@@ -43,7 +43,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestList}. */
-public class ManifestListTest {
+class ManifestListTest {
 
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
     private final FileFormat avro = FileFormat.fromIdentifier("avro", new Options());
@@ -51,7 +51,7 @@ public class ManifestListTest {
     @TempDir java.nio.file.Path tempDir;
 
     @RepeatedTest(10)
-    public void testWriteAndReadManifestList() {
+    void testWriteAndReadManifestList() {
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList = createManifestList(tempDir.toString());
 
@@ -61,7 +61,7 @@ public class ManifestListTest {
     }
 
     @RepeatedTest(10)
-    public void testCleanUpForException() throws IOException {
+    void testCleanUpForException() throws IOException {
         String failingName = UUID.randomUUID().toString();
         FailingFileIO.reset(failingName, 1, 3);
         List<ManifestFileMeta> metas = generateData();
@@ -78,7 +78,7 @@ public class ManifestListTest {
     }
 
     @Test
-    public void testManifestListNaming() {
+    void testManifestListNaming() {
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList = createManifestList(tempDir.toString());
 

@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SafeBinaryArrayTest {
 
     @Test
-    public void test() {
+    void test() {
         BinaryArray expected = toBinaryArray(DataTypes.BOOLEAN(), true, false, null, true);
         BinaryArray converted =
                 toBinaryArray(DataTypes.BOOLEAN(), new SafeBinaryArray(expected.toBytes(), 0));

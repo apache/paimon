@@ -57,7 +57,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link ManifestFileMeta}. */
-public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
+class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
     private static final RowType PARTITION_TYPE = RowType.of(new IntType());
 
@@ -65,14 +65,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     private ManifestFile manifestFile;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         manifestFile = createManifestFile(tempDir.toString());
     }
 
     @Disabled // TODO wrong test to rely on self-defined file size
     @ParameterizedTest
     @ValueSource(ints = {2, 3, 4})
-    public void testMergeWithoutFullCompaction(int numLastBits) {
+    void testMergeWithoutFullCompaction(int numLastBits) {
         List<ManifestFileMeta> input = new ArrayList<>();
         List<ManifestFileMeta> expected = new ArrayList<>();
         createData(numLastBits, input, expected);
@@ -98,7 +98,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @RepeatedTest(10)
-    public void testCleanUpForException() throws IOException {
+    void testCleanUpForException() throws IOException {
         List<ManifestFileMeta> input = new ArrayList<>();
         createData(ThreadLocalRandom.current().nextInt(5), input, null);
         // merge without fullcompaction
@@ -138,14 +138,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @RepeatedTest(10)
-    public void testCleanUpWithFullCompaction() throws IOException {
+    void testCleanUpWithFullCompaction() throws IOException {
         List<ManifestFileMeta> input = new ArrayList<>();
         createData(ThreadLocalRandom.current().nextInt(5), input, null);
         testCleanUp(input, 1L);
     }
 
     @Test
-    public void testMerge() {
+    void testMerge() {
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
         // delta with delete apply partition 1,2
         addDeltaManifests(input, true);
@@ -162,7 +162,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testMergeWithoutDelta() {
+    void testMergeWithoutDelta() {
 
         // base
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
@@ -189,7 +189,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testMergeWithoutBase() {
+    void testMergeWithoutBase() {
         List<ManifestFileMeta> input = new ArrayList<>();
         addDeltaManifests(input, true);
         List<ManifestFileMeta> merged =
@@ -199,7 +199,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testMergeWithoutDeleteFile() {
+    void testMergeWithoutDeleteFile() {
         // entries are All ADD.
         List<ManifestFileMeta> input = new ArrayList<>();
         // base
@@ -226,7 +226,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testTriggerFullCompaction() throws Exception {
+    void testTriggerFullCompaction() throws Exception {
         List<ManifestEntry> entries = new ArrayList<>();
         for (int i = 0; i < 16; i++) {
             entries.add(makeEntry(true, String.valueOf(i)));
@@ -357,7 +357,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testMultiPartitionsFullCompaction() throws Exception {
+    void testMultiPartitionsFullCompaction() throws Exception {
 
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
 
@@ -392,7 +392,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testIdentifierAfterFullCompaction() throws Exception {
+    void testIdentifierAfterFullCompaction() throws Exception {
         List<ManifestEntry> entries = new ArrayList<>();
         List<ManifestEntry> expectedEntries = new ArrayList<>();
         for (int i = 0; i < 16; i++) {
@@ -453,7 +453,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @RepeatedTest(10)
-    public void testRandomFullCompaction() throws Exception {
+    void testRandomFullCompaction() throws Exception {
         List<ManifestFileMeta> input = new ArrayList<>();
         Set<FileEntry.Identifier> manifestEntrySet = new HashSet<>();
         Set<FileEntry.Identifier> deleteManifestEntrySet = new HashSet<>();

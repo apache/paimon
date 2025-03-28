@@ -37,10 +37,10 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SimpleStatsCollector}. */
-public class SimpleStatsCollectorTest {
+class SimpleStatsCollectorTest {
 
     @Test
-    public void testCollect() {
+    void testCollect() {
         RowType rowType =
                 RowType.of(new IntType(), new VarCharType(10), new ArrayType(new IntType()));
         SimpleStatsCollector collector =

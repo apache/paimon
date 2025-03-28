@@ -48,13 +48,13 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link FlinkSink} when writing file store and with savepoints. */
-public class SinkSavepointITCase extends AbstractTestBase {
+class SinkSavepointITCase extends AbstractTestBase {
 
     private String path;
     private String failingName;
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         path = getTempDirPath();
         // for failure tests
         failingName = UUID.randomUUID().toString();
@@ -62,7 +62,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
 
     @Test
     @Timeout(180)
-    public void testRecoverFromSavepoint() throws Exception {
+    void testRecoverFromSavepoint() throws Exception {
         String failingPath = FailingFileIO.getFailingPath(failingName, path);
         String savepointPath = null;
 

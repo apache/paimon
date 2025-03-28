@@ -65,7 +65,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testReadWriteWithPartitionedRecordsWithPk() throws Exception {
+    void testReadWriteWithPartitionedRecordsWithPk() throws Exception {
         // test hybrid read
         List<Row> initialRecords =
                 Arrays.asList(
@@ -173,7 +173,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
     }
 
     @Test
-    public void testSReadWriteWithNonPartitionedRecordsWithPk() throws Exception {
+    void testSReadWriteWithNonPartitionedRecordsWithPk() throws Exception {
         // file store bounded read with merge
         List<Row> initialRecords =
                 Arrays.asList(
@@ -236,7 +236,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testReadLatestChangelogOfPartitionedRecordsWithPk() throws Exception {
+    void testReadLatestChangelogOfPartitionedRecordsWithPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // dt = 2022-01-01
@@ -414,7 +414,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
     }
 
     @Test
-    public void testReadLatestChangelogOfNonPartitionedRecordsWithPk() throws Exception {
+    void testReadLatestChangelogOfNonPartitionedRecordsWithPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", 102L),
@@ -523,7 +523,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
     }
 
     @Test
-    public void testReadLatestChangelogOfInsertOnlyRecords() throws Exception {
+    void testReadLatestChangelogOfInsertOnlyRecords() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", 102L),
@@ -645,7 +645,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testReadInsertOnlyChangelogFromTimestamp() throws Exception {
+    void testReadInsertOnlyChangelogFromTimestamp() throws Exception {
         // test records 0
         List<Row> initialRecords0 =
                 Arrays.asList(
@@ -780,7 +780,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
     }
 
     @Test
-    public void testReadInsertOnlyChangelogFromEnormousTimestamp() throws Exception {
+    void testReadInsertOnlyChangelogFromEnormousTimestamp() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", 102L),

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -26,10 +26,10 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Tests for {@link TableNameConverter}. */
-public class TableNameConverterTest {
+class TableNameConverterTest {
 
     @Test
-    public void testConvertTableName() {
+    void testConvertTableName() {
         Map<String, String> tableMapping = new HashMap<>(1);
         tableMapping.put("mapped_src", "mapped_TGT");
         TableNameConverter caseConverter =
@@ -45,7 +45,7 @@ public class TableNameConverterTest {
     }
 
     @Test
-    public void testConvertTableNameByDBPrefix_Suffix() {
+    void testConvertTableNameByDBPrefix_Suffix() {
         Map<String, String> dbPrefix = new HashMap<>(2);
         dbPrefix.put("db_with_prefix", "db_pref_");
         dbPrefix.put("db_with_prefix_suffix", "db_pref_");

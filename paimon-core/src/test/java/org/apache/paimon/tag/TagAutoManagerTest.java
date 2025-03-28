@@ -53,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
 
     @Test
-    public void testTag() throws Exception {
+    void testTag() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -103,7 +103,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTagDelay() throws Exception {
+    void testTagDelay() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -127,7 +127,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTagSinkWatermark() throws Exception {
+    void testTagSinkWatermark() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -151,7 +151,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTagTwoHour() throws Exception {
+    void testTagTwoHour() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.TWO_HOURS);
@@ -174,7 +174,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTagDaily() throws Exception {
+    void testTagDaily() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
@@ -199,7 +199,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testModifyTagPeriod() {
+    void testModifyTagPeriod() {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -225,7 +225,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testSavepointTag() {
+    void testSavepointTag() {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -258,7 +258,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTagDatePeriodFormatter() {
+    void testTagDatePeriodFormatter() {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
@@ -275,7 +275,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTagHourlyPeriodFormatter() {
+    void testTagHourlyPeriodFormatter() {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -292,7 +292,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTagHourlyPeriodFormatterWithoutDashesAndSpaces() {
+    void testTagHourlyPeriodFormatterWithoutDashesAndSpaces() {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -309,7 +309,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testOnlyExpireAutoCreatedTag() {
+    void testOnlyExpireAutoCreatedTag() {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -327,7 +327,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testWatermarkIdleTimeoutForceCreatingSnapshot() throws Exception {
+    void testWatermarkIdleTimeoutForceCreatingSnapshot() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -346,7 +346,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAutoCreateTagNotExpiredByTimeRetained() throws Exception {
+    void testAutoCreateTagNotExpiredByTimeRetained() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -371,7 +371,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testExpireTagsByTimeRetained() throws Exception {
+    void testExpireTagsByTimeRetained() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -452,7 +452,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAutoCompleteTags() throws Exception {
+    void testAutoCompleteTags() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);

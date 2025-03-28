@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
 
 /** ITCase for partial update. */
-public class PartialUpdateITCase extends CatalogITCaseBase {
+class PartialUpdateITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
@@ -61,7 +61,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMergeInMemory() {
+    void testMergeInMemory() {
         batchSql(
                 "INSERT INTO T VALUES "
                         + "(1, 2, 3, CAST(NULL AS INT), '5'), "
@@ -71,7 +71,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMergeRead() {
+    void testMergeRead() {
         batchSql("INSERT INTO T VALUES (1, 2, 3, CAST(NULL AS INT), CAST(NULL AS STRING))");
         batchSql("INSERT INTO T VALUES (1, 2, 4, 5, CAST(NULL AS STRING))");
         batchSql("INSERT INTO T VALUES (1, 2, 4, CAST(NULL AS INT), '6')");
@@ -87,7 +87,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMergeCompaction() {
+    void testMergeCompaction() {
         // Wait compaction
         batchSql("ALTER TABLE T SET ('commit.force-compact'='true')");
 
@@ -106,7 +106,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testForeignKeyJoin() throws Exception {
+    void testForeignKeyJoin() throws Exception {
         sEnv.getConfig()
                 .set(
                         ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
@@ -153,14 +153,14 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testStreamingRead() {
+    void testStreamingRead() {
         assertThatThrownBy(
                 () -> sEnv.from("T").execute().print(),
                 "Partial update continuous reading is not supported");
     }
 
     @Test
-    public void testStreamingReadChangelogInput() throws TimeoutException {
+    void testStreamingReadChangelogInput() throws TimeoutException {
         sql(
                 "CREATE TABLE INPUT_T ("
                         + "a INT, b INT, c INT, PRIMARY KEY (a) NOT ENFORCED)"
@@ -175,7 +175,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSequenceGroup() {
+    void testSequenceGroup() {
         sql(
                 "CREATE TABLE SG ("
                         + "k INT, a INT, b INT, g_1 INT, c INT, d INT, g_2 INT, PRIMARY KEY (k) NOT ENFORCED)"
@@ -210,7 +210,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMultiFieldsSequenceGroup() {
+    void testMultiFieldsSequenceGroup() {
         sql(
                 "CREATE TABLE SG ("
                         + "k INT, a INT, b INT, g_1 INT, c INT, d INT, g_2 INT, g_3 INT, PRIMARY KEY (k) NOT ENFORCED)"
@@ -247,7 +247,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSequenceGroupWithDefaultAggFunc() {
+    void testSequenceGroupWithDefaultAggFunc() {
         sql(
                 "CREATE TABLE SG ("
                         + "k INT, a INT, b INT, g_1 INT, c INT, d INT, g_2 INT, PRIMARY KEY (k) NOT ENFORCED)"
@@ -283,7 +283,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testInvalidSequenceGroup() {
+    void testInvalidSequenceGroup() {
         Assertions.assertThatThrownBy(
                         () ->
                                 sql(
@@ -332,7 +332,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testProjectPushDownWithLookupChangelogProducer() {
+    void testProjectPushDownWithLookupChangelogProducer() {
         sql(
                 "CREATE TABLE IF NOT EXISTS T_P ("
                         + "j INT, k INT, a INT, b INT, c STRING, PRIMARY KEY (j,k) NOT ENFORCED)"
@@ -343,7 +343,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLocalMerge() {
+    void testLocalMerge() {
         sql(
                 "CREATE TABLE T1 ("
                         + "k INT,"
@@ -360,7 +360,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartialUpdateWithAggregation() {
+    void testPartialUpdateWithAggregation() {
         sql(
                 "CREATE TABLE AGG ("
                         + "k INT, a INT, b INT, g_1 INT, c VARCHAR, g_2 INT, PRIMARY KEY (k) NOT ENFORCED)"
@@ -399,7 +399,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMultiFieldsSequencePartialUpdateWithAggregation() {
+    void testMultiFieldsSequencePartialUpdateWithAggregation() {
         sql(
                 "CREATE TABLE AGG ("
                         + "k INT, a INT, b INT, g_1 INT, c VARCHAR, g_2 INT, g_3 INT, PRIMARY KEY (k) NOT ENFORCED)"
@@ -440,7 +440,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartialUpdateWithDefaultAndFieldAggregation() {
+    void testPartialUpdateWithDefaultAndFieldAggregation() {
         sql(
                 "CREATE TABLE AGG ("
                         + "k INT, a INT, b INT, g_1 INT, c VARCHAR, g_2 INT, PRIMARY KEY (k) NOT ENFORCED)"
@@ -480,7 +480,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFirstValuePartialUpdate() {
+    void testFirstValuePartialUpdate() {
         sql(
                 "CREATE TABLE AGG ("
                         + "k INT, a INT, g_1 INT, PRIMARY KEY (k) NOT ENFORCED)"
@@ -500,7 +500,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNoSinkMaterializer() {
+    void testNoSinkMaterializer() {
         sEnv.getConfig()
                 .set(
                         ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
@@ -523,7 +523,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartialUpdateProjectionPushDownWithDeleteMessage() throws Exception {
+    void testPartialUpdateProjectionPushDownWithDeleteMessage() throws Exception {
         List<Row> input = Arrays.asList(Row.ofKind(RowKind.INSERT, 1, 1, 1));
 
         String id = TestValuesTableFactory.registerData(input);
@@ -580,7 +580,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
 
     @ParameterizedTest(name = "localMergeEnabled = {0}")
     @ValueSource(booleans = {true, false})
-    public void testIgnoreDelete(boolean localMerge) throws Exception {
+    void testIgnoreDelete(boolean localMerge) throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
@@ -623,7 +623,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRemoveRecordOnDeleteWithoutSequenceGroup() {
+    void testRemoveRecordOnDeleteWithoutSequenceGroup() {
         sql(
                 "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
@@ -648,7 +648,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRemoveRecordOnDeleteWithSequenceGroup() throws Exception {
+    void testRemoveRecordOnDeleteWithSequenceGroup() throws Exception {
         sql(
                 "CREATE TABLE remove_record_on_delete_sequence_group"
                         + " (pk INT PRIMARY KEY NOT ENFORCED, a STRING, seq_a INT, b STRING, seq_b INT) WITH ("
@@ -686,7 +686,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRemoveRecordOnDeleteLookup() throws Exception {
+    void testRemoveRecordOnDeleteLookup() throws Exception {
         sql(
                 "CREATE TABLE remove_record_on_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
@@ -725,7 +725,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSequenceGroupWithDefaultAgg() {
+    void testSequenceGroupWithDefaultAgg() {
         sql(
                 "CREATE TABLE seq_default_agg ("
                         + " pk INT PRIMARY KEY NOT ENFORCED,"

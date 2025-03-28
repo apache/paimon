@@ -31,10 +31,10 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link StaticFileStoreSplitEnumerator} with {@link SplitAssignMode#PREEMPTIVE}. */
-public class PreemptiveAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
+class PreemptiveAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
 
     @Test
-    public void testSplitAllocation() {
+    void testSplitAllocation() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 

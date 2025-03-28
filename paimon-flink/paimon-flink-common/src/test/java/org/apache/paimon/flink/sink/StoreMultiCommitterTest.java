@@ -98,7 +98,7 @@ class StoreMultiCommitterTest {
     }
 
     @BeforeEach
-    public void beforeEach() throws Exception {
+    void beforeEach() throws Exception {
         initialCommitUser = UUID.randomUUID().toString();
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         databaseName = "test_db";
@@ -152,7 +152,7 @@ class StoreMultiCommitterTest {
     }
 
     @AfterEach
-    public void after() throws Exception {
+    void after() throws Exception {
         if (catalog != null) {
             catalog.close();
         }
@@ -164,7 +164,7 @@ class StoreMultiCommitterTest {
 
     @SuppressWarnings("CatchMayIgnoreException")
     @Test
-    public void testFailIntentionallyAfterRestore() throws Exception {
+    void testFailIntentionallyAfterRestore() throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(firstTable);
 
         // write to first table
@@ -257,7 +257,7 @@ class StoreMultiCommitterTest {
     }
 
     @Test
-    public void testCheckpointAbort() throws Exception {
+    void testCheckpointAbort() throws Exception {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
         OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable>
@@ -339,7 +339,7 @@ class StoreMultiCommitterTest {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testSnapshotLostWhenFailed() throws Exception {
+    void testSnapshotLostWhenFailed() throws Exception {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
 
@@ -430,7 +430,7 @@ class StoreMultiCommitterTest {
     }
 
     @Test
-    public void testWatermarkCommit() throws Exception {
+    void testWatermarkCommit() throws Exception {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
 
@@ -486,7 +486,7 @@ class StoreMultiCommitterTest {
     }
 
     @Test
-    public void testEmptyCommit() throws Exception {
+    void testEmptyCommit() throws Exception {
         // table1: TagCreationMode.PROCESS_TIME
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
@@ -546,7 +546,7 @@ class StoreMultiCommitterTest {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testCommitMetrics() throws Exception {
+    void testCommitMetrics() throws Exception {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
 

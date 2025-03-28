@@ -52,12 +52,12 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
     private static final int PORT = 9086;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         TEST_HIVE_METASTORE.stop();
     }
 
@@ -73,8 +73,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testMigrateDatabaseProcedure(String format, boolean isNamedArgument)
-            throws Exception {
+    void testMigrateDatabaseProcedure(String format, boolean isNamedArgument) throws Exception {
         testUpgradeNonPartitionTable(format, isNamedArgument);
         resetMetastore();
         testUpgradePartitionTable(format, isNamedArgument);
@@ -86,7 +85,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
-    public void testUpgradePartitionTable(String format, boolean isNamedArgument) throws Exception {
+    void testUpgradePartitionTable(String format, boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -150,8 +149,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
         Assertions.assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
     }
 
-    public void testUpgradeNonPartitionTable(String format, boolean isNamedArgument)
-            throws Exception {
+    void testUpgradeNonPartitionTable(String format, boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -215,7 +213,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testMigrateDatabaseAction(String format) throws Exception {
+    void testMigrateDatabaseAction(String format) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");

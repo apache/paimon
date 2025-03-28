@@ -59,7 +59,7 @@ public class AppendOnlyFileStoreWriteTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testWritesInBatch() throws Exception {
+    void testWritesInBatch() throws Exception {
         FileStoreTable table = createFileStoreTable();
         table = table.copy(Collections.singletonMap(WRITE_MAX_WRITERS_TO_SPILL.key(), "5"));
 
@@ -114,7 +114,7 @@ public class AppendOnlyFileStoreWriteTest {
     }
 
     @Test
-    public void testWritesInBatchWithNoExtraFiles() throws Exception {
+    void testWritesInBatchWithNoExtraFiles() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
@@ -182,7 +182,7 @@ public class AppendOnlyFileStoreWriteTest {
     }
 
     @Test
-    public void testScanFilterWithMixedPartitionWrite() throws Exception {
+    void testScanFilterWithMixedPartitionWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
@@ -214,7 +214,7 @@ public class AppendOnlyFileStoreWriteTest {
     }
 
     @Test
-    public void testScanFilterWithAllNullPartitionWrite() throws Exception {
+    void testScanFilterWithAllNullPartitionWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
@@ -241,7 +241,7 @@ public class AppendOnlyFileStoreWriteTest {
     }
 
     @Test
-    public void testScanFilterWithNoneNullPartitionWrite() throws Exception {
+    void testScanFilterWithNoneNullPartitionWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");

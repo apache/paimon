@@ -90,7 +90,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadWhenDataIsAlignedWithBlock() {
+    void testReadWhenDataIsAlignedWithBlock() {
         T[] data = allocDataArray(5 * blockSize);
         for (int i = 0; i < blockSize * 5; i++) {
             data[i] = getNextRandom();
@@ -99,7 +99,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadWhenBlockIsNotFullyWritten() {
+    void testReadWhenBlockIsNotFullyWritten() {
         T[] data = allocDataArray(blockSize - 3);
         for (int i = 0; i < data.length; i++) {
             data[i] = getNextRandom();
@@ -108,7 +108,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadWhenMiniBlockIsNotFullyWritten() {
+    void testReadWhenMiniBlockIsNotFullyWritten() {
         int miniBlockSize = blockSize / miniBlockNum;
         T[] data = allocDataArray(miniBlockSize - 3);
         for (int i = 0; i < data.length; i++) {
@@ -118,7 +118,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadWithNegativeDeltas() {
+    void testReadWithNegativeDeltas() {
         T[] data = allocDataArray(blockSize);
         for (int i = 0; i < data.length; i++) {
             setValue(data, i, 10 - (i * 32 - random.nextInt(6)));
@@ -127,7 +127,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadWhenDeltasAreSame() {
+    void testReadWhenDeltasAreSame() {
         T[] data = allocDataArray(2 * blockSize);
         for (int i = 0; i < blockSize; i++) {
             setValue(data, i, i * 32);
@@ -139,7 +139,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadWhenValuesAreSame() {
+    void testReadWhenValuesAreSame() {
         T[] data = allocDataArray(2 * blockSize);
         for (int i = 0; i < blockSize; i++) {
             setValue(data, i, 3);
@@ -151,7 +151,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadWhenDeltaIs0ForEachBlock() {
+    void testReadWhenDeltaIs0ForEachBlock() {
         T[] data = allocDataArray(5 * blockSize + 1);
         for (int i = 0; i < data.length; i++) {
             setValue(data, i, (i - 1) / blockSize);
@@ -160,7 +160,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadWhenDataIsNotAlignedWithBlock() {
+    void testReadWhenDataIsNotAlignedWithBlock() {
         T[] data = allocDataArray(5 * blockSize + 3);
         for (int i = 0; i < data.length; i++) {
             setValue(data, i, random.nextInt(20) - 10);
@@ -169,7 +169,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testReadMaxMinValue() {
+    void testReadMaxMinValue() {
         T[] data = allocDataArray(10);
         for (int i = 0; i < data.length; i++) {
             data[i] = (i % 2 == 0) ? getTypeMinValue() : getTypeMaxValue();
@@ -178,7 +178,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testThrowExceptionWhenReadMoreThanWritten() {
+    void testThrowExceptionWhenReadMoreThanWritten() {
         T[] data = allocDataArray(5 * blockSize + 1);
         for (int i = 0; i < data.length; i++) {
             setValue(data, i, i * 32);
@@ -193,7 +193,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testSkip() throws IOException {
+    void testSkip() throws IOException {
         T[] data = allocDataArray(5 * blockSize + 1);
         for (int i = 0; i < data.length; i++) {
             setValue(data, i, i * 32);
@@ -214,7 +214,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testSkipN() throws IOException {
+    void testSkipN() throws IOException {
         T[] data = allocDataArray(5 * blockSize + 1);
         for (int i = 0; i < data.length; i++) {
             setValue(data, i, i * 32);
@@ -235,7 +235,7 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
-    public void testRandomDataTest() throws IOException {
+    void testRandomDataTest() throws IOException {
         int maxSize = 1000;
         T[] data = allocDataArray(maxSize);
         for (int round = 0; round < 10; round++) {

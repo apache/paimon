@@ -467,7 +467,7 @@ public class ParquetReadWriteTest {
 
     @ParameterizedTest
     @CsvSource({"10, paimon", "1000, paimon", "10, origin", "1000, origin"})
-    public void testNestedRead(int rowGroupSize, String writerType) throws Exception {
+    void testNestedRead(int rowGroupSize, String writerType) throws Exception {
         List<InternalRow> rows = prepareNestedData(1283);
         Path path;
         if ("paimon".equals(writerType)) {
@@ -492,7 +492,7 @@ public class ParquetReadWriteTest {
     }
 
     @Test
-    public void testDecimalWithFixedLengthRead() throws Exception {
+    void testDecimalWithFixedLengthRead() throws Exception {
         int number = new Random().nextInt(1000) + 100;
         Path path = createDecimalFile(number, folder, 10);
 
@@ -522,7 +522,7 @@ public class ParquetReadWriteTest {
     }
 
     @Test
-    public void testNestedNullMapKey() {
+    void testNestedNullMapKey() {
         List<InternalRow> rows = prepareNestedData(1283, true);
         assertThatThrownBy(
                         () ->
@@ -534,7 +534,7 @@ public class ParquetReadWriteTest {
     }
 
     @Test
-    public void testConvertToParquetTypeWithId() {
+    void testConvertToParquetTypeWithId() {
         List<DataField> nestedFields =
                 Arrays.asList(
                         new DataField(3, "v1", DataTypes.INT()),
@@ -606,7 +606,7 @@ public class ParquetReadWriteTest {
     }
 
     @Test
-    public void testReadBinaryWrittenByParquet() throws Exception {
+    void testReadBinaryWrittenByParquet() throws Exception {
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
         Configuration conf = new Configuration();
         MessageType schema =

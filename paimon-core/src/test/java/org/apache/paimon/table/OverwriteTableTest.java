@@ -51,7 +51,7 @@ public class OverwriteTableTest extends TableTestBase {
 
     @ParameterizedTest(name = "dynamic = {0}, partition={2}")
     @MethodSource("overwriteTestData")
-    public void testOverwriteAppend(
+    void testOverwriteAppend(
             boolean dynamicPartitionOverwrite,
             List<InternalRow> overwriteData,
             Map<String, String> overwritePartition,
@@ -63,7 +63,7 @@ public class OverwriteTableTest extends TableTestBase {
 
     @ParameterizedTest(name = "dynamic = {0}, partition={2}")
     @MethodSource("overwriteTestData")
-    public void testOverwritePrimaryKey(
+    void testOverwritePrimaryKey(
             boolean dynamicPartitionOverwrite,
             List<InternalRow> overwriteData,
             Map<String, String> overwritePartition,

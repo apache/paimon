@@ -73,7 +73,7 @@ class RecordLevelExpireWithMillisecondTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void test() throws Exception {
+    void test() throws Exception {
         writeCommit(GenericRow.of(1, 1, 1L), GenericRow.of(1, 2, 2L));
 
         // can be queried

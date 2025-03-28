@@ -22,73 +22,73 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
-public class KafkaMaxwellSyncTableActionITCase extends KafkaSyncTableActionITCase {
+class KafkaMaxwellSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
     private static final String MAXWELL = "maxwell";
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution", MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testNotSupportFormat() throws Exception {
+    void testNotSupportFormat() throws Exception {
         testNotSupportFormat(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testAssertSchemaCompatible() throws Exception {
+    void testAssertSchemaCompatible() throws Exception {
         testAssertSchemaCompatible(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionSpecific() throws Exception {
+    void testStarUpOptionSpecific() throws Exception {
         testStarUpOptionSpecific(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionLatest() throws Exception {
+    void testStarUpOptionLatest() throws Exception {
         testStarUpOptionLatest(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionTimestamp() throws Exception {
+    void testStarUpOptionTimestamp() throws Exception {
         testStarUpOptionTimestamp(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionEarliest() throws Exception {
+    void testStarUpOptionEarliest() throws Exception {
         testStarUpOptionEarliest(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionGroup() throws Exception {
+    void testStarUpOptionGroup() throws Exception {
         testStarUpOptionGroup(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testComputedColumn() throws Exception {
+    void testComputedColumn() throws Exception {
         testComputedColumn(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testWaterMarkSyncTable() throws Exception {
+    void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(MAXWELL);
     }
 
     @Test
     @Timeout(60)
-    public void testFieldValNullSyncTable() throws Exception {
+    void testFieldValNullSyncTable() throws Exception {
         testTableFiledValNull(MAXWELL);
     }
 }

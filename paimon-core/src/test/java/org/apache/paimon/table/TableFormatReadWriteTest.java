@@ -65,7 +65,7 @@ public class TableFormatReadWriteTest extends TableTestBase {
     }
 
     @Test
-    public void testAllFormatReadWrite() throws Exception {
+    void testAllFormatReadWrite() throws Exception {
         testReadWrite("orc");
         testReadWrite("parquet");
         testReadWrite("avro");

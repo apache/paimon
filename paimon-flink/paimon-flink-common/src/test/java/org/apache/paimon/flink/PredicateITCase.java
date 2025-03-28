@@ -26,10 +26,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Predicate ITCase. */
-public class PredicateITCase extends CatalogITCaseBase {
+class PredicateITCase extends CatalogITCaseBase {
 
     @Test
-    public void testPkFilterBucket() throws Exception {
+    void testPkFilterBucket() throws Exception {
         sql("CREATE TABLE T (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('bucket' = '5')");
         writeRecords();
         innerTestSingleField();
@@ -37,7 +37,7 @@ public class PredicateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNoPkFilterBucket() throws Exception {
+    void testNoPkFilterBucket() throws Exception {
         sql("CREATE TABLE T (a INT, b INT) WITH ('bucket' = '5', 'bucket-key'='a')");
         writeRecords();
         innerTestSingleField();
@@ -45,7 +45,7 @@ public class PredicateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAppendFilterBucket() throws Exception {
+    void testAppendFilterBucket() throws Exception {
         sql("CREATE TABLE T (a INT, b INT) WITH ('bucket' = '5', 'bucket-key'='a')");
         writeRecords();
         innerTestSingleField();
@@ -53,7 +53,7 @@ public class PredicateITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIntegerFilter() {
+    void testIntegerFilter() {
         int rand = ThreadLocalRandom.current().nextInt(3);
         String fileFormat;
         if (rand == 0) {

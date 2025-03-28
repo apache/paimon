@@ -52,7 +52,7 @@ public class PartitionStatisticsReporterTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testReportAction() throws Exception {
+    void testReportAction() throws Exception {
         Path tablePath = new Path(tempDir.toString(), "table");
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         Schema schema =

@@ -55,7 +55,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link FlinkConnectorOptions.PartitionMarkDoneActionMode}. */
 public class WatermarkPartitionMarkDoneTest extends TableTestBase {
     @Test
-    public void testWaterMarkPartitionMarkDone() throws Exception {
+    void testWaterMarkPartitionMarkDone() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()

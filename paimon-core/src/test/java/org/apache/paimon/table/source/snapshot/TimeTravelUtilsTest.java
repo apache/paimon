@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class TimeTravelUtilsTest extends ScannerTestBase {
 
     @Test
-    public void testResolveSnapshotFromOptions() throws Exception {
+    void testResolveSnapshotFromOptions() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);

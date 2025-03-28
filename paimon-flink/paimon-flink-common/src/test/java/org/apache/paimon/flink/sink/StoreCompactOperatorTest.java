@@ -43,7 +43,7 @@ public class StoreCompactOperatorTest extends TableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testCompactExactlyOnce(boolean streamingMode) throws Exception {
+    void testCompactExactlyOnce(boolean streamingMode) throws Exception {
         createTableDefault();
 
         CompactRememberStoreWrite compactRememberStoreWrite =

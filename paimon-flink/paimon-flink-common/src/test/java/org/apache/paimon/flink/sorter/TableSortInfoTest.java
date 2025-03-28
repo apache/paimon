@@ -30,10 +30,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /** The unit test for {@link TableSortInfo}. */
-public class TableSortInfoTest {
+class TableSortInfoTest {
 
     @Test
-    public void testTableSortInfoBuilderWithValidParameters() {
+    void testTableSortInfoBuilderWithValidParameters() {
         TableSortInfo tableSortInfo =
                 new TableSortInfo.Builder()
                         .setSortColumns(Arrays.asList("column1", "column2"))
@@ -55,7 +55,7 @@ public class TableSortInfoTest {
     }
 
     @Test
-    public void testTableSortInfoBuilderWithEmptySortColumns() {
+    void testTableSortInfoBuilderWithEmptySortColumns() {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(
                         () ->
@@ -72,7 +72,7 @@ public class TableSortInfoTest {
     }
 
     @Test
-    public void testTableSortInfoBuilderWithNullSortStrategy() {
+    void testTableSortInfoBuilderWithNullSortStrategy() {
         assertThatExceptionOfType(NullPointerException.class)
                 .isThrownBy(
                         () ->
@@ -89,7 +89,7 @@ public class TableSortInfoTest {
     }
 
     @Test
-    public void testTableSortInfoBuilderWithNegativeRangeNumber() {
+    void testTableSortInfoBuilderWithNegativeRangeNumber() {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(
                         () ->
@@ -106,7 +106,7 @@ public class TableSortInfoTest {
     }
 
     @Test
-    public void testTableSortInfoBuilderWithZeroSinkParallelism() {
+    void testTableSortInfoBuilderWithZeroSinkParallelism() {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(
                         () ->
@@ -125,7 +125,7 @@ public class TableSortInfoTest {
     }
 
     @Test
-    public void testTableSortInfoBuilderWithZeroLocalSampleSize() {
+    void testTableSortInfoBuilderWithZeroLocalSampleSize() {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(
                         () ->
@@ -142,7 +142,7 @@ public class TableSortInfoTest {
     }
 
     @Test
-    public void testTableSortInfoBuilderWithNegativeGlobalSampleSize() {
+    void testTableSortInfoBuilderWithNegativeGlobalSampleSize() {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(
                         () ->

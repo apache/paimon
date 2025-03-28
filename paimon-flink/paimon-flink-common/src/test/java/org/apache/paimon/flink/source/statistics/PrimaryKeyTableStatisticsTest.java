@@ -37,7 +37,7 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
 
     /** Primary key tables does not support filter value. */
     @Test
-    public void testTableFilterValueStatistics() throws Exception {
+    void testTableFilterValueStatistics() throws Exception {
         FileStoreTable table = writeData();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
         DataTableSource keyFilterSource =

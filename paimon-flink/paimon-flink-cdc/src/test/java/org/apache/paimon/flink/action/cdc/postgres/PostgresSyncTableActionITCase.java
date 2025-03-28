@@ -44,20 +44,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link PostgresSyncTableAction}. */
-public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
+class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
     private static final String DATABASE_NAME = "paimon_sync_table";
     private static final String SCHEMA_NAME = "public";
 
     @BeforeAll
-    public static void startContainers() {
+    static void startContainers() {
         POSTGRES_CONTAINER.withSetupSQL("postgres/sync_table_setup.sql");
         start();
     }
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
@@ -234,7 +234,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testMultipleSchemaEvolutions() throws Exception {
+    void testMultipleSchemaEvolutions() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
@@ -305,7 +305,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
     @Test
     @Timeout(90)
-    public void testAllTypes() throws Exception {
+    void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
         for (int i = 0; i < 2; i++) {
@@ -450,7 +450,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    public void testIncompatibleTable() {
+    void testIncompatibleTable() {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
@@ -468,7 +468,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    public void testIncompatiblePaimonTable() throws Exception {
+    void testIncompatiblePaimonTable() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
@@ -494,7 +494,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    public void testInvalidPrimaryKey() {
+    void testInvalidPrimaryKey() {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
@@ -513,7 +513,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    public void testNoPrimaryKey() {
+    void testNoPrimaryKey() {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
@@ -533,7 +533,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testComputedColumn() throws Exception {
+    void testComputedColumn() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
         for (int i = 0; i < 2; i++) {
@@ -628,7 +628,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSyncShards() throws Exception {
+    void testSyncShards() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
 
         // test table list
@@ -678,7 +678,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testOptionsChange() throws Exception {
+    void testOptionsChange() throws Exception {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
@@ -730,7 +730,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testMetadataColumns() throws Exception {
+    void testMetadataColumns() throws Exception {
         String tableName = "test_metadata_columns";
         try (Statement statement = getStatement(DATABASE_NAME)) {
             statement.executeUpdate("INSERT INTO test_metadata_columns VALUES (1, '2023-07-30')");
@@ -774,7 +774,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     }
 
     @Test
-    public void testCatalogAndTableConfig() {
+    void testCatalogAndTableConfig() {
         PostgresSyncTableAction action =
                 syncTableActionBuilder(getBasicPostgresConfig())
                         .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
@@ -792,7 +792,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testRuntimeExecutionModeCheckForCdcSync() {
+    void testRuntimeExecutionModeCheckForCdcSync() {
         Map<String, String> postgresConfig = getBasicPostgresConfig();
         postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);

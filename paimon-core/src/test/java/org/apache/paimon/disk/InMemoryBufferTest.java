@@ -39,17 +39,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for {@link InMemoryBuffer}. */
-public class InMemoryBufferTest {
+class InMemoryBufferTest {
 
     private InternalRowSerializer serializer;
 
     @BeforeEach
-    public void before() {
+    void before() {
         this.serializer = new InternalRowSerializer(DataTypes.STRING());
     }
 
     @Test
-    public void testNonSpill() throws Exception {
+    void testNonSpill() throws Exception {
         InMemoryBuffer buffer =
                 new InMemoryBuffer(
                         new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
@@ -74,7 +74,7 @@ public class InMemoryBufferTest {
     }
 
     @Test
-    public void testPutRead() throws Exception {
+    void testPutRead() throws Exception {
         InMemoryBuffer buffer =
                 new InMemoryBuffer(
                         new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
@@ -100,7 +100,7 @@ public class InMemoryBufferTest {
     }
 
     @Test
-    public void testReset() throws Exception {
+    void testReset() throws Exception {
         InMemoryBuffer buffer =
                 new InMemoryBuffer(
                         new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
@@ -139,7 +139,7 @@ public class InMemoryBufferTest {
     }
 
     @Test
-    public void testEmpty() throws Exception {
+    void testEmpty() throws Exception {
         InMemoryBuffer buffer =
                 new InMemoryBuffer(
                         new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
@@ -149,7 +149,7 @@ public class InMemoryBufferTest {
     }
 
     @Test
-    public void testMemoryPoolWorksWellWithInMemoryBuffer() {
+    void testMemoryPoolWorksWellWithInMemoryBuffer() {
         MemoryPoolFactory memoryPoolFactory =
                 new MemoryPoolFactory(
                         new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE));

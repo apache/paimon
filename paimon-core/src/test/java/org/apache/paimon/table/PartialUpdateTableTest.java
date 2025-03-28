@@ -85,7 +85,7 @@ public class PartialUpdateTableTest {
     }
 
     @Test
-    public void testWriteDeleteRecordWithNoInsertData() throws Exception {
+    void testWriteDeleteRecordWithNoInsertData() throws Exception {
         Table table = catalog.getTable(identifier);
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
         try (StreamTableCommit commit = writeBuilder.newCommit();

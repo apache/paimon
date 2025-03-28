@@ -32,10 +32,10 @@ import static org.apache.paimon.mergetree.compact.UniversalCompactionTest.file;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ForceUpLevel0Compaction}. */
-public class ForceUpLevel0CompactionTest {
+class ForceUpLevel0CompactionTest {
 
     @Test
-    public void testForceCompaction0() {
+    void testForceCompaction0() {
         ForceUpLevel0Compaction compaction =
                 new ForceUpLevel0Compaction(new UniversalCompaction(200, 1, 5));
 

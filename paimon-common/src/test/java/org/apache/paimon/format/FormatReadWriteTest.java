@@ -71,7 +71,7 @@ public abstract class FormatReadWriteTest {
     }
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         this.fileIO = LocalFileIO.create();
         this.file = new Path(new Path(tempPath.toUri()), UUID.randomUUID() + "." + formatType);
     }
@@ -79,7 +79,7 @@ public abstract class FormatReadWriteTest {
     protected abstract FileFormat fileFormat();
 
     @Test
-    public void testSimpleTypes() throws IOException {
+    void testSimpleTypes() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.BIGINT());
 
         if (ThreadLocalRandom.current().nextBoolean()) {
@@ -110,7 +110,7 @@ public abstract class FormatReadWriteTest {
     }
 
     @Test
-    public void testFullTypes() throws IOException {
+    void testFullTypes() throws IOException {
         RowType rowType = rowTypeForFullTypesTest();
         InternalRow expected = expectedRowForFullTypesTest();
         FileFormat format = fileFormat();
@@ -134,7 +134,7 @@ public abstract class FormatReadWriteTest {
     }
 
     @Test
-    public void testNestedReadPruning() throws Exception {
+    void testNestedReadPruning() throws Exception {
         FileFormat format = fileFormat();
 
         RowType writeType =
@@ -176,7 +176,7 @@ public abstract class FormatReadWriteTest {
     }
 
     @Test
-    public void testReadWriteVariant() throws IOException {
+    void testReadWriteVariant() throws IOException {
         FileFormat format = fileFormat();
         // todo: support other format types
         if (!format.getFormatIdentifier().equals("parquet")) {
@@ -205,7 +205,7 @@ public abstract class FormatReadWriteTest {
     }
 
     @Test
-    public void testReadWriteVariantList() throws IOException {
+    void testReadWriteVariantList() throws IOException {
         FileFormat format = fileFormat();
         // todo: support other format types
         if (!format.getFormatIdentifier().equals("parquet")) {

@@ -46,7 +46,7 @@ import java.util.List;
 public class FlinkTableSourceTest extends TableTestBase {
 
     @Test
-    public void testApplyFilterNonPartitionTable() throws Exception {
+    void testApplyFilterNonPartitionTable() throws Exception {
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
         Schema schema = Schema.newBuilder().column("col1", DataTypes.INT()).build();
@@ -63,7 +63,7 @@ public class FlinkTableSourceTest extends TableTestBase {
     }
 
     @Test
-    public void testApplyPartitionTable() throws Exception {
+    void testApplyPartitionTable() throws Exception {
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
         Schema schema =

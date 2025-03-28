@@ -53,12 +53,12 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link PaimonRecordReader}. */
-public class PaimonRecordReaderTest {
+class PaimonRecordReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testPk() throws Exception {
+    void testPk() throws Exception {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
@@ -101,7 +101,7 @@ public class PaimonRecordReaderTest {
     }
 
     @Test
-    public void testProjectionPushdown() throws Exception {
+    void testProjectionPushdown() throws Exception {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);

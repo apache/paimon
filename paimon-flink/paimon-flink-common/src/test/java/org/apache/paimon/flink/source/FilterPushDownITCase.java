@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for filter push down. */
-public class FilterPushDownITCase extends CatalogITCaseBase {
+class FilterPushDownITCase extends CatalogITCaseBase {
 
     @Override
     public List<String> ddl() {
@@ -54,7 +54,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionConditionConsuming_OnePartitionCondition() {
+    void testPartitionConditionConsuming_OnePartitionCondition() {
         String sql = "SELECT * FROM T where a = 1 limit 1";
         assertPlanAndResult(
                 sql,
@@ -64,7 +64,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionConditionConsuming_PartitionConditionAndOther() {
+    void testPartitionConditionConsuming_PartitionConditionAndOther() {
         String sql = "SELECT * FROM T where (a = 1 or a = 2) and c = '1' limit 1";
         // c = '1' is not consumed and limit 1 not push to source
         assertPlanAndResult(
@@ -75,7 +75,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionConditionNotConsuming1() {
+    void testPartitionConditionNotConsuming1() {
         // a = 1 not consumed
         String sql = "SELECT * FROM T where a + 1 = 2 limit 1";
         assertPlanAndResult(
@@ -86,7 +86,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionConditionNotConsuming2() {
+    void testPartitionConditionNotConsuming2() {
         // UNIX_TIMESTAMP() > 0 not consumed
         String sql = "SELECT * FROM T where UNIX_TIMESTAMP() > 0";
         assertPlanAndResult(
@@ -100,7 +100,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionConditionNotConsuming3() {
+    void testPartitionConditionNotConsuming3() {
         // all not consumed
         String sql = "SELECT * FROM T where b = 3 and ( a = 2 or c = '3')";
         assertPlanAndResult(
@@ -112,7 +112,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testStreamingReadingNotConsumePartitionCondition() throws TimeoutException {
+    void testStreamingReadingNotConsumePartitionCondition() throws TimeoutException {
         String sql = "SELECT * FROM T WHERE a = 5";
         String plan = sEnv.explainSql(sql, ExplainFormat.TEXT);
         Assertions.assertThat(plan)
@@ -127,7 +127,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionCondition_ProjectionPushDown() {
+    void testPartitionCondition_ProjectionPushDown() {
         String sql = "SELECT b, a FROM T where a = 1 limit 1";
         assertPlanAndResult(
                 sql,

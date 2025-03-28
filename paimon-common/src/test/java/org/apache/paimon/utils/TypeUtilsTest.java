@@ -47,18 +47,18 @@ public class TypeUtilsTest {
     private static TimeZone originalTimeZone;
 
     @BeforeAll
-    public static void setUp() {
+    static void setUp() {
         originalTimeZone = TimeZone.getDefault();
         TimeZone.setDefault(TimeZone.getTimeZone("Asia/Tokyo"));
     }
 
     @AfterAll
-    public static void tearDown() {
+    static void tearDown() {
         TimeZone.setDefault(originalTimeZone);
     }
 
     @Test
-    public void testCastFromString() {
+    void testCastFromString() {
         String value =
                 "[{\"key1\":null,\"key2\":\"value\"},{\"key1\":{\"nested_key1\":0},\"key2\":null}]";
         Object result =
@@ -87,7 +87,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testStringCastFromString() {
+    void testStringCastFromString() {
         String value = "value";
         Object result = TypeUtils.castFromString(value, DataTypes.STRING());
         BinaryString expected = BinaryString.fromString("value");
@@ -95,7 +95,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testArrayIntCastFromString() {
+    void testArrayIntCastFromString() {
         String value = "[0, 1, 2]";
         Object result = TypeUtils.castFromString(value, DataTypes.ARRAY(DataTypes.INT()));
         GenericArray expected = new GenericArray(new Integer[] {0, 1, 2});
@@ -103,7 +103,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testArrayStringCastFromString() {
+    void testArrayStringCastFromString() {
         String value = "[\"0\", \"1\", \"2\"]";
         Object result = TypeUtils.castFromString(value, DataTypes.ARRAY(DataTypes.STRING()));
         GenericArray expected =
@@ -117,7 +117,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testLongCastFromString() {
+    void testLongCastFromString() {
         String value = "12";
         Object result = TypeUtils.castFromString(value, DataTypes.BIGINT());
         long expected = 12;
@@ -125,7 +125,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testBinaryCastFromString() {
+    void testBinaryCastFromString() {
         String value = "abc";
         Object result = TypeUtils.castFromString(value, DataTypes.BINARY(3));
         byte[] expected = "abc".getBytes(StandardCharsets.UTF_8);
@@ -133,7 +133,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testBinaryCastFromCdcValueString() {
+    void testBinaryCastFromCdcValueString() {
         String value = Base64.getEncoder().encodeToString("abc".getBytes(StandardCharsets.UTF_8));
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.BINARY(3));
         byte[] expected = "abc".getBytes(StandardCharsets.UTF_8);
@@ -141,7 +141,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testBooleanTrueCastFromString() {
+    void testBooleanTrueCastFromString() {
         String value = "true";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.BOOLEAN());
         boolean expected = true;
@@ -149,7 +149,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testBooleanFalseCastFromString() {
+    void testBooleanFalseCastFromString() {
         String value = "false";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.BOOLEAN());
         boolean expected = false;
@@ -157,7 +157,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testCharCastFromString() {
+    void testCharCastFromString() {
         String value = "abc";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.CHAR(3));
         BinaryString expected = BinaryString.fromString("abc");
@@ -165,7 +165,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testDateCastFromString() {
+    void testDateCastFromString() {
         String value = "2017-12-12 09:30:00.0";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.DATE());
         int expected = 17512;
@@ -173,7 +173,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testDateNumericCastFromString() {
+    void testDateNumericCastFromString() {
         String value = "17512";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.DATE());
         int expected = 17512;
@@ -181,7 +181,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testDecimalCastFromString() {
+    void testDecimalCastFromString() {
         String value = "123";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.DECIMAL(5, 0));
         Decimal expected = Decimal.fromBigDecimal(new BigDecimal("123"), 5, 0);
@@ -189,7 +189,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testDoubleCastFromString() {
+    void testDoubleCastFromString() {
         String value = "123.456";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.DOUBLE());
         Double expected = 123.456;
@@ -197,7 +197,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testFloatCastFromString() {
+    void testFloatCastFromString() {
         String value = "123.456";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.FLOAT());
         Float expected = 123.456f;
@@ -205,7 +205,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testLargeFloatCastFromString() {
+    void testLargeFloatCastFromString() {
         String value = "123.45678";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.FLOAT());
         Float expected = 123.45678f;
@@ -213,7 +213,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testIntCastFromString() {
+    void testIntCastFromString() {
         String value = "12";
         Object result = TypeUtils.castFromString(value, DataTypes.INT());
         int expected = 12;
@@ -221,7 +221,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testLocalZonedTimestampCastFromString() {
+    void testLocalZonedTimestampCastFromString() {
         String value = "2017-12-12 09:30:00";
         Object result = TypeUtils.castFromString(value, DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
         Timestamp expected =
@@ -234,7 +234,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testMapStringStringCastFromString() {
+    void testMapStringStringCastFromString() {
         String value = "{\"a\":\"b\", \"c\":\"d\"}";
         Object result =
                 TypeUtils.castFromString(
@@ -251,7 +251,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testMapStringIntCastFromString() {
+    void testMapStringIntCastFromString() {
         String value = "{\"a\":0, \"c\":1}";
         Object result =
                 TypeUtils.castFromString(value, DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
@@ -267,7 +267,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testRowCastFromString() {
+    void testRowCastFromString() {
         String value = "{\"key1\":{\"nested_key1\":0},\"key2\":\"value\"}";
         Object result =
                 TypeUtils.castFromString(
@@ -288,7 +288,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testSmallIntCastFromString() {
+    void testSmallIntCastFromString() {
         String value = "12";
         Object result = TypeUtils.castFromString(value, DataTypes.SMALLINT());
         short expected = 12;
@@ -296,7 +296,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testTimestampCastFromString() {
+    void testTimestampCastFromString() {
         String value = "2017-12-12 09:30:00";
         Object result = TypeUtils.castFromString(value, DataTypes.TIMESTAMP());
         Timestamp expected =
@@ -305,7 +305,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testTimestampNumericCastFromString() {
+    void testTimestampNumericCastFromString() {
         String value = "123456789000000";
         Object result = TypeUtils.castFromString(value, DataTypes.TIMESTAMP());
         Timestamp expected = Timestamp.fromMicros(123456789000000L);
@@ -313,7 +313,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testTimeCastFromString() {
+    void testTimeCastFromString() {
         String value = "13:09:42.123456+01:00";
         Object result = TypeUtils.castFromString(value, DataTypes.TIME(3));
         int expected = 14 * 60 * 60 * 1000 + 9 * 60 * 1000 + 42 * 1000 + 123;
@@ -321,7 +321,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testTimeNumericCastFromString() {
+    void testTimeNumericCastFromString() {
         String value = "123456789";
         Object result = TypeUtils.castFromString(value, DataTypes.TIME());
         int expected = 123456789;
@@ -329,7 +329,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testTinyIntCastFromString() {
+    void testTinyIntCastFromString() {
         String value = "6";
         Object result = TypeUtils.castFromString(value, DataTypes.TINYINT());
         byte expected = 6;
@@ -337,7 +337,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testVarBinaryCastFromString() {
+    void testVarBinaryCastFromString() {
         String value = "abc";
         Object result = TypeUtils.castFromString(value, DataTypes.VARBINARY(3));
         byte[] expected = "abc".getBytes(StandardCharsets.UTF_8);
@@ -345,7 +345,7 @@ public class TypeUtilsTest {
     }
 
     @Test
-    public void testVarCharCastFromString() {
+    void testVarCharCastFromString() {
         String value = "abc";
         Object result = TypeUtils.castFromCdcValueString(value, DataTypes.VARCHAR(3));
         BinaryString expected = BinaryString.fromString("abc");

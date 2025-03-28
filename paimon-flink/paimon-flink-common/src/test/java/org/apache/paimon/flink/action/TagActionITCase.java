@@ -39,7 +39,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for tag management actions. */
-public class TagActionITCase extends ActionITCaseBase {
+class TagActionITCase extends ActionITCaseBase {
 
     private static Stream<String> testData() {
         return Stream.of("action", "procedure_indexed", "procedure_named");
@@ -47,7 +47,7 @@ public class TagActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCreateAndDeleteTag(String invoker) throws Exception {
+    void testCreateAndDeleteTag(String invoker) throws Exception {
         init(warehouse);
 
         RowType rowType =
@@ -242,7 +242,7 @@ public class TagActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testRenameTag(String invoker) throws Exception {
+    void testRenameTag(String invoker) throws Exception {
         init(warehouse);
 
         RowType rowType =
@@ -337,7 +337,7 @@ public class TagActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCreateLatestTag(String invoker) throws Exception {
+    void testCreateLatestTag(String invoker) throws Exception {
         init(warehouse);
 
         RowType rowType =

@@ -37,10 +37,10 @@ import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SimpleStatsEvolution}. */
-public class SimpleStatsEvolutionTest {
+class SimpleStatsEvolutionTest {
 
     @Test
-    public void testFromBinary() {
+    void testFromBinary() {
         TableSchema dataSchema =
                 new TableSchema(
                         0,

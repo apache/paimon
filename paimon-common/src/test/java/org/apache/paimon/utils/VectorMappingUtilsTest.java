@@ -45,7 +45,7 @@ import java.util.Arrays;
 public class VectorMappingUtilsTest {
 
     @Test
-    public void testCreatePartitionMappedVectors() {
+    void testCreatePartitionMappedVectors() {
         ColumnVector[] columnVectors = new ColumnVector[5];
 
         Arrays.fill(columnVectors, (ColumnVector) i -> false);
@@ -73,7 +73,7 @@ public class VectorMappingUtilsTest {
     }
 
     @Test
-    public void testCreateIndexMappedVectors() {
+    void testCreateIndexMappedVectors() {
 
         ColumnVector[] columnVectors = new ColumnVector[5];
 
@@ -90,7 +90,7 @@ public class VectorMappingUtilsTest {
     }
 
     @Test
-    public void testForType() {
+    void testForType() {
         RowType rowType =
                 RowType.builder()
                         .fields(

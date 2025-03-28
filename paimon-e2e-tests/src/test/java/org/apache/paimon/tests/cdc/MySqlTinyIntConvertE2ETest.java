@@ -36,7 +36,7 @@ public class MySqlTinyIntConvertE2ETest extends MySqlCdcE2eTestBase {
     }
 
     @Test
-    public void testSyncTable() throws Exception {
+    void testSyncTable() throws Exception {
         runAction(
                 ACTION_SYNC_TABLE,
                 null,
@@ -67,5 +67,5 @@ public class MySqlTinyIntConvertE2ETest extends MySqlCdcE2eTestBase {
 
     @Disabled("Not supported")
     @Test
-    public void testSyncDatabase() {}
+    void testSyncDatabase() {}
 }

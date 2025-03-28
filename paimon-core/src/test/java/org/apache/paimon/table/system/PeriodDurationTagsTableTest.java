@@ -28,6 +28,7 @@ import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -82,8 +83,8 @@ public class PeriodDurationTagsTableTest extends TableTestBase {
         assertThat(result.get(1).getString(0).toString()).isEqualTo("202501071458");
     }
 
-    @Override
-    public void after() throws IOException {
+    @AfterEach
+    void after() throws IOException {
         table.deleteTag("202501071158");
         table.deleteTag("202501071458");
     }

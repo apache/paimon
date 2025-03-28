@@ -58,7 +58,7 @@ class BlockStatementSplitterTest {
                     + " }";
 
     @Test
-    public void testWhileIfBlockExtract() {
+    void testWhileIfBlockExtract() {
         String parameters = "a, b, c";
         BlockStatementSplitter splitter =
                 new BlockStatementSplitter(GIVEN_WHILE_IF_BLOCK, parameters);

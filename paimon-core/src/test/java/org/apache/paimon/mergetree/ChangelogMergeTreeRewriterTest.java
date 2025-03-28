@@ -105,7 +105,7 @@ public class ChangelogMergeTreeRewriterTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testRewriteFailAndCleanupFiles(boolean rewriteChangelog) throws Exception {
+    void testRewriteFailAndCleanupFiles(boolean rewriteChangelog) throws Exception {
         List<List<SortedRun>> sections = createTestSections(2);
         Path testPath = new Path(path, UUID.randomUUID().toString());
         CoreOptions coreOptions = new CoreOptions(new Options());
@@ -149,7 +149,7 @@ public class ChangelogMergeTreeRewriterTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testRewriteSuccess(boolean rewriteChangelog) throws Exception {
+    void testRewriteSuccess(boolean rewriteChangelog) throws Exception {
         List<List<SortedRun>> sections = createTestSections(2);
         Path testPath = new Path(path, UUID.randomUUID().toString());
         CoreOptions coreOptions = new CoreOptions(new Options());

@@ -101,7 +101,7 @@ public class OffsetRowTest {
     }
 
     @Test
-    public void testGenericRow() {
+    void testGenericRow() {
         InternalRow underRow = createRow();
         testGetters(
                 new OffsetRow(underRow.getFieldCount(), 5)

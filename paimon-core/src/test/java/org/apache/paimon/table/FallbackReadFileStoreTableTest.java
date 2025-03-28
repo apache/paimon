@@ -68,14 +68,14 @@ public class FallbackReadFileStoreTableTest {
     private FileIO fileIO;
 
     @BeforeEach
-    public void before() {
+    void before() {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         commitUser = UUID.randomUUID().toString();
         fileIO = FileIOFinder.find(tablePath);
     }
 
     @Test
-    public void testListPartitions() throws Exception {
+    void testListPartitions() throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();
@@ -108,7 +108,7 @@ public class FallbackReadFileStoreTableTest {
     }
 
     @Test
-    public void testListPartitionEntries() throws Exception {
+    void testListPartitionEntries() throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();

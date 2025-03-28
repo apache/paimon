@@ -38,7 +38,7 @@ public class CacheManagerBenchmark {
     @TempDir Path tempDir;
 
     @Test
-    public void testCache() throws Exception {
+    void testCache() throws Exception {
         Benchmark benchmark =
                 new Benchmark("cache-benchmark", 100)
                         .setNumWarmupIters(1)

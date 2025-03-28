@@ -50,7 +50,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
     }
 
     @Test
-    public void testTableSplit() throws Exception {
+    void testTableSplit() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -109,7 +109,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
     }
 
     @Test
-    public void testTableSplitFilterNormalFields() throws Exception {
+    void testTableSplitFilterNormalFields() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -179,7 +179,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
     }
 
     @Test
-    public void testTableSplitFilterPrimaryKeyFields() throws Exception {
+    void testTableSplitFilterPrimaryKeyFields() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);

@@ -47,13 +47,13 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     private StreamTableCommit commit;
 
     @BeforeEach
-    public void beforeEach() throws Exception {
+    void beforeEach() throws Exception {
         fileHandler = table.store().newIndexFileHandler();
         commit = table.newStreamWriteBuilder().withCommitUser(commitUser).newCommit();
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         commit.close();
     }
 
@@ -83,7 +83,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssign() {
+    void testAssign() {
         HashBucketAssigner assigner = createAssigner(2, 2, 0);
 
         // assign
@@ -108,7 +108,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignWithUpperBound() {
+    void testAssignWithUpperBound() {
         HashBucketAssigner assigner = createAssigner(2, 2, 0, 2);
 
         // assign
@@ -151,7 +151,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignWithUpperBoundMultiAssigners() {
+    void testAssignWithUpperBoundMultiAssigners() {
         HashBucketAssigner assigner0 = createAssigner(2, 2, 0, 3);
         HashBucketAssigner assigner1 = createAssigner(2, 2, 1, 3);
 
@@ -193,7 +193,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
 
     @ParameterizedTest(name = "maxBuckets: {0}")
     @ValueSource(ints = {-1, 1, 2})
-    public void testPartitionCopy(int maxBucketsNum) {
+    void testPartitionCopy(int maxBucketsNum) {
         HashBucketAssigner assigner = createAssigner(1, 1, 0, maxBucketsNum);
 
         BinaryRow partition = row(1);
@@ -222,7 +222,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignRestore() {
+    void testAssignRestore() {
         IndexFileMeta bucket0 = fileHandler.writeHashIndex(new int[] {2, 5});
         IndexFileMeta bucket2 = fileHandler.writeHashIndex(new int[] {4, 7});
         commit.commit(
@@ -248,7 +248,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignRestoreWithUpperBound() {
+    void testAssignRestoreWithUpperBound() {
         IndexFileMeta bucket0 = fileHandler.writeHashIndex(new int[] {2, 5});
         IndexFileMeta bucket2 = fileHandler.writeHashIndex(new int[] {4, 7});
         commit.commit(
@@ -276,7 +276,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignDecoupled() {
+    void testAssignDecoupled() {
         HashBucketAssigner assigner1 = createAssigner(3, 2, 1);
         assertThat(assigner1.assign(row(1), 0)).isEqualTo(1);
         assertThat(assigner1.assign(row(1), 2)).isEqualTo(1);
@@ -303,7 +303,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexEliminate() {
+    void testIndexEliminate() {
         HashBucketAssigner assigner = createAssigner(1, 1, 0);
 
         // checkpoint 0

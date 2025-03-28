@@ -56,7 +56,7 @@ public class SparkS3ITCase {
     private static SparkSession spark = null;
 
     @BeforeAll
-    public static void startMetastoreAndSpark() {
+    static void startMetastoreAndSpark() {
         String path = MINIO_CONTAINER.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         warehousePath = new Path(path);
         spark =
@@ -76,7 +76,7 @@ public class SparkS3ITCase {
     }
 
     @AfterAll
-    public static void stopMetastoreAndSpark() {
+    static void stopMetastoreAndSpark() {
         if (spark != null) {
             spark.stop();
             spark = null;
@@ -95,12 +95,12 @@ public class SparkS3ITCase {
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         spark.sql("DROP TABLE IF EXISTS T");
     }
 
     @TestTemplate
-    public void testWriteRead() {
+    void testWriteRead() {
         spark.sql(
                 String.format(
                         "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
@@ -112,7 +112,7 @@ public class SparkS3ITCase {
     }
 
     @TestTemplate
-    public void testS3AtomicWriteMultipleThreads() throws InterruptedException, IOException {
+    void testS3AtomicWriteMultipleThreads() throws InterruptedException, IOException {
         Path file = new Path(warehousePath, UUID.randomUUID().toString());
         Options options = new Options();
         MINIO_CONTAINER.getS3ConfigOptions().forEach(options::setString);

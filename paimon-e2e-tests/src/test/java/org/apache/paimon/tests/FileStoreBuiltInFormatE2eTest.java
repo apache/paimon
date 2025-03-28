@@ -23,10 +23,10 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 /** Test that file store supports format included in paimon-format. */
-public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
+class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
 
     @Test
-    public void testParquet() throws Exception {
+    void testParquet() throws Exception {
         String schema =
                 "id INT,\n"
                         + "isMan BOOLEAN,\n"

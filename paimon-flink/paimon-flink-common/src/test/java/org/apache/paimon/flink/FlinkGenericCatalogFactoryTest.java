@@ -40,7 +40,7 @@ public class FlinkGenericCatalogFactoryTest {
     @TempDir public static java.nio.file.Path temporaryFolder;
 
     @Test
-    public void testGenericCatalogOptionsFilter() {
+    void testGenericCatalogOptionsFilter() {
         String path1 = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
         String path2 = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
 

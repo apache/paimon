@@ -57,10 +57,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Unit tests for the {@link ContinuousFileSplitEnumerator}. */
-public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
+class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
 
     @Test
-    public void testSplitAllocationIsOrdered() {
+    void testSplitAllocationIsOrdered() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(1);
 
@@ -112,7 +112,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testSplitWithBatch() {
+    void testSplitWithBatch() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(1);
 
@@ -149,7 +149,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testSplitAllocationIsFair() {
+    void testSplitAllocationIsFair() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(1);
 
@@ -193,7 +193,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testSnapshotEnumerator() {
+    void testSnapshotEnumerator() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 
@@ -261,7 +261,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testUnawareBucketEnumeratorWithBucket() {
+    void testUnawareBucketEnumeratorWithBucket() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(3, 1);
 
@@ -303,7 +303,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testUnawareBucketEnumeratorLot() {
+    void testUnawareBucketEnumeratorLot() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(4);
 
@@ -362,7 +362,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testUnawareBucketEnumeratorAssignLater() {
+    void testUnawareBucketEnumeratorAssignLater() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(4);
 
@@ -418,7 +418,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testEnumeratorDeregisteredByContext() {
+    void testEnumeratorDeregisteredByContext() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 
@@ -457,7 +457,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testRemoveReadersAwaitSuccessful() {
+    void testRemoveReadersAwaitSuccessful() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 
@@ -488,7 +488,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testTriggerScanByTaskRequest() throws Exception {
+    void testTriggerScanByTaskRequest() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 
@@ -529,7 +529,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testNoTriggerWhenReadLatest() {
+    void testNoTriggerWhenReadLatest() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(4);
 
@@ -619,7 +619,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testEnumeratorWithCheckpoint() {
+    void testEnumeratorWithCheckpoint() {
         final TestingAsyncSplitEnumeratorContext<FileStoreSourceSplit> context =
                 new TestingAsyncSplitEnumeratorContext<>(1);
         context.registerReader(0, "test-host");
@@ -685,7 +685,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testEnumeratorWithConsumer() throws Exception {
+    void testEnumeratorWithConsumer() throws Exception {
         final TestingAsyncSplitEnumeratorContext<FileStoreSourceSplit> context =
                 new TestingAsyncSplitEnumeratorContext<>(3);
         for (int i = 0; i < 3; i++) {
@@ -753,7 +753,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
     }
 
     @Test
-    public void testEnumeratorSplitMax() throws Exception {
+    void testEnumeratorSplitMax() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 

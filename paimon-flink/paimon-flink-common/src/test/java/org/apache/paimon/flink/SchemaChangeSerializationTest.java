@@ -31,10 +31,10 @@ import java.io.ObjectOutputStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for serializing {@link SchemaChange}. */
-public class SchemaChangeSerializationTest {
+class SchemaChangeSerializationTest {
 
     @Test
-    public void testSerialization() throws Exception {
+    void testSerialization() throws Exception {
         runTest(SchemaChange.setOption("key", "value"));
         runTest(SchemaChange.removeOption("key"));
         runTest(

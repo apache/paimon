@@ -126,7 +126,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void basicTest() {
+    void basicTest() {
         checkBasic("", 0);
         checkBasic(",", 1);
         checkBasic("hello", 5);
@@ -141,7 +141,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void emptyStringTest() {
+    void emptyStringTest() {
         assertThat(fromString("")).isEqualTo(EMPTY_UTF8);
         assertThat(fromBytes(new byte[0])).isEqualTo(EMPTY_UTF8);
         assertThat(EMPTY_UTF8.numChars()).isEqualTo(0);
@@ -149,7 +149,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void compareTo() {
+    void compareTo() {
         assertThat(fromString("   ").compareTo(blankString(3))).isEqualTo(0);
         assertThat(fromString("").compareTo(fromString("a"))).isLessThan(0);
         assertThat(fromString("abc").compareTo(fromString("ABC"))).isGreaterThan(0);
@@ -173,7 +173,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void testMultiSegments() {
+    void testMultiSegments() {
 
         // prepare
         MemorySegment[] segments1 = new MemorySegment[2];
@@ -222,7 +222,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void contains() {
+    void contains() {
         assertThat(EMPTY_UTF8.contains(EMPTY_UTF8)).isTrue();
         assertThat(fromString("hello").contains(fromString("ello"))).isTrue();
         assertThat(fromString("hello").contains(fromString("vello"))).isFalse();
@@ -233,7 +233,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void startsWith() {
+    void startsWith() {
         assertThat(EMPTY_UTF8.startsWith(EMPTY_UTF8)).isTrue();
         assertThat(fromString("hello").startsWith(fromString("hell"))).isTrue();
         assertThat(fromString("hello").startsWith(fromString("ell"))).isFalse();
@@ -244,7 +244,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void endsWith() {
+    void endsWith() {
         assertThat(EMPTY_UTF8.endsWith(EMPTY_UTF8)).isTrue();
         assertThat(fromString("hello").endsWith(fromString("ello"))).isTrue();
         assertThat(fromString("hello").endsWith(fromString("ellov"))).isFalse();
@@ -255,7 +255,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void substring() {
+    void substring() {
         assertThat(fromString("hello").substring(0, 0)).isEqualTo(EMPTY_UTF8);
         assertThat(fromString("hello").substring(1, 3)).isEqualTo(fromString("el"));
         assertThat(fromString("数据砖头").substring(0, 1)).isEqualTo(fromString("数"));
@@ -265,7 +265,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void indexOf() {
+    void indexOf() {
         assertThat(EMPTY_UTF8.indexOf(EMPTY_UTF8, 0)).isEqualTo(0);
         assertThat(EMPTY_UTF8.indexOf(fromString("l"), 0)).isEqualTo(-1);
         assertThat(fromString("hello").indexOf(EMPTY_UTF8, 0)).isEqualTo(0);
@@ -281,7 +281,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void testToUpperLowerCase() {
+    void testToUpperLowerCase() {
         assertThat(fromString("我是中国人").toLowerCase()).isEqualTo(fromString("我是中国人"));
         assertThat(fromString("我是中国人").toUpperCase()).isEqualTo(fromString("我是中国人"));
 
@@ -309,7 +309,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void testCastFrom() {
+    void testCastFrom() {
         class DecimalTestData {
             private final String str;
             private final int precision;
@@ -393,7 +393,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void testEmptyString() {
+    void testEmptyString() {
         BinaryString str2 = fromString("hahahahah");
         BinaryString str3;
         {
@@ -417,7 +417,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void testEncodeWithIllegalCharacter() {
+    void testEncodeWithIllegalCharacter() {
 
         // Tis char array has some illegal character, such as 55357
         // the jdk ignores theses character and cast them to '?'
@@ -434,7 +434,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void testDecodeWithIllegalUtf8Bytes() {
+    void testDecodeWithIllegalUtf8Bytes() {
 
         // illegal utf-8 bytes
         byte[] bytes =
@@ -466,7 +466,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void skipWrongFirstByte() {
+    void skipWrongFirstByte() {
         int[] wrongFirstBytes = {
             0x80,
             0x9F,
@@ -495,7 +495,7 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
-    public void testFromBytes() {
+    void testFromBytes() {
         String s = "hahahe";
         byte[] bytes = Arrays.copyOf(s.getBytes(UTF_8), 10);
         assertThat(BinaryString.fromBytes(bytes, 0, 6)).isEqualTo(BinaryString.fromString(s));

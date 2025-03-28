@@ -64,7 +64,7 @@ public class CompositePkAndMultiPartitionedTableWithKafkaLogITCase extends Kafka
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testStreamingReadWriteMultiPartitionedRecordsWithMultiPk() throws Exception {
+    void testStreamingReadWriteMultiPartitionedRecordsWithMultiPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // to_currency is USD
@@ -219,7 +219,7 @@ public class CompositePkAndMultiPartitionedTableWithKafkaLogITCase extends Kafka
     }
 
     @Test
-    public void testStreamingReadWriteSinglePartitionedRecordsWithMultiPk() throws Exception {
+    void testStreamingReadWriteSinglePartitionedRecordsWithMultiPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // to_currency is USD
@@ -321,7 +321,7 @@ public class CompositePkAndMultiPartitionedTableWithKafkaLogITCase extends Kafka
     // Latest
     // ----------------------------------------------------------------------------------------------------------------
     @Test
-    public void testReadLatestChangelogOfMultiPartitionedRecordsWithMultiPk() throws Exception {
+    void testReadLatestChangelogOfMultiPartitionedRecordsWithMultiPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // to_currency is USD
@@ -538,7 +538,7 @@ public class CompositePkAndMultiPartitionedTableWithKafkaLogITCase extends Kafka
     }
 
     @Test
-    public void testReadLatestChangelogOfSinglePartitionedRecordsWithMultiPk() throws Exception {
+    void testReadLatestChangelogOfSinglePartitionedRecordsWithMultiPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // to_currency is USD
@@ -701,7 +701,7 @@ public class CompositePkAndMultiPartitionedTableWithKafkaLogITCase extends Kafka
     }
 
     @Test
-    public void testReadLatestChangelogOfNonPartitionedRecordsWithMultiPk() throws Exception {
+    void testReadLatestChangelogOfNonPartitionedRecordsWithMultiPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // to_currency is USD
@@ -841,7 +841,7 @@ public class CompositePkAndMultiPartitionedTableWithKafkaLogITCase extends Kafka
     }
 
     @Test
-    public void testReadLatestChangelogOfMultiPartitionedRecordsWithOnePk() throws Exception {
+    void testReadLatestChangelogOfMultiPartitionedRecordsWithOnePk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // dt = 2022-01-01, hh = "15"

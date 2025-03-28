@@ -58,10 +58,10 @@ import static org.assertj.core.api.Fail.fail;
  * exist for the same key with different descriptions/default values), and that the documentation
  * does not refer to non-existent options.
  */
-public class ConfigOptionsDocsCompletenessITCase {
+class ConfigOptionsDocsCompletenessITCase {
 
     @Test
-    public void testCompleteness() throws IOException, ClassNotFoundException {
+    void testCompleteness() throws IOException, ClassNotFoundException {
         compareDocumentedAndExistingOptions(
                 parseDocumentedOptions(),
                 checkWellDefinedAndDeduplicate(findExistingOptions(ignored -> true)));

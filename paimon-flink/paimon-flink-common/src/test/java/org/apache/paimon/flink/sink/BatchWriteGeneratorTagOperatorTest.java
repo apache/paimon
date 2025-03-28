@@ -48,10 +48,10 @@ import java.util.Objects;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link BatchWriteGeneratorTagOperator}. */
-public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
+class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
 
     @Test
-    public void testBatchWriteGeneratorTag() throws Exception {
+    void testBatchWriteGeneratorTag() throws Exception {
         FileStoreTable table = createFileStoreTable();
         // set tag.automatic-creation = batch
         HashMap<String, String> dynamicOptions = new HashMap<>();
@@ -126,7 +126,7 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
     }
 
     @Test
-    public void testBatchWriteGeneratorCustomizedTag() throws Exception {
+    void testBatchWriteGeneratorCustomizedTag() throws Exception {
         FileStoreTable table = createFileStoreTable();
         String customizedTag = "customized-tag";
         // set tag.automatic-creation = batch

@@ -27,10 +27,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link ReplaceTagProcedure}. */
-public class ReplaceTagProcedureITCase extends CatalogITCaseBase {
+class ReplaceTagProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testExpireTagsByTagCreateTimeAndTagTimeRetained() throws Exception {
+    void testExpireTagsByTagCreateTimeAndTagTimeRetained() throws Exception {
         sql(
                 "CREATE TABLE T (id INT, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"

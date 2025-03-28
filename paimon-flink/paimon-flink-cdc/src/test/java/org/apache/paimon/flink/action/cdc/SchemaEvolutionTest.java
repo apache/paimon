@@ -202,7 +202,7 @@ public class SchemaEvolutionTest extends TableTestBase {
     }
 
     @Test
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         DataStream<CdcSchema> upDataFieldStream = env.fromCollection(prepareData());
         Options options = new Options();

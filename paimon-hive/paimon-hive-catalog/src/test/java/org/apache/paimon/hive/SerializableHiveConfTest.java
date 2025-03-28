@@ -30,9 +30,9 @@ import java.io.ObjectOutputStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SerializableHiveConf}. */
-public class SerializableHiveConfTest {
+class SerializableHiveConfTest {
     @Test
-    public void testSerializeHiveConf() throws IOException, ClassNotFoundException {
+    void testSerializeHiveConf() throws IOException, ClassNotFoundException {
         HiveConf conf = new HiveConf();
         conf.set("k1", "v1");
         conf.set("k2", "v2");

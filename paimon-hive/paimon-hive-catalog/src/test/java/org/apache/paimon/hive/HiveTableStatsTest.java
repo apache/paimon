@@ -47,12 +47,12 @@ import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLK
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Verify that table stats has been updated. */
-public class HiveTableStatsTest {
+class HiveTableStatsTest {
     @TempDir java.nio.file.Path tempFile;
     protected Catalog catalog;
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         String warehouse = tempFile.toUri().toString();
         HiveConf hiveConf = new HiveConf();
         String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
@@ -68,7 +68,7 @@ public class HiveTableStatsTest {
     }
 
     @Test
-    public void testAlterTable() throws Exception {
+    void testAlterTable() throws Exception {
         catalog.createDatabase("test_db", false);
         // Alter table adds a new column to an existing table,but do not update stats
         Identifier identifier = Identifier.create("test_db", "test_table");

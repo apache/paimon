@@ -191,7 +191,7 @@ public class EqualiserCodeGeneratorTest {
 
     @ParameterizedTest
     @EnumSource(DataTypeRoot.class)
-    public void testSingleField(DataTypeRoot dataTypeRoot) {
+    void testSingleField(DataTypeRoot dataTypeRoot) {
         GeneratedData testData = TEST_DATA.get(dataTypeRoot);
         if (testData == null) {
             throw new UnsupportedOperationException("Unsupported type: " + dataTypeRoot);
@@ -214,7 +214,7 @@ public class EqualiserCodeGeneratorTest {
     }
 
     @RepeatedTest(100)
-    public void testProjection() {
+    void testProjection() {
         GeneratedData field0 = TEST_DATA.get(DataTypeRoot.INTEGER);
         GeneratedData field1 = TEST_DATA.get(DataTypeRoot.VARCHAR);
         GeneratedData field2 = TEST_DATA.get(DataTypeRoot.BIGINT);
@@ -238,7 +238,7 @@ public class EqualiserCodeGeneratorTest {
     }
 
     @RepeatedTest(100)
-    public void testManyFields() {
+    void testManyFields() {
         int size = 499;
         GeneratedData[] generatedData = new GeneratedData[size];
         ThreadLocalRandom random = ThreadLocalRandom.current();

@@ -38,7 +38,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFlinkMemoryPool() {
+    void testFlinkMemoryPool() {
         // Check if the configuration is effective
         assertThatThrownBy(
                         () ->

@@ -39,7 +39,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Tests for {@link SyncDatabaseActionBase}. */
-public class SyncDatabaseActionBaseTest {
+class SyncDatabaseActionBaseTest {
     private static final String ANY_DB = "any_db";
     private static final String WHITE_DB = "white_db";
     private static final String BLACK_DB = "black_db";
@@ -57,7 +57,7 @@ public class SyncDatabaseActionBaseTest {
     @TempDir private java.nio.file.Path tmp;
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         LocalFileIO localFileIO = new LocalFileIO();
         Path defaultDb = new Path(tmp.toString(), "default.db");
         localFileIO.mkdirs(defaultDb);
@@ -82,7 +82,7 @@ public class SyncDatabaseActionBaseTest {
     }
 
     @Test
-    public void testSyncTablesWithoutDbLists() throws NoSuchMethodException, IOException {
+    void testSyncTablesWithoutDbLists() throws NoSuchMethodException, IOException {
 
         kafkaSyncDbAction.includingTables(WHITE_TBL);
         kafkaSyncDbAction.excludingTables(BLACK_TBL);
@@ -102,7 +102,7 @@ public class SyncDatabaseActionBaseTest {
     }
 
     @Test
-    public void testSyncTablesWithDbList() {
+    void testSyncTablesWithDbList() {
         kafkaSyncDbAction.includingDbs(WHITE_DB);
         kafkaSyncDbAction.excludingDbs(BLACK_DB);
         RichCdcMultiplexRecordEventParser parser =
@@ -129,7 +129,7 @@ public class SyncDatabaseActionBaseTest {
     }
 
     @Test
-    public void testSycTablesCrossDB() {
+    void testSycTablesCrossDB() {
         kafkaSyncDbAction.includingDbs(WHITE_DB);
         kafkaSyncDbAction.excludingDbs(BLACK_DB);
         kafkaSyncDbAction.excludingTables(BLACK_TBL);

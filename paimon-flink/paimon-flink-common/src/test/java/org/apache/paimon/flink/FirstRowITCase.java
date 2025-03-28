@@ -33,7 +33,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for first row merge engine. */
-public class FirstRowITCase extends CatalogITCaseBase {
+class FirstRowITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
@@ -44,7 +44,7 @@ public class FirstRowITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBatchQueryNoChangelog() {
+    void testBatchQueryNoChangelog() {
         sql(
                 "CREATE TABLE T_NO_CHANGELOG (a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
                         + " WITH ('merge-engine'='first-row')");
@@ -52,7 +52,7 @@ public class FirstRowITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBatchQuery() {
+    void testBatchQuery() {
         testBatchQuery("T");
     }
 
@@ -66,7 +66,7 @@ public class FirstRowITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testStreamingRead() throws Exception {
+    void testStreamingRead() throws Exception {
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
 
         sql("INSERT INTO T VALUES(1, 1, '1'), (2, 2, '2'), (1, 3, '3'), (1, 4, '4')");
@@ -91,7 +91,7 @@ public class FirstRowITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLocalMerge() {
+    void testLocalMerge() {
         sql(
                 "CREATE TABLE IF NOT EXISTS T1 ("
                         + "a INT, b INT, c STRING, PRIMARY KEY (a, b) NOT ENFORCED)"
@@ -106,7 +106,7 @@ public class FirstRowITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDelete() {
+    void testIgnoreDelete() {
         sql(
                 "CREATE TABLE IF NOT EXISTS T1 ("
                         + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"

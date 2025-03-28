@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ParquetFiltersTest {
 
     @Test
-    public void testLong() {
+    void testLong() {
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(
@@ -79,7 +79,7 @@ class ParquetFiltersTest {
     }
 
     @Test
-    public void testString() {
+    void testString() {
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(

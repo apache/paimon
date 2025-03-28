@@ -66,7 +66,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for using file index in Spark. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-public class SparkFileIndexITCase extends SparkWriteITCase {
+class SparkFileIndexITCase extends SparkWriteITCase {
 
     protected FileIO fileIO = LocalFileIO.create();
     protected FileSystemCatalog fileSystemCatalog;
@@ -96,7 +96,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
     }
 
     @Test
-    public void testReadWriteTableWithBitmapIndex() throws Catalog.TableNotExistException {
+    void testReadWriteTableWithBitmapIndex() throws Catalog.TableNotExistException {
 
         spark.sql(
                 "CREATE TABLE T(a int) TBLPROPERTIES ("
@@ -142,7 +142,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
     }
 
     @Test
-    public void testReadWriteTableWithBitSliceIndex() throws Catalog.TableNotExistException {
+    void testReadWriteTableWithBitSliceIndex() throws Catalog.TableNotExistException {
 
         spark.sql(
                 "CREATE TABLE T(a int) TBLPROPERTIES ("

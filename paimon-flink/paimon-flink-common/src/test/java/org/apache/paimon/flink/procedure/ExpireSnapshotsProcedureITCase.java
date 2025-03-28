@@ -34,10 +34,10 @@ import java.sql.Timestamp;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link ExpireSnapshotsProcedure}. */
-public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
+class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testExpireSnapshotsProcedure() throws Exception {
+    void testExpireSnapshotsProcedure() throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999' )");
@@ -78,7 +78,7 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExpireSnapshotsAction() throws Exception {
+    void testExpireSnapshotsAction() throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999' )");

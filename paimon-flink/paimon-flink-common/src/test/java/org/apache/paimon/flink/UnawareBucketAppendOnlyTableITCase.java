@@ -68,17 +68,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed unaware-bucket table. */
-public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
+class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testReadEmpty() {
+    void testReadEmpty() {
         assertThat(batchSql("SELECT * FROM append_table")).isEmpty();
     }
 
     @Test
-    public void testReadWrite() {
+    void testReadWrite() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
@@ -95,7 +95,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSkipDedup() {
+    void testSkipDedup() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (1, 'AAA'), (2, 'BBB'), (3, 'BBB')");
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
@@ -116,7 +116,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIngestFromSource() {
+    void testIngestFromSource() {
         List<Row> input =
                 Arrays.asList(
                         Row.ofKind(RowKind.INSERT, 1, "AAA"),
@@ -149,7 +149,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNoCompactionInBatchMode() {
+    void testNoCompactionInBatchMode() {
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
 
@@ -211,7 +211,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCompactionInStreamingMode() throws Exception {
+    void testCompactionInStreamingMode() throws Exception {
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");
@@ -236,7 +236,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCompactionInStreamingModeWithMaxWatermark() throws Exception {
+    void testCompactionInStreamingModeWithMaxWatermark() throws Exception {
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");
@@ -270,28 +270,28 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRejectDelete() {
+    void testRejectDelete() {
         testRejectChanges(RowKind.DELETE);
     }
 
     @Test
-    public void testRejectUpdateBefore() {
+    void testRejectUpdateBefore() {
         testRejectChanges(RowKind.UPDATE_BEFORE);
     }
 
     @Test
-    public void testRejectUpdateAfter() {
+    void testRejectUpdateAfter() {
         testRejectChanges(RowKind.UPDATE_BEFORE);
     }
 
     @Test
-    public void testComplexType() {
+    void testComplexType() {
         batchSql("INSERT INTO complex_table VALUES (1, CAST(NULL AS MAP<INT, INT>))");
         assertThat(batchSql("SELECT * FROM complex_table")).containsExactly(Row.of(1, null));
     }
 
     @Test
-    public void testTimestampLzType() {
+    void testTimestampLzType() {
         sql("CREATE TABLE t_table (id INT, data TIMESTAMP_LTZ(3))");
         batchSql("INSERT INTO t_table VALUES (1, TIMESTAMP '2023-02-03 20:20:20')");
         assertThat(batchSql("SELECT * FROM t_table"))
@@ -305,7 +305,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     // test is not correct, append table may insert twice if always retry when file io fails
     @Test
-    public void testReadWriteFailRandom() throws Exception {
+    void testReadWriteFailRandom() throws Exception {
         setFailRate(100, 1000);
         int size = 1000;
         List<Row> results = new ArrayList<>();
@@ -333,7 +333,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadWriteFailRandomString() throws Exception {
+    void testReadWriteFailRandomString() throws Exception {
         setFailRate(100, 1000);
         int size = 1000;
         List<Row> results = new ArrayList<>();
@@ -362,14 +362,14 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLimit() {
+    void testLimit() {
         sql("INSERT INTO append_table VALUES (1, 'AAA')");
         sql("INSERT INTO append_table VALUES (2, 'BBB')");
         assertThat(sql("SELECT * FROM append_table LIMIT 1")).hasSize(1);
     }
 
     @Test
-    public void testFileIndex() {
+    void testFileIndex() {
         batchSql(
                 "INSERT INTO index_table VALUES (1, 'a', 'AAA'), (1, 'a', 'AAA'), (2, 'c', 'BBB'), (3, 'c', 'BBB')");
         batchSql(
@@ -381,7 +381,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Timeout(60)
     @Test
-    public void testStatelessWriter() throws Exception {
+    void testStatelessWriter() throws Exception {
         FileStoreTable table =
                 FileStoreTableFactory.create(
                         LocalFileIO.create(), new Path(path, "default.db/append_table"));
@@ -412,7 +412,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.PartitionSinkStrategy.class)
-    public void testPartitionStrategyForPartitionedTable(CoreOptions.PartitionSinkStrategy strategy)
+    void testPartitionStrategyForPartitionedTable(CoreOptions.PartitionSinkStrategy strategy)
             throws Catalog.TableNotExistException {
 
         int partitionNums = 5;

@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CompactionTaskSerializerTest {
 
     @Test
-    public void testCompactionTaskSerializer() throws IOException {
+    void testCompactionTaskSerializer() throws IOException {
         CompactionTaskSerializer serializer = new CompactionTaskSerializer();
         UnawareAppendCompactionTask task =
                 new UnawareAppendCompactionTask(row(0), randomNewFilesIncrement().newFiles());
@@ -45,7 +45,7 @@ public class CompactionTaskSerializerTest {
     }
 
     @Test
-    public void testMultiTableCompactionTaskSerializer() throws IOException {
+    void testMultiTableCompactionTaskSerializer() throws IOException {
         MultiTableCompactionTaskSerializer serializer = new MultiTableCompactionTaskSerializer();
         MultiTableUnawareAppendCompactionTask task =
                 new MultiTableUnawareAppendCompactionTask(

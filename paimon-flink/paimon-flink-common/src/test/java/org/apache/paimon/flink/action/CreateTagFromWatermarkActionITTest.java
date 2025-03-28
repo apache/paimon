@@ -29,15 +29,15 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CreateTagFromTimestampAction}. */
-public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
+class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         init(warehouse);
     }
 
     @Test
-    public void testCreateTagsFromSnapshotsWatermark() throws Exception {
+    void testCreateTagsFromSnapshotsWatermark() throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -103,7 +103,7 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
     }
 
     @Test
-    public void testCreateTagsFromTagsWatermark() throws Exception {
+    void testCreateTagsFromTagsWatermark() throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T ("
                         + " k STRING,"

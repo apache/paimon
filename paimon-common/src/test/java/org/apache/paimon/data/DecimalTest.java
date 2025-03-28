@@ -35,7 +35,7 @@ public class DecimalTest {
 
     @SuppressWarnings("ConstantConditions")
     @Test
-    public void testNormal() {
+    void testNormal() {
         BigDecimal bigDecimal1 = new BigDecimal("13145678.90123");
         BigDecimal bigDecimal2 = new BigDecimal("1234567890.0987654321");
         // fromUnscaledBytes
@@ -82,7 +82,7 @@ public class DecimalTest {
 
     @SuppressWarnings("ConstantConditions")
     @Test
-    public void testNotCompact() {
+    void testNotCompact() {
         Decimal decimal1 = Decimal.fromBigDecimal(new BigDecimal(10), 20, 0);
         Decimal decimal2 = Decimal.fromBigDecimal(new BigDecimal(15), 20, 0);
         assertThat(Decimal.fromBigDecimal(new BigDecimal(10), 20, 0).hashCode())
@@ -106,7 +106,7 @@ public class DecimalTest {
     }
 
     @Test
-    public void testToString() {
+    void testToString() {
         String val = "0.0000000000000000001";
         assertThat(castFrom(val, 39, val.length() - 2).toString()).isEqualTo(val);
         val = "123456789012345678901234567890123456789";

@@ -43,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DynamicBucketTableTest extends TableTestBase {
 
     @Test
-    public void testOverwriteDynamicBucketTable() throws Exception {
+    void testOverwriteDynamicBucketTable() throws Exception {
         createTableDefault();
 
         commitDefault(writeDataDefault(100, 100));

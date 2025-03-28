@@ -56,7 +56,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SchemaMergingUtilsTest {
 
     @Test
-    public void testMergeTableSchemas() {
+    void testMergeTableSchemas() {
         // Init the table schema
         DataField a = new DataField(0, "a", new IntType());
         DataField b = new DataField(1, "b", new DoubleType());
@@ -94,7 +94,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergeTableSchemaNotChanges() {
+    void testMergeTableSchemaNotChanges() {
         // Init the table schema
         DataField a = new DataField(0, "a", new IntType());
         DataField b = new DataField(1, "b", new DoubleType());
@@ -115,7 +115,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergeSchemas() {
+    void testMergeSchemas() {
         // This will test both `mergeSchemas` and `merge` methods.
         // Init the source schema
         DataField a = new DataField(0, "a", new IntType());
@@ -191,7 +191,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergeArrayTypes() {
+    void testMergeArrayTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
         DataType source = new ArrayType(false, new IntType());
@@ -220,7 +220,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergeMapTypes() {
+    void testMergeMapTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
         DataType source = new MapType(new VarCharType(VarCharType.MAX_LENGTH), new IntType());
@@ -252,7 +252,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergeMultisetTypes() {
+    void testMergeMultisetTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
         DataType source = new MultisetType(false, new IntType());
@@ -283,7 +283,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergeDecimalTypes() {
+    void testMergeDecimalTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
         DataType s1 = new DecimalType();
@@ -324,7 +324,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergeTypesWithLength() {
+    void testMergeTypesWithLength() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
         // BinaryType
@@ -446,7 +446,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergeTypesWithPrecision() {
+    void testMergeTypesWithPrecision() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
         // LocalZonedTimestampType
@@ -556,7 +556,7 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
-    public void testMergePrimitiveTypes() {
+    void testMergePrimitiveTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
         // declare the primitive source and target types

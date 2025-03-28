@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class BloomFilterTest {
 
     @Test
-    public void testOneSegmentBuilder() {
+    void testOneSegmentBuilder() {
         BloomFilter.Builder builder = BloomFilter.builder(100, 0.01);
         int[] inputs = generateRandomInts(100);
         for (int input : inputs) {
@@ -45,7 +45,7 @@ public class BloomFilterTest {
     }
 
     @Test
-    public void testEstimatedHashFunctions() {
+    void testEstimatedHashFunctions() {
         Assertions.assertThat(BloomFilter.builder(1000, 0.01).getFilter().numHashFunctions())
                 .isEqualTo(7);
         Assertions.assertThat(BloomFilter.builder(10_000, 0.01).getFilter().numHashFunctions())
@@ -63,7 +63,7 @@ public class BloomFilterTest {
     }
 
     @Test
-    public void testBloomNumBits() {
+    void testBloomNumBits() {
         Assertions.assertThat(BloomFilter.optimalNumOfBits(0, 0)).isEqualTo(0);
         Assertions.assertThat(BloomFilter.optimalNumOfBits(0, 1)).isEqualTo(0);
         Assertions.assertThat(BloomFilter.optimalNumOfBits(1, 1)).isEqualTo(0);
@@ -84,7 +84,7 @@ public class BloomFilterTest {
     }
 
     @Test
-    public void testBloomNumHashFunctions() {
+    void testBloomNumHashFunctions() {
         assertEquals(1, BloomFilter.optimalNumOfHashFunctions(-1, -1));
         assertEquals(1, BloomFilter.optimalNumOfHashFunctions(0, 0));
         assertEquals(1, BloomFilter.optimalNumOfHashFunctions(10, 0));
@@ -103,7 +103,7 @@ public class BloomFilterTest {
     }
 
     @Test
-    public void testBloomFilter() {
+    void testBloomFilter() {
         BloomFilter filter = new BloomFilter(100, 1024);
 
         // segment1

@@ -76,7 +76,7 @@ public abstract class TableTestBase {
     @TempDir public java.nio.file.Path tempPath;
 
     @BeforeEach
-    public void beforeEach() throws Catalog.DatabaseAlreadyExistException {
+    void beforeEach() throws Catalog.DatabaseAlreadyExistException {
         database = "default";
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(warehouse));
@@ -84,7 +84,7 @@ public abstract class TableTestBase {
     }
 
     @AfterEach
-    public void after() throws IOException {
+    void after() throws IOException {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempPath.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();

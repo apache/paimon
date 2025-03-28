@@ -44,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT case for overwrite data layout after changing num of bucket. */
-public class RescaleBucketITCase extends CatalogITCaseBase {
+class RescaleBucketITCase extends CatalogITCaseBase {
 
     private final String alterTableSql = "ALTER TABLE %s SET ('bucket' = '%d')";
 
@@ -60,12 +60,12 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRescaleCatalogTable() {
+    void testRescaleCatalogTable() {
         innerTest("fs_catalog", "T1");
     }
 
     @Test
-    public void testSuspendAndRecoverAfterRescaleOverwrite() throws Exception {
+    void testSuspendAndRecoverAfterRescaleOverwrite() throws Exception {
         // register a companion table T4 for T3
         executeBoth(
                 Arrays.asList(

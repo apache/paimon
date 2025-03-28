@@ -66,7 +66,7 @@ public class AppendOnlyTableCompactionTest {
     private final String commitUser = UUID.randomUUID().toString();
 
     @BeforeEach
-    public void createNegativeAppendOnlyTable() throws Exception {
+    void createNegativeAppendOnlyTable() throws Exception {
         FileIO fileIO = new LocalFileIO();
         path = new org.apache.paimon.fs.Path(tempDir.toString());
         tableSchema = new SchemaManager(fileIO, path).createTable(schema());
@@ -86,7 +86,7 @@ public class AppendOnlyTableCompactionTest {
     }
 
     @Test
-    public void noCompaction() throws Exception {
+    void noCompaction() throws Exception {
         List<CommitMessage> messages = writeCommit(10);
 
         messages.forEach(
@@ -96,7 +96,7 @@ public class AppendOnlyTableCompactionTest {
     }
 
     @Test
-    public void compactionTaskTest() throws Exception {
+    void compactionTaskTest() throws Exception {
         // commit 11 files
         List<CommitMessage> messages = writeCommit(11);
         commit(messages);
@@ -127,7 +127,7 @@ public class AppendOnlyTableCompactionTest {
     }
 
     @Test
-    public void testScanSkipBigFiles() throws Exception {
+    void testScanSkipBigFiles() throws Exception {
         List<CommitMessage> messages = writeCommit(11);
         commit(messages);
         tableSchema = tableSchema.copy(singletonMap("target-file-size", "1 b"));
@@ -136,7 +136,7 @@ public class AppendOnlyTableCompactionTest {
     }
 
     @Test
-    public void testCompactionLot() throws Exception {
+    void testCompactionLot() throws Exception {
         // test continuous compaction
         assertThat(snapshotManager.latestSnapshotId()).isNull();
 

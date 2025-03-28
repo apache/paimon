@@ -36,10 +36,10 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link AbstractFlinkTableFactory}. */
-public class AbstractFlinkTableFactoryTest {
+class AbstractFlinkTableFactoryTest {
 
     @Test
-    public void testSchemaEquals() {
+    void testSchemaEquals() {
         innerTest(RowType.of(false), RowType.of(true), true);
         innerTest(RowType.of(false), RowType.of(false, new VarCharType()), false);
         innerTest(
@@ -61,7 +61,7 @@ public class AbstractFlinkTableFactoryTest {
     }
 
     @Test
-    public void testGetDynamicOptions() {
+    void testGetDynamicOptions() {
         Configuration configuration = new Configuration();
         configuration.setString("k1", "v2");
         ObjectIdentifier identifier = ObjectIdentifier.of("catalog1", "db", "T");

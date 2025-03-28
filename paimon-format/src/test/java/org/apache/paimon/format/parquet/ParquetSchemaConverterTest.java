@@ -101,7 +101,7 @@ public class ParquetSchemaConverterTest {
                                                                     .notNull()))))));
 
     @Test
-    public void testPaimonParquetSchemaConvert() {
+    void testPaimonParquetSchemaConvert() {
         MessageType messageType = convertToParquetMessageType(ALL_TYPES);
         RowType rowType = convertToPaimonRowType(messageType);
         assertThat(ALL_TYPES).isEqualTo(rowType);

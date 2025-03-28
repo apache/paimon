@@ -55,7 +55,7 @@ import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_Q
 import static org.apache.paimon.operation.metrics.CompactionMetrics.COMPACTION_THREAD_BUSY;
 
 /** Test for {@link UnawareBucketCompactor}. */
-public class UnawareBucketCompactorTest {
+class UnawareBucketCompactorTest {
 
     @TempDir private Path dir;
     private String tableName = "Orders1";
@@ -63,7 +63,7 @@ public class UnawareBucketCompactorTest {
     private Catalog catalog;
 
     @Test
-    public void testGaugeCollection() throws Exception {
+    void testGaugeCollection() throws Exception {
         createTable();
         ExecutorService executorService =
                 Executors.newSingleThreadScheduledExecutor(

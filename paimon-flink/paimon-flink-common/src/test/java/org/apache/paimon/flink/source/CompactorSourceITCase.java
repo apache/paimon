@@ -65,7 +65,7 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactorSourceBuilder}. */
-public class CompactorSourceITCase extends AbstractTestBase {
+class CompactorSourceITCase extends AbstractTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -80,14 +80,14 @@ public class CompactorSourceITCase extends AbstractTestBase {
     private String commitUser;
 
     @BeforeEach
-    public void before() throws IOException {
+    void before() throws IOException {
         tablePath = new Path(getTempDirPath());
         commitUser = UUID.randomUUID().toString();
     }
 
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
-    public void testBatchRead(boolean defaultOptions) throws Exception {
+    void testBatchRead(boolean defaultOptions) throws Exception {
         FileStoreTable table = createFileStoreTable();
         if (!defaultOptions) {
             // change options to test whether CompactorSourceBuilder work normally
@@ -133,7 +133,7 @@ public class CompactorSourceITCase extends AbstractTestBase {
 
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
-    public void testStreamingRead(boolean defaultOptions) throws Exception {
+    void testStreamingRead(boolean defaultOptions) throws Exception {
         FileStoreTable table = createFileStoreTable();
         if (!defaultOptions) {
             // change options to test whether CompactorSourceBuilder work normally
@@ -207,7 +207,7 @@ public class CompactorSourceITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testStreamingPartitionSpec() throws Exception {
+    void testStreamingPartitionSpec() throws Exception {
         testPartitionSpec(
                 true,
                 getSpecifiedPartitions(),
@@ -219,7 +219,7 @@ public class CompactorSourceITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchPartitionSpec() throws Exception {
+    void testBatchPartitionSpec() throws Exception {
         testPartitionSpec(
                 false,
                 getSpecifiedPartitions(),
@@ -290,7 +290,7 @@ public class CompactorSourceITCase extends AbstractTestBase {
 
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
-    public void testHistoryPartitionRead(boolean defaultOptions) throws Exception {
+    void testHistoryPartitionRead(boolean defaultOptions) throws Exception {
         Duration partitionIdleTime = Duration.ofMillis(3000);
         FileStoreTable table = createFileStoreTable();
         if (!defaultOptions) {

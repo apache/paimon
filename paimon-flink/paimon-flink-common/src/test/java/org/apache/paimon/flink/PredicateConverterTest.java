@@ -73,7 +73,7 @@ public class PredicateConverterTest {
 
     @MethodSource("provideResolvedExpression")
     @ParameterizedTest
-    public void testVisitAndAutoTypeInference(ResolvedExpression expression, Predicate expected) {
+    void testVisitAndAutoTypeInference(ResolvedExpression expression, Predicate expected) {
         if (expression instanceof CallExpression) {
             assertThat(CONVERTER.visit((CallExpression) expression).toString())
                     .isEqualTo(expected.toString());
@@ -256,7 +256,7 @@ public class PredicateConverterTest {
 
     @MethodSource("provideLikeExpressions")
     @ParameterizedTest
-    public void testStartsWith(
+    void testStartsWith(
             CallExpression callExpression,
             List<Object[]> valuesList,
             List<Boolean> expectedForValues,
@@ -422,7 +422,7 @@ public class PredicateConverterTest {
     }
 
     @Test
-    public void testUnsupportedExpression() {
+    void testUnsupportedExpression() {
         CallExpression expression =
                 call(
                         BuiltInFunctionDefinitions.AND,
@@ -443,7 +443,7 @@ public class PredicateConverterTest {
     }
 
     @Test
-    public void testUnsupportedStartsPatternForLike() {
+    void testUnsupportedStartsPatternForLike() {
         PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         // starts pattern with '_' as wildcard
         assertThatThrownBy(
@@ -543,7 +543,7 @@ public class PredicateConverterTest {
     }
 
     @Test
-    public void testUnsupportedEndsPatternForLike() {
+    void testUnsupportedEndsPatternForLike() {
         PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         // ends pattern with '%' as wildcard
         assertThatThrownBy(
@@ -643,7 +643,7 @@ public class PredicateConverterTest {
     }
 
     @Test
-    public void testUnsupportedEqualsPatternForLike() {
+    void testUnsupportedEqualsPatternForLike() {
         PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         // equals pattern
         assertThatThrownBy(
@@ -679,7 +679,7 @@ public class PredicateConverterTest {
     }
 
     @Test
-    public void testUnsupportedMiddlePatternForLike() {
+    void testUnsupportedMiddlePatternForLike() {
         PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         // middle pattern with '%' as wildcard
         assertThatThrownBy(
@@ -771,7 +771,7 @@ public class PredicateConverterTest {
     }
 
     @Test
-    public void testUnsupportedType() {
+    void testUnsupportedType() {
         PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         DataType structType = DataTypes.ROW(DataTypes.INT()).bridgedTo(Row.class);
         CallExpression expression =
@@ -784,7 +784,7 @@ public class PredicateConverterTest {
     }
 
     @Test
-    public void testUnsupportedFieldReferenceExpression() {
+    void testUnsupportedFieldReferenceExpression() {
         PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
         DataType structType = DataTypes.ROW(DataTypes.INT()).bridgedTo(Row.class);
         assertThatThrownBy(() -> field(0, structType).accept(converter))

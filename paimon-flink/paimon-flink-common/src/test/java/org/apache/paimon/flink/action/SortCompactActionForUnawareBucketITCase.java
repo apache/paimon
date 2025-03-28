@@ -52,7 +52,7 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Order Rewrite Action tests for {@link SortCompactAction}. */
-public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
+class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
 
     private static final Random RANDOM = new Random();
 
@@ -77,7 +77,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testOrderBy() throws Exception {
+    void testOrderBy() throws Exception {
         prepareData(300, 1);
         Assertions.assertThatCode(
                         () ->
@@ -90,7 +90,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testOrderResult() throws Exception {
+    void testOrderResult() throws Exception {
         prepareData(300, 2);
         Assertions.assertThatCode(() -> order(Arrays.asList("f1", "f2")))
                 .doesNotThrowAnyException();
@@ -146,7 +146,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testAllBasicTypeWorksWithZorder() throws Exception {
+    void testAllBasicTypeWorksWithZorder() throws Exception {
         prepareData(300, 1);
         // All the basic types should support zorder
         Assertions.assertThatCode(
@@ -160,7 +160,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testAllBasicTypeWorksWithHilbert() throws Exception {
+    void testAllBasicTypeWorksWithHilbert() throws Exception {
         prepareData(300, 1);
         // All the basic types should support hilbert
         Assertions.assertThatCode(
@@ -174,7 +174,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testZorderActionWorks() throws Exception {
+    void testZorderActionWorks() throws Exception {
         prepareData(300, 2);
         PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
         Predicate predicate = predicateBuilder.between(1, 100, 200);
@@ -200,7 +200,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testHilbertActionWorks() throws Exception {
+    void testHilbertActionWorks() throws Exception {
         prepareData(300, 2);
         PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
         Predicate predicate = predicateBuilder.between(1, 100, 200);
@@ -227,7 +227,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testCompareZorderAndOrder() throws Exception {
+    void testCompareZorderAndOrder() throws Exception {
         prepareData(300, 10);
         zorder(Arrays.asList("f2", "f1"));
 
@@ -254,7 +254,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testCompareHilbertAndOrder() throws Exception {
+    void testCompareHilbertAndOrder() throws Exception {
         prepareData(300, 10);
 
         hilbert(Arrays.asList("f2", "f1"));
@@ -281,7 +281,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testTableConf() throws Exception {
+    void testTableConf() throws Exception {
         createTable();
         SortCompactAction sortCompactAction =
                 new SortCompactAction(
@@ -302,7 +302,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testRandomSuffixWorks() throws Exception {
+    void testRandomSuffixWorks() throws Exception {
         prepareSameData(200);
         Assertions.assertThatCode(() -> order(Collections.singletonList("f1")))
                 .doesNotThrowAnyException();
@@ -318,7 +318,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testSortCompactionOnEmptyData() throws Exception {
+    void testSortCompactionOnEmptyData() throws Exception {
         createTable();
         SortCompactAction sortCompactAction =
                 new SortCompactAction(
@@ -377,7 +377,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testvalidSampleConfig() throws Exception {
+    void testvalidSampleConfig() throws Exception {
         prepareData(300, 1);
         {
             ArrayList<String> extraCompactionConfig =

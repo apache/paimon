@@ -72,7 +72,7 @@ public class ThinModeReadWriteTest extends TableTestBase {
     }
 
     @Test
-    public void testThinModeWorks() throws Exception {
+    void testThinModeWorks() throws Exception {
 
         InternalRow[] datas = datas(200000);
 
@@ -91,7 +91,7 @@ public class ThinModeReadWriteTest extends TableTestBase {
     }
 
     @Test
-    public void testAllFormatReadWrite() throws Exception {
+    void testAllFormatReadWrite() throws Exception {
         testFormat("orc");
         testFormat("parquet");
         testFormat("avro");

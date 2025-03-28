@@ -39,7 +39,7 @@ import java.util.Arrays;
 public class OneElementFieldVectorGeneratorTest {
 
     @Test
-    public void testFunction() {
+    void testFunction() {
         try (RootAllocator rootAllocator = new RootAllocator()) {
             DataField dataField = new DataField(0, "id", DataTypes.STRING());
             GenericRow genericRow = new GenericRow(1);

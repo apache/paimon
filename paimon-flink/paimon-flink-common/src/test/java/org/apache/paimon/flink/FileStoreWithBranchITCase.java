@@ -37,7 +37,7 @@ public class FileStoreWithBranchITCase extends FileStoreITCase {
     }
 
     @BeforeAll
-    public static void before() {
+    static void before() {
         branch = "testBranch";
     }
 }

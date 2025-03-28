@@ -62,7 +62,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SplitTest {
 
     @Test
-    public void testSplitMergedRowCount() {
+    void testSplitMergedRowCount() {
         // not rawConvertible
         List<DataFileMeta> dataFiles =
                 Arrays.asList(newDataFile(1000L), newDataFile(2000L), newDataFile(3000L));
@@ -97,7 +97,7 @@ public class SplitTest {
     }
 
     @Test
-    public void testSplitMinMaxValue() {
+    void testSplitMinMaxValue() {
         Map<Long, List<DataField>> schemas = new HashMap<>();
 
         Timestamp minTs = Timestamp.fromLocalDateTime(LocalDateTime.parse("2025-01-01T00:00:00"));
@@ -161,7 +161,7 @@ public class SplitTest {
     }
 
     @Test
-    public void testSerializer() throws IOException {
+    void testSerializer() throws IOException {
         DataFileTestDataGenerator gen = DataFileTestDataGenerator.builder().build();
         DataFileTestDataGenerator.Data data = gen.next();
         List<DataFileMeta> files = new ArrayList<>();
@@ -185,7 +185,7 @@ public class SplitTest {
     }
 
     @Test
-    public void testSerializerCompatibleV1() throws Exception {
+    void testSerializerCompatibleV1() throws Exception {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -248,7 +248,7 @@ public class SplitTest {
     }
 
     @Test
-    public void testSerializerCompatibleV2() throws Exception {
+    void testSerializerCompatibleV2() throws Exception {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -311,7 +311,7 @@ public class SplitTest {
     }
 
     @Test
-    public void testSerializerCompatibleV3() throws Exception {
+    void testSerializerCompatibleV3() throws Exception {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -378,7 +378,7 @@ public class SplitTest {
     }
 
     @Test
-    public void testSerializerCompatibleV4() throws Exception {
+    void testSerializerCompatibleV4() throws Exception {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),
@@ -445,7 +445,7 @@ public class SplitTest {
     }
 
     @Test
-    public void testSerializerCompatibleV5() throws Exception {
+    void testSerializerCompatibleV5() throws Exception {
         SimpleStats keyStats =
                 new SimpleStats(
                         singleColumn("min_key"),

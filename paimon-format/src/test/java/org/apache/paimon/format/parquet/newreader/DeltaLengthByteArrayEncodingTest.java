@@ -41,14 +41,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * additional information regarding copyright ownership. */
 
 /** Test for delta length byte array encoding. */
-public class DeltaLengthByteArrayEncodingTest {
+class DeltaLengthByteArrayEncodingTest {
 
     private final String[] values = new String[] {"parquet", "hadoop", "mapreduce"};
     private DeltaLengthByteArrayValuesWriter writer;
     private VectorizedDeltaLengthByteArrayReader reader;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         writer =
                 new DeltaLengthByteArrayValuesWriter(
                         64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
@@ -56,27 +56,27 @@ public class DeltaLengthByteArrayEncodingTest {
     }
 
     @Test
-    public void testSerialization() throws Exception {
+    void testSerialization() throws Exception {
         writeData(writer, values);
         readAndValidate(reader, writer.getBytes().toInputStream(), values.length, values);
     }
 
     @Test
-    public void testRandomStrings() throws Exception {
+    void testRandomStrings() throws Exception {
         String[] values = Utils.getRandomStringSamples(1000, 32);
         writeData(writer, values);
         readAndValidate(reader, writer.getBytes().toInputStream(), values.length, values);
     }
 
     @Test
-    public void testRandomStringsWithEmptyStrings() throws Exception {
+    void testRandomStringsWithEmptyStrings() throws Exception {
         String[] values = getRandomStringSamplesWithEmptyStrings(1000, 32);
         writeData(writer, values);
         readAndValidate(reader, writer.getBytes().toInputStream(), values.length, values);
     }
 
     @Test
-    public void testSkipWithRandomStrings() throws Exception {
+    void testSkipWithRandomStrings() throws Exception {
         String[] values = Utils.getRandomStringSamples(1000, 32);
         writeData(writer, values);
         reader.initFromPage(values.length, writer.getBytes().toInputStream());
@@ -102,7 +102,7 @@ public class DeltaLengthByteArrayEncodingTest {
     }
 
     @Test
-    public void testLengths() throws Exception {
+    void testLengths() throws Exception {
         VectorizedDeltaBinaryPackedReader lenReader = new VectorizedDeltaBinaryPackedReader();
         writeData(writer, values);
 

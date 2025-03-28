@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link Expression.TruncateComputer}. */
-public class TruncateComputerTest {
+class TruncateComputerTest {
 
     private static Object[][] prepareData() {
         return new Object[][] {
@@ -103,7 +103,7 @@ public class TruncateComputerTest {
     }
 
     @Test
-    public void testTruncate() {
+    void testTruncate() {
         Object[][] testData = prepareData();
         for (int i = 0; i < testData.length; i++) {
             String field = (String) testData[i][0];
@@ -119,7 +119,7 @@ public class TruncateComputerTest {
     }
 
     @Test
-    public void testTruncateWithException() {
+    void testTruncateWithException() {
         String fieldReference = "computedColumnField";
         DataType dataType = new CharType(true, 5);
         Expression.TruncateComputer truncateComputer =

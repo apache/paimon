@@ -42,7 +42,7 @@ import java.util.Collections;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for changelog mode with flink source and sink. */
-public class ChangelogModeTest {
+class ChangelogModeTest {
 
     @TempDir java.nio.file.Path temp;
 
@@ -51,7 +51,7 @@ public class ChangelogModeTest {
     private Path path;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         path = new Path(temp.toUri().toString());
     }
 
@@ -75,19 +75,19 @@ public class ChangelogModeTest {
     }
 
     @Test
-    public void testDefault() throws Exception {
+    void testDefault() throws Exception {
         test(new Options(), ChangelogMode.upsert(), ChangelogMode.upsert());
     }
 
     @Test
-    public void testInputChangelogProducer() throws Exception {
+    void testInputChangelogProducer() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
         test(options, ChangelogMode.all(), ChangelogMode.all());
     }
 
     @Test
-    public void testChangelogModeAll() throws Exception {
+    void testChangelogModeAll() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.LOG_CHANGELOG_MODE, CoreOptions.LogChangelogMode.ALL);
         test(options, ChangelogMode.all(), ChangelogMode.all());

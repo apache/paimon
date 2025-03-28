@@ -59,7 +59,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CastExecutorTest {
 
     @Test
-    public void testNumericToNumeric() {
+    void testNumericToNumeric() {
         // byte to other numeric
         compareCastResult(
                 CastExecutors.resolve(new TinyIntType(false), new SmallIntType(false)),
@@ -111,7 +111,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testNumericToTimestamp() {
+    void testNumericToTimestamp() {
         compareCastResult(
                 CastExecutors.resolve(new BigIntType(false), new TimestampType(3)),
                 1721898748,
@@ -128,7 +128,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testNumericToDecimal() {
+    void testNumericToDecimal() {
         compareCastResult(
                 CastExecutors.resolve(new TinyIntType(false), new DecimalType(10, 2)),
                 (byte) 1,
@@ -156,7 +156,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testDecimalToDecimal() {
+    void testDecimalToDecimal() {
         compareCastResult(
                 CastExecutors.resolve(new DecimalType(10, 4), new DecimalType(10, 2)),
                 DecimalUtils.castFrom(1.23456D, 10, 4),
@@ -168,7 +168,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testDecimalToNumeric() {
+    void testDecimalToNumeric() {
         compareCastResult(
                 CastExecutors.resolve(new DecimalType(10, 4), new FloatType(false)),
                 DecimalUtils.castFrom(1.23456D, 10, 4),
@@ -180,7 +180,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testBooleanToNumeric() {
+    void testBooleanToNumeric() {
         compareCastResult(
                 CastExecutors.resolve(new BooleanType(false), new TinyIntType(false)),
                 true,
@@ -204,7 +204,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testNumericToBoolean() {
+    void testNumericToBoolean() {
         compareCastResult(
                 CastExecutors.resolve(new TinyIntType(false), new BooleanType(false)),
                 (byte) 1,
@@ -222,7 +222,7 @@ public class CastExecutorTest {
     // To string rules
 
     @Test
-    public void testNumericToString() {
+    void testNumericToString() {
         // byte to string
         compareCastResult(
                 CastExecutors.resolve(new TinyIntType(false), new VarCharType(5)),
@@ -267,7 +267,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testBooleanToString() {
+    void testBooleanToString() {
         compareCastResult(
                 CastExecutors.resolve(new BooleanType(false), new CharType(5)),
                 true,
@@ -279,7 +279,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testTimestampToString() {
+    void testTimestampToString() {
         long mills = System.currentTimeMillis();
         Timestamp timestamp = Timestamp.fromEpochMillis(mills);
         compareCastResult(
@@ -296,7 +296,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testTimestampToNumeric() {
+    void testTimestampToNumeric() {
         long mills = System.currentTimeMillis() / 1000 * 1000;
         Timestamp timestamp1 = Timestamp.fromEpochMillis(mills);
         long millisecond = timestamp1.getMillisecond();
@@ -349,7 +349,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testTimeToString() {
+    void testTimeToString() {
         compareCastResult(
                 CastExecutors.resolve(new TimeType(2), VarCharType.STRING_TYPE),
                 36115615,
@@ -357,7 +357,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testDateToString() {
+    void testDateToString() {
         compareCastResult(
                 CastExecutors.resolve(new DateType(), VarCharType.STRING_TYPE),
                 19516,
@@ -365,7 +365,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToString() {
+    void testStringToString() {
         // varchar(10) to varchar(5)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new VarCharType(5)),
@@ -418,7 +418,7 @@ public class CastExecutorTest {
     // From string rules
 
     @Test
-    public void testStringToBoolean() {
+    void testStringToBoolean() {
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
                 BinaryString.fromString("t"),
@@ -476,7 +476,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToDecimal() {
+    void testStringToDecimal() {
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(5), new DecimalType(5, 2)),
                 BinaryString.fromString("1.233"),
@@ -484,7 +484,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToNumeric() {
+    void testStringToNumeric() {
         // string to byte
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(5), new TinyIntType(false)),
@@ -523,7 +523,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToDate() {
+    void testStringToDate() {
         String date = "2023-06-06";
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(25), new DateType()),
@@ -532,7 +532,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToTime() {
+    void testStringToTime() {
         String date = "09:30:00.0";
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(25), new TimeType(2)),
@@ -541,7 +541,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToTimestamp() {
+    void testStringToTimestamp() {
         String date = "2017-12-12 09:30:00.0";
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(25), new TimestampType(3)),
@@ -555,7 +555,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToBinary() {
+    void testStringToBinary() {
         // string(10) to binary(5)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new VarBinaryType(5)),
@@ -570,7 +570,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testBinaryToString() {
+    void testBinaryToString() {
         // binary(5) to string(10)
         compareCastResult(
                 CastExecutors.resolve(new VarBinaryType(5), new VarCharType(10)),
@@ -587,7 +587,7 @@ public class CastExecutorTest {
     // To binary rules
 
     @Test
-    public void testBinaryToBinary() {
+    void testBinaryToBinary() {
         // binary(10) to binary(5)
         compareCastResult(
                 CastExecutors.resolve(new BinaryType(10), new BinaryType(5)),
@@ -616,7 +616,7 @@ public class CastExecutorTest {
     // Date/Time/Timestamp rules
 
     @Test
-    public void testTimestampData() {
+    void testTimestampData() {
         long mills = System.currentTimeMillis();
         Timestamp timestamp = Timestamp.fromEpochMillis(mills);
 
@@ -668,7 +668,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testDateToTimestamp() {
+    void testDateToTimestamp() {
         String date = "2023-06-06";
         compareCastResult(
                 CastExecutors.resolve(new DateType(), new TimestampType(5)),
@@ -682,7 +682,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testTimeToTimestamp() {
+    void testTimeToTimestamp() {
         String time = "12:00:00.123";
         compareCastResult(
                 CastExecutors.resolve(new TimeType(), new TimestampType(3)),
@@ -691,7 +691,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testArrayToString() {
+    void testArrayToString() {
         ArrayType arrayType = new ArrayType(DataTypes.INT());
         GenericArray genericArray = new GenericArray(new Integer[] {1, null, 2});
         compareCastResult(
@@ -701,7 +701,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testMapToString() {
+    void testMapToString() {
         MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
         Map<Object, Object> javaMap = new HashMap<>();
         javaMap.put(1, BinaryString.fromString("i"));
@@ -716,7 +716,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testRowToString() {
+    void testRowToString() {
         RowType rowType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "f0", DataTypes.INT()),

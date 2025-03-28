@@ -81,7 +81,7 @@ public abstract class SortBufferWriteBufferTestBase {
     protected abstract MergeFunction<KeyValue> createMergeFunction();
 
     @Test
-    public void testAndClear() throws IOException {
+    void testAndClear() throws IOException {
         testRandom(100);
         table.clear();
         checkState(
@@ -91,7 +91,7 @@ public abstract class SortBufferWriteBufferTestBase {
     }
 
     @Test
-    public void testOverflow() throws IOException {
+    void testOverflow() throws IOException {
         int numEof = 0;
         try {
             testRandom(100000);

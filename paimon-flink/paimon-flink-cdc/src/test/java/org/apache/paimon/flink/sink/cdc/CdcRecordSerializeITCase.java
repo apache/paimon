@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CdcRecordSerializeITCase {
 
     @Test
-    public void testCdcRecordKryoSerialize() throws Exception {
+    void testCdcRecordKryoSerialize() throws Exception {
         KryoSerializer<RichCdcMultiplexRecord> kr =
                 createFlinkKryoSerializer(RichCdcMultiplexRecord.class);
         CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
@@ -79,7 +79,7 @@ public class CdcRecordSerializeITCase {
     }
 
     @Test
-    public void testUnmodifiableListKryoSerialize() throws Exception {
+    void testUnmodifiableListKryoSerialize() throws Exception {
         KryoSerializer<List> kryoSerializer = createFlinkKryoSerializer(List.class);
         RowType.Builder rowType = RowType.builder();
         rowType.field("id", new BigIntType());

@@ -31,10 +31,10 @@ import java.math.BigDecimal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link PaimonDecimalObjectInspector}. */
-public class PaimonDecimalObjectInspectorTest {
+class PaimonDecimalObjectInspectorTest {
 
     @Test
-    public void testCategoryAndClass() {
+    void testCategoryAndClass() {
         PaimonDecimalObjectInspector oi = new PaimonDecimalObjectInspector(5, 3);
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
@@ -46,7 +46,7 @@ public class PaimonDecimalObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveJavaObject() {
+    void testGetPrimitiveJavaObject() {
         PaimonDecimalObjectInspector oi = new PaimonDecimalObjectInspector(5, 3);
 
         Decimal input = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
@@ -56,7 +56,7 @@ public class PaimonDecimalObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveWritableObject() {
+    void testGetPrimitiveWritableObject() {
         PaimonDecimalObjectInspector oi = new PaimonDecimalObjectInspector(5, 3);
 
         Decimal input = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
@@ -66,7 +66,7 @@ public class PaimonDecimalObjectInspectorTest {
     }
 
     @Test
-    public void testCopyObject() {
+    void testCopyObject() {
         PaimonDecimalObjectInspector oi = new PaimonDecimalObjectInspector(5, 3);
 
         Decimal input1 = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);

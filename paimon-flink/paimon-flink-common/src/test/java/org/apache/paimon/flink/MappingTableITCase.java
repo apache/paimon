@@ -36,19 +36,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for mapping table api. */
-public class MappingTableITCase extends AbstractTestBase {
+class MappingTableITCase extends AbstractTestBase {
 
     private TableEnvironment tEnv;
     private String path;
 
     @BeforeEach
-    public void before() throws IOException {
+    void before() throws IOException {
         tEnv = tableEnvironmentBuilder().batchMode().build();
         path = getTempDirPath();
     }
 
     @Test
-    public void testCreateEmptyMappingTable() {
+    void testCreateEmptyMappingTable() {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
@@ -61,7 +61,7 @@ public class MappingTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testCreateMappingTable() throws ExecutionException, InterruptedException {
+    void testCreateMappingTable() throws ExecutionException, InterruptedException {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
@@ -81,7 +81,7 @@ public class MappingTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testCreateTemporaryTableRepeat() throws Exception {
+    void testCreateTemporaryTableRepeat() throws Exception {
         for (int i = 0; i < 5; i++) {
             tEnv.executeSql(
                     String.format(
@@ -94,7 +94,7 @@ public class MappingTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testCreateTemporaryTableConflict() throws Exception {
+    void testCreateTemporaryTableConflict() throws Exception {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("

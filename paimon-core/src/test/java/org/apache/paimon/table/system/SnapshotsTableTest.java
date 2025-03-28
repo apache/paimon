@@ -90,7 +90,7 @@ public class SnapshotsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadSnapshotsFromLatest() throws Exception {
+    void testReadSnapshotsFromLatest() throws Exception {
         List<InternalRow> expectedRow = getExpectedResult(new long[] {1, 2});
         List<InternalRow> result = read(snapshotsTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);

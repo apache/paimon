@@ -24,10 +24,10 @@ import java.util.Arrays;
 import java.util.UUID;
 
 /** Test for currently supported data types. */
-public class TypeE2eTest extends E2eTestBase {
+class TypeE2eTest extends E2eTestBase {
 
     @Test
-    public void testAllTypesAsKey() throws Exception {
+    void testAllTypesAsKey() throws Exception {
         String schema =
                 String.join(
                         "\n",
@@ -102,7 +102,7 @@ public class TypeE2eTest extends E2eTestBase {
     }
 
     @Test
-    public void testAllTypesAsValue() throws Exception {
+    void testAllTypesAsValue() throws Exception {
         String schema =
                 String.join(
                         "\n",

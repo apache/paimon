@@ -57,7 +57,7 @@ public abstract class CommitterOperatorTestBase {
     protected Path tablePath;
 
     @BeforeEach
-    public void before() {
+    void before() {
         tablePath = new Path(tempDir.toString());
     }
 

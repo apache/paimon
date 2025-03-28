@@ -122,7 +122,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     @TempDir public static java.nio.file.Path externalPath1;
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         init(getTempDirPath());
     }
 
@@ -131,7 +131,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testBatchReadWriteWithPartitionedRecordsWithPk() throws Exception {
+    void testBatchReadWriteWithPartitionedRecordsWithPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // part = 2022-01-01
@@ -223,7 +223,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathRoundRobinStrategy()
+    void testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathRoundRobinStrategy()
             throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(
@@ -233,7 +233,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathSpecificFStrategy()
+    void testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathSpecificFStrategy()
             throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(
@@ -337,7 +337,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testNaNType() throws Exception {
+    void testNaNType() throws Exception {
         bEnv.executeSql(
                 "CREATE TEMPORARY TABLE S ( a DOUBLE,b DOUBLE,c STRING) WITH ( 'connector' = 'filesystem', 'format'='json' , 'path' ='"
                         + warehouse
@@ -374,7 +374,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchReadWriteWithPartitionedRecordsWithoutPk() throws Exception {
+    void testBatchReadWriteWithPartitionedRecordsWithoutPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         // dt = 2022-01-01
@@ -438,7 +438,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchReadWriteWithNonPartitionedRecordsWithPk() throws Exception {
+    void testBatchReadWriteWithNonPartitionedRecordsWithPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", 102L),
@@ -492,7 +492,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchReadWriteWithNonPartitionedRecordsWithoutPk() throws Exception {
+    void testBatchReadWriteWithNonPartitionedRecordsWithoutPk() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", 102L),
@@ -556,7 +556,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testStreamingReadWriteWithPartitionedRecordsWithPk() throws Exception {
+    void testStreamingReadWriteWithPartitionedRecordsWithPk() throws Exception {
         // file store continuous read
         // will not merge, at least collect two records
         List<Row> initialRecords =
@@ -693,7 +693,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testDynamicOverwrite() throws Exception {
+    void testDynamicOverwrite() throws Exception {
         String table =
                 createTable(
                         Arrays.asList("pk INT", "part0 INT", "part1 STRING", "v STRING"),
@@ -763,7 +763,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testPurgeTableUsingBatchOverWrite() throws Exception {
+    void testPurgeTableUsingBatchOverWrite() throws Exception {
         String table =
                 createTable(
                         Arrays.asList("k0 INT", "k1 STRING", "v STRING"),
@@ -776,7 +776,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testPurgePartitionUsingBatchOverWrite() throws Exception {
+    void testPurgePartitionUsingBatchOverWrite() throws Exception {
         List<String> fieldsSpec = Arrays.asList("k0 INT", "k1 STRING", "v STRING");
 
         // single partition key
@@ -840,7 +840,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testStreamingReadOverwriteWithPartitionedRecords() throws Exception {
+    void testStreamingReadOverwriteWithPartitionedRecords() throws Exception {
         String table =
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt String"),
@@ -886,7 +886,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testStreamingReadOverwriteWithoutPartitionedRecords() throws Exception {
+    void testStreamingReadOverwriteWithoutPartitionedRecords() throws Exception {
         String table =
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
@@ -923,7 +923,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testStreamingReadOverwriteWithDeleteRecords() throws Exception {
+    void testStreamingReadOverwriteWithDeleteRecords() throws Exception {
         String table =
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
@@ -960,7 +960,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testUnsupportStreamingReadOverwriteWithoutPk() {
+    void testUnsupportStreamingReadOverwriteWithoutPk() {
         assertThatThrownBy(
                         () ->
                                 createTable(
@@ -981,7 +981,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testLike() throws Exception {
+    void testLike() throws Exception {
         String table =
                 createTable(
                         Arrays.asList("f0 INT", "f1 STRING"),
@@ -1050,7 +1050,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testIn() throws Exception {
+    void testIn() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow("+I", 1, "aaa"),
@@ -1121,7 +1121,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testUnsupportedPredicate() throws Exception {
+    void testUnsupportedPredicate() throws Exception {
         String table =
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
@@ -1151,7 +1151,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testSourceParallelism() throws Exception {
+    void testSourceParallelism() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", 102L),
@@ -1223,7 +1223,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testInferParallelism() throws Exception {
+    void testInferParallelism() throws Exception {
         String table =
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
@@ -1365,14 +1365,14 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
     @ParameterizedTest
     @MethodSource("testSinkParallelismParameters")
-    public void testSinkParallelism(
+    void testSinkParallelism(
             boolean isFixedBucket, boolean hasPrimaryKey, boolean isSinkParallelismSet)
             throws Exception {
         testSinkParallelism(isFixedBucket, hasPrimaryKey, isSinkParallelismSet ? 23 : null);
     }
 
     @Test
-    public void testChangeBucketNumber() throws Exception {
+    void testChangeBucketNumber() throws Exception {
         String table = "MyTable_" + UUID.randomUUID();
         bEnv.executeSql(
                 String.format(
@@ -1397,7 +1397,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testStreamingInsertOverwrite() {
+    void testStreamingInsertOverwrite() {
         String table =
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt String"),
@@ -1416,7 +1416,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testPhysicalColumnComments() {
+    void testPhysicalColumnComments() {
         String ddl = "CREATE TABLE T(a INT COMMENT 'comment of a', b INT);";
         bEnv.executeSql(ddl);
 
@@ -1432,7 +1432,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testComputedColumnComments() {
+    void testComputedColumnComments() {
         String ddl = "CREATE TABLE T(a INT , b INT, c AS a + b COMMENT 'computed');";
         bEnv.executeSql(ddl);
 
@@ -1448,7 +1448,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testCleanedSchemaOptions() {
+    void testCleanedSchemaOptions() {
         String ddl =
                 "CREATE TABLE T (\n"
                         + "id INT,\n"
@@ -1486,7 +1486,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testReadFromOldStyleSchemaOptions() throws Exception {
+    void testReadFromOldStyleSchemaOptions() throws Exception {
         Map<String, String> oldStyleOptions = new HashMap<>();
         oldStyleOptions.put("schema.0.name", "id");
         oldStyleOptions.put("schema.0.data-type", "INT NOT NULL");
@@ -1537,7 +1537,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"deduplicate", "partial-update"})
-    public void testUpdateWithPrimaryKey(String mergeEngine) throws Exception {
+    void testUpdateWithPrimaryKey(String mergeEngine) throws Exception {
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
         options.put(MERGE_ENGINE.key(), mergeEngine);
@@ -1586,7 +1586,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testDefaultValueWithoutPrimaryKey() throws Exception {
+    void testDefaultValueWithoutPrimaryKey() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(
                 CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
@@ -1621,8 +1621,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.MergeEngine.class)
-    public void testDefaultValueWithPrimaryKey(CoreOptions.MergeEngine mergeEngine)
-            throws Exception {
+    void testDefaultValueWithPrimaryKey(CoreOptions.MergeEngine mergeEngine) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(
                 CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
@@ -1657,7 +1656,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testUpdateWithoutPrimaryKey() throws Exception {
+    void testUpdateWithoutPrimaryKey() throws Exception {
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
         String table =
@@ -1700,7 +1699,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testDeleteWithPrimaryKey() throws Exception {
+    void testDeleteWithPrimaryKey() throws Exception {
         // Step1: define table schema
         String table =
                 createTable(
@@ -1735,7 +1734,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testDeleteWithoutPrimaryKey() throws Exception {
+    void testDeleteWithoutPrimaryKey() throws Exception {
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
         String table =
@@ -1766,7 +1765,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testDeleteWithPrimaryKeyFilter() throws Exception {
+    void testDeleteWithPrimaryKeyFilter() throws Exception {
         // Step1: define table schema
         String table =
                 createTable(
@@ -1820,7 +1819,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testDeletePushDownWithPartitionKey() throws Exception {
+    void testDeletePushDownWithPartitionKey() throws Exception {
         // Step1: define table schema
         String table =
                 createTable(

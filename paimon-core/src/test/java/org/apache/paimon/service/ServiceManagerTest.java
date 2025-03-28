@@ -37,7 +37,7 @@ class ServiceManagerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void test() throws IOException {
+    void test() throws IOException {
         LocalFileIO fileIO = LocalFileIO.create();
         Path path = new Path(tempDir.toUri());
         ServiceManager manager = new ServiceManager(fileIO, path);

@@ -18,15 +18,15 @@
 
 package org.apache.paimon.rest;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link ResourcePaths}. */
-public class ResourcePathsTest {
+class ResourcePathsTest {
 
     @Test
-    public void testUrlEncode() {
+    void testUrlEncode() {
         String database = "test_db";
         String objectName = "test_table$snapshot";
         ResourcePaths resourcePaths = new ResourcePaths("paimon");

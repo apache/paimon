@@ -37,10 +37,10 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link UniversalCompaction}. */
-public class UniversalCompactionTest {
+class UniversalCompactionTest {
 
     @Test
-    public void testOutputLevel() {
+    void testOutputLevel() {
         UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
         assertThat(compaction.createUnit(createLevels(0, 0, 1, 3, 4), 5, 1).outputLevel())
                 .isEqualTo(1);
@@ -55,7 +55,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testPick() {
+    void testPick() {
         UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
 
         // by size amplification
@@ -83,7 +83,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testOptimizedCompactionInterval() {
+    void testOptimizedCompactionInterval() {
         AtomicLong time = new AtomicLong(0);
         UniversalCompaction compaction =
                 new UniversalCompaction(100, 1, 3, Duration.ofMillis(1000)) {
@@ -125,7 +125,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testNoOutputLevel0() {
+    void testNoOutputLevel0() {
         UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
 
         Optional<CompactUnit> pick =
@@ -145,7 +145,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testExtremeCaseNoOutputLevel0() {
+    void testExtremeCaseNoOutputLevel0() {
         UniversalCompaction compaction = new UniversalCompaction(200, 1, 5);
 
         Optional<CompactUnit> pick =
@@ -165,7 +165,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testSizeAmplification() {
+    void testSizeAmplification() {
         UniversalCompaction compaction = new UniversalCompaction(25, 0, 1);
         long[] sizes = new long[] {1};
         sizes = appendAndPickForSizeAmp(compaction, sizes);
@@ -205,7 +205,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testSizeRatio() {
+    void testSizeRatio() {
         UniversalCompaction compaction = new UniversalCompaction(25, 1, 5);
         long[] sizes = new long[] {1, 1, 1, 1};
         sizes = appendAndPickForSizeRatio(compaction, sizes);
@@ -257,7 +257,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testSizeRatioThreshold() {
+    void testSizeRatioThreshold() {
         long[] sizes = new long[] {8, 9, 10};
         assertThat(pickForSizeRatio(new UniversalCompaction(25, 10, 2), sizes))
                 .isEqualTo(new long[] {8, 9, 10});
@@ -266,7 +266,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testLookup() {
+    void testLookup() {
         ForceUpLevel0Compaction compaction =
                 new ForceUpLevel0Compaction(new UniversalCompaction(25, 1, 3));
 
@@ -293,7 +293,7 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testForcePickL0() {
+    void testForcePickL0() {
         int maxInterval = 5;
         UniversalCompaction compaction = new UniversalCompaction(25, 1, 5, null, maxInterval);
 

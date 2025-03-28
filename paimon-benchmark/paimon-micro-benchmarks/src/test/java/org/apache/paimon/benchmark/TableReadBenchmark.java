@@ -45,7 +45,7 @@ public class TableReadBenchmark extends TableBenchmark {
     private final int rowCount = 1000000;
 
     @Test
-    public void testOrcRead() throws Exception {
+    void testOrcRead() throws Exception {
         innerTest(Collections.singletonMap("orc", prepareData(orc(), "orc")));
         /*
          * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
@@ -57,7 +57,7 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testParquetRead() throws Exception {
+    void testParquetRead() throws Exception {
         innerTest(Collections.singletonMap("parquet", prepareData(parquet(), "parquet")));
         /*
          * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
@@ -69,7 +69,7 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testAvroRead() throws Exception {
+    void testAvroRead() throws Exception {
         innerTest(Collections.singletonMap("avro", prepareData(avro(), "avro")));
         /*
          * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
@@ -81,7 +81,7 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testOrcReadProjection() throws Exception {
+    void testOrcReadProjection() throws Exception {
         innerTestProjection(
                 Collections.singletonMap("orc", prepareData(orc(), "orc")),
                 new int[] {0, 5, 10, 14});
@@ -95,7 +95,7 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testOrcReadProjection1() throws Exception {
+    void testOrcReadProjection1() throws Exception {
         innerTestProjection(
                 Collections.singletonMap("orc", prepareData(orc(), "orc")), new int[] {10});
         /*
@@ -108,7 +108,7 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testParquetReadProjection() throws Exception {
+    void testParquetReadProjection() throws Exception {
         innerTestProjection(
                 Collections.singletonMap("parquet", prepareData(parquet(), "parquet")),
                 new int[] {0, 5, 10, 14});
@@ -122,7 +122,7 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     @Test
-    public void testParquetReadProjection1() throws Exception {
+    void testParquetReadProjection1() throws Exception {
         innerTestProjection(
                 Collections.singletonMap("parquet", prepareData(parquet(), "parquet")),
                 new int[] {10});

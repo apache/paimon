@@ -36,7 +36,7 @@ public class HadoopUtilsITCase {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testHadoopConfDirWithScheme() throws Exception {
+    void testHadoopConfDirWithScheme() throws Exception {
         LocalFileIO.create()
                 .overwriteFileUtf8(
                         new Path(tempDir.toString(), "core-site.xml"),

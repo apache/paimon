@@ -101,7 +101,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testEmptyCommits() throws Exception {
+    void testEmptyCommits() throws Exception {
         RecordWriter<InternalRow> writer = createEmptyWriter(1024 * 1024L);
 
         for (int i = 0; i < 3; i++) {
@@ -114,7 +114,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testSingleWrite() throws Exception {
+    void testSingleWrite() throws Exception {
         RecordWriter<InternalRow> writer = createEmptyWriter(1024 * 1024L);
         writer.write(row(1, "AAA", PART));
         CommitIncrement increment = writer.prepareCommit(true);
@@ -146,7 +146,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testMultipleCommits() throws Exception {
+    void testMultipleCommits() throws Exception {
         RecordWriter<InternalRow> writer =
                 createWriter(1024 * 1024L, true, Collections.emptyList()).getLeft();
 
@@ -210,7 +210,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testRollingWrite() throws Exception {
+    void testRollingWrite() throws Exception {
         // Set a very small target file size, so the threshold to trigger rolling becomes record
         // count instead of file size, because we check rolling per 1000 records.
         AppendOnlyWriter writer = createEmptyWriter(10L);
@@ -284,7 +284,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testCloseUnexpectedly() throws Exception {
+    void testCloseUnexpectedly() throws Exception {
         final CountDownLatch latch = new CountDownLatch(1);
         AppendOnlyWriter writer =
                 createWriter(20 * 1024, false, Collections.emptyList(), latch).getLeft();
@@ -321,7 +321,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testExternalBufferWorks() throws Exception {
+    void testExternalBufferWorks() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 
         // we give it a small Memory Pool, force it to spill
@@ -343,7 +343,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testSpillWorksAndMoreSmallFilesGenerated() throws Exception {
+    void testSpillWorksAndMoreSmallFilesGenerated() throws Exception {
         List<AppendOnlyWriter> writers = new ArrayList<>();
         HeapMemorySegmentPool heapMemorySegmentPool = new HeapMemorySegmentPool(2501024L, 1024);
         MemoryPoolFactory memoryPoolFactory = new MemoryPoolFactory(heapMemorySegmentPool);
@@ -397,7 +397,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testNoBuffer() throws Exception {
+    void testNoBuffer() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
 
         // we give it a small Memory Pool, force it to spill
@@ -410,7 +410,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void tesWriteBufferSpillAutoEnabled() {
+    void tesWriteBufferSpillAutoEnabled() {
         HashMap<String, String> map = new HashMap<>();
         // This is the default behavior,no object store and streaming mode.
         Assertions.assertThat(CoreOptions.fromMap(map).writeBufferSpillable(false, true, false))
@@ -458,7 +458,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testMultipleFlush() throws Exception {
+    void testMultipleFlush() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 
         // we give it a small Memory Pool, force it to spill
@@ -493,7 +493,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testClose() throws Exception {
+    void testClose() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 
         // we give it a small Memory Pool, force it to spill
@@ -520,7 +520,7 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testNonSpillable() throws Exception {
+    void testNonSpillable() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 
         // we give it a small Memory Pool, force it to spill

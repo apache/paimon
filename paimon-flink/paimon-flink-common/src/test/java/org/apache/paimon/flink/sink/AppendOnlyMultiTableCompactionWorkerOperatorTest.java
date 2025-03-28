@@ -48,7 +48,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
     private final String[] tables = {"a", "b"};
 
     @Test
-    public void testAsyncCompactionWorks() throws Exception {
+    void testAsyncCompactionWorks() throws Exception {
 
         AppendOnlyMultiTableCompactionWorkerOperator workerOperator =
                 new AppendOnlyMultiTableCompactionWorkerOperator.Factory(

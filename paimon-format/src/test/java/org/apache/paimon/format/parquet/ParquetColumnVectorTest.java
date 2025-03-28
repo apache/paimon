@@ -60,14 +60,14 @@ import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Validate the {@link ColumnVector}s read by Parquet format. */
-public class ParquetColumnVectorTest {
+class ParquetColumnVectorTest {
 
     private @TempDir java.nio.file.Path tempDir;
 
     private static final Random RND = ThreadLocalRandom.current();
 
     @Test
-    public void testNormalStrings() throws IOException {
+    void testNormalStrings() throws IOException {
         RowType rowType =
                 RowType.builder()
                         .field("s1", DataTypes.STRING())
@@ -92,7 +92,7 @@ public class ParquetColumnVectorTest {
     }
 
     @Test
-    public void testArrayString() throws IOException {
+    void testArrayString() throws IOException {
         RowType rowType =
                 RowType.builder()
                         .field("array_string", DataTypes.ARRAY(DataTypes.STRING()))
@@ -137,7 +137,7 @@ public class ParquetColumnVectorTest {
     }
 
     @Test
-    public void testArrayArrayString() throws IOException {
+    void testArrayArrayString() throws IOException {
         RowType rowType =
                 RowType.builder()
                         .field(
@@ -196,7 +196,7 @@ public class ParquetColumnVectorTest {
     }
 
     @Test
-    public void testMapString() throws IOException {
+    void testMapString() throws IOException {
         RowType rowType =
                 RowType.builder()
                         .field("map_string", DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()))
@@ -250,7 +250,7 @@ public class ParquetColumnVectorTest {
     }
 
     @Test
-    public void testMapArrayString() throws IOException {
+    void testMapArrayString() throws IOException {
         RowType rowType =
                 RowType.builder()
                         .field(
@@ -358,7 +358,7 @@ public class ParquetColumnVectorTest {
     }
 
     @Test
-    public void testRow() throws IOException {
+    void testRow() throws IOException {
         RowType rowType =
                 RowType.builder()
                         .field(
@@ -428,7 +428,7 @@ public class ParquetColumnVectorTest {
     }
 
     @Test
-    public void testArrayRowArray() throws IOException {
+    void testArrayRowArray() throws IOException {
         RowType rowType =
                 RowType.builder()
                         .field(
@@ -517,7 +517,7 @@ public class ParquetColumnVectorTest {
     }
 
     @Test
-    public void testHighlyNestedSchema() throws IOException {
+    void testHighlyNestedSchema() throws IOException {
         RowType rowType =
                 RowType.builder()
                         .field(

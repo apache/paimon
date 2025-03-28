@@ -42,7 +42,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link DropPartitionAction}. */
-public class DropPartitionActionITCase extends ActionITCaseBase {
+class DropPartitionActionITCase extends ActionITCaseBase {
 
     private static final DataType[] FIELD_TYPES =
             new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()};
@@ -52,7 +52,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testDropPartitionWithSinglePartitionKey(boolean hasPk) throws Exception {
+    void testDropPartitionWithSinglePartitionKey(boolean hasPk) throws Exception {
         FileStoreTable table = prepareTable(hasPk);
 
         if (ThreadLocalRandom.current().nextBoolean()) {
@@ -109,7 +109,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testDropPartitionWithMultiplePartitionKey(boolean hasPk) throws Exception {
+    void testDropPartitionWithMultiplePartitionKey(boolean hasPk) throws Exception {
         FileStoreTable table = prepareTable(hasPk);
 
         Map<String, String> partitions0 = new HashMap<>();

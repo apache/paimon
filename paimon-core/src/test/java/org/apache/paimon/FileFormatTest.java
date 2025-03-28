@@ -50,7 +50,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class FileFormatTest {
 
     @Test
-    public void testWriteRead(@TempDir java.nio.file.Path tempDir) throws IOException {
+    void testWriteRead(@TempDir java.nio.file.Path tempDir) throws IOException {
         FileFormat avro = createFileFormat("snappy");
         RowType rowType = RowType.of(new IntType(), new IntType());
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
@@ -86,7 +86,7 @@ public class FileFormatTest {
     }
 
     @Test
-    public void testUnsupportedOption(@TempDir java.nio.file.Path tempDir) {
+    void testUnsupportedOption(@TempDir java.nio.file.Path tempDir) {
         FormatWriterFactory writerFactory =
                 createFileFormat("_unsupported").createWriterFactory(RowType.of(new IntType()));
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
@@ -101,7 +101,7 @@ public class FileFormatTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "Orc", "ORC"})
-    public void testCreateFileFormat(String identifier) {
+    void testCreateFileFormat(String identifier) {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.FILE_FORMAT, identifier);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
@@ -116,7 +116,7 @@ public class FileFormatTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "Orc", "ORC"})
-    public void testFileFormatOption(String identifier) {
+    void testFileFormatOption(String identifier) {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.FILE_FORMAT, identifier);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);

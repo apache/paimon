@@ -58,7 +58,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for the {@link AlignedContinuousFileSplitEnumerator}. */
-public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
+class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -71,7 +71,7 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
     private FileStoreTable table;
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         Path tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         FileIO fileIO = FileIOFinder.find(tablePath);
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
@@ -88,7 +88,7 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
     }
 
     @Test
-    public void testSplitsAssignedBySnapshot() throws Exception {
+    void testSplitsAssignedBySnapshot() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 
@@ -136,7 +136,7 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
     }
 
     @Test
-    public void testEnumeratorSnapshotState() throws Exception {
+    void testEnumeratorSnapshotState() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(1);
 
@@ -167,7 +167,7 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
     }
 
     @Test
-    public void testScanWithConsumerId() throws Exception {
+    void testScanWithConsumerId() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(1);
 

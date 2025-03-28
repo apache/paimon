@@ -45,7 +45,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
     private static final String PASSWORD = "paimonpw";
 
     @AfterAll
-    public static void stopContainers() {
+    static void stopContainers() {
         LOG.info("Stopping containers...");
         MYSQL_CONTAINER.stop();
         LOG.info("Containers are stopped.");

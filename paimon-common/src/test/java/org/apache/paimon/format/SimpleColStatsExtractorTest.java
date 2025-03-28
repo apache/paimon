@@ -71,7 +71,7 @@ public abstract class SimpleColStatsExtractorTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"none", "counts", "full", "truncate(3)", "truncate(12)"})
-    public void testExtract(String mode) throws Exception {
+    void testExtract(String mode) throws Exception {
         FileFormat format = createFormat();
         RowType rowType = rowType();
         int count = rowType().getFieldCount();

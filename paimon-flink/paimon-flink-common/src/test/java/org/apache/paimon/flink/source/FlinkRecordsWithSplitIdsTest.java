@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link FlinkRecordsWithSplitIds}. */
-public class FlinkRecordsWithSplitIdsTest {
+class FlinkRecordsWithSplitIdsTest {
 
     private RowData[] rows;
     private ArrayResultIterator<RowData> iter;
@@ -48,7 +48,7 @@ public class FlinkRecordsWithSplitIdsTest {
     private FileStoreSourceSplitState state;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         iter = new ArrayResultIterator<>();
         rows = new RowData[] {GenericRowData.of(1, 1), GenericRowData.of(2, 2)};
         iter.set(rows, rows.length, CheckpointedPosition.NO_OFFSET, 0);
@@ -57,7 +57,7 @@ public class FlinkRecordsWithSplitIdsTest {
     }
 
     @Test
-    public void testEmitRecord() {
+    void testEmitRecord() {
         RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records =
                 FlinkRecordsWithSplitIds.forRecords("", iter);
         records.nextSplit();

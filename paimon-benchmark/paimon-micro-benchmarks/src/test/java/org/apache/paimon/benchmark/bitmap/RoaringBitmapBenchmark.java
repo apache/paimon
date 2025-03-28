@@ -45,7 +45,7 @@ public class RoaringBitmapBenchmark {
     @TempDir Path tempDir;
 
     @Test
-    public void testDeserialize() throws Exception {
+    void testDeserialize() throws Exception {
         Random random = new Random();
         RoaringBitmap bitmap = new RoaringBitmap();
         for (int i = 0; i < ROW_COUNT; i++) {

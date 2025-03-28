@@ -57,12 +57,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PartitionMarkDoneTest extends TableTestBase {
 
     @Test
-    public void testTriggerByCompaction() throws Exception {
+    void testTriggerByCompaction() throws Exception {
         innerTest(true);
     }
 
     @Test
-    public void testNotTriggerByCompaction() throws Exception {
+    void testNotTriggerByCompaction() throws Exception {
         innerTest(false);
     }
 

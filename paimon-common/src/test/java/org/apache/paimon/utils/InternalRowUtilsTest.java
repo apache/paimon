@@ -92,7 +92,7 @@ public class InternalRowUtilsTest {
     }
 
     @Test
-    public void testCopy() {
+    void testCopy() {
         for (int i = 0; i < 10; i++) {
             InternalRow row = rowDataGenerator.next();
             InternalRow copied = InternalRowUtils.copyInternalRow(row, ROW_TYPE);
@@ -117,7 +117,7 @@ public class InternalRowUtilsTest {
     }
 
     @Test
-    public void testCompare() {
+    void testCompare() {
         // test DECIMAL data type
         Decimal xDecimalData = Decimal.fromBigDecimal(new BigDecimal("12.34"), 4, 2);
         Decimal yDecimalData = Decimal.fromBigDecimal(new BigDecimal("13.14"), 4, 2);
@@ -152,7 +152,7 @@ public class InternalRowUtilsTest {
     }
 
     @Test
-    public void testEqualsAndHashCode() {
+    void testEqualsAndHashCode() {
         for (int i = 0; i < 10; i++) {
             GenericRow row1 = (GenericRow) rowDataGenerator.next();
             GenericRow row2 = (GenericRow) InternalRowUtils.copyInternalRow(row1, ROW_TYPE);
@@ -196,7 +196,7 @@ public class InternalRowUtilsTest {
     }
 
     @Test
-    public void testEqualsAndHashCodeNegativeCase() {
+    void testEqualsAndHashCodeNegativeCase() {
         // different array len
         RowType rowType = RowType.builder().field("f1", DataTypes.ARRAY(DataTypes.INT())).build();
         GenericRow rowWithArray1 = new GenericRow(1);

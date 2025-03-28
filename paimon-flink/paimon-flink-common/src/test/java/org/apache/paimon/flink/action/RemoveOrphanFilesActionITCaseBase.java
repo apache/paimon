@@ -100,7 +100,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testRunWithoutException(boolean isNamedArgument) throws Exception {
+    void testRunWithoutException(boolean isNamedArgument) throws Exception {
         assumeTrue(!isNamedArgument || supportNamedArgument());
 
         createTableAndWriteData(tableName);
@@ -162,7 +162,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testRemoveDatabaseOrphanFilesITCase(boolean isNamedArgument) throws Exception {
+    void testRemoveDatabaseOrphanFilesITCase(boolean isNamedArgument) throws Exception {
         assumeTrue(!isNamedArgument || supportNamedArgument());
 
         createTableAndWriteData("tableName1");
@@ -239,7 +239,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testCleanWithBranch(boolean isNamedArgument) throws Exception {
+    void testCleanWithBranch(boolean isNamedArgument) throws Exception {
         assumeTrue(!isNamedArgument || supportNamedArgument());
 
         // create main branch
@@ -302,7 +302,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testRunWithMode(boolean isNamedArgument) throws Exception {
+    void testRunWithMode(boolean isNamedArgument) throws Exception {
         assumeTrue(!isNamedArgument || supportNamedArgument());
 
         createTableAndWriteData(tableName);

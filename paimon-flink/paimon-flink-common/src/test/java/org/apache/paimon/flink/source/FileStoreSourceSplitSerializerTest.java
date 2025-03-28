@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class FileStoreSourceSplitSerializerTest {
 
     @Test
-    public void serializeSplit() throws Exception {
+    void serializeSplit() throws Exception {
         final FileStoreSourceSplit split =
                 newSourceSplit("id", row(1), 2, Arrays.asList(newFile(0), newFile(1)));
 
@@ -48,7 +48,7 @@ public class FileStoreSourceSplitSerializerTest {
     }
 
     @Test
-    public void serializeSplitWithReaderPosition() throws Exception {
+    void serializeSplitWithReaderPosition() throws Exception {
         final FileStoreSourceSplit split =
                 newSourceSplit("id", row(1), 2, Arrays.asList(newFile(0), newFile(1)), 29);
 
@@ -58,7 +58,7 @@ public class FileStoreSourceSplitSerializerTest {
     }
 
     @Test
-    public void repeatedSerialization() throws Exception {
+    void repeatedSerialization() throws Exception {
         final FileStoreSourceSplit split =
                 newSourceSplit("id", row(1), 2, Arrays.asList(newFile(0), newFile(1)), 29);
 

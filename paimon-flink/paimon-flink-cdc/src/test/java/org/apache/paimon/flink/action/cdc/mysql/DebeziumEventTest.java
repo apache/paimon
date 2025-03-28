@@ -41,7 +41,7 @@ public class DebeziumEventTest {
     private ObjectMapper objectMapper;
 
     @BeforeEach
-    public void before() {
+    void before() {
         objectMapper = new ObjectMapper();
         objectMapper
                 .configure(JsonParser.Feature.ALLOW_COMMENTS, true)
@@ -50,7 +50,7 @@ public class DebeziumEventTest {
     }
 
     @Test
-    public void testDeserialize() throws IOException {
+    void testDeserialize() throws IOException {
         final URL url =
                 DebeziumEventTest.class
                         .getClassLoader()

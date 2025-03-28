@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IntHashSetTest {
 
     @Test
-    public void testRandom() {
+    void testRandom() {
         Set<Integer> values = new HashSet<>();
         Random rnd = new Random();
         for (int i = 0; i < rnd.nextInt(100); i++) {

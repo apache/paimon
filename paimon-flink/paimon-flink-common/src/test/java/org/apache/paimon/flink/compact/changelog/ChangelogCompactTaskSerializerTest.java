@@ -35,11 +35,11 @@ import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ChangelogCompactTaskSerializer}. */
-public class ChangelogCompactTaskSerializerTest {
+class ChangelogCompactTaskSerializerTest {
     private final ChangelogCompactTaskSerializer serializer = new ChangelogCompactTaskSerializer();
 
     @Test
-    public void testSerializer() throws Exception {
+    void testSerializer() throws Exception {
         BinaryRow partition = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(partition);
         writer.writeInt(0, 0);

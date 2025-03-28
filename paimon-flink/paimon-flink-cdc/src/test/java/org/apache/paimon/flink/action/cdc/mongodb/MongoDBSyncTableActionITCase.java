@@ -39,11 +39,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link MongoDBSyncTableAction}. */
-public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
+class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("inventory-1");
     }
 
@@ -124,7 +124,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSpecifiedMode() throws Exception {
+    void testSpecifiedMode() throws Exception {
         String inventory = createRecordsToMongoDB("inventory-1", "table");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
         mongodbConfig.put("database", inventory);
@@ -156,7 +156,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
     }
 
     @Test
-    public void testCatalogAndTableConfig() {
+    void testCatalogAndTableConfig() {
         MongoDBSyncTableAction action =
                 syncTableActionBuilder(getBasicMongoDBConfig())
                         .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
@@ -170,7 +170,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testOptionsChange() throws Exception {
+    void testOptionsChange() throws Exception {
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", "1");
         tableConfig.put("sink.parallelism", "1");
@@ -208,7 +208,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testComputedColumn() throws Exception {
+    void testComputedColumn() throws Exception {
         writeRecordsToMongoDB("test-table-1", database, "table/computedcolumn");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
         mongodbConfig.put("database", database);
@@ -235,7 +235,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testMongoDBCDCOperations() throws Exception {
+    void testMongoDBCDCOperations() throws Exception {
         writeRecordsToMongoDB("event-insert", database, "table/event");
 
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -300,7 +300,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testDefaultId() throws Exception {
+    void testDefaultId() throws Exception {
         writeRecordsToMongoDB("defaultId-1", database, "table/defaultid");
 
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -336,7 +336,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testPrimaryKeyNotObjectIdType() throws Exception {
+    void testPrimaryKeyNotObjectIdType() throws Exception {
         writeRecordsToMongoDB("defaultId-2", database, "table/defaultid");
 
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -371,7 +371,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testComputedColumnWithCaseInsensitive() throws Exception {
+    void testComputedColumnWithCaseInsensitive() throws Exception {
         writeRecordsToMongoDB("test-table-2", database, "table/computedcolumn");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
         mongodbConfig.put("database", database);
@@ -403,7 +403,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testRuntimeExecutionModeCheckForCdcSync() {
+    void testRuntimeExecutionModeCheckForCdcSync() {
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
         mongodbConfig.put("database", database);
         mongodbConfig.put("collection", "products");

@@ -111,7 +111,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testListDatabasesPaged() throws Catalog.DatabaseAlreadyExistException {
+    public void testListDatabasesPaged() throws Catalog.DatabaseAlreadyExistException {
         // List databases paged returns an empty list when there are no databases in the catalog
         PagedList<String> pagedDatabases = catalog.listDatabasesPaged(null, null);
         assertThat(pagedDatabases.getElements()).isEmpty();
@@ -167,7 +167,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testDatabaseApiWhenNoPermission() {
+    public void testDatabaseApiWhenNoPermission() {
         String database = "test_no_permission_db";
         revokeDatabasePermission(database);
         assertThrows(
@@ -188,7 +188,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testApiWhenDatabaseNoExistAndNotIgnore() {
+    public void testApiWhenDatabaseNoExistAndNotIgnore() {
         String database = "test_no_exist_db";
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
@@ -209,13 +209,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testGetSystemDatabase() throws Catalog.DatabaseNotExistException {
+    public void testGetSystemDatabase() throws Catalog.DatabaseNotExistException {
         assertThat(catalog.getDatabase(SYSTEM_DATABASE_NAME).name())
                 .isEqualTo(SYSTEM_DATABASE_NAME);
     }
 
     @Test
-    void testApiWhenTableNoPermission() throws Exception {
+    public void testApiWhenTableNoPermission() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "no_permission_table");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         revokeTablePermission(identifier);
@@ -442,7 +442,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testListViews() throws Exception {
+    public void testListViews() throws Exception {
         String databaseName = "views_paged_db";
         List<String> views;
         String[] viewNames = new String[] {"view1", "view2", "view3", "abd", "def", "opr", "xyz"};
@@ -591,7 +591,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
+    public void testListPartitionsWhenMetastorePartitionedIsTrue() throws Exception {
         if (!supportPartitions()) {
             return;
         }
@@ -634,7 +634,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testListPartitionsFromFile() throws Exception {
+    public void testListPartitionsFromFile() throws Exception {
         Identifier identifier = Identifier.create("test_db", "test_table");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         List<Partition> result = catalog.listPartitions(identifier);
@@ -642,7 +642,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testListPartitions() throws Exception {
+    public void testListPartitions() throws Exception {
         if (!supportPartitions()) {
             return;
         }
@@ -780,7 +780,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testRefreshFileIO() throws Exception {
+    public void testRefreshFileIO() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         List<Identifier> identifiers =
                 Lists.newArrayList(
@@ -800,7 +800,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testRefreshFileIOWhenExpired() throws Exception {
+    public void testRefreshFileIOWhenExpired() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
                 Identifier.create("test_data_token", "table_for_testing_date_token");
@@ -825,7 +825,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testSnapshotFromREST() throws Exception {
+    public void testSnapshotFromREST() throws Exception {
         RESTCatalog catalog = (RESTCatalog) this.catalog;
         Identifier hasSnapshotTableIdentifier = Identifier.create("test_db_a", "my_snapshot_table");
 
@@ -988,7 +988,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testBranches() throws Exception {
+    public void testBranches() throws Exception {
         String databaseName = "testBranchTable";
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
@@ -1025,7 +1025,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testListDataFromPageApiWhenLastPageTokenIsNull() {
+    public void testListDataFromPageApiWhenLastPageTokenIsNull() {
         List<Integer> testData = ImmutableList.of(1, 2, 3, 4, 5, 6, 7);
         int maxResults = 2;
         AtomicInteger fetchTimes = new AtomicInteger(0);
@@ -1040,7 +1040,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testListDataFromPageApiWhenLastPageTokenIsNotNullAndDataIsNull() {
+    public void testListDataFromPageApiWhenLastPageTokenIsNotNullAndDataIsNull() {
         List<Integer> testData = ImmutableList.of(1, 2, 3, 4, 5, 6);
         int maxResults = 2;
         AtomicInteger fetchTimes = new AtomicInteger(0);
@@ -1056,7 +1056,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testAlterView() throws Exception {
+    public void testAlterView() throws Exception {
         Identifier identifier = new Identifier("rest_catalog_db", "my_view");
         View view = createView(identifier);
         catalog.createDatabase(identifier.getDatabaseName(), false);

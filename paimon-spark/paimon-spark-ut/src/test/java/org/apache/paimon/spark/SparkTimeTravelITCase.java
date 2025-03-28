@@ -34,10 +34,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT case for Spark 3.3+ time travel syntax (VERSION AS OF, TIMESTAMP AS OF). */
-public class SparkTimeTravelITCase extends SparkReadTestBase {
+class SparkTimeTravelITCase extends SparkReadTestBase {
 
     @Test
-    public void testTravelToVersion() throws Exception {
+    void testTravelToVersion() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -61,7 +61,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToTimestampString() throws Exception {
+    void testTravelToTimestampString() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -90,7 +90,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToTimestampNumber() throws Exception {
+    void testTravelToTimestampNumber() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -120,7 +120,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToOldSchema() throws Exception {
+    void testTravelToOldSchema() throws Exception {
         // old schema
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
@@ -148,14 +148,14 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToNonExistedVersion() {
+    void testTravelToNonExistedVersion() {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         assertThat(spark.sql("SELECT * FROM t VERSION AS OF 2").collectAsList()).isEmpty();
     }
 
     @Test
-    public void testTravelToNonExistedTimestamp() {
+    void testTravelToNonExistedTimestamp() {
         long anchor = System.currentTimeMillis() / 1000;
 
         spark.sql("CREATE TABLE t (k INT, v STRING)");
@@ -167,7 +167,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testSystemTableTimeTravel() throws Exception {
+    void testSystemTableTimeTravel() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -200,7 +200,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToTag() throws Exception {
+    void testTravelToTag() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -229,7 +229,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToNonExistingTag() {
+    void testTravelToNonExistingTag() {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
         assertThatThrownBy(
                         () -> spark.sql("SELECT * FROM t VERSION AS OF 'unknown'").collectAsList())
@@ -240,7 +240,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToTagWithSnapshotExpiration() throws Exception {
+    void testTravelToTagWithSnapshotExpiration() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -277,7 +277,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToTagWithDigitalName() throws Exception {
+    void testTravelToTagWithDigitalName() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
@@ -301,7 +301,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelWithWatermark() throws Exception {
+    void testTravelWithWatermark() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1

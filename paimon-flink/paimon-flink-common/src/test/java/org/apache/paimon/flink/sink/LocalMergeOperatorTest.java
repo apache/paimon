@@ -60,7 +60,7 @@ class LocalMergeOperatorTest {
     private LocalMergeOperator operator;
 
     @Test
-    public void testHashNormal() throws Exception {
+    void testHashNormal() throws Exception {
         prepareHashOperator();
         List<String> result = new ArrayList<>();
         setOutput(result);
@@ -97,7 +97,7 @@ class LocalMergeOperatorTest {
     }
 
     @Test
-    public void testUserDefineSequence() throws Exception {
+    void testUserDefineSequence() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(SEQUENCE_FIELD.key(), "f1");
         prepareHashOperator(options);
@@ -114,7 +114,7 @@ class LocalMergeOperatorTest {
     }
 
     @Test
-    public void testHashSpill() throws Exception {
+    void testHashSpill() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(LOCAL_MERGE_BUFFER_SIZE.key(), "2 m");
         prepareHashOperator(options);

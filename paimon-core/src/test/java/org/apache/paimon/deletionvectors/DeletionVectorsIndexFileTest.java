@@ -36,12 +36,12 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DeletionVectorsIndexFile}. */
-public class DeletionVectorsIndexFileTest {
+class DeletionVectorsIndexFileTest {
 
     @TempDir java.nio.file.Path tempPath;
 
     @Test
-    public void testReadDvIndex() {
+    void testReadDvIndex() {
         PathFactory pathFactory = getPathFactory();
 
         DeletionVectorsIndexFile deletionVectorsIndexFile =
@@ -82,7 +82,7 @@ public class DeletionVectorsIndexFileTest {
     }
 
     @Test
-    public void testReadDvIndexWithCopiousDv() {
+    void testReadDvIndexWithCopiousDv() {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
@@ -106,7 +106,7 @@ public class DeletionVectorsIndexFileTest {
     }
 
     @Test
-    public void testReadDvIndexWithEnormousDv() {
+    void testReadDvIndexWithEnormousDv() {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(
@@ -138,7 +138,7 @@ public class DeletionVectorsIndexFileTest {
     }
 
     @Test
-    public void testWriteDVIndexWithLimitedTargetSizePerIndexFile() {
+    void testWriteDVIndexWithLimitedTargetSizePerIndexFile() {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 new DeletionVectorsIndexFile(

@@ -102,7 +102,7 @@ public class FilesTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadWithFilter() throws Exception {
+    void testReadWithFilter() throws Exception {
         compact(table, row(2, 20), 0);
         write(table, GenericRow.of(3, 1, 10, 1));
         assertThat(readPartBucketLevel(null))
@@ -136,20 +136,20 @@ public class FilesTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadFilesFromLatest() throws Exception {
+    void testReadFilesFromLatest() throws Exception {
         List<InternalRow> expectedRow = getExpectedResult(2L);
         List<InternalRow> result = read(filesTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 
     @Test
-    public void testReadWithNotFullPartitionKey() throws Exception {
+    void testReadWithNotFullPartitionKey() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
         assertThat(readPartBucketLevel(builder.equal(0, "[2]"))).isEmpty();
     }
 
     @Test
-    public void testReadFilesFromSpecifiedSnapshot() throws Exception {
+    void testReadFilesFromSpecifiedSnapshot() throws Exception {
         List<InternalRow> expectedRow = getExpectedResult(1L);
         filesTable =
                 (FilesTable)
@@ -160,7 +160,7 @@ public class FilesTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadFilesFromNotExistSnapshot() {
+    void testReadFilesFromNotExistSnapshot() {
         filesTable =
                 (FilesTable)
                         filesTable.copy(

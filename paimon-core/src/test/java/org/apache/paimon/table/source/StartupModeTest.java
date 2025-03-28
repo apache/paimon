@@ -63,7 +63,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromLatest() throws Exception {
+    void testStartFromLatest() throws Exception {
         initializeTable(StartupMode.LATEST);
         initializeTestData(); // initialize 3 commits
 
@@ -89,7 +89,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromLatestFull() throws Exception {
+    void testStartFromLatestFull() throws Exception {
         initializeTable(StartupMode.LATEST_FULL);
         initializeTestData(); // initialize 3 commits
 
@@ -116,7 +116,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromTimestamp() throws Exception {
+    void testStartFromTimestamp() throws Exception {
         initializeTable(StartupMode.LATEST);
         initializeTestData(); // initialize 3 commits
 
@@ -148,7 +148,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromTimestampString() throws Exception {
+    void testStartFromTimestampString() throws Exception {
         initializeTable(StartupMode.LATEST);
         initializeTestData(); // initialize 3 commits
         String timestampString =
@@ -180,7 +180,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromCompactedFull() throws Exception {
+    void testStartFromCompactedFull() throws Exception {
         initializeTable(StartupMode.COMPACTED_FULL);
         initializeTestData(); // initialize 3 commits
 
@@ -206,7 +206,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromSnapshot() throws Exception {
+    void testStartFromSnapshot() throws Exception {
         Map<String, String> properties = new HashMap<>();
         properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
         initializeTable(StartupMode.FROM_SNAPSHOT, properties);
@@ -229,7 +229,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromSnapshotWithDelayDuration() throws Exception {
+    void testStartFromSnapshotWithDelayDuration() throws Exception {
         Map<String, String> properties = new HashMap<>();
         properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
         properties.put(CoreOptions.STREAMING_READ_SNAPSHOT_DELAY.key(), "5 s");
@@ -253,7 +253,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromSnapshotWithoutDelayDuration() throws Exception {
+    void testStartFromSnapshotWithoutDelayDuration() throws Exception {
         Map<String, String> properties = new HashMap<>();
         properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
         initializeTable(StartupMode.FROM_SNAPSHOT, properties);
@@ -277,7 +277,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testTimeTravelFromExpiredSnapshot() throws Exception {
+    void testTimeTravelFromExpiredSnapshot() throws Exception {
         Map<String, String> properties = new HashMap<>();
         // retain 2 snapshots
         properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
@@ -307,7 +307,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromSnapshotFull() throws Exception {
+    void testStartFromSnapshotFull() throws Exception {
         Map<String, String> properties = new HashMap<>();
         properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
         initializeTable(StartupMode.FROM_SNAPSHOT_FULL, properties);
@@ -330,7 +330,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testTimeTravelFromExpiredSnapshotFull() throws Exception {
+    void testTimeTravelFromExpiredSnapshotFull() throws Exception {
         Map<String, String> properties = new HashMap<>();
         // retaine 2 snapshots
         properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
@@ -401,7 +401,7 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         IOUtils.closeAll(write, commit);
     }
 }

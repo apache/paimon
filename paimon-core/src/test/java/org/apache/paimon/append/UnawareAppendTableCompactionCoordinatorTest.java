@@ -57,19 +57,19 @@ public class UnawareAppendTableCompactionCoordinatorTest {
     private BinaryRow partition;
 
     @Test
-    public void testForCompactPlan() {
+    void testForCompactPlan() {
         List<DataFileMeta> files = generateNewFiles(200, 0);
         assertTasks(files, 200 / 6);
     }
 
     @Test
-    public void testNoCompactTask() {
+    void testNoCompactTask() {
         List<DataFileMeta> files = generateNewFiles(100, Long.MAX_VALUE);
         assertTasks(files, 0);
     }
 
     @Test
-    public void testMinSizeCompactTask() {
+    void testMinSizeCompactTask() {
         List<DataFileMeta> files =
                 generateNewFiles(
                         100, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 3 + 1);
@@ -77,7 +77,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
     }
 
     @Test
-    public void testFilterMiddleFile() {
+    void testFilterMiddleFile() {
         List<DataFileMeta> files =
                 generateNewFiles(
                         100, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 10 * 8);
@@ -85,7 +85,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
     }
 
     @Test
-    public void testEliminatePartitionCoordinator() {
+    void testEliminatePartitionCoordinator() {
         List<DataFileMeta> files = generateNewFiles(1, 0);
         compactionCoordinator.notifyNewFiles(partition, files);
 
@@ -100,7 +100,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
     }
 
     @Test
-    public void testCompactLessFile() {
+    void testCompactLessFile() {
         List<DataFileMeta> files = generateNewFiles(2, 0);
         compactionCoordinator.notifyNewFiles(partition, files);
 
@@ -118,7 +118,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
     }
 
     @Test
-    public void testAgeGrowUp() {
+    void testAgeGrowUp() {
         List<DataFileMeta> files = generateNewFiles(1, 0);
         compactionCoordinator.notifyNewFiles(partition, files);
 
@@ -139,7 +139,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
     }
 
     @Test
-    public void testBatchScanEmptyTable() {
+    void testBatchScanEmptyTable() {
         compactionCoordinator =
                 new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable, false);
         assertThatThrownBy(() -> compactionCoordinator.scan())

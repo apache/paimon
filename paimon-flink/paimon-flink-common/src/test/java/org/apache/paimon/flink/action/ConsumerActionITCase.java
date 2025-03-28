@@ -51,7 +51,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
     @ParameterizedTest
     @Timeout(60)
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testResetConsumer(String invoker) throws Exception {
+    void testResetConsumer(String invoker) throws Exception {
         init(warehouse);
 
         RowType rowType =
@@ -201,7 +201,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
     @ParameterizedTest
     @Timeout(60)
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testResetBranchConsumer(String invoker) throws Exception {
+    void testResetBranchConsumer(String invoker) throws Exception {
         init(warehouse);
 
         RowType rowType =
@@ -316,7 +316,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
     @ParameterizedTest
     @Timeout(120)
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testClearConsumers(String invoker) throws Exception {
+    void testClearConsumers(String invoker) throws Exception {
         init(warehouse);
 
         RowType rowType =

@@ -28,10 +28,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatException;
 
 /** IT Case for {@link CreateTagProcedure}. */
-public class CreateTagsProcedureITCase extends CatalogITCaseBase {
+class CreateTagsProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testCreateTags() {
+    void testCreateTags() {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -59,7 +59,7 @@ public class CreateTagsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRenameTag() {
+    void testRenameTag() {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -83,7 +83,7 @@ public class CreateTagsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testThrowSnapshotNotExistException() {
+    void testThrowSnapshotNotExistException() {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"

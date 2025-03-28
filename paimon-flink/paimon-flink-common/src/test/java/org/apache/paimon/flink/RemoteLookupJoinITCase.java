@@ -56,7 +56,7 @@ import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for remote lookup join. */
-public class RemoteLookupJoinITCase extends CatalogITCaseBase {
+class RemoteLookupJoinITCase extends CatalogITCaseBase {
 
     @Override
     public List<String> ddl() {
@@ -70,7 +70,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testQueryServiceLookup(boolean isNamedArgument) throws Exception {
+    void testQueryServiceLookup(boolean isNamedArgument) throws Exception {
         sql(
                 "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
         CloseableIterator<Row> service =
@@ -106,7 +106,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupRemoteTable() throws Throwable {
+    void testLookupRemoteTable() throws Throwable {
         sql(
                 "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH ('bucket' = '1')");
         ServiceProxy proxy = launchQueryServer("DIM");
@@ -144,7 +144,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
 
     @Disabled // TODO unstable
     @Test
-    public void testServiceFileCleaned() throws Exception {
+    void testServiceFileCleaned() throws Exception {
         sql(
                 "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
         JobClient client = queryService(paimonTable("DIM"));

@@ -98,7 +98,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testInvalidateWhenDatabaseIsAltered() throws Exception {
+    void testInvalidateWhenDatabaseIsAltered() throws Exception {
         Catalog mockcatalog = Mockito.mock(Catalog.class);
         Catalog catalog = new CachingCatalog(mockcatalog, new Options());
         String databaseName = "db";
@@ -118,7 +118,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testInvalidateSystemTablesIfBaseTableIsModified() throws Exception {
+    void testInvalidateSystemTablesIfBaseTableIsModified() throws Exception {
         Catalog catalog = new CachingCatalog(this.catalog, new Options());
         Identifier tableIdent = new Identifier("db", "tbl");
         catalog.createTable(new Identifier("db", "tbl"), DEFAULT_TABLE_SCHEMA, false);
@@ -129,7 +129,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testInvalidateSysTablesIfBaseTableIsDropped() throws Exception {
+    void testInvalidateSysTablesIfBaseTableIsDropped() throws Exception {
         TestableCachingCatalog catalog =
                 new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
         Identifier tableIdent = new Identifier("db", "tbl");
@@ -200,7 +200,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCatalogExpirationTtlRefreshesAfterAccessViaCatalog() throws Exception {
+    void testCatalogExpirationTtlRefreshesAfterAccessViaCatalog() throws Exception {
         TestableCachingCatalog catalog =
                 new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
 
@@ -240,7 +240,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testPartitionCache() throws Exception {
+    void testPartitionCache() throws Exception {
         TestableCachingCatalog catalog =
                 new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
 
@@ -265,7 +265,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testDeadlock() throws Exception {
+    void testDeadlock() throws Exception {
         Catalog underlyCatalog = this.catalog;
         TestableCachingCatalog catalog =
                 new TestableCachingCatalog(this.catalog, Duration.ofSeconds(1), ticker);
@@ -315,7 +315,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCachingCatalogRejectsExpirationIntervalOfZero() {
+    void testCachingCatalogRejectsExpirationIntervalOfZero() {
         Assertions.assertThatThrownBy(
                         () -> new TestableCachingCatalog(this.catalog, Duration.ZERO, ticker))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -324,7 +324,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testInvalidateTableForChainedCachingCatalogs() throws Exception {
+    void testInvalidateTableForChainedCachingCatalogs() throws Exception {
         TestableCachingCatalog wrappedCatalog =
                 new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
         TestableCachingCatalog catalog =
@@ -345,7 +345,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testSnapshotCache() throws Exception {
+    void testSnapshotCache() throws Exception {
         TestableCachingCatalog wrappedCatalog =
                 new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
         Identifier tableIdent = new Identifier("db", "tbl");
@@ -370,7 +370,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testManifestCache() throws Exception {
+    void testManifestCache() throws Exception {
         innerTestManifestCache(Long.MAX_VALUE);
         assertThatThrownBy(() -> innerTestManifestCache(10))
                 .hasRootCauseInstanceOf(FileNotFoundException.class);
@@ -449,7 +449,7 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testManifestCacheOptions() {
+    void testManifestCacheOptions() {
         Options options = new Options();
 
         CachingCatalog caching = (CachingCatalog) CachingCatalog.tryToCreate(catalog, options);

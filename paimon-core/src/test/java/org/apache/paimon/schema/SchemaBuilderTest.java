@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SchemaBuilderTest {
 
     @Test
-    public void testDuplicateColumns() {
+    void testDuplicateColumns() {
         Schema.Builder builder =
                 Schema.newBuilder().column("id", DataTypes.INT()).column("id", DataTypes.INT());
 
@@ -42,7 +42,7 @@ public class SchemaBuilderTest {
     }
 
     @Test
-    public void testDuplicatePrimaryKeys() {
+    void testDuplicatePrimaryKeys() {
         Schema.Builder builder =
                 Schema.newBuilder().column("id", DataTypes.INT()).primaryKey("id", "id");
 
@@ -54,7 +54,7 @@ public class SchemaBuilderTest {
     }
 
     @Test
-    public void testDuplicatePartitionKeys() {
+    void testDuplicatePartitionKeys() {
         Schema.Builder builder =
                 Schema.newBuilder().column("id", DataTypes.INT()).partitionKeys("id", "id");
 
@@ -66,7 +66,7 @@ public class SchemaBuilderTest {
     }
 
     @Test
-    public void testHighestFieldId() {
+    void testHighestFieldId() {
         Schema.Builder builder =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())

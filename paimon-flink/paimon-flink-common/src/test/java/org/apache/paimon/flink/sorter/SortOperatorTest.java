@@ -40,10 +40,10 @@ import java.util.Arrays;
 import java.util.Collections;
 
 /** Test for {@link SortOperator}. */
-public class SortOperatorTest {
+class SortOperatorTest {
 
     @Test
-    public void testSort() throws Exception {
+    void testSort() throws Exception {
         RowType keyRowType =
                 new RowType(
                         Collections.singletonList(
@@ -93,7 +93,7 @@ public class SortOperatorTest {
     }
 
     @Test
-    public void testCloseSortOperator() throws Exception {
+    void testCloseSortOperator() throws Exception {
         RowType keyRowType =
                 new RowType(
                         Collections.singletonList(

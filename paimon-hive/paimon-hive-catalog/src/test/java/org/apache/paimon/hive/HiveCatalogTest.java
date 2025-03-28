@@ -71,7 +71,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 public class HiveCatalogTest extends CatalogTestBase {
 
     @BeforeEach
-    public void setUp() throws Exception {
+    protected void setUp() throws Exception {
         super.setUp();
         HiveConf hiveConf = new HiveConf();
         String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
@@ -89,7 +89,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCheckIdentifierUpperCase() throws Exception {
+    void testCheckIdentifierUpperCase() throws Exception {
         catalog.createDatabase("test_db", false);
         assertThatThrownBy(() -> catalog.createDatabase("TEST_DB", false))
                 .isInstanceOf(Catalog.DatabaseAlreadyExistException.class)
@@ -112,7 +112,7 @@ public class HiveCatalogTest extends CatalogTestBase {
             Thread.currentThread().getContextClassLoader().getResource("hive-conf-dir").getPath();
 
     @Test
-    public void testHadoopConfDir() {
+    void testHadoopConfDir() {
         HiveConf hiveConf =
                 HiveCatalog.createHiveConf(
                         null, HADOOP_CONF_DIR, HadoopUtils.getHadoopConfiguration(new Options()));
@@ -120,7 +120,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testHiveConfDir() {
+    void testHiveConfDir() {
         try {
             testHiveConfDirImpl();
         } finally {
@@ -141,7 +141,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testHadoopConfDirFromEnv() {
+    void testHadoopConfDirFromEnv() {
         Map<String, String> newEnv = new HashMap<>(System.getenv());
         newEnv.put("HADOOP_CONF_DIR", HADOOP_CONF_DIR);
         // add HADOOP_CONF_DIR to system environment
@@ -154,7 +154,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testHiveConfDirFromEnv() {
+    void testHiveConfDirFromEnv() {
         try {
             testHiveConfDirFromEnvImpl();
         } finally {
@@ -175,7 +175,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testAddHiveTableParameters() {
+    void testAddHiveTableParameters() {
         try {
             // Create a new database for the test
             String databaseName = "test_db";
@@ -226,7 +226,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testAlterHiveTableParameters() {
+    void testAlterHiveTableParameters() {
         try {
             // Create a new database for the test
             String databaseName = "test_db";
@@ -278,7 +278,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testListTablesLock() {
+    void testListTablesLock() {
         try {
             String databaseName = "test_db";
             catalog.createDatabase(databaseName, false);
@@ -421,8 +421,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testCreateExternalTableWithLocation(@TempDir java.nio.file.Path tempDir)
-            throws Exception {
+    void testCreateExternalTableWithLocation(@TempDir java.nio.file.Path tempDir) throws Exception {
         HiveConf hiveConf = new HiveConf();
         String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
@@ -453,7 +452,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testTagToPartitionTable() throws Exception {
+    void testTagToPartitionTable() throws Exception {
         String databaseName = "testTagToPartitionTable";
         catalog.dropDatabase(databaseName, true, true);
         catalog.createDatabase(databaseName, true);
@@ -479,7 +478,7 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testAlterPartitions() throws Exception {
+    void testAlterPartitions() throws Exception {
         if (!supportPartitions()) {
             return;
         }

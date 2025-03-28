@@ -42,11 +42,11 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link CompactProcedure}. */
-public class CompactProcedureITCase extends CatalogITCaseBase {
+class CompactProcedureITCase extends CatalogITCaseBase {
 
     // ----------------------- Non-sort Compact -----------------------
     @Test
-    public void testBatchCompact() throws Exception {
+    void testBatchCompact() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -93,7 +93,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testStreamingCompact() throws Exception {
+    void testStreamingCompact() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -155,7 +155,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testHistoryPartitionCompact() throws Exception {
+    void testHistoryPartitionCompact() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -199,7 +199,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
     // ----------------------- Sort Compact -----------------------
 
     @Test
-    public void testDynamicBucketSortCompact() throws Exception {
+    void testDynamicBucketSortCompact() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " f0 BIGINT PRIMARY KEY NOT ENFORCED,"
@@ -244,7 +244,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
     // ----------------------- Minor Compact -----------------------
 
     @Test
-    public void testBatchMinorCompactStrategy() throws Exception {
+    void testBatchMinorCompactStrategy() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -293,7 +293,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBatchFullCompactStrategy() throws Exception {
+    void testBatchFullCompactStrategy() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -328,7 +328,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testStreamFullCompactStrategy() throws Exception {
+    void testStreamFullCompactStrategy() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"

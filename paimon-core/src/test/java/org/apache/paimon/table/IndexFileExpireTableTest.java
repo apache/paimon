@@ -57,7 +57,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexFileExpiration() throws Exception {
+    void testIndexFileExpiration() throws Exception {
         prepareExpireTable();
         ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
 
@@ -86,7 +86,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexFileExpirationWithTag() throws Exception {
+    void testIndexFileExpirationWithTag() throws Exception {
         prepareExpireTable();
         ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
 
@@ -112,7 +112,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexFileExpirationWhenDeletingTag() throws Exception {
+    void testIndexFileExpirationWhenDeletingTag() throws Exception {
         prepareExpireTable();
         ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
 
@@ -141,7 +141,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexFileRollbackSnapshot() throws Exception {
+    void testIndexFileRollbackSnapshot() throws Exception {
         prepareExpireTable();
 
         long indexFileSize = indexFileSize();
@@ -169,7 +169,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexFileRollbackTag() throws Exception {
+    void testIndexFileRollbackTag() throws Exception {
         prepareExpireTable();
 
         long indexFileSize = indexFileSize();

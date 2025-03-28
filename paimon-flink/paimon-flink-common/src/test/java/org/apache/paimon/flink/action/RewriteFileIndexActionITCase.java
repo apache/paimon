@@ -41,9 +41,9 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 /** IT cases for {@link RewriteFileIndexAction}. */
-public class RewriteFileIndexActionITCase extends ActionITCaseBase {
+class RewriteFileIndexActionITCase extends ActionITCaseBase {
     @Test
-    public void testFileIndexAddIndex() throws Exception {
+    void testFileIndexAddIndex() throws Exception {
 
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(

@@ -75,14 +75,14 @@ public class OptionsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testOptionsTable() throws Exception {
+    void testOptionsTable() throws Exception {
         List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(optionsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
     @Test
-    public void testBranchOptionsTable() throws Exception {
+    void testBranchOptionsTable() throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier(tableName));
         table.createBranch("b1");
         // verify that branch file exist

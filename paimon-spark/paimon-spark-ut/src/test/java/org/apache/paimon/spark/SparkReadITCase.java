@@ -49,30 +49,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for spark reader. */
-public class SparkReadITCase extends SparkReadTestBase {
+class SparkReadITCase extends SparkReadTestBase {
 
     @Test
-    public void testNormal() {
+    void testNormal() {
         innerTestSimpleType(spark.table("t1"));
 
         innerTestNestedType(spark.table("t2"));
     }
 
     @Test
-    public void testFilterPushDown() {
+    void testFilterPushDown() {
         innerTestSimpleTypeFilterPushDown(spark.table("t1"));
 
         innerTestNestedTypeFilterPushDown(spark.table("t2"));
     }
 
     @Test
-    public void testCatalogNormal() {
+    void testCatalogNormal() {
         innerTestSimpleType(spark.table("t1"));
         innerTestNestedType(spark.table("t2"));
     }
 
     @Test
-    public void testSnapshotsTable() {
+    void testSnapshotsTable() {
         List<Row> rows =
                 spark.table("`t1$snapshots`")
                         .select("snapshot_id", "schema_id", "commit_user", "commit_kind")
@@ -99,7 +99,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testSnapshotsTableWithRecordCount() {
+    void testSnapshotsTableWithRecordCount() {
         List<Row> rows =
                 spark.table("`t1$snapshots`")
                         .select(
@@ -112,7 +112,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testManifestsTable() {
+    void testManifestsTable() {
         List<Row> rows =
                 spark.table("`t1$manifests`")
                         .select("schema_id", "file_name", "file_size")
@@ -127,7 +127,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testManifestsTableWithRecordCount() {
+    void testManifestsTableWithRecordCount() {
         List<Row> rows =
                 spark.table("`t1$manifests`")
                         .select("num_added_files", "num_deleted_files")
@@ -136,20 +136,20 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCatalogFilterPushDown() {
+    void testCatalogFilterPushDown() {
         innerTestSimpleTypeFilterPushDown(spark.table("t1"));
 
         innerTestNestedTypeFilterPushDown(spark.table("t2"));
     }
 
     @Test
-    public void testDefaultNamespace() {
+    void testDefaultNamespace() {
         assertThat(spark.sql("SHOW CURRENT NAMESPACE").collectAsList().toString())
                 .isEqualTo("[[paimon,default]]");
     }
 
     @Test
-    public void testCreateTable() {
+    void testCreateTable() {
         spark.sql(
                 "CREATE TABLE testCreateTable(\n"
                         + "a BIGINT,\n"
@@ -167,7 +167,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCreateTableAs() {
+    void testCreateTableAs() {
         spark.sql(
                 "CREATE TABLE testCreateTable(\n"
                         + "a BIGINT,\n"
@@ -306,7 +306,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testConflictOption() {
+    void testConflictOption() {
         assertThatThrownBy(
                         () ->
                                 spark.sql(
@@ -329,7 +329,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testShowTablesSorted() {
+    void testShowTablesSorted() {
         spark.sql("create table t3(id int, name string)");
         spark.sql("create table t4(id int, name string)");
         List<Row> tables = spark.sql("SHOW TABLES").collectAsList();
@@ -339,7 +339,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCreateTableWithNullablePk() {
+    void testCreateTableWithNullablePk() {
         spark.sql(
                 "CREATE TABLE PkTable (\n"
                         + "a BIGINT,\n"
@@ -351,7 +351,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDescribeTable() {
+    void testDescribeTable() {
         spark.sql(
                 "CREATE TABLE PartitionedTable (\n"
                         + "a BIGINT,\n"
@@ -363,7 +363,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testShowCreateTable() {
+    void testShowCreateTable() {
         spark.sql(
                 "CREATE TABLE tbl (\n"
                         + "  a INT COMMENT 'a comment',\n"
@@ -397,7 +397,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testShowTableProperties() {
+    void testShowTableProperties() {
         spark.sql(
                 "CREATE TABLE tbl (\n"
                         + "  a INT)\n"
@@ -414,7 +414,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCreateTableWithNonexistentPk() {
+    void testCreateTableWithNonexistentPk() {
         spark.sql("USE paimon");
         assertThatThrownBy(
                         () ->
@@ -432,7 +432,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCreateTableWithNonexistentPartition() {
+    void testCreateTableWithNonexistentPartition() {
         assertThatThrownBy(
                         () ->
                                 spark.sql(
@@ -447,7 +447,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCreateAndDropTable() {
+    void testCreateAndDropTable() {
         innerTest("MyTable1", true, true);
         innerTest("MyTable2", true, false);
         innerTest("MyTable3", false, false);
@@ -457,7 +457,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testReadNestedColumnTable() {
+    void testReadNestedColumnTable() {
         String tableName = "testAddNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -622,7 +622,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCreateAndDropNamespace() {
+    void testCreateAndDropNamespace() {
         // create namespace
         spark.sql("CREATE NAMESPACE bar");
 
@@ -714,7 +714,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCreateNestedField() {
+    void testCreateNestedField() {
         spark.sql(
                 "CREATE TABLE nested_table ( a INT, b STRUCT<b1: STRUCT<b11: INT, b12 INT>, b2 BIGINT>)");
         assertThat(spark.sql("SHOW CREATE TABLE nested_table").collectAsList().toString())

@@ -27,10 +27,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for TableFilter. */
-public class TableFilterTest {
+class TableFilterTest {
 
     @Test
-    public void testFilterTables() {
+    void testFilterTables() {
         List<String> tableWhitelist = Collections.singletonList("white_listed_table");
         List<String> tablePrefixes = Collections.singletonList("test_");
         List<String> tableSuffixes = Collections.EMPTY_LIST;

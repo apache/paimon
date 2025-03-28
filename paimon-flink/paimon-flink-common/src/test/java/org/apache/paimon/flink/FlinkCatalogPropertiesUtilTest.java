@@ -53,10 +53,10 @@ import static org.apache.paimon.flink.utils.FlinkDescriptorProperties.WATERMARK_
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FlinkCatalogPropertiesUtil}. */
-public class FlinkCatalogPropertiesUtilTest {
+class FlinkCatalogPropertiesUtilTest {
 
     @Test
-    public void testSerDeNonPhysicalColumns() {
+    void testSerDeNonPhysicalColumns() {
         List<Schema.UnresolvedColumn> columns = new ArrayList<>();
         columns.add(new Schema.UnresolvedComputedColumn("comp", new SqlCallExpression("`k` * 2")));
         columns.add(
@@ -107,7 +107,7 @@ public class FlinkCatalogPropertiesUtilTest {
     }
 
     @Test
-    public void testSerDeWatermarkSpec() {
+    void testSerDeWatermarkSpec() {
         WatermarkSpec watermarkSpec =
                 WatermarkSpec.of(
                         "test_time",
@@ -139,7 +139,7 @@ public class FlinkCatalogPropertiesUtilTest {
     }
 
     @Test
-    public void testNonPhysicalColumnsCount() {
+    void testNonPhysicalColumnsCount() {
         Map<String, String> oldStyleOptions = new HashMap<>();
         // physical
         oldStyleOptions.put(compoundKey(SCHEMA, 0, NAME), "phy1");

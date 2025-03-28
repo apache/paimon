@@ -41,7 +41,7 @@ public class TableFormatBenchmark extends TableBenchmark {
     private final int rowCount = 10000000;
 
     @Test
-    public void testRead() throws Exception {
+    void testRead() throws Exception {
         innerTest(prepareData());
         /*
          * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16

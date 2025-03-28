@@ -39,11 +39,11 @@ import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.TOPIC_
 import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_FORMAT;
 
 /** IT cases for {@link PulsarSyncTableAction}. */
-public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
+class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
 
     @Test
     @Timeout(120)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution");
     }
 
@@ -197,7 +197,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testWaterMarkSyncTable() throws Exception {
+    void testWaterMarkSyncTable() throws Exception {
         String topic = "watermark";
         topics = Collections.singletonList(topic);
         createTopic(topic, 1);

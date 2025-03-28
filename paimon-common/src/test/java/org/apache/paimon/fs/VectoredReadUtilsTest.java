@@ -71,7 +71,7 @@ class VectoredReadUtilsTest {
     }
 
     @Test
-    public void testNormal() throws Exception {
+    void testNormal() throws Exception {
         // test empty
         doTest(Collections.emptyList());
 
@@ -112,7 +112,7 @@ class VectoredReadUtilsTest {
     }
 
     @Test
-    public void testRandom() throws Exception {
+    void testRandom() throws Exception {
         List<FileRange> ranges = new ArrayList<>();
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int lastEnd = 0;

@@ -41,22 +41,22 @@ public class BucketSelectConverterTest {
     private final PredicateBuilder builder = new PredicateBuilder(rowType);
 
     @Test
-    public void testRepeatEqual() {
+    void testRepeatEqual() {
         assertThat(newSelector(and(builder.equal(0, 0), builder.equal(0, 1)))).isEmpty();
     }
 
     @Test
-    public void testNotFull() {
+    void testNotFull() {
         assertThat(newSelector(and(builder.equal(0, 0)))).isEmpty();
     }
 
     @Test
-    public void testOtherPredicate() {
+    void testOtherPredicate() {
         assertThat(newSelector(and(builder.notEqual(0, 0)))).isEmpty();
     }
 
     @Test
-    public void testOrIllegal() {
+    void testOrIllegal() {
         assertThat(
                         newSelector(
                                 and(
@@ -67,7 +67,7 @@ public class BucketSelectConverterTest {
     }
 
     @Test
-    public void testNormal() {
+    void testNormal() {
         Selector selector =
                 newSelector(and(builder.equal(0, 0), builder.equal(1, 1), builder.equal(2, 2)))
                         .get();
@@ -76,7 +76,7 @@ public class BucketSelectConverterTest {
     }
 
     @Test
-    public void testIn() {
+    void testIn() {
         Selector selector =
                 newSelector(
                                 and(
@@ -89,7 +89,7 @@ public class BucketSelectConverterTest {
     }
 
     @Test
-    public void testOr() {
+    void testOr() {
         Selector selector =
                 newSelector(
                                 and(
@@ -105,7 +105,7 @@ public class BucketSelectConverterTest {
     }
 
     @Test
-    public void testInNull() {
+    void testInNull() {
         Selector selector =
                 newSelector(
                                 and(
@@ -118,7 +118,7 @@ public class BucketSelectConverterTest {
     }
 
     @Test
-    public void testMultipleIn() {
+    void testMultipleIn() {
         Selector selector =
                 newSelector(
                                 and(
@@ -133,7 +133,7 @@ public class BucketSelectConverterTest {
     }
 
     @Test
-    public void testMultipleOr() {
+    void testMultipleOr() {
         Selector selector =
                 newSelector(
                                 and(

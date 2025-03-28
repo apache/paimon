@@ -23,10 +23,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link LogOffsetCommittable}. */
-public class LogOffsetCommittableTest {
+class LogOffsetCommittableTest {
 
     @Test
-    public void test() {
+    void test() {
         LogOffsetCommittable committable = new LogOffsetCommittable(5, 9);
         LogOffsetCommittable deser = LogOffsetCommittable.fromBytes(committable.toBytes());
         assertThat(deser.bucket()).isEqualTo(committable.bucket());

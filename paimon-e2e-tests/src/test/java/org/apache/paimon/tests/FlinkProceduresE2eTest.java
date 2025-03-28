@@ -25,7 +25,7 @@ import java.util.UUID;
 
 /** Tests for flink {@code Procedure}s. */
 @EnabledIf("runTest")
-public class FlinkProceduresE2eTest extends E2eTestBase {
+class FlinkProceduresE2eTest extends E2eTestBase {
 
     private static boolean runTest() {
         return System.getProperty("test.flink.main.version").compareTo("1.18") >= 0;
@@ -36,7 +36,7 @@ public class FlinkProceduresE2eTest extends E2eTestBase {
     }
 
     @Test
-    public void testCompact() throws Exception {
+    void testCompact() throws Exception {
         String topicName = "ts-topic-" + UUID.randomUUID();
         createKafkaTopic(topicName, 1);
         // prepare first part of test data

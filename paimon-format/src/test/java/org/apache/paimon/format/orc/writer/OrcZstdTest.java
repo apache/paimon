@@ -119,7 +119,7 @@ class OrcZstdTest {
     }
 
     @Test
-    public void testCorrupt() throws Exception {
+    void testCorrupt() throws Exception {
         ByteBuffer buf = ByteBuffer.allocate(1000);
         buf.put(new byte[] {127, 125, 1, 99, 98, 1});
         buf.flip();
@@ -133,7 +133,7 @@ class OrcZstdTest {
     }
 
     @Test
-    public void testZstdDirectDecompress() {
+    void testZstdDirectDecompress() {
         ByteBuffer in = ByteBuffer.allocate(10000);
         ByteBuffer out = ByteBuffer.allocate(10000);
         ByteBuffer directOut = ByteBuffer.allocateDirect(10000);

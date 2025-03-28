@@ -40,91 +40,91 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution", DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testNotSupportFormat() throws Exception {
+    void testNotSupportFormat() throws Exception {
         testNotSupportFormat(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testAssertSchemaCompatible() throws Exception {
+    void testAssertSchemaCompatible() throws Exception {
         testAssertSchemaCompatible(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionSpecific() throws Exception {
+    void testStarUpOptionSpecific() throws Exception {
         testStarUpOptionSpecific(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionLatest() throws Exception {
+    void testStarUpOptionLatest() throws Exception {
         testStarUpOptionLatest(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionTimestamp() throws Exception {
+    void testStarUpOptionTimestamp() throws Exception {
         testStarUpOptionTimestamp(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionEarliest() throws Exception {
+    void testStarUpOptionEarliest() throws Exception {
         testStarUpOptionEarliest(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionGroup() throws Exception {
+    void testStarUpOptionGroup() throws Exception {
         testStarUpOptionGroup(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testComputedColumn() throws Exception {
+    void testComputedColumn() throws Exception {
         testComputedColumn(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testWaterMarkSyncTable() throws Exception {
+    void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testKafkaBuildSchemaWithDelete() throws Exception {
+    void testKafkaBuildSchemaWithDelete() throws Exception {
         testKafkaBuildSchemaWithDelete(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testSchemaIncludeRecord() throws Exception {
+    void testSchemaIncludeRecord() throws Exception {
         testSchemaIncludeRecord(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionWithSchemaIncludeRecord() throws Exception {
+    void testSchemaEvolutionWithSchemaIncludeRecord() throws Exception {
         runSingleTableSchemaEvolutionWithSchemaIncludeRecord("schemaevolution", DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testAllTypesWithSchema() throws Exception {
+    void testAllTypesWithSchema() throws Exception {
         testAllTypesWithSchemaImpl(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
-    public void testMessageWithNullValue() throws Exception {
+    void testMessageWithNullValue() throws Exception {
         final String topic = "test_null_value";
         createTestTopic(topic, 1, 1);
 

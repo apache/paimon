@@ -101,7 +101,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireWithMissingFiles() throws Exception {
+    void testExpireWithMissingFiles() throws Exception {
         ExpireSnapshots expire = store.newExpire(1, 1, 1);
 
         List<KeyValue> allData = new ArrayList<>();
@@ -142,7 +142,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireWithMissingFilesWithExternalPath() throws Exception {
+    void testExpireWithMissingFilesWithExternalPath() throws Exception {
         String externalPath = "file://" + tempExternalPath.toString();
         store.options().toConfiguration().set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, externalPath);
         store.options()
@@ -203,7 +203,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testMixedSnapshotAndTagDeletion() throws Exception {
+    void testMixedSnapshotAndTagDeletion() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -250,7 +250,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireExtraFiles() throws IOException {
+    void testExpireExtraFiles() throws IOException {
         ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(1, 3, Long.MAX_VALUE);
 
         // write test files
@@ -302,7 +302,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireExtraFilesWithExternalPath() throws IOException {
+    void testExpireExtraFilesWithExternalPath() throws IOException {
         String externalPath = "file://" + tempExternalPath.toString();
         store.options().toConfiguration().set(CoreOptions.DATA_FILE_EXTERNAL_PATHS, externalPath);
         store.options()
@@ -363,7 +363,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testNoSnapshot() throws IOException {
+    void testNoSnapshot() throws IOException {
         ExpireSnapshots expire = store.newExpire(1, 3, Long.MAX_VALUE);
         expire.expire();
 
@@ -373,7 +373,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testNotEnoughSnapshots() throws Exception {
+    void testNotEnoughSnapshots() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(2, allData, snapshotPositions);
@@ -390,7 +390,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testNeverExpire() throws Exception {
+    void testNeverExpire() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
@@ -407,7 +407,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testNumRetainedMin() throws Exception {
+    void testNumRetainedMin() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numRetainedMin = random.nextInt(5) + 1;
@@ -431,7 +431,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireEmptySnapshot() throws Exception {
+    void testExpireEmptySnapshot() throws Exception {
         Random random = new Random();
 
         List<KeyValue> allData = new ArrayList<>();
@@ -475,7 +475,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireWithNumber() throws Exception {
+    void testExpireWithNumber() throws Exception {
         ExpireSnapshots expire = store.newExpire(1, 3, Long.MAX_VALUE);
 
         List<KeyValue> allData = new ArrayList<>();
@@ -513,7 +513,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireWithTime() throws Exception {
+    void testExpireWithTime() throws Exception {
         ExpireConfig.Builder builder = ExpireConfig.builder();
         builder.snapshotRetainMin(1)
                 .snapshotRetainMax(Integer.MAX_VALUE)
@@ -544,7 +544,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpireWithUpgradedFile() throws Exception {
+    void testExpireWithUpgradedFile() throws Exception {
         // write & commit data
         List<KeyValue> data = FileStoreTestUtils.partitionedData(5, gen, "0401", 8);
         BinaryRow partition = gen.getPartition(data.get(0));
@@ -587,7 +587,7 @@ public class ExpireSnapshotsTest {
     }
 
     @RepeatedTest(5)
-    public void testChangelogOutLivedSnapshot() throws Exception {
+    void testChangelogOutLivedSnapshot() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(10, allData, snapshotPositions);

@@ -89,7 +89,7 @@ public class LookupLevelsTest {
                     DataTypes.FIELD(1, "value", DataTypes.INT()));
 
     @Test
-    public void testMultiLevels() throws IOException {
+    void testMultiLevels() throws IOException {
         Levels levels =
                 new Levels(
                         comparator,
@@ -130,7 +130,7 @@ public class LookupLevelsTest {
     }
 
     @Test
-    public void testMultiFiles() throws IOException {
+    void testMultiFiles() throws IOException {
         Levels levels =
                 new Levels(
                         comparator,
@@ -175,7 +175,7 @@ public class LookupLevelsTest {
     }
 
     @RepeatedTest(value = 10)
-    public void testMaxDiskSize() throws IOException {
+    void testMaxDiskSize() throws IOException {
         List<DataFileMeta> files = new ArrayList<>();
         int fileNum = 10;
         int recordInFile = 100;
@@ -214,7 +214,7 @@ public class LookupLevelsTest {
     }
 
     @Test
-    public void testLookupEmptyLevel() throws IOException {
+    void testLookupEmptyLevel() throws IOException {
         Levels levels =
                 new Levels(
                         comparator,
@@ -231,7 +231,7 @@ public class LookupLevelsTest {
     }
 
     @Test
-    public void testLookupLevel0() throws Exception {
+    void testLookupLevel0() throws Exception {
         Levels levels =
                 new Levels(
                         comparator,

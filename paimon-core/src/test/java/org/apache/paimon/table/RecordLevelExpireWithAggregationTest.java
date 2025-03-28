@@ -78,7 +78,7 @@ class RecordLevelExpireWithAggregationTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void test() throws Exception {
+    void test() throws Exception {
         writeCommit(GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 2));
         // disordered retract message will generate null fields
         writeCommit(

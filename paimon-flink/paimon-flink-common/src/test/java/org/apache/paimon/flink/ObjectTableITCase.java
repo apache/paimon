@@ -31,10 +31,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for object table. */
-public class ObjectTableITCase extends CatalogITCaseBase {
+class ObjectTableITCase extends CatalogITCaseBase {
 
     @Test
-    public void testIllegalObjectTable() {
+    void testIllegalObjectTable() {
         assertThatThrownBy(
                         () ->
                                 sql(
@@ -47,7 +47,7 @@ public class ObjectTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testObjectTableRefresh() throws IOException {
+    void testObjectTableRefresh() throws IOException {
         Path objectLocation = new Path(path + "/object-location");
         FileIO fileIO = LocalFileIO.create();
         sql(
@@ -82,7 +82,7 @@ public class ObjectTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testObjectTableRefreshInPrivileged() throws IOException {
+    void testObjectTableRefreshInPrivileged() throws IOException {
         sql("CALL sys.init_file_based_privilege('root-passwd')");
 
         tEnv.executeSql(

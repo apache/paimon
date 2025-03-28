@@ -74,7 +74,7 @@ public class SparkTypeTest {
                     .build();
 
     @Test
-    public void testAllTypes() {
+    void testAllTypes() {
         String nestedRowMapType =
                 "StructField(locations,MapType("
                         + "StringType,"

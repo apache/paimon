@@ -36,12 +36,12 @@ import java.net.URL;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CdcDebeziumTimestampExtractor}. */
-public class CdcDebeziumTimestampExtractorITCase {
+class CdcDebeziumTimestampExtractorITCase {
 
     private ObjectMapper objectMapper;
 
     @BeforeEach
-    public void before() {
+    void before() {
         objectMapper = new ObjectMapper();
         objectMapper
                 .configure(JsonParser.Feature.ALLOW_COMMENTS, true)
@@ -50,7 +50,7 @@ public class CdcDebeziumTimestampExtractorITCase {
     }
 
     @Test
-    public void testMysqlCdcTimestampExtractor() throws Exception {
+    void testMysqlCdcTimestampExtractor() throws Exception {
         MysqlCdcTimestampExtractor extractor = new MysqlCdcTimestampExtractor();
 
         JsonNode data = objectMapper.readValue("{\"payload\" : {\"ts_ms\": 1}}", JsonNode.class);
@@ -69,7 +69,7 @@ public class CdcDebeziumTimestampExtractorITCase {
     }
 
     @Test
-    public void testMongodbCdcTimestampExtractor() throws Exception {
+    void testMongodbCdcTimestampExtractor() throws Exception {
         MongoDBCdcTimestampExtractor extractor = new MongoDBCdcTimestampExtractor();
 
         JsonNode data = objectMapper.readValue("{\"ts_ms\": 1}", JsonNode.class);

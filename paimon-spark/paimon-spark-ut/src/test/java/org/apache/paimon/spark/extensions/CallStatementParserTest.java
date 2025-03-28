@@ -46,13 +46,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PaimonCallStatement} of {@link PaimonSparkSessionExtensions}. */
-public class CallStatementParserTest {
+class CallStatementParserTest {
 
     private SparkSession spark = null;
     private ParserInterface parser = null;
 
     @BeforeEach
-    public void startSparkSession() {
+    void startSparkSession() {
         // Stops and clears active session to avoid loading previous non-stopped session.
         Option<SparkSession> optionalSession =
                 SparkSession.getActiveSession().orElse(SparkSession::getDefaultSession);
@@ -71,7 +71,7 @@ public class CallStatementParserTest {
     }
 
     @AfterEach
-    public void stopSparkSession() {
+    void stopSparkSession() {
         if (spark != null) {
             spark.stop();
             spark = null;
@@ -80,7 +80,7 @@ public class CallStatementParserTest {
     }
 
     @Test
-    public void testDelegateUnsupportedProcedure() {
+    void testDelegateUnsupportedProcedure() {
         assertThatThrownBy(() -> parser.parsePlan("CALL cat.d.t()"))
                 .isInstanceOf(ParseException.class)
                 .satisfies(
@@ -94,7 +94,7 @@ public class CallStatementParserTest {
     }
 
     @Test
-    public void testCallWithBackticks() throws ParseException {
+    void testCallWithBackticks() throws ParseException {
         PaimonCallStatement call =
                 (PaimonCallStatement) parser.parsePlan("CALL cat.`sys`.`rollback`()");
         assertThat(JavaConverters.seqAsJavaList(call.name()))
@@ -103,7 +103,7 @@ public class CallStatementParserTest {
     }
 
     @Test
-    public void testCallWithNamedArguments() throws ParseException {
+    void testCallWithNamedArguments() throws ParseException {
         PaimonCallStatement callStatement =
                 (PaimonCallStatement)
                         parser.parsePlan(
@@ -117,7 +117,7 @@ public class CallStatementParserTest {
     }
 
     @Test
-    public void testCallWithPositionalArguments() throws ParseException {
+    void testCallWithPositionalArguments() throws ParseException {
         PaimonCallStatement callStatement =
                 (PaimonCallStatement)
                         parser.parsePlan(
@@ -147,7 +147,7 @@ public class CallStatementParserTest {
     }
 
     @Test
-    public void testCallWithMixedArguments() throws ParseException {
+    void testCallWithMixedArguments() throws ParseException {
         PaimonCallStatement callStatement =
                 (PaimonCallStatement)
                         parser.parsePlan("CALL catalog.sys.rollback(arg1 => 1, 'test')");
@@ -159,7 +159,7 @@ public class CallStatementParserTest {
     }
 
     @Test
-    public void testCallWithParseException() {
+    void testCallWithParseException() {
         assertThatThrownBy(() -> parser.parsePlan("CALL catalog.sys.rollback abc"))
                 .isInstanceOf(PaimonParseException.class)
                 .hasMessageContaining("missing '(' at 'abc'");

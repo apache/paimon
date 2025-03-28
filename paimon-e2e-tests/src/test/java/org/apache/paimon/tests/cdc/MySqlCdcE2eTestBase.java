@@ -109,7 +109,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
     }
 
     @Test
-    public void testSyncTable() throws Exception {
+    void testSyncTable() throws Exception {
         runAction(
                 ACTION_SYNC_TABLE,
                 "pt",
@@ -196,7 +196,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
     }
 
     @Test
-    public void testSyncDatabase() throws Exception {
+    void testSyncDatabase() throws Exception {
         runAction(
                 ACTION_SYNC_DATABASE,
                 null,

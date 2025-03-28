@@ -59,7 +59,7 @@ public class AllTableOptionsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAllTableOptionsTable() throws Exception {
+    void testAllTableOptionsTable() throws Exception {
         List<String> result =
                 read(allTableOptionsTable).stream()
                         .map(Objects::toString)

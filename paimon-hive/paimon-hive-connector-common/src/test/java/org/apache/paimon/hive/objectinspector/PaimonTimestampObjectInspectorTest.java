@@ -30,10 +30,10 @@ import java.time.LocalDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link PaimonTimestampObjectInspector}. */
-public class PaimonTimestampObjectInspectorTest {
+class PaimonTimestampObjectInspectorTest {
 
     @Test
-    public void testCategoryAndClass() {
+    void testCategoryAndClass() {
         PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
@@ -45,7 +45,7 @@ public class PaimonTimestampObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveJavaObject() {
+    void testGetPrimitiveJavaObject() {
         PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
 
         LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
@@ -55,7 +55,7 @@ public class PaimonTimestampObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveWritableObject() {
+    void testGetPrimitiveWritableObject() {
         PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
 
         LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
@@ -66,7 +66,7 @@ public class PaimonTimestampObjectInspectorTest {
     }
 
     @Test
-    public void testCopyObject() {
+    void testCopyObject() {
         PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
 
         // TimestampData is immutable

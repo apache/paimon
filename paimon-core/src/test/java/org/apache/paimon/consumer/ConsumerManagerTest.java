@@ -33,7 +33,7 @@ import java.util.OptionalLong;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ConsumerManager}. */
-public class ConsumerManagerTest {
+class ConsumerManagerTest {
 
     @TempDir Path tempDir;
 
@@ -42,7 +42,7 @@ public class ConsumerManagerTest {
     private ConsumerManager consumerManagerBranch;
 
     @BeforeEach
-    public void before() {
+    void before() {
         this.manager =
                 new ConsumerManager(
                         LocalFileIO.create(), new org.apache.paimon.fs.Path(tempDir.toUri()));
@@ -54,7 +54,7 @@ public class ConsumerManagerTest {
     }
 
     @Test
-    public void test() {
+    void test() {
         Optional<Consumer> consumer = manager.consumer("id1");
         assertThat(consumer).isEmpty();
 
@@ -87,7 +87,7 @@ public class ConsumerManagerTest {
     }
 
     @Test
-    public void testExpire() throws Exception {
+    void testExpire() throws Exception {
         manager.resetConsumer("id1", new Consumer(1));
         Thread.sleep(1000);
         LocalDateTime expireDateTime = DateTimeUtils.toLocalDateTime(System.currentTimeMillis());
@@ -133,7 +133,7 @@ public class ConsumerManagerTest {
     }
 
     @Test
-    public void testReadConsumer() throws Exception {
+    void testReadConsumer() {
         manager.resetConsumer("id1", new Consumer(5));
         assertThat(manager.consumer("id1"));
 

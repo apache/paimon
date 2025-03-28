@@ -33,7 +33,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link ExpireTagsAction}. */
-public class ExpireTagsActionTest extends ActionITCaseBase {
+class ExpireTagsActionTest extends ActionITCaseBase {
 
     @TempDir private Path tempExternalPath;
 
@@ -43,7 +43,7 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
     }
 
     @Test
-    public void testExpireTags() throws Exception {
+    void testExpireTags() throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T (id STRING, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"
@@ -53,7 +53,7 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
     }
 
     @Test
-    public void testExpireTagsWithExternalPath() throws Exception {
+    void testExpireTagsWithExternalPath() throws Exception {
         String externalPath = "file://" + tempExternalPath;
         bEnv.executeSql(
                 "CREATE TABLE T (id STRING, name STRING,"

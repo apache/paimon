@@ -31,7 +31,7 @@ public class BloomFilter64Test {
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testFunction() {
+    void testFunction() {
         BloomFilter64 bloomFilter64 = new BloomFilter64(10000, 0.02);
 
         List<Long> testData = new ArrayList<>();

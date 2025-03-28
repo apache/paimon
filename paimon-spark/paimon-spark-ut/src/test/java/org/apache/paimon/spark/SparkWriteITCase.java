@@ -53,7 +53,7 @@ public class SparkWriteITCase {
     protected static Path warehousePath = null;
 
     @BeforeAll
-    public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
+    void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         warehousePath = new Path("file:///" + tempDir.toString());
         spark =
                 SparkSession.builder()
@@ -69,7 +69,7 @@ public class SparkWriteITCase {
     }
 
     @AfterAll
-    public void stopMetastoreAndSpark() {
+    void stopMetastoreAndSpark() {
         if (spark != null) {
             spark.stop();
             spark = null;
@@ -77,12 +77,12 @@ public class SparkWriteITCase {
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         spark.sql("DROP TABLE T");
     }
 
     @Test
-    public void testWrite() {
+    void testWrite() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
                         + " ('primary-key'='a', 'bucket'='4', 'file.format'='avro')");
@@ -90,7 +90,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testWritePartitionTable() {
+    void testWritePartitionTable() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (a) TBLPROPERTIES"
                         + " ('primary-key'='a,b', 'bucket'='4', 'file.format'='avro')");
@@ -98,7 +98,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testSortSpill() {
+    void testSortSpill() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
                         + " ('primary-key'='a', 'bucket'='4', 'file.format'='avro', 'sort-spill-threshold'='2')");
@@ -127,7 +127,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testDeleteWhereNonePk() {
+    void testDeleteWhereNonePk() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
                         + " ('primary-key'='a', 'file.format'='avro')");
@@ -138,7 +138,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testTruncateTable() {
+    void testTruncateTable() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING)"
                         + " TBLPROPERTIES ('primary-key'='a', 'file.format'='avro')");
@@ -149,7 +149,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testTruncatePartition1() {
+    void testTruncatePartition1() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c LONG) PARTITIONED BY (c)"
                         + " TBLPROPERTIES ('primary-key'='a,c')");
@@ -161,7 +161,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testTruncatePartition() {
+    void testTruncatePartition() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c LONG, d STRING)"
                         + " PARTITIONED BY (c,d)"
@@ -175,7 +175,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testWriteDynamicBucketPartitionedTable() {
+    void testWriteDynamicBucketPartitionedTable() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (a) TBLPROPERTIES"
                         + " ('primary-key'='a,b', 'bucket'='-1', "
@@ -214,7 +214,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testReadWriteUnawareBucketTable() {
+    void testReadWriteUnawareBucketTable() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (a) TBLPROPERTIES"
                         + " ('bucket'='-1')");
@@ -237,7 +237,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testDefaultDataFilePrefix() {
+    void testDefaultDataFilePrefix() {
         spark.sql("CREATE TABLE T (a INT, b INT, c STRING)");
 
         spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
@@ -257,7 +257,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testDataFilePrefixForAppendOnlyTable() {
+    void testDataFilePrefixForAppendOnlyTable() {
         spark.sql("CREATE TABLE T (a INT, b INT, c STRING)");
 
         spark.conf().set("spark.paimon.data-file.prefix", "test-");
@@ -278,7 +278,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testDataFilePrefixForPKTable() {
+    void testDataFilePrefixForPKTable() {
         spark.sql("CREATE TABLE T (a INT, b INT, c STRING)" + " TBLPROPERTIES ('primary-key'='a')");
 
         spark.conf().set("spark.paimon.data-file.prefix", "test-");
@@ -302,7 +302,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testChangelogFilePrefixForPkTable() throws Exception {
+    void testChangelogFilePrefixForPkTable() throws Exception {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES ('primary-key'='a', 'bucket' = '1', 'changelog-producer' = 'lookup')");
 
@@ -326,7 +326,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testMarkDone() throws IOException {
+    void testMarkDone() throws IOException {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (c) TBLPROPERTIES ("
                         + "'partition.end-input-to-done' = 'true', 'partition.mark-done-action' = 'success-file')");
@@ -340,7 +340,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testDataFileSuffixName() {
+    void testDataFileSuffixName() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING)"
                         + " TBLPROPERTIES ("
@@ -387,7 +387,7 @@ public class SparkWriteITCase {
     }
 
     @Test
-    public void testChangelogFileSuffixName() throws Exception {
+    void testChangelogFileSuffixName() throws Exception {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) "
                         + "TBLPROPERTIES ("

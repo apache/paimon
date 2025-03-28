@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CustomPartitionMarkDoneActionTest extends TableTestBase {
 
     @Test
-    public void testCustomPartitionMarkDoneAction() throws Exception {
+    void testCustomPartitionMarkDoneAction() throws Exception {
 
         Identifier identifier = identifier("T");
         Schema schema =
