@@ -53,6 +53,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     private KeyValue latestKv;
     private GenericRow row;
     private KeyValue reused;
+    private KeyValue initialKv;
+    private boolean isInitialized;
 
     public AggregateMergeFunction(
             InternalRow.FieldGetter[] getters, FieldAggregator[] aggregators) {
@@ -64,11 +66,25 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     public void reset() {
         this.latestKv = null;
         this.row = new GenericRow(getters.length);
+        this.initialKv = null;
+        this.isInitialized = false;
         Arrays.stream(aggregators).forEach(FieldAggregator::reset);
     }
 
     @Override
     public void add(KeyValue kv) {
+        if (initialKv == null) {
+            initialKv = kv;
+        } else {
+            if (!isInitialized) {
+                internalAdd(initialKv);
+                isInitialized = true;
+            }
+            internalAdd(kv);
+        }
+    }
+
+    private void internalAdd(KeyValue kv) {
         latestKv = kv;
         boolean isRetract =
                 kv.valueKind() != RowKind.INSERT && kv.valueKind() != RowKind.UPDATE_AFTER;
@@ -86,6 +102,22 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public KeyValue getResult() {
+        if (isInitialized) {
+            return internalGetResult();
+        }
+
+        boolean isRetract =
+                initialKv.valueKind() != RowKind.INSERT
+                        && initialKv.valueKind() != RowKind.UPDATE_AFTER;
+        if (isRetract) {
+            return initialKv;
+        }
+
+        internalAdd(initialKv);
+        return internalGetResult();
+    }
+
+    private KeyValue internalGetResult() {
         checkNotNull(
                 latestKv,
                 "Trying to get result from merge function without any input. This is unexpected.");
