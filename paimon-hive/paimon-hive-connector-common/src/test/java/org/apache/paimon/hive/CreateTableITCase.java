@@ -59,7 +59,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CreateTableITCase extends HiveTestBase {
 
     @Test
-    void testCreateExternalTableWithoutPaimonTable() {
+    public void testCreateExternalTableWithoutPaimonTable() {
         // Create hive external table without paimon table
         String tableName = "without_paimon_table";
         String hiveSql =
@@ -78,7 +78,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testCreateExternalTableWithPaimonTable() throws Exception {
+    public void testCreateExternalTableWithPaimonTable() throws Exception {
         // Create hive external table with paimon table
         String tableName = "with_paimon_table";
 
@@ -121,7 +121,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testCallCreateTableToCreatHiveExternalTable() throws Exception {
+    public void testCallCreateTableToCreatHiveExternalTable() throws Exception {
         // Create hive external table with paimon table
         String tableName = "with_paimon_table";
         String hadoopConfDir = "";
@@ -154,7 +154,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testCreateTableUsePartitionedBy() {
+    public void testCreateTableUsePartitionedBy() {
         // Use `partitioned by` to create hive partition table
         String tableName = "support_partitioned_by_table";
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
@@ -200,7 +200,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testLowerTableName() throws Catalog.TableNotExistException {
+    public void testLowerTableName() throws Catalog.TableNotExistException {
         // Use `partitioned by` to create hive partition table
         String tableName = "UPPER_NAME";
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
@@ -258,7 +258,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testLowerDBName() throws Catalog.TableNotExistException {
+    public void testLowerDBName() throws Catalog.TableNotExistException {
         String upperDB = "UPPER_DB";
 
         hiveShell.execute(String.format("create database %s", upperDB));
@@ -323,7 +323,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testCreateTableWithPrimaryKey() {
+    public void testCreateTableWithPrimaryKey() {
         String tableName = "primary_key_table";
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
         String hiveSql =
@@ -364,7 +364,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testCreateTableWithPartition() {
+    public void testCreateTableWithPartition() {
         String tableName = "partition_table";
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
         String hiveSql =
@@ -406,7 +406,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testCreateTableSpecifyProperties() {
+    public void testCreateTableSpecifyProperties() {
         String tableName = "specify_properties_table";
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
         String hiveSql =
@@ -450,7 +450,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testCreateTableIsPaimonSystemTable() {
+    public void testCreateTableIsPaimonSystemTable() {
         String tableName = "test$schema";
         String hiveSql =
                 String.join(
@@ -469,7 +469,7 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
-    void testCreateTableFailing() throws Exception {
+    public void testCreateTableFailing() throws Exception {
         // Create a extern table
 
         {
