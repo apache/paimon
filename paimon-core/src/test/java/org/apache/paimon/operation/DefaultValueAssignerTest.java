@@ -81,7 +81,7 @@ class DefaultValueAssignerTest {
     }
 
     @Test
-    public void testGeneralRow() {
+    void testGeneralRow() {
         DefaultValueAssigner defaultValueAssigner = DefaultValueAssigner.create(tableSchema);
         RowType readRowType =
                 tableSchema.projectedLogicalRowType(Lists.newArrayList("col5", "col4", "col0"));
@@ -92,7 +92,7 @@ class DefaultValueAssignerTest {
     }
 
     @Test
-    public void testHandlePredicate() {
+    void testHandlePredicate() {
         DefaultValueAssigner defaultValueAssigner = DefaultValueAssigner.create(tableSchema);
         PredicateBuilder predicateBuilder = new PredicateBuilder(tableSchema.logicalRowType());
 

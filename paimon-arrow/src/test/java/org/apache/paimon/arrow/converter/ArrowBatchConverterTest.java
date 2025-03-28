@@ -149,7 +149,7 @@ public class ArrowBatchConverterTest {
     }
 
     @BeforeEach
-    public void reset() throws Exception {
+    void reset() throws Exception {
         catalog =
                 CatalogFactory.createCatalog(
                         CatalogContext.create(new Path(tempDir.toUri().toString())));
@@ -171,7 +171,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testReadEmpty() throws Exception {
+    void testReadEmpty() throws Exception {
         testDv(false);
         List<Object[]> expected = new ArrayList<>();
         RecordReader.RecordIterator<InternalRow> iterator =
@@ -180,7 +180,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testPrimitiveTypes() throws Exception {
+    void testPrimitiveTypes() throws Exception {
         testDv(false);
         List<Object[]> expected = new ArrayList<>();
         RecordReader.RecordIterator<InternalRow> iterator = createPrimitiveIterator(expected, null);
@@ -211,7 +211,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testArrayType() throws Exception {
+    void testArrayType() throws Exception {
         testDv(false);
         // build RowType
         boolean nullable = RND.nextBoolean();
@@ -274,7 +274,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testMapType() throws Exception {
+    void testMapType() throws Exception {
         testDv(false);
         // build RowType
         boolean nullable = RND.nextBoolean();
@@ -342,7 +342,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testMapRowType() throws Exception {
+    void testMapRowType() throws Exception {
         testDv(false);
         // build RowType
         RowType nestedMapRowType =
@@ -393,13 +393,13 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testRowType() throws Exception {
+    void testRowType() throws Exception {
         testDv(false);
         testRowTypeImpl(false);
     }
 
     @TestTemplate
-    public void testRowTypeWithAllNull() throws Exception {
+    void testRowTypeWithAllNull() throws Exception {
         testDv(false);
         testRowTypeImpl(true);
     }
@@ -461,7 +461,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testSliceIntType() throws Exception {
+    void testSliceIntType() throws Exception {
         testDv(false);
         RowType rowType = RowType.builder().field("int", DataTypes.INT()).build();
         List<InternalRow> rows = new ArrayList<>(8);
@@ -494,7 +494,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testDvWithSimpleRowType() throws Exception {
+    void testDvWithSimpleRowType() throws Exception {
         testDv(true);
         boolean nullable = RND.nextBoolean();
         RowType rowType =
@@ -560,7 +560,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testDvWithArrayType() throws Exception {
+    void testDvWithArrayType() throws Exception {
         testDv(true);
         // build RowType
         boolean nullable = RND.nextBoolean();
@@ -637,7 +637,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testDvWithMapType() throws Exception {
+    void testDvWithMapType() throws Exception {
         testDv(true);
         // build RowType
         boolean nullable = RND.nextBoolean();
@@ -725,7 +725,7 @@ public class ArrowBatchConverterTest {
     }
 
     @TestTemplate
-    public void testDvWithRowType() throws Exception {
+    void testDvWithRowType() throws Exception {
         testDv(true);
         // build RowType
         boolean nullable = RND.nextBoolean();

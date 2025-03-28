@@ -38,7 +38,7 @@ public class CompressedInputOutputTest {
     @TempDir Path tempDir;
 
     @Test
-    public void testRandom() throws IOException {
+    void testRandom() throws IOException {
         for (int i = 0; i < 100; i++) {
             innerTestRandom();
         }

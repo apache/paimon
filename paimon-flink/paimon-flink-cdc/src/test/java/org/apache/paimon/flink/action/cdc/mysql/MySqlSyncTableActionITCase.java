@@ -64,19 +64,19 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link MySqlSyncTableAction}. */
-public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
+class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     private static final String DATABASE_NAME = "paimon_sync_table";
 
     @BeforeAll
-    public static void startContainers() {
+    static void startContainers() {
         MYSQL_CONTAINER.withSetupSQL("mysql/sync_table_setup.sql");
         start();
     }
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
@@ -260,7 +260,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testMultipleSchemaEvolutions() throws Exception {
+    void testMultipleSchemaEvolutions() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_multiple");
@@ -371,7 +371,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionWithComment() throws Exception {
+    void testSchemaEvolutionWithComment() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_comment");
@@ -439,7 +439,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(90)
-    public void testAllTypes() throws Exception {
+    void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
         for (int i = 0; i < 2; i++) {
@@ -738,7 +738,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testIncompatibleMySqlTable() {
+    void testIncompatibleMySqlTable() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "incompatible_field_\\d+");
@@ -755,7 +755,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testIncompatiblePaimonTable() throws Exception {
+    void testIncompatiblePaimonTable() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "incompatible_pk_\\d+");
@@ -780,7 +780,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testInvalidPrimaryKey() {
+    void testInvalidPrimaryKey() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
@@ -798,7 +798,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testNoPrimaryKey() {
+    void testNoPrimaryKey() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "incompatible_pk_\\d+");
@@ -817,7 +817,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testComputedColumn() throws Exception {
+    void testComputedColumn() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
         for (int i = 0; i < 2; i++) {
@@ -950,7 +950,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTemporalToIntWithEpochTime() throws Exception {
+    void testTemporalToIntWithEpochTime() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "test_time_to_int_epoch");
@@ -1027,7 +1027,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testDateFormatWithEpochTime() throws Exception {
+    void testDateFormatWithEpochTime() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "test_date_format_epoch");
@@ -1122,7 +1122,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSyncShards() throws Exception {
+    void testSyncShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 
         // test table list
@@ -1171,7 +1171,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testOptionsChange() throws Exception {
+    void testOptionsChange() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 
         mySqlConfig.put("database-name", DATABASE_NAME);
@@ -1222,7 +1222,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testOptionsChangeInExistingTable() throws Exception {
+    void testOptionsChangeInExistingTable() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("bucket", "1");
         options.put("sink.parallelism", "1");
@@ -1267,7 +1267,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testMetadataColumns() throws Exception {
+    void testMetadataColumns() throws Exception {
         try (Statement statement = getStatement()) {
             statement.execute("USE metadata");
             statement.executeUpdate("INSERT INTO test_metadata_columns VALUES (1, '2023-07-30')");
@@ -1315,7 +1315,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testCatalogAndTableConfig() {
+    void testCatalogAndTableConfig() {
         MySqlSyncTableAction action =
                 syncTableActionBuilder(getBasicMySqlConfig())
                         .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
@@ -1333,7 +1333,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testDefaultCheckpointInterval() throws Exception {
+    void testDefaultCheckpointInterval() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "default_checkpoint");
         mySqlConfig.put("table-name", "t");
@@ -1370,7 +1370,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testComputedColumnWithCaseInsensitive() throws Exception {
+    void testComputedColumnWithCaseInsensitive() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "computed_column_with_case_insensitive");
         mySqlConfig.put("table-name", "t");
@@ -1406,7 +1406,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSpecifyKeysWithCaseInsensitive() throws Exception {
+    void testSpecifyKeysWithCaseInsensitive() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "specify_key_with_case_insensitive");
         mySqlConfig.put("table-name", "t");
@@ -1427,7 +1427,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testInvalidAlterBucket() throws Exception {
+    void testInvalidAlterBucket() throws Exception {
         // create table with bucket first
         createFileStoreTable(
                 RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"k"}),
@@ -1453,7 +1453,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testColumnCommentChangeInExistingTable() throws Exception {
+    void testColumnCommentChangeInExistingTable() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("bucket", "1");
         options.put("sink.parallelism", "1");
@@ -1496,7 +1496,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testWriteOnlyAndSchemaEvolution() throws Exception {
+    void testWriteOnlyAndSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "write_only_and_schema_evolution");
         mySqlConfig.put("table-name", "t");
@@ -1537,7 +1537,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testUnknowMysqlScanStartupMode() {
+    void testUnknowMysqlScanStartupMode() {
         String scanStartupMode = "abc";
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
@@ -1556,7 +1556,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(1000)
-    public void testRuntimeExecutionModeCheckForCdcSync() throws Exception {
+    void testRuntimeExecutionModeCheckForCdcSync() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "check_cdc_sync_runtime_execution_mode");
         mySqlConfig.put("table-name", "t");

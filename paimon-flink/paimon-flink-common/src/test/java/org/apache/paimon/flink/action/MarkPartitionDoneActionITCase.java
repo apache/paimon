@@ -75,7 +75,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testPartitionMarkDoneWithSinglePartitionKey(boolean hasPk, String invoker)
+    void testPartitionMarkDoneWithSinglePartitionKey(boolean hasPk, String invoker)
             throws Exception {
         FileStoreTable table = prepareTable(hasPk);
 
@@ -117,7 +117,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testPartitionMarkDoneWithMultiplePartitionKey(boolean hasPk, String invoker)
+    void testPartitionMarkDoneWithMultiplePartitionKey(boolean hasPk, String invoker)
             throws Exception {
         FileStoreTable table = prepareTable(hasPk);
 
@@ -165,7 +165,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testCustomPartitionMarkDoneAction(boolean hasPk, String invoker) throws Exception {
+    void testCustomPartitionMarkDoneAction(boolean hasPk, String invoker) throws Exception {
 
         MockCustomPartitionMarkDoneAction.getMarkedDonePartitions().clear();
         Map<String, String> options = new HashMap<>(2);
@@ -226,8 +226,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testHttpReportPartitionMarkDoneAction(boolean hasPk, String invoker)
-            throws Exception {
+    void testHttpReportPartitionMarkDoneAction(boolean hasPk, String invoker) throws Exception {
 
         TestHttpWebServer server = new TestHttpWebServer("");
         server.start();

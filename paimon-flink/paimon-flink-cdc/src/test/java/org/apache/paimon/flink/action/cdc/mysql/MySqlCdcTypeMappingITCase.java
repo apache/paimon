@@ -48,10 +48,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT test for {@link TypeMapping} in MySQL CDC. */
-public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
+class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @BeforeAll
-    public static void startContainers() {
+    static void startContainers() {
         MYSQL_CONTAINER.withSetupSQL("mysql/type_mapping_test_setup.sql");
         start();
     }
@@ -60,7 +60,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTinyInt1NotBool() throws Exception {
+    void testTinyInt1NotBool() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "tinyint1_not_bool_test");
 
@@ -121,7 +121,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testConflictTinyInt1NotBool() {
+    void testConflictTinyInt1NotBool() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "tinyint1_not_bool_test");
         mySqlConfig.put(JdbcUrlUtils.PROPERTIES_PREFIX + "tinyInt1isBit", "true");
@@ -146,7 +146,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testReadAllTypes() throws Exception {
+    void testReadAllTypes() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "all_to_string_test");
         mySqlConfig.put("table-name", "all_types_table");
@@ -334,7 +334,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionAndNewlyCreatedTable() throws Exception {
+    void testSchemaEvolutionAndNewlyCreatedTable() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "all_to_string_test");
 
@@ -412,7 +412,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     // ------------------------------------- ignore-not-null -------------------------------------
     @Test
     @Timeout(60)
-    public void testIgnoreNotNull() throws Exception {
+    void testIgnoreNotNull() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "ignore_not_null_test");
 
@@ -471,7 +471,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testCharToString() throws Exception {
+    void testCharToString() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "char_to_string_test");
 
@@ -538,7 +538,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testLongtextToBytes() throws Exception {
+    void testLongtextToBytes() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "longtext_to_bytes_test");
 
@@ -608,7 +608,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testBigintUnsignedToBigint() throws Exception {
+    void testBigintUnsignedToBigint() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "bigint_unsigned_to_bigint_test");
 

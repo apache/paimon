@@ -66,7 +66,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         testMigrateFileAction(format);
     }
 
-    public void test(String format) throws Exception {
+    void test(String format) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -100,7 +100,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
-    public void testMigrateFileAction(String format) throws Exception {
+    void testMigrateFileAction(String format) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");

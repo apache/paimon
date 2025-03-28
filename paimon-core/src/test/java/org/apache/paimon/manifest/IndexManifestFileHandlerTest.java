@@ -33,12 +33,12 @@ import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomDeletion
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for IndexManifestFileHandler. */
-public class IndexManifestFileHandlerTest {
+class IndexManifestFileHandlerTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testUnawareMode() throws Exception {
+    void testUnawareMode() throws Exception {
         TestAppendFileStore fileStore =
                 TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
 
@@ -73,7 +73,7 @@ public class IndexManifestFileHandlerTest {
     }
 
     @Test
-    public void testHashFixedBucket() throws Exception {
+    void testHashFixedBucket() throws Exception {
         TestAppendFileStore fileStore =
                 TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
 

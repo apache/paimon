@@ -29,10 +29,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatException;
 
 /** IT Case for {@link CreateTagFromTimestampProcedure}. */
-public class CreateTagFromTimestampProcedureITCase extends CatalogITCaseBase {
+class CreateTagFromTimestampProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testCreateTagsFromSnapshotsCommitTime() throws Exception {
+    void testCreateTagsFromSnapshotsCommitTime() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -109,7 +109,7 @@ public class CreateTagFromTimestampProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateTagsFromTagsCommitTime() throws Exception {
+    void testCreateTagsFromTagsCommitTime() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"

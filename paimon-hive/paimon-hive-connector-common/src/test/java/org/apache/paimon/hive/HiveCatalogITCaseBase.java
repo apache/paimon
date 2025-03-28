@@ -194,7 +194,7 @@ public abstract class HiveCatalogITCaseBase {
                     };
 
     @Test
-    public void testDbLocation() {
+    void testDbLocation() {
         String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
@@ -209,7 +209,7 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     @LocationInProperties
-    public void testDbLocationWithMetastoreLocationInProperties()
+    void testDbLocationWithMetastoreLocationInProperties()
             throws Catalog.DatabaseAlreadyExistException, Catalog.DatabaseNotExistException {
         String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         Catalog catalog =
@@ -232,7 +232,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testDatabaseOperations() throws Exception {
+    void testDatabaseOperations() throws Exception {
         // create database
         tEnv.executeSql("CREATE DATABASE test_db2").await();
         assertThat(collect("SHOW DATABASES"))
@@ -276,7 +276,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testTableOperations() throws Exception {
+    void testTableOperations() throws Exception {
         // create table
         tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
@@ -340,7 +340,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testCreateExternalTable() throws Exception {
+    void testCreateExternalTable() throws Exception {
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -365,7 +365,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testCreateCatalogWithSyncTblProperties() throws Exception {
+    void testCreateCatalogWithSyncTblProperties() throws Exception {
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -425,8 +425,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testAlterTableWithSyncTblProperties()
-            throws ExecutionException, InterruptedException {
+    void testAlterTableWithSyncTblProperties() throws ExecutionException, InterruptedException {
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -488,7 +487,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testCreateInsensitiveTable() throws Exception {
+    void testCreateInsensitiveTable() throws Exception {
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -513,7 +512,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testFlinkWriteAndHiveRead() throws Exception {
+    void testFlinkWriteAndHiveRead() throws Exception {
         tEnv.executeSql(
                         "CREATE TABLE t ( "
                                 + "f0 BOOLEAN, "
@@ -551,7 +550,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testFlinkCreateBranchAndHiveRead() throws Exception {
+    void testFlinkCreateBranchAndHiveRead() throws Exception {
         tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
         tEnv.executeSql("CALL sys.create_branch('test_db.t', 'test')").await();
@@ -573,13 +572,13 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testDropPartitionFromBranch() throws Exception {
+    void testDropPartitionFromBranch() throws Exception {
         testDropPartitionFromBranchImpl();
     }
 
     @Test
     @LocationInProperties
-    public void testDropPartitionFromBranchLocationInProperties() throws Exception {
+    void testDropPartitionFromBranchLocationInProperties() throws Exception {
         testDropPartitionFromBranchImpl();
     }
 
@@ -628,7 +627,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testFallbackBranchRead() throws Exception {
+    void testFallbackBranchRead() throws Exception {
         tEnv.executeSql(
                         "CREATE TABLE t ( pt INT, a INT, b STRING ) PARTITIONED BY (pt) "
                                 + "WITH ( 'file.format' = 'avro', 'metastore.partitioned-table' = 'true' )")
@@ -663,7 +662,7 @@ public abstract class HiveCatalogITCaseBase {
      * Test flink writing and hive reading to compare partitions and non-partitions table results.
      */
     @Test
-    public void testFlinkWriteAndHiveReadToCompare() throws Exception {
+    void testFlinkWriteAndHiveReadToCompare() throws Exception {
         // Use flink to create a partitioned table and write data, hive read.
         tEnv.executeSql(
                         "create table students\n"
@@ -704,7 +703,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testHiveCreateAndFlinkRead() throws Exception {
+    void testHiveCreateAndFlinkRead() throws Exception {
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
         hiveShell.execute(
                 "CREATE TABLE hive_test_table ( a INT, b STRING ) "
@@ -717,7 +716,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testHiveCreateAndFlinkInsertRead() throws Exception {
+    void testHiveCreateAndFlinkInsertRead() throws Exception {
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
         hiveShell.execute(
                 "CREATE TABLE hive_test_table ( a INT, b STRING ) "
@@ -733,7 +732,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testCreateTableAs() throws Exception {
+    void testCreateTableAs() throws Exception {
         tEnv.executeSql("CREATE TABLE t (a INT)").await();
         tEnv.executeSql("INSERT INTO t VALUES(1)").await();
         tEnv.executeSql("CREATE TABLE t1 AS SELECT * FROM t").await();
@@ -891,7 +890,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testRenameTable() throws Exception {
+    void testRenameTable() throws Exception {
         tEnv.executeSql("CREATE TABLE t1 (a INT)").await();
         tEnv.executeSql("CREATE TABLE t2 (a INT)").await();
         tEnv.executeSql("INSERT INTO t1 SELECT 1").await();
@@ -929,7 +928,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testAlterTable() throws Exception {
+    void testAlterTable() throws Exception {
         tEnv.executeSql("CREATE TABLE t1 (a INT, b STRING, c TIMESTAMP(3))").await();
         List<String> result =
                 collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
@@ -1020,7 +1019,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testHiveLock() throws InterruptedException, Catalog.TableNotExistException {
+    void testHiveLock() throws InterruptedException, Catalog.TableNotExistException {
         tEnv.executeSql("CREATE TABLE t (a INT)");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
@@ -1067,7 +1066,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testUpperCase() {
+    void testUpperCase() {
         tEnv.executeSql("CREATE TABLE T (a INT, b STRING ) WITH ( 'file.format' = 'avro' )");
         tEnv.executeSql(
                 "CREATE TABLE tT (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')");
@@ -1081,7 +1080,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testCatalogOptionsInheritAndOverride() throws Exception {
+    void testCatalogOptionsInheritAndOverride() throws Exception {
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -1125,7 +1124,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testAddPartitionsToMetastore() throws Exception {
+    void testAddPartitionsToMetastore() throws Exception {
         prepareTestAddPartitionsToMetastore();
 
         String sql1 =
@@ -1145,7 +1144,7 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     @LocationInProperties
-    public void testAddPartitionsToMetastoreLocationInProperties() throws Exception {
+    void testAddPartitionsToMetastoreLocationInProperties() throws Exception {
         prepareTestAddPartitionsToMetastore();
 
         String sql1 =
@@ -1211,7 +1210,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testAddPartitionsToMetastoreForUnpartitionedTable() throws Exception {
+    void testAddPartitionsToMetastoreForUnpartitionedTable() throws Exception {
         tEnv.executeSql(
                 String.join(
                         "\n",
@@ -1229,7 +1228,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testDropPartitionsToMetastore() throws Exception {
+    void testDropPartitionsToMetastore() throws Exception {
         prepareTestAddPartitionsToMetastore();
 
         // drop partition
@@ -1242,7 +1241,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testCreatePartitionsToMetastore() throws Exception {
+    void testCreatePartitionsToMetastore() throws Exception {
         prepareTestAddPartitionsToMetastore();
 
         // add partition
@@ -1262,7 +1261,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testAddPartitionsForTag() throws Exception {
+    void testAddPartitionsForTag() throws Exception {
         tEnv.executeSql(
                 String.join(
                         "\n",
@@ -1302,7 +1301,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testDeletePartitionForTag() throws Exception {
+    void testDeletePartitionForTag() throws Exception {
         tEnv.executeSql(
                 "CREATE TABLE t (\n"
                         + "    k INT,\n"
@@ -1328,7 +1327,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testHistoryPartitionsCascadeToUpdate() throws Exception {
+    void testHistoryPartitionsCascadeToUpdate() throws Exception {
         tEnv.executeSql(
                 String.join(
                         "\n",
@@ -1363,7 +1362,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testAddPartitionsForTagPreview() throws Exception {
+    void testAddPartitionsForTagPreview() throws Exception {
         tEnv.executeSql(
                 String.join(
                         "\n",
@@ -1397,7 +1396,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testFileBasedPrivilege() throws Exception {
+    void testFileBasedPrivilege() throws Exception {
         tEnv.executeSql("CREATE TABLE t ( a INT, b INT )");
         tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
         tEnv.executeSql("CALL sys.init_file_based_privilege('root-passwd')");
@@ -1423,7 +1422,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testMarkDone() throws Exception {
+    void testMarkDone() throws Exception {
         sEnv.executeSql(
                 "CREATE TABLE mark_done_t1 (a INT, dt STRING) WITH ('continuous.discovery-interval' = '1s')");
         sEnv.executeSql(
@@ -1487,7 +1486,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testRepairDatabasesOrTables() throws Exception {
+    void testRepairDatabasesOrTables() throws Exception {
         TableEnvironment fileCatalog = useFileCatalog("test_db");
         TableEnvironment fileCatalog01 = useFileCatalog("test_db_01");
         // Database test_db exists in hive metastore
@@ -1528,7 +1527,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testRepairDatabasesOrTablesWithNamedArgument() throws Exception {
+    void testRepairDatabasesOrTablesWithNamedArgument() throws Exception {
         TableEnvironment fileCatalog = useFileCatalog("test_db");
         TableEnvironment fileCatalog01 = useFileCatalog("test_db_02");
         // Database test_db exists in hive metastore
@@ -1571,12 +1570,12 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testRepairTable() throws Exception {
+    void testRepairTable() throws Exception {
         testRepairTable(false);
     }
 
     @Test
-    public void testRepairTableWithNamedArgument() throws Exception {
+    void testRepairTableWithNamedArgument() throws Exception {
         testRepairTable(true);
     }
 
@@ -1609,12 +1608,12 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testRepairTableWithCustomLocation() throws Exception {
+    void testRepairTableWithCustomLocation() throws Exception {
         testRepairTableWithCustomLocation(false);
     }
 
     @Test
-    public void testRepairTableWithCustomLocationAndNamedArgument() throws Exception {
+    void testRepairTableWithCustomLocationAndNamedArgument() throws Exception {
         testRepairTableWithCustomLocation(true);
     }
 
@@ -1658,8 +1657,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testRepairTableWithSyncTblProperties()
-            throws ExecutionException, InterruptedException {
+    void testRepairTableWithSyncTblProperties() throws ExecutionException, InterruptedException {
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -1715,7 +1713,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testExpiredPartitionsSyncToMetastore() throws Exception {
+    void testExpiredPartitionsSyncToMetastore() throws Exception {
         // Use flink to create a partitioned table and write data, hive read.
         tEnv.executeSql("drop table if exists students").await();
         tEnv.executeSql(
@@ -1745,7 +1743,7 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testView() throws Exception {
+    void testView() throws Exception {
         tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
         tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();

@@ -50,19 +50,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for avro file format. */
-public class AvroFileFormatTest {
+class AvroFileFormatTest {
 
     @TempDir java.nio.file.Path tempPath;
 
     private static AvroFileFormat fileFormat;
 
     @BeforeAll
-    public static void before() {
+    static void before() {
         fileFormat = new AvroFileFormat(new FormatContext(new Options(), 1024, 1024));
     }
 
     @Test
-    public void testSupportedDataTypes() {
+    void testSupportedDataTypes() {
         ArrayList<DataField> dataFields = new ArrayList<>();
         int index = 0;
         dataFields.add(new DataField(index++, "boolean_type", DataTypes.BOOLEAN()));
@@ -90,7 +90,7 @@ public class AvroFileFormatTest {
     }
 
     @Test
-    public void testSupportedComplexDataTypes() {
+    void testSupportedComplexDataTypes() {
         ArrayList<DataField> dataFields = new ArrayList<>();
         int index = 0;
         dataFields.add(

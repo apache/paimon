@@ -42,10 +42,10 @@ import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getKafka
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for building schema from Kafka. */
-public class KafkaSchemaITCase extends KafkaActionITCaseBase {
+class KafkaSchemaITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
-    public void testKafkaSchema() throws Exception {
+    void testKafkaSchema() throws Exception {
         final String topic = "test_kafka_schema";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/schemaevolution/canal-data-1.txt");
@@ -69,7 +69,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTableOptionsChange() throws Exception {
+    void testTableOptionsChange() throws Exception {
         final String topic = "test_table_options_change";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/table/optionschange/canal-data-1.txt");
@@ -112,7 +112,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testNewlyAddedTablesOptionsChange() throws Exception {
+    void testNewlyAddedTablesOptionsChange() throws Exception {
         final String topic = "test_database_options_change";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/database/schemaevolution/topic0/canal-data-1.txt");

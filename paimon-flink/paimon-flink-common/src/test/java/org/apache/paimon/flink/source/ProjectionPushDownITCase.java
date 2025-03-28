@@ -36,7 +36,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /** Tests for {@link SupportsProjectionPushDown}. */
-public class ProjectionPushDownITCase extends CatalogITCaseBase {
+class ProjectionPushDownITCase extends CatalogITCaseBase {
 
     @Override
     public List<String> ddl() {
@@ -58,7 +58,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testProjectionPushDown() {
+    void testProjectionPushDown() {
         String sql = "SELECT a, c FROM T";
         assertPlanAndResult(
                 sql,
@@ -70,7 +70,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testProjectionPushDownWithUnorderedColumns() {
+    void testProjectionPushDownWithUnorderedColumns() {
         String sql = "SELECT c, a FROM T";
         assertPlanAndResult(
                 sql,
@@ -82,7 +82,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNestedProjectionPushDown() {
+    void testNestedProjectionPushDown() {
         String sql = "SELECT a, b.b1 FROM T";
         assertPlanAndResult(
                 sql,
@@ -94,7 +94,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNestedProjectionPushDownTripleLevel() {
+    void testNestedProjectionPushDownTripleLevel() {
         String sql = "SELECT a, d.d0.d00 FROM T";
         assertPlanAndResult(
                 sql,
@@ -106,7 +106,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNestedProjectionPushDownMultipleFields() {
+    void testNestedProjectionPushDownMultipleFields() {
         String sql = "SELECT a, b.b1, d.d2 FROM T";
         assertPlanAndResult(
                 sql,
@@ -118,7 +118,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMultipleNestedProjectionPushDownWithUnorderedColumns() {
+    void testMultipleNestedProjectionPushDownWithUnorderedColumns() {
         String sql = "SELECT c, d.d1, b.b1, a FROM T";
         assertPlanAndResult(
                 sql,
@@ -130,7 +130,7 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSystemTableProjectionPushDown() {
+    void testSystemTableProjectionPushDown() {
         String sql = "SELECT schema_id, primary_keys FROM T$schemas";
         assertPlanAndResult(
                 sql,

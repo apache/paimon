@@ -50,14 +50,14 @@ public class BitmapFileIndexTest {
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Test
-    public void testFlip() {
+    void testFlip() {
         RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOf(1, 3, 5);
         bitmap.flip(0, 6);
         assert bitmap.equals(RoaringBitmap32.bitmapOf(0, 2, 4));
     }
 
     @Test
-    public void testComparator() {
+    void testComparator() {
         assert BitmapFileIndexMetaV2.getComparator(new VarCharType())
                         .compare(BinaryString.fromString("a"), BinaryString.fromString("b"))
                 < 0;
@@ -72,7 +72,7 @@ public class BitmapFileIndexTest {
     }
 
     @Test
-    public void testMemorySize() {
+    void testMemorySize() {
         assert MemorySize.parse("16kb").getBytes() == 16 * 1024;
         assert MemorySize.parse("16KB").getBytes() == 16 * 1024;
         assert MemorySize.parse("16 kb").getBytes() == 16 * 1024;
@@ -81,7 +81,7 @@ public class BitmapFileIndexTest {
     }
 
     @Test
-    public void testCompoundIndexResult() {
+    void testCompoundIndexResult() {
 
         BitmapIndexResult bitmapIndexResult =
                 new BitmapIndexResult(() -> RoaringBitmap32.bitmapOf(1, 3, 5));
@@ -105,7 +105,7 @@ public class BitmapFileIndexTest {
     }
 
     @Test
-    public void testV1() throws Exception {
+    void testV1() throws Exception {
         testIntType(BitmapFileIndex.VERSION_1);
         testStringType(BitmapFileIndex.VERSION_1);
         testBooleanType(BitmapFileIndex.VERSION_1);
@@ -114,7 +114,7 @@ public class BitmapFileIndexTest {
     }
 
     @Test
-    public void testV2() throws Exception {
+    void testV2() throws Exception {
         testIntType(BitmapFileIndex.VERSION_2);
         testStringType(BitmapFileIndex.VERSION_2);
         testBooleanType(BitmapFileIndex.VERSION_2);

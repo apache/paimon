@@ -122,7 +122,7 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     @Timeout(300)
-    public void testCheckpointTrigger(boolean rpcFirst) throws Exception {
+    void testCheckpointTrigger(boolean rpcFirst) throws Exception {
         writeTable();
 
         AlignedContinuousFileStoreSource alignedSource =

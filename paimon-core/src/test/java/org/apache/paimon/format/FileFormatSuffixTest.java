@@ -51,7 +51,7 @@ import java.util.LinkedList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** test file format suffix. */
-public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
+class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
 
     private static final RowType SCHEMA =
             RowType.of(

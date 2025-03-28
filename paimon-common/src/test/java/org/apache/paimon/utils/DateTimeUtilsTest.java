@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DateTimeUtilsTest {
 
     @Test
-    public void testFormatLocalDateTime() {
+    void testFormatLocalDateTime() {
         LocalDateTime time = LocalDateTime.of(2023, 8, 30, 12, 30, 59, 999_999_999);
         String[] expectations = new String[10];
         expectations[0] = "2023-08-30 12:30:59";
@@ -48,7 +48,7 @@ public class DateTimeUtilsTest {
     }
 
     @Test
-    public void testParseTimestampData() {
+    void testParseTimestampData() {
         String dt = "2024-01-14 19:35:00.012";
         Timestamp ts = DateTimeUtils.parseTimestampData(dt, 3);
         assertThat(dt)
@@ -70,7 +70,7 @@ public class DateTimeUtilsTest {
     }
 
     @Test
-    public void testTimestamp() {
+    void testTimestamp() {
         int nanos = 100;
         java.sql.Timestamp timestamp = new java.sql.Timestamp(System.currentTimeMillis());
         for (int i = 0; i < 2000; i++) {
@@ -84,7 +84,7 @@ public class DateTimeUtilsTest {
     }
 
     @Test
-    public void testToInternalWithChangedTimeZone() {
+    void testToInternalWithChangedTimeZone() {
         TimeZone timeZone = TimeZone.getDefault();
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("UTC"));

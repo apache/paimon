@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for catalog tables. */
-public class CatalogTableITCase extends CatalogITCaseBase {
+class CatalogTableITCase extends CatalogITCaseBase {
 
     @Override
     protected boolean inferScanParallelism() {
@@ -59,13 +59,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testNotExistMetadataTable() {
+    void testNotExistMetadataTable() {
         assertThatThrownBy(() -> sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots"))
                 .hasMessageContaining("Object 'T$snapshots' not found");
     }
 
     @Test
-    public void testSnapshotsTable() throws Exception {
+    void testSnapshotsTable() throws Exception {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
@@ -132,7 +132,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSnapshotsTableWithRecordCount() throws Exception {
+    void testSnapshotsTableWithRecordCount() throws Exception {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
@@ -145,7 +145,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testOptionsTable() throws Exception {
+    void testOptionsTable() throws Exception {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
 
@@ -154,7 +154,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAllTableOptions() {
+    void testAllTableOptions() {
         sql("CREATE TABLE T (a INT, b INT) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
         sql("ALTER TABLE T SET ('c.cc.ccc' = 'val3')");
 
@@ -170,25 +170,25 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCatalogOptionsTable() {
+    void testCatalogOptionsTable() {
         List<Row> result = sql("SELECT * FROM sys.catalog_options");
         assertThat(result).containsExactly(Row.of("warehouse", path));
     }
 
     @Test
-    public void testDropSystemDatabase() {
+    void testDropSystemDatabase() {
         assertThatCode(() -> sql("DROP DATABASE sys"))
                 .hasRootCauseMessage("Can't do operation on system database.");
     }
 
     @Test
-    public void testCreateSystemDatabase() {
+    void testCreateSystemDatabase() {
         assertThatCode(() -> sql("CREATE DATABASE sys"))
                 .hasRootCauseMessage("Can't do operation on system database.");
     }
 
     @Test
-    public void testChangeTableInSystemDatabase() {
+    void testChangeTableInSystemDatabase() {
         sql("USE sys");
         assertThatCode(() -> sql("ALTER TABLE all_table_options SET ('bucket-num' = '5')"))
                 .rootCause()
@@ -196,7 +196,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSystemDatabase() {
+    void testSystemDatabase() {
         sql("USE " + Catalog.SYSTEM_DATABASE_NAME);
         assertThat(sql("SHOW TABLES"))
                 .containsExactlyInAnyOrder(
@@ -205,7 +205,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateSystemTable() {
+    void testCreateSystemTable() {
         assertThatThrownBy(() -> sql("CREATE TABLE T$snapshots (a INT, b INT)"))
                 .hasRootCauseMessage(
                         "Cannot 'createTable' for system table "
@@ -216,7 +216,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testManifestsTable() {
+    void testManifestsTable() {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
 
@@ -232,7 +232,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testManifestsTableWithFileCount() {
+    void testManifestsTableWithFileCount() {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
@@ -242,7 +242,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSchemasTable() {
+    void testSchemasTable() {
         sql(
                 "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
         sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
@@ -368,7 +368,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSnapshotsSchemasTable() {
+    void testSnapshotsSchemasTable() {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
@@ -389,7 +389,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateTableLike() {
+    void testCreateTableLike() {
         sql("CREATE TABLE T (a INT)");
         sql("CREATE TABLE T1 LIKE T (EXCLUDING OPTIONS)");
         List<Row> result =
@@ -401,7 +401,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateTableAs() {
+    void testCreateTableAs() {
         sql("CREATE TABLE t (a INT)");
         sql("INSERT INTO t VALUES(1),(2)");
         sql("CREATE TABLE t1 AS SELECT * FROM t");
@@ -548,7 +548,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConflictOption() {
+    void testConflictOption() {
         assertThatThrownBy(
                         () -> sql("CREATE TABLE T (a INT) WITH ('changelog-producer' = 'input')"))
                 .rootCause()
@@ -565,7 +565,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testShowPartitions() {
+    void testShowPartitions() {
         sql(
                 "CREATE TABLE NoPartitionTable (\n"
                         + "    user_id BIGINT,\n"
@@ -670,7 +670,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDropPartition() {
+    void testDropPartition() {
         sql(
                 "CREATE TABLE PartitionTable (\n"
                         + "    user_id BIGINT,\n"
@@ -726,7 +726,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFileFormatPerLevel() {
+    void testFileFormatPerLevel() {
         sql(
                 "CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) "
                         + "WITH ('num-sorted-run.compaction-trigger'='2',"
@@ -744,7 +744,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFilesTable() {
+    void testFilesTable() {
         sql(
                 "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
                         + "PARTITIONED BY (p) ");
@@ -858,7 +858,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFilesTableWithFilter() {
+    void testFilesTableWithFilter() {
         tEnv.getConfig().set(TABLE_DML_SYNC, true);
         sql(
                 "CREATE TABLE T_WITH_FILTER (k INT, p INT, v INT, PRIMARY KEY (k, p) NOT ENFORCED) "
@@ -907,7 +907,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTagsTable() throws Exception {
+    void testTagsTable() throws Exception {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
@@ -944,7 +944,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testConsumersTable() throws Exception {
+    void testConsumersTable() throws Exception {
         batchSql("CREATE TABLE T (a INT, b INT)");
         batchSql("INSERT INTO T VALUES (1, 2)");
         batchSql("INSERT INTO T VALUES (3, 4)");
@@ -973,7 +973,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConsumerIdExpInBatchMode() {
+    void testConsumerIdExpInBatchMode() {
         batchSql("CREATE TABLE T (a INT, b INT)");
         batchSql("INSERT INTO T VALUES (1, 2)");
         batchSql("INSERT INTO T VALUES (3, 4)");
@@ -989,7 +989,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConsumerIdExpInStreamingMode() {
+    void testConsumerIdExpInStreamingMode() {
         batchSql("CREATE TABLE T (a INT, b INT)");
         batchSql("INSERT INTO T VALUES (1, 2)");
         batchSql("INSERT INTO T VALUES (3, 4)");
@@ -1003,7 +1003,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionsTable() {
+    void testPartitionsTable() {
         String table = "PARTITIONS_TABLE";
         sql("CREATE TABLE %s (a INT, p INT, b BIGINT, c STRING) " + "PARTITIONED BY (p)", table);
 
@@ -1059,7 +1059,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testInvalidStreamingReadOverwrite() {
+    void testInvalidStreamingReadOverwrite() {
         String ddl =
                 "CREATE TABLE T (a INT PRIMARY KEY NOT ENFORCED, b STRING)"
                         + "WITH ('changelog-producer' = '%s', 'streaming-read-overwrite' = 'true')";
@@ -1080,7 +1080,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testShowTableMetadataComment() {
+    void testShowTableMetadataComment() {
         sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
         List<Row> result = sql("SHOW CREATE TABLE T");
         assertThat(result.get(0).toString())
@@ -1094,7 +1094,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadOptimizedTable() {
+    void testReadOptimizedTable() {
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '1')");
         innerTestReadOptimizedTable();
 
@@ -1104,7 +1104,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBinlogTableStreamRead() throws Exception {
+    void testBinlogTableStreamRead() throws Exception {
         sql(
                 "CREATE TABLE T (a INT, b INT, primary key (a) NOT ENFORCED) with ('changelog-producer' = 'lookup', "
                         + "'bucket' = '2')");
@@ -1123,7 +1123,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBinlogTableBatchRead() throws Exception {
+    void testBinlogTableBatchRead() throws Exception {
         sql(
                 "CREATE TABLE T (a INT, b INT, primary key (a) NOT ENFORCED) with ('changelog-producer' = 'lookup', "
                         + "'bucket' = '2')");
@@ -1138,7 +1138,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIndexesTable() {
+    void testIndexesTable() {
         sql(
                 "CREATE TABLE T (pt STRING, a INT, b STRING, PRIMARY KEY (pt, a) NOT ENFORCED)"
                         + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true')");

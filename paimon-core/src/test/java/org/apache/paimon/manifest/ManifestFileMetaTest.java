@@ -57,7 +57,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link ManifestFileMeta}. */
-public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
+class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
     private static final RowType PARTITION_TYPE = RowType.of(new IntType());
 
@@ -65,7 +65,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     private ManifestFile manifestFile;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         manifestFile = createManifestFile(tempDir.toString());
     }
 
@@ -357,7 +357,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testMultiPartitionsFullCompaction() throws Exception {
+    void testMultiPartitionsFullCompaction() throws Exception {
 
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
 
@@ -392,7 +392,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testIdentifierAfterFullCompaction() throws Exception {
+    void testIdentifierAfterFullCompaction() throws Exception {
         List<ManifestEntry> entries = new ArrayList<>();
         List<ManifestEntry> expectedEntries = new ArrayList<>();
         for (int i = 0; i < 16; i++) {

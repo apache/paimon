@@ -80,7 +80,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Tests for {@link IcebergMigrator}. */
-public class IcebergMigrateTest {
+class IcebergMigrateTest {
     @TempDir java.nio.file.Path iceTempDir;
     @TempDir java.nio.file.Path paiTempDir;
 

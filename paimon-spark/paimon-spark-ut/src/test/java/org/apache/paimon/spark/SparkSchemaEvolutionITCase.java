@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
-    public void testSetAndRemoveOption() {
+    void testSetAndRemoveOption() {
         spark.sql("ALTER TABLE t1 SET TBLPROPERTIES('xyc' 'unknown1')");
 
         Map<String, String> options =
@@ -70,7 +70,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAddColumn() {
+    void testAddColumn() {
         createTable("testAddColumn");
         writeTable("testAddColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
@@ -94,7 +94,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAddNotNullColumn() {
+    void testAddNotNullColumn() {
         createTable("testAddNotNullColumn");
 
         List<Row> beforeAdd = spark.sql("SHOW CREATE TABLE testAddNotNullColumn").collectAsList();
@@ -111,7 +111,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAddColumnPosition() {
+    void testAddColumnPosition() {
         createTable("testAddColumnPositionFirst");
         spark.sql("ALTER TABLE testAddColumnPositionFirst ADD COLUMN d INT FIRST");
         List<Row> result =
@@ -139,7 +139,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testRenameTable() {
+    void testRenameTable() {
         // TODO: add test case for hive catalog table
         assertThatThrownBy(() -> spark.sql("ALTER TABLE t3 RENAME TO t4"))
                 .isInstanceOf(AnalysisException.class)
@@ -163,7 +163,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testRenameColumn() {
+    void testRenameColumn() {
         createTable("testRenameColumn");
         writeTable("testRenameColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
@@ -189,7 +189,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testRenamePartitionKey() {
+    void testRenamePartitionKey() {
         spark.sql(
                 "CREATE TABLE testRenamePartitionKey (\n"
                         + "a BIGINT,\n"
@@ -209,7 +209,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDropSingleColumn() {
+    void testDropSingleColumn() {
         createTable("testDropSingleColumn");
         writeTable("testDropSingleColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
@@ -227,7 +227,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDropColumns() {
+    void testDropColumns() {
         createTable("testDropColumns");
 
         List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropColumns").collectAsList();
@@ -241,7 +241,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDropPartitionKey() {
+    void testDropPartitionKey() {
         spark.sql(
                 "CREATE TABLE testDropPartitionKey (\n"
                         + "a BIGINT,\n"
@@ -260,7 +260,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDropPrimaryKey() {
+    void testDropPrimaryKey() {
         spark.sql(
                 "CREATE TABLE testDropPrimaryKey (\n"
                         + "a BIGINT,\n"
@@ -282,7 +282,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testRenamePrimaryKey() {
+    void testRenamePrimaryKey() {
         spark.sql(
                 "CREATE TABLE test_rename_primary_key_table (\n"
                         + "a BIGINT NOT NULL,\n"
@@ -318,7 +318,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testRenameBucketKey() {
+    void testRenameBucketKey() {
         spark.sql(
                 "CREATE TABLE test_rename_bucket_key_table (\n"
                         + "a BIGINT NOT NULL,\n"
@@ -347,7 +347,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testUpdateColumnPosition() {
+    void testUpdateColumnPosition() {
         // move first
         createTable("tableFirst");
         spark.sql("ALTER TABLE tableFirst ALTER COLUMN b FIRST");
@@ -397,7 +397,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAlterColumnType() {
+    void testAlterColumnType() {
         createTableWithNonNullColumn("testAlterColumnType");
         writeTable("testAlterColumnType", "(1, 2L, '1')", "(5, 6L, '3')");
 
@@ -431,7 +431,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAlterTableColumnNullability() {
+    void testAlterTableColumnNullability() {
         assertThat(fieldIsNullable(getField(schema2(), 0))).isFalse();
         assertThat(fieldIsNullable(getField(schema2(), 1))).isFalse();
         assertThat(fieldIsNullable(getField(schema2(), 2))).isFalse();
@@ -461,7 +461,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAlterPrimaryKeyNullability() {
+    void testAlterPrimaryKeyNullability() {
         spark.sql(
                 "CREATE TABLE testAlterPkNullability (\n"
                         + "a BIGINT,\n"
@@ -478,7 +478,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAlterTableColumnComment() {
+    void testAlterTableColumnComment() {
         createTable("testAlterTableColumnComment");
         assertThat(getField(schema1(), 0).description()).isNull();
 
@@ -532,7 +532,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
      * <p>Verify records in table above.
      */
     @Test
-    public void testSchemaEvolution() {
+    void testSchemaEvolution() {
         // Create table with fields [a, b, c] and insert 2 records
         spark.sql(
                 "CREATE TABLE testSchemaEvolution(\n"
@@ -665,7 +665,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testFilesTable() {
+    void testFilesTable() {
         // Create table with fields [a, b, c] and insert 2 records
         createTable("testFilesTable");
         writeTable("testFilesTable", "(1, 2L, '3')", "(4, 5L, '6')");
@@ -710,7 +710,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testAddAndDropNestedColumn(String formatType) {
+    void testAddAndDropNestedColumn(String formatType) {
         String tableName = "testAddNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -791,7 +791,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testAddAndDropNestedColumnInArray(String formatType) {
+    void testAddAndDropNestedColumnInArray(String formatType) {
         String tableName = "testAddNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -835,7 +835,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testAddAndDropNestedColumnInMap(String formatType) {
+    void testAddAndDropNestedColumnInMap(String formatType) {
         String tableName = "testAddNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -874,7 +874,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testRenameNestedColumn(String formatType) {
+    void testRenameNestedColumn(String formatType) {
         String tableName = "testRenameNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -903,7 +903,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testRenameNestedColumnInArray(String formatType) {
+    void testRenameNestedColumnInArray(String formatType) {
         String tableName = "testRenameNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -934,7 +934,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testRenameNestedColumnInMap(String formatType) {
+    void testRenameNestedColumnInMap(String formatType) {
         String tableName = "testRenameNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -964,7 +964,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testUpdateNestedColumnType(String formatType) {
+    void testUpdateNestedColumnType(String formatType) {
         String tableName = "testRenameNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -997,7 +997,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testUpdateNestedColumnTypeInArray(String formatType) {
+    void testUpdateNestedColumnTypeInArray(String formatType) {
         String tableName = "testRenameNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."
@@ -1040,7 +1040,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testUpdateNestedColumnTypeInMap(String formatType) {
+    void testUpdateNestedColumnTypeInMap(String formatType) {
         String tableName = "testRenameNestedColumnTable";
         spark.sql(
                 "CREATE TABLE paimon.default."

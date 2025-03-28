@@ -102,7 +102,7 @@ public class FlinkEndInputPartitionExpireITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testEndInputPartitionExpire() throws Exception {
+    void testEndInputPartitionExpire() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write

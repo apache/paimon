@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link ResourcePaths}. */
-public class ResourcePathsTest {
+class ResourcePathsTest {
 
     @Test
     void testUrlEncode() {

@@ -31,10 +31,10 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link StaticFileStoreSplitEnumerator} with {@link SplitAssignMode#FAIR}. */
-public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
+class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
 
     @Test
-    public void testSplitAllocation() {
+    void testSplitAllocation() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 
@@ -65,7 +65,7 @@ public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
     }
 
     @Test
-    public void testSplitBatch() {
+    void testSplitBatch() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 
@@ -102,7 +102,7 @@ public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
     }
 
     @Test
-    public void testSplitAllocationNotEvenly() {
+    void testSplitAllocationNotEvenly() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(2);
 
@@ -124,7 +124,7 @@ public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
     }
 
     @Test
-    public void testSplitAllocationSomeEmpty() {
+    void testSplitAllocationSomeEmpty() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(3);
 

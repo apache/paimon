@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * additional information regarding copyright ownership. */
 
 /** Test for delta byte array encoding. */
-public class DeltaByteArrayEncodingTest {
+class DeltaByteArrayEncodingTest {
 
     private final String[] values = new String[] {"parquet-mr", "parquet", "parquet-format"};
     private String[] randValues;
@@ -46,34 +46,34 @@ public class DeltaByteArrayEncodingTest {
     private VectorizedDeltaByteArrayReader reader;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         writer = new DeltaByteArrayWriter(64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
         reader = new VectorizedDeltaByteArrayReader();
         randValues = Utils.getRandomStringSamples(10000, 32);
     }
 
     @Test
-    public void testSerialization() throws Exception {
+    void testSerialization() throws Exception {
         assertReadWrite(writer, reader, values);
     }
 
     @Test
-    public void randomStrings() throws Exception {
+    void randomStrings() throws Exception {
         assertReadWrite(writer, reader, randValues);
     }
 
     @Test
-    public void randomStringsWithSkip() throws Exception {
+    void randomStringsWithSkip() throws Exception {
         assertReadWriteWithSkip(writer, reader, randValues);
     }
 
     @Test
-    public void randomStringsWithSkipN() throws Exception {
+    void randomStringsWithSkipN() throws Exception {
         assertReadWriteWithSkipN(writer, reader, randValues);
     }
 
     @Test
-    public void testLengths() throws Exception {
+    void testLengths() throws Exception {
         VectorizedDeltaBinaryPackedReader lenReader = new VectorizedDeltaBinaryPackedReader();
         Utils.writeData(writer, values);
         ByteBufferInputStream data = writer.getBytes().toInputStream();
@@ -95,7 +95,7 @@ public class DeltaByteArrayEncodingTest {
     }
 
     @Test
-    public void testNegativeSize() {
+    void testNegativeSize() {
         HeapBytesVector heapBytesVector = new HeapBytesVector(32);
         assertThrows(
                 RuntimeException.class,

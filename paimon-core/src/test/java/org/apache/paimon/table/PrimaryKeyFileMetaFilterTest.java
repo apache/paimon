@@ -37,13 +37,13 @@ import java.util.stream.Collectors;
 public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         super.before();
     }
 
     @Test
     @Override
-    public void testTableSplit() throws Exception {
+    void testTableSplit() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -71,7 +71,7 @@ public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
 
     @Test
     @Override
-    public void testTableSplitFilterExistFields() throws Exception {
+    void testTableSplitFilterExistFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -110,7 +110,7 @@ public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
 
     @Test
     @Override
-    public void testTableSplitFilterNewFields() throws Exception {
+    void testTableSplitFilterNewFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);

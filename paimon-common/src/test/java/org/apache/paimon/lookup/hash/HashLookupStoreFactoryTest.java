@@ -112,7 +112,7 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testEmpty() throws IOException {
+    void testEmpty() throws IOException {
         HashLookupStoreWriter writer =
                 factory.createWriter(file, createBloomFiler(enableBloomFilter));
         Context context = writer.close();
@@ -127,7 +127,7 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testOneKey() throws IOException {
+    void testOneKey() throws IOException {
         HashLookupStoreWriter writer =
                 factory.createWriter(file, createBloomFiler(enableBloomFilter));
         writer.put(toBytes(1), toBytes("foo"));
@@ -139,7 +139,7 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testTwoFirstKeyLength() throws IOException {
+    void testTwoFirstKeyLength() throws IOException {
         int key1 = 1;
         int key2 = 245;
 
@@ -158,7 +158,7 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testKeyLengthGap() throws IOException {
+    void testKeyLengthGap() throws IOException {
         int key1 = 1;
         int key2 = 2450;
 
@@ -179,7 +179,7 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testKeyLengthStartTwo() throws IOException {
+    void testKeyLengthStartTwo() throws IOException {
         int key1 = 245;
         int key2 = 2450;
 
@@ -199,7 +199,7 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testDataOnTwoBuffers() throws IOException {
+    void testDataOnTwoBuffers() throws IOException {
         Object[] keys = new Object[] {1, 2, 3};
         Object[] values =
                 new Object[] {
@@ -224,7 +224,7 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testDataSizeOnTwoBuffers() throws IOException {
+    void testDataSizeOnTwoBuffers() throws IOException {
         Object[] keys = new Object[] {1, 2, 3};
         Object[] values =
                 new Object[] {
@@ -253,52 +253,52 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testReadStringToString() throws IOException {
+    void testReadStringToString() throws IOException {
         testReadKeyToString(generateStringKeys(100));
     }
 
     @TestTemplate
-    public void testReadIntToString() throws IOException {
+    void testReadIntToString() throws IOException {
         testReadKeyToString(generateIntKeys(100));
     }
 
     @TestTemplate
-    public void testReadDoubleToString() throws IOException {
+    void testReadDoubleToString() throws IOException {
         testReadKeyToString(generateDoubleKeys(100));
     }
 
     @TestTemplate
-    public void testReadLongToString() throws IOException {
+    void testReadLongToString() throws IOException {
         testReadKeyToString(generateLongKeys(100));
     }
 
     @TestTemplate
-    public void testReadStringToInt() throws IOException {
+    void testReadStringToInt() throws IOException {
         testReadKeyToInt(generateStringKeys(100));
     }
 
     @TestTemplate
-    public void testReadByteToInt() throws IOException {
+    void testReadByteToInt() throws IOException {
         testReadKeyToInt(generateByteKeys(100));
     }
 
     @TestTemplate
-    public void testReadIntToInt() throws IOException {
+    void testReadIntToInt() throws IOException {
         testReadKeyToInt(generateIntKeys(100));
     }
 
     @TestTemplate
-    public void testReadCompoundToString() throws IOException {
+    void testReadCompoundToString() throws IOException {
         testReadKeyToString(generateCompoundKeys(100));
     }
 
     @TestTemplate
-    public void testReadCompoundByteToString() throws IOException {
+    void testReadCompoundByteToString() throws IOException {
         testReadKeyToString(new Object[] {generateCompoundByteKey()});
     }
 
     @TestTemplate
-    public void testCacheExpiration() throws IOException {
+    void testCacheExpiration() throws IOException {
         int len = 1000;
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
         Object[] keys = new Object[len];
@@ -322,7 +322,7 @@ public class HashLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testIterate() throws IOException {
+    void testIterate() throws IOException {
         Integer[] keys = generateIntKeys(100);
         String[] values = generateStringData(keys.length, 12);
 

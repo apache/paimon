@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.condition.JRE.JAVA_11;
  * you're running this test locally, make sure that the memory limit of your Docker is at least 8GB.
  */
 @DisabledOnJre(JAVA_11)
-public class HiveE2eTest extends E2eReaderTestBase {
+class HiveE2eTest extends E2eReaderTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveE2eTest.class);
 
@@ -55,7 +55,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     }
 
     @Test
-    public void testReadExternalTable() throws Exception {
+    void testReadExternalTable() throws Exception {
         final String table = "paimon_pk";
         String paimonPkPath = HDFS_ROOT + "/" + UUID.randomUUID() + ".store";
         String paimonPkDdl =
@@ -82,7 +82,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     }
 
     @Test
-    public void testFlinkWriteAndHiveRead() throws Exception {
+    void testFlinkWriteAndHiveRead() throws Exception {
         final String warehouse = HDFS_ROOT + "/" + UUID.randomUUID() + ".warehouse";
         final String table = "t";
         runBatchSql(
@@ -99,7 +99,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     }
 
     @Test
-    public void testHiveWrite() throws Exception {
+    void testHiveWrite() throws Exception {
         final String table = "hive_test";
         String hiveSql =
                 String.join(
@@ -132,7 +132,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     }
 
     @Test
-    public void testMetastorePartitionedTable() throws Exception {
+    void testMetastorePartitionedTable() throws Exception {
         String warehouse = HDFS_ROOT + "/" + UUID.randomUUID() + ".warehouse";
 
         String createTableSql =

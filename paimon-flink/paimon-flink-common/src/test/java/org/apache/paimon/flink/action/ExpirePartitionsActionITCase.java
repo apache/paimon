@@ -40,7 +40,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link ExpirePartitionsAction}. */
-public class ExpirePartitionsActionITCase extends ActionITCaseBase {
+class ExpirePartitionsActionITCase extends ActionITCaseBase {
 
     private static final DataType[] FIELD_TYPES =
             new DataType[] {DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING()};
@@ -53,7 +53,7 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testExpirePartitionsAction() throws Exception {
+    void testExpirePartitionsAction() throws Exception {
         FileStoreTable table = prepareTable();
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
@@ -90,7 +90,7 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testExpirePartitionsActionWithTimePartition() throws Exception {
+    void testExpirePartitionsActionWithTimePartition() throws Exception {
         FileStoreTable table = prepareTable();
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);

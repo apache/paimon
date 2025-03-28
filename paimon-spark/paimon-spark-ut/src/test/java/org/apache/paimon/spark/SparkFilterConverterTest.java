@@ -61,10 +61,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link SparkFilterConverter}. */
-public class SparkFilterConverterTest {
+class SparkFilterConverterTest {
 
     @Test
-    public void testAll() {
+    void testAll() {
         RowType rowType =
                 new RowType(Collections.singletonList(new DataField(0, "id", new IntType())));
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
@@ -179,7 +179,7 @@ public class SparkFilterConverterTest {
     }
 
     @Test
-    public void testTimestamp() {
+    void testTimestamp() {
         RowType rowType =
                 new RowType(Collections.singletonList(new DataField(0, "x", new TimestampType())));
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
@@ -199,7 +199,7 @@ public class SparkFilterConverterTest {
     }
 
     @Test
-    public void testChar() {
+    void testChar() {
         RowType rowType =
                 new RowType(Collections.singletonList(new DataField(0, "id", new CharType())));
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
@@ -211,7 +211,7 @@ public class SparkFilterConverterTest {
     }
 
     @Test
-    public void testDate() {
+    void testDate() {
         RowType rowType =
                 new RowType(Collections.singletonList(new DataField(0, "x", new DateType())));
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
@@ -230,7 +230,7 @@ public class SparkFilterConverterTest {
     }
 
     @Test
-    public void testIgnoreFailure() {
+    void testIgnoreFailure() {
         List<DataField> dataFields = new ArrayList<>();
         dataFields.add(new DataField(0, "id", new IntType()));
         dataFields.add(new DataField(1, "name", new VarCharType(VarCharType.MAX_LENGTH)));

@@ -29,7 +29,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link DLFAuthSignature}. */
-public class DLFAuthSignatureTest {
+class DLFAuthSignatureTest {
 
     @Test
     void testGetAuthorization() throws Exception {

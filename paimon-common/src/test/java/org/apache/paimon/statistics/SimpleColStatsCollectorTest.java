@@ -64,7 +64,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testParse() {
+    void testParse() {
         assertThat(
                         SimpleColStatsCollector.from("none").create()
                                 instanceof NoneSimpleColStatsCollector)
@@ -88,7 +88,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testNone() {
+    void testNone() {
         List<GenericRow> rows = getRows();
         for (int i = 0; i < serializers.length; i++) {}
         check(
@@ -106,7 +106,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testCounts() {
+    void testCounts() {
         List<GenericRow> rows = getRows();
         for (int i = 0; i < serializers.length; i++) {}
         check(
@@ -124,7 +124,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testFull() {
+    void testFull() {
         List<GenericRow> rows = getRows();
         for (int i = 0; i < serializers.length; i++) {}
         check(
@@ -142,7 +142,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testTruncate() {
+    void testTruncate() {
         List<GenericRow> rows = getRows();
         for (int i = 0; i < serializers.length; i++) {}
         check(
@@ -161,7 +161,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testTruncateTwoChar() {
+    void testTruncateTwoChar() {
         TruncateSimpleColStatsCollector t1 = new TruncateSimpleColStatsCollector(1);
         SimpleColStats fieldStats =
                 new SimpleColStats(
@@ -174,7 +174,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testTruncateCopied() {
+    void testTruncateCopied() {
         TruncateSimpleColStatsCollector collector = new TruncateSimpleColStatsCollector(16);
         BinaryString str = BinaryString.fromString("str");
         collector.collect(str, (Serializer) BinaryStringSerializer.INSTANCE);
@@ -184,7 +184,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testFullCopied() {
+    void testFullCopied() {
         FullSimpleColStatsCollector collector = new FullSimpleColStatsCollector();
         BinaryString str = BinaryString.fromString("str");
         collector.collect(str, (Serializer) BinaryStringSerializer.INSTANCE);
@@ -194,7 +194,7 @@ public class SimpleColStatsCollectorTest {
     }
 
     @Test
-    public void testTruncateFail() {
+    void testTruncateFail() {
         TruncateSimpleColStatsCollector collector = new TruncateSimpleColStatsCollector(3);
 
         StringBuilder builder = new StringBuilder();

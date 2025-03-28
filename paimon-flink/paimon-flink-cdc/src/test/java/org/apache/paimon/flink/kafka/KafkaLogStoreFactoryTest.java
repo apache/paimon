@@ -58,7 +58,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** UT about {@link KafkaLogStoreFactory}. */
-public class KafkaLogStoreFactoryTest {
+class KafkaLogStoreFactoryTest {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.StartupMode.class)

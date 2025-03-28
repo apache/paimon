@@ -41,7 +41,7 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Metrics related IT cases for Paimon Flink source. */
-public class SourceMetricsITCase {
+class SourceMetricsITCase {
 
     private static final int DEFAULT_PARALLELISM = 4;
     private static final InMemoryReporter reporter = InMemoryReporter.createWithRetainedMetrics();

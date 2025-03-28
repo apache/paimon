@@ -37,16 +37,16 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests of {@link PrimaryKeyFileStoreTable} for schema evolution. */
-public class PrimaryKeyFileDataTableTest extends FileDataFilterTestBase {
+class PrimaryKeyFileDataTableTest extends FileDataFilterTestBase {
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         super.before();
     }
 
     @Test
     @Override
-    public void testReadFilterNonExistField() throws Exception {
+    void testReadFilterNonExistField() throws Exception {
         writeAndCheckFileResult(
                 schemas -> null,
                 (files, schemas) -> {
@@ -138,7 +138,7 @@ public class PrimaryKeyFileDataTableTest extends FileDataFilterTestBase {
 
     @Test
     @Override
-    public void testStreamingFilter() throws Exception {
+    void testStreamingFilter() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));

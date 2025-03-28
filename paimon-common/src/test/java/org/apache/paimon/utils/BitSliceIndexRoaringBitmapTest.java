@@ -82,7 +82,7 @@ public class BitSliceIndexRoaringBitmapTest {
     }
 
     @Test
-    public void testSerde() throws IOException {
+    void testSerde() throws IOException {
         BitSliceIndexRoaringBitmap.Appender appender =
                 new BitSliceIndexRoaringBitmap.Appender(0, 10);
         appender.append(0, 0);
@@ -99,7 +99,7 @@ public class BitSliceIndexRoaringBitmapTest {
     }
 
     @Test
-    public void testEQ() {
+    void testEQ() {
         // test predicate in the value bound
         for (int i = 0; i < 10; i++) {
             long predicate = generateNextValue();
@@ -120,7 +120,7 @@ public class BitSliceIndexRoaringBitmapTest {
     }
 
     @Test
-    public void testLT() {
+    void testLT() {
         // test predicate in the value bound
         for (int i = 0; i < 10; i++) {
             long predicate = generateNextValue();
@@ -142,7 +142,7 @@ public class BitSliceIndexRoaringBitmapTest {
     }
 
     @Test
-    public void testLTE() {
+    void testLTE() {
         // test predicate in the value bound
         for (int i = 0; i < 10; i++) {
             long predicate = generateNextValue();
@@ -164,7 +164,7 @@ public class BitSliceIndexRoaringBitmapTest {
     }
 
     @Test
-    public void testGT() {
+    void testGT() {
         // test predicate in the value bound
         for (int i = 0; i < 10; i++) {
             long predicate = generateNextValue();
@@ -186,7 +186,7 @@ public class BitSliceIndexRoaringBitmapTest {
     }
 
     @Test
-    public void testGTE() {
+    void testGTE() {
         // test predicate in the value bound
         for (int i = 0; i < 10; i++) {
             long predicate = generateNextValue();
@@ -208,7 +208,7 @@ public class BitSliceIndexRoaringBitmapTest {
     }
 
     @Test
-    public void testIsNotNull() {
+    void testIsNotNull() {
         assertThat(bsi.isNotNull())
                 .isEqualTo(
                         pairs.stream()
@@ -221,7 +221,7 @@ public class BitSliceIndexRoaringBitmapTest {
     }
 
     @Test
-    public void testCompareUsingMinMax() {
+    void testCompareUsingMinMax() {
         // a predicate in the value bound
         final int predicate = generateNextValue();
         final Optional<RoaringBitmap32> empty = Optional.of(new RoaringBitmap32());

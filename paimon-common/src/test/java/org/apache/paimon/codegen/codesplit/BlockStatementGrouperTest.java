@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class BlockStatementGrouperTest {
 
     @Test
-    public void testExtractIfInWhileGroups() {
+    void testExtractIfInWhileGroups() {
         String parameters = "a, b";
         String givenBlock = readResource("groups/code/IfInWhile.txt");
         String expectedBlock = readResource("groups/expected/IfInWhile.txt");
@@ -97,7 +97,7 @@ class BlockStatementGrouperTest {
     }
 
     @Test
-    public void testExtractWhileInIfGroups() {
+    void testExtractWhileInIfGroups() {
         String parameters = "a, b";
         String givenBlock = readResource("groups/code/WhileInIf.txt");
         String expectedBlock = readResource("groups/expected/WhileInIf.txt");

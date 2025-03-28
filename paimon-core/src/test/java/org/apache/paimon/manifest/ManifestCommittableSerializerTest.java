@@ -44,7 +44,7 @@ public class ManifestCommittableSerializerTest {
     private static final AtomicInteger ID = new AtomicInteger();
 
     @Test
-    public void testCommittableSerDe() throws IOException {
+    void testCommittableSerDe() throws IOException {
         ManifestCommittableSerializer serializer = serializer();
         ManifestCommittable committable = create();
         byte[] serialized = serializer.serialize(committable);

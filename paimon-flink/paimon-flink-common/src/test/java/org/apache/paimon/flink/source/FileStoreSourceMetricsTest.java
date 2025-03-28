@@ -52,13 +52,13 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for file store sources with metrics. */
-public class FileStoreSourceMetricsTest {
+class FileStoreSourceMetricsTest {
     private FileStoreTable table;
     private TestingSplitEnumeratorContextWithRegisteringGroup context;
     private MetricGroup scanMetricGroup;
 
     @BeforeEach
-    public void before(@TempDir java.nio.file.Path path) throws Exception {
+    void before(@TempDir java.nio.file.Path path) throws Exception {
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(path.toString());
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
@@ -78,7 +78,7 @@ public class FileStoreSourceMetricsTest {
     }
 
     @Test
-    public void staticFileStoreSourceScanMetricsTest() throws Exception {
+    void staticFileStoreSourceScanMetricsTest() throws Exception {
         writeOnce();
         StaticFileStoreSource staticFileStoreSource =
                 new StaticFileStoreSource(
@@ -96,7 +96,7 @@ public class FileStoreSourceMetricsTest {
     }
 
     @Test
-    public void continuousFileStoreSourceScanMetricsTest() throws Exception {
+    void continuousFileStoreSourceScanMetricsTest() throws Exception {
         writeOnce();
         ContinuousFileStoreSource continuousFileStoreSource =
                 new ContinuousFileStoreSource(table.newReadBuilder(), table.options(), null);
@@ -126,7 +126,7 @@ public class FileStoreSourceMetricsTest {
     }
 
     @Test
-    public void logHybridFileStoreSourceScanMetricsTest() throws Exception {
+    void logHybridFileStoreSourceScanMetricsTest() throws Exception {
         writeOnce();
         FlinkSource logHybridFileStoreSource =
                 LogHybridSourceFactory.buildHybridFirstSource(table, null, null, null);

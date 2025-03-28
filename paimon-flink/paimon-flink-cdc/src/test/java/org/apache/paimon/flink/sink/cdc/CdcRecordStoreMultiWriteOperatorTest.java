@@ -73,7 +73,7 @@ import java.util.function.Predicate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CdcRecordStoreMultiWriteOperator}. */
-public class CdcRecordStoreMultiWriteOperatorTest {
+class CdcRecordStoreMultiWriteOperatorTest {
 
     @TempDir java.nio.file.Path tempDir;
 

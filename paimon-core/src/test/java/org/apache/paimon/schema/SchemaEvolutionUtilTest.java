@@ -40,7 +40,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SchemaEvolutionUtil}. */
-public class SchemaEvolutionUtilTest {
+class SchemaEvolutionUtilTest {
 
     private final List<DataField> dataFields =
             Arrays.asList(
@@ -64,7 +64,7 @@ public class SchemaEvolutionUtilTest {
                     new DataField(9, "e", new DoubleType()));
 
     @Test
-    public void testCreateIndexMapping() {
+    void testCreateIndexMapping() {
         int[] indexMapping = SchemaEvolutionUtil.createIndexMapping(tableFields1, dataFields);
 
         assert indexMapping != null;
@@ -76,7 +76,7 @@ public class SchemaEvolutionUtilTest {
     }
 
     @Test
-    public void testDevolveDataFilters() {
+    void testDevolveDataFilters() {
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(
                 new LeafPredicate(

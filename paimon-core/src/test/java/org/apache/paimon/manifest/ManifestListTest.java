@@ -41,7 +41,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestList}. */
-public class ManifestListTest {
+class ManifestListTest {
 
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
     private final FileFormat avro = FileFormat.fromIdentifier("avro", new Options());
@@ -76,7 +76,7 @@ public class ManifestListTest {
     }
 
     @Test
-    public void testManifestListNaming() {
+    void testManifestListNaming() {
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList = createManifestList(tempDir.toString());
 

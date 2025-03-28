@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /** Tests for {@link ConcatRecordReader}. */
-public class ConcatRecordReaderTest extends CombiningRecordReaderTestBase {
+class ConcatRecordReaderTest extends CombiningRecordReaderTestBase {
 
     @Override
     protected boolean addOnly() {
@@ -53,7 +53,7 @@ public class ConcatRecordReaderTest extends CombiningRecordReaderTestBase {
     }
 
     @Test
-    public void testSmallData() throws IOException {
+    void testSmallData() throws IOException {
         runTest(
                 parseData(
                         "1, 1, +, 100 | 3, 2, +, 300 | 5, 3, -, 500 | "

@@ -66,7 +66,7 @@ public class AppendOnlyTableCompactionTest {
     private final String commitUser = UUID.randomUUID().toString();
 
     @BeforeEach
-    public void createNegativeAppendOnlyTable() throws Exception {
+    void createNegativeAppendOnlyTable() throws Exception {
         FileIO fileIO = new LocalFileIO();
         path = new org.apache.paimon.fs.Path(tempDir.toString());
         tableSchema = new SchemaManager(fileIO, path).createTable(schema());

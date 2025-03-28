@@ -132,7 +132,7 @@ public class FlinkCatalogTest {
     @TempDir public static java.nio.file.Path temporaryFolder;
 
     @BeforeEach
-    public void beforeEach() throws IOException {
+    void beforeEach() throws IOException {
         warehouse = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
         Options conf = new Options();
         conf.setString("warehouse", warehouse);

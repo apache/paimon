@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class BitSliceIndexBitmapFileIndexTest {
 
     @Test
-    public void testBitSliceIndexMix() {
+    void testBitSliceIndexMix() {
         IntType intType = new IntType();
         FieldRef fieldRef = new FieldRef(0, "", intType);
         BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType, null);
@@ -108,7 +108,7 @@ public class BitSliceIndexBitmapFileIndexTest {
     }
 
     @Test
-    public void testBitSliceIndexPositiveOnly() {
+    void testBitSliceIndexPositiveOnly() {
         IntType intType = new IntType();
         FieldRef fieldRef = new FieldRef(0, "", intType);
         BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType, null);
@@ -180,7 +180,7 @@ public class BitSliceIndexBitmapFileIndexTest {
     }
 
     @Test
-    public void testBitSliceIndexNegativeOnly() {
+    void testBitSliceIndexNegativeOnly() {
         IntType intType = new IntType();
         FieldRef fieldRef = new FieldRef(0, "", intType);
         BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType, null);

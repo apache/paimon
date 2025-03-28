@@ -33,7 +33,7 @@ class SuccessFileMarkDoneActionTest {
     @TempDir java.nio.file.Path temp;
 
     @Test
-    public void test() throws Exception {
+    void test() throws Exception {
         LocalFileIO fileIO = new LocalFileIO();
         Path path = new Path(temp.toUri());
         SuccessFileMarkDoneAction action = new SuccessFileMarkDoneAction(fileIO, path);

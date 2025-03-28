@@ -40,7 +40,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for spark read from Rest catalog. */
-public class SparkCatalogWithRestTest {
+class SparkCatalogWithRestTest {
 
     private RESTCatalogServer restCatalogServer;
     private String serverUrl;
@@ -73,7 +73,7 @@ public class SparkCatalogWithRestTest {
     }
 
     @Test
-    public void testTable() {
+    void testTable() {
         SparkSession spark =
                 SparkSession.builder()
                         .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())

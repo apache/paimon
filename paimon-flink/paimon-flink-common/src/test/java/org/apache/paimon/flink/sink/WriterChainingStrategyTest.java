@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Tests for {@link org.apache.flink.streaming.api.operators.ChainingStrategy} of writer operators.
  */
-public class WriterChainingStrategyTest {
+class WriterChainingStrategyTest {
     private static final String TABLE_NAME = "paimon_table";
 
     @TempDir java.nio.file.Path tempDir;
@@ -50,7 +50,7 @@ public class WriterChainingStrategyTest {
     private StreamTableEnvironment tEnv;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         Configuration config = new Configuration();
         config.setString(
                 "execution.checkpointing.interval",
@@ -73,7 +73,7 @@ public class WriterChainingStrategyTest {
     }
 
     @Test
-    public void testAppendTable() throws Exception {
+    void testAppendTable() throws Exception {
         tEnv.executeSql(
                         String.format(
                                 "CREATE TABLE %s (id INT, data STRING, dt STRING) "
@@ -85,7 +85,7 @@ public class WriterChainingStrategyTest {
     }
 
     @Test
-    public void testAppendTableWithUnawareBucket() throws Exception {
+    void testAppendTableWithUnawareBucket() throws Exception {
         tEnv.executeSql(
                         String.format(
                                 "CREATE TABLE %s (id INT, data STRING, dt STRING) "
@@ -97,7 +97,7 @@ public class WriterChainingStrategyTest {
     }
 
     @Test
-    public void testPrimaryKeyTable() throws Exception {
+    void testPrimaryKeyTable() throws Exception {
         tEnv.executeSql(
                         String.format(
                                 "CREATE TABLE %s (id INT, data STRING, dt STRING, PRIMARY KEY (id) NOT ENFORCED) "
@@ -109,7 +109,7 @@ public class WriterChainingStrategyTest {
     }
 
     @Test
-    public void testPrimaryKeyTableWithDynamicBucket() throws Exception {
+    void testPrimaryKeyTableWithDynamicBucket() throws Exception {
         tEnv.executeSql(
                         String.format(
                                 "CREATE TABLE %s (id INT, data STRING, dt STRING, PRIMARY KEY (id) NOT ENFORCED) "
@@ -121,7 +121,7 @@ public class WriterChainingStrategyTest {
     }
 
     @Test
-    public void testPrimaryKeyTableWithMultipleWriter() throws Exception {
+    void testPrimaryKeyTableWithMultipleWriter() throws Exception {
         tEnv.executeSql(
                         String.format(
                                 "CREATE TABLE %s (id INT, data STRING, dt STRING, PRIMARY KEY (id) NOT ENFORCED) "
@@ -133,7 +133,7 @@ public class WriterChainingStrategyTest {
     }
 
     @Test
-    public void testPrimaryKeyTableWithCrossPartitionUpdate() throws Exception {
+    void testPrimaryKeyTableWithCrossPartitionUpdate() throws Exception {
         tEnv.executeSql(
                         String.format(
                                 "CREATE TABLE %s (id INT, data STRING, dt STRING, PRIMARY KEY (id) NOT ENFORCED) "
@@ -147,7 +147,7 @@ public class WriterChainingStrategyTest {
     }
 
     @Test
-    public void testPrimaryKeyTableWithLocalMerge() throws Exception {
+    void testPrimaryKeyTableWithLocalMerge() throws Exception {
         tEnv.executeSql(
                         String.format(
                                 "CREATE TABLE %s (id INT, data STRING, dt STRING, PRIMARY KEY (id) NOT ENFORCED) "

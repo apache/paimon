@@ -164,7 +164,7 @@ class StoreMultiCommitterTest {
 
     @SuppressWarnings("CatchMayIgnoreException")
     @Test
-    public void testFailIntentionallyAfterRestore() throws Exception {
+    void testFailIntentionallyAfterRestore() throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(firstTable);
 
         // write to first table

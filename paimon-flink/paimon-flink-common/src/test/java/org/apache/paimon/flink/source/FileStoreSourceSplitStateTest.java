@@ -29,10 +29,10 @@ import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.ro
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for the {@link FileStoreSourceSplitState}. */
-public class FileStoreSourceSplitStateTest {
+class FileStoreSourceSplitStateTest {
 
     @Test
-    public void testRoundTripWithoutModification() {
+    void testRoundTripWithoutModification() {
         final FileStoreSourceSplit split = getTestSplit();
         final FileStoreSourceSplitState state = new FileStoreSourceSplitState(split);
 
@@ -42,7 +42,7 @@ public class FileStoreSourceSplitStateTest {
     }
 
     @Test
-    public void testStateStartsWithSplitValues() {
+    void testStateStartsWithSplitValues() {
         final FileStoreSourceSplit split = getTestSplit(456L);
         final FileStoreSourceSplitState state = new FileStoreSourceSplitState(split);
 
@@ -50,7 +50,7 @@ public class FileStoreSourceSplitStateTest {
     }
 
     @Test
-    public void testNewSplitTakesModifiedOffsetAndCount() {
+    void testNewSplitTakesModifiedOffsetAndCount() {
         final FileStoreSourceSplit split = getTestSplit();
         final FileStoreSourceSplitState state = new FileStoreSourceSplitState(split);
 

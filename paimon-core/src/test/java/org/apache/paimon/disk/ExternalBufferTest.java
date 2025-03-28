@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link ExternalBuffer}. */
-public class ExternalBufferTest {
+class ExternalBufferTest {
 
     @TempDir Path tempDir;
 
@@ -51,7 +51,7 @@ public class ExternalBufferTest {
     private BinaryRowSerializer serializer;
 
     @BeforeEach
-    public void before() {
+    void before() {
         this.ioManager = IOManager.create(tempDir.toString());
         this.random = new Random();
         this.serializer = new BinaryRowSerializer(1);

@@ -69,7 +69,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Tests for {@link FileStoreLookupFunction}. */
-public class FileStoreLookupFunctionTest {
+class FileStoreLookupFunctionTest {
 
     private static final Random RANDOM = new Random();
 

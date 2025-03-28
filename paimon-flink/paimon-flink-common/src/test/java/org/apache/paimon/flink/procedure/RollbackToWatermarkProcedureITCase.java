@@ -27,10 +27,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link RollbackToWatermarkProcedure}. */
-public class RollbackToWatermarkProcedureITCase extends CatalogITCaseBase {
+class RollbackToWatermarkProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testCreateTagsFromSnapshotsWatermark() throws Exception {
+    void testCreateTagsFromSnapshotsWatermark() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"

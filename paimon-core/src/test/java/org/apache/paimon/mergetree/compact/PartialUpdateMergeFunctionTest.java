@@ -37,12 +37,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PartialUpdateMergeFunction}. */
-public class PartialUpdateMergeFunctionTest {
+class PartialUpdateMergeFunctionTest {
 
     private long sequence = 0;
 
     @Test
-    public void testUpdateNonNull() {
+    void testUpdateNonNull() {
         Options options = new Options();
         RowType rowType =
                 RowType.of(
@@ -63,7 +63,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testSequenceGroup() {
+    void testSequenceGroup() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2");
         options.set("fields.f6.sequence-group", "f4,f5");
@@ -98,7 +98,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testSequenceGroupPartialDelete() {
+    void testSequenceGroupPartialDelete() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2");
         options.set("fields.f6.sequence-group", "f4,f5");
@@ -134,7 +134,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFields() {
+    void testMultiSequenceFields() {
         Options options = new Options();
         options.set("fields.f3,f4.sequence-group", "f1,f2");
         options.set("fields.f7,f8.sequence-group", "f5,f6");
@@ -177,7 +177,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testSequenceGroupDefaultAggFunc() {
+    void testSequenceGroupDefaultAggFunc() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2");
         options.set("fields.f6.sequence-group", "f4,f5");
@@ -205,7 +205,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFieldsDefaultAggFunc() {
+    void testMultiSequenceFieldsDefaultAggFunc() {
         Options options = new Options();
         options.set("fields.f3,f4.sequence-group", "f1,f2");
         options.set("fields.f7,f8.sequence-group", "f5,f6");
@@ -235,7 +235,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testSequenceGroupDefinedNoField() {
+    void testSequenceGroupDefinedNoField() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2,f7");
         options.set("fields.f6.sequence-group", "f4,f5");
@@ -256,7 +256,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFieldsDefinedNoField() {
+    void testMultiSequenceFieldsDefinedNoField() {
         Options options = new Options();
         options.set("fields.f2,f3.sequence-group", "f1,f7");
         options.set("fields.f5,f6.sequence-group", "f4");
@@ -277,7 +277,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testSequenceGroupRepeatDefine() {
+    void testSequenceGroupRepeatDefine() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2");
         options.set("fields.f4.sequence-group", "f1,f2");
@@ -296,7 +296,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFieldsRepeatDefine() {
+    void testMultiSequenceFieldsRepeatDefine() {
         Options options = new Options();
         options.set("fields.f3,f4.sequence-group", "f1,f2");
         options.set("fields.f5,f6.sequence-group", "f1,f2");
@@ -317,7 +317,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testAdjustProjectionSequenceFieldsProject() {
+    void testAdjustProjectionSequenceFieldsProject() {
         Options options = new Options();
         options.set("fields.f4.sequence-group", "f1,f3");
         options.set("fields.f5.sequence-group", "f7");
@@ -349,7 +349,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFieldsAdjustProjectionProject() {
+    void testMultiSequenceFieldsAdjustProjectionProject() {
         Options options = new Options();
         options.set("fields.f2,f4.sequence-group", "f1,f3");
         options.set("fields.f5,f6.sequence-group", "f7");
@@ -381,7 +381,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testAdjustProjectionAllFieldsProject() {
+    void testAdjustProjectionAllFieldsProject() {
         Options options = new Options();
         options.set("fields.f4.sequence-group", "f1,f3");
         options.set("fields.f5.sequence-group", "f7");
@@ -416,7 +416,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFieldsAdjustProjectionAllFieldsProject() {
+    void testMultiSequenceFieldsAdjustProjectionAllFieldsProject() {
         Options options = new Options();
         options.set("fields.f2,f4.sequence-group", "f1,f3");
         options.set("fields.f5,f6.sequence-group", "f7");
@@ -451,7 +451,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testAdjustProjectionNonProject() {
+    void testAdjustProjectionNonProject() {
         Options options = new Options();
         options.set("fields.f4.sequence-group", "f1,f3");
         options.set("fields.f5.sequence-group", "f7");
@@ -481,7 +481,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testAdjustProjectionNoSequenceGroup() {
+    void testAdjustProjectionNoSequenceGroup() {
         Options options = new Options();
         RowType rowType =
                 RowType.of(
@@ -512,7 +512,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testAdjustProjectionCreateDirectly() {
+    void testAdjustProjectionCreateDirectly() {
         Options options = new Options();
         options.set("fields.f4.sequence-group", "f1,f3");
         options.set("fields.f5.sequence-group", "f7");
@@ -536,7 +536,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testFirstValue() {
+    void testFirstValue() {
         Options options = new Options();
         options.set("fields.f1.sequence-group", "f2,f3");
         options.set("fields.f2.aggregate-function", "first_value");
@@ -558,7 +558,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFieldsFirstValue() {
+    void testMultiSequenceFieldsFirstValue() {
         Options options = new Options();
         options.set("fields.f1,f2.sequence-group", "f3,f4");
         options.set("fields.f3.aggregate-function", "first_value");
@@ -585,7 +585,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testPartialUpdateWithAggregation() {
+    void testPartialUpdateWithAggregation() {
         Options options = new Options();
         options.set("fields.f1.sequence-group", "f2,f3,f4");
         options.set("fields.f7.sequence-group", "f6");
@@ -644,7 +644,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFieldsPartialUpdateWithAggregation() {
+    void testMultiSequenceFieldsPartialUpdateWithAggregation() {
         Options options = new Options();
         options.set("fields.f1,f2.sequence-group", "f3,f4,f5");
         options.set("fields.f7,f8.sequence-group", "f6");
@@ -711,7 +711,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testPartialUpdateWithAggregationProjectPushDown() {
+    void testPartialUpdateWithAggregationProjectPushDown() {
         Options options = new Options();
         options.set("fields.f1.sequence-group", "f2,f3,f4");
         options.set("fields.f7.sequence-group", "f6");
@@ -765,7 +765,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiSequenceFieldsPartialUpdateWithAggregationProjectPushDown() {
+    void testMultiSequenceFieldsPartialUpdateWithAggregationProjectPushDown() {
         Options options = new Options();
         options.set("fields.f1,f8.sequence-group", "f2,f3,f4");
         options.set("fields.f7,f9.sequence-group", "f6");
@@ -821,7 +821,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testAggregationWithoutSequenceGroup() {
+    void testAggregationWithoutSequenceGroup() {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -858,7 +858,7 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testDeleteReproduceCorrectSequenceNumber() {
+    void testDeleteReproduceCorrectSequenceNumber() {
         Options options = new Options();
         options.set("partial-update.remove-record-on-delete", "true");
         RowType rowType =

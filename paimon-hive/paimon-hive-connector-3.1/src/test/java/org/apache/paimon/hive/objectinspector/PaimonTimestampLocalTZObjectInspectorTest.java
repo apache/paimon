@@ -32,10 +32,10 @@ import java.time.ZoneId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link PaimonTimestampLocalTZObjectInspector}. */
-public class PaimonTimestampLocalTZObjectInspectorTest {
+class PaimonTimestampLocalTZObjectInspectorTest {
 
     @Test
-    public void testCategoryAndClass() {
+    void testCategoryAndClass() {
         PaimonTimestampLocalTZObjectInspector oi = new PaimonTimestampLocalTZObjectInspector();
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
@@ -47,7 +47,7 @@ public class PaimonTimestampLocalTZObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveJavaObject() {
+    void testGetPrimitiveJavaObject() {
         PaimonTimestampLocalTZObjectInspector oi = new PaimonTimestampLocalTZObjectInspector();
 
         LocalDateTime now = LocalDateTime.now().plusNanos(123);
@@ -59,7 +59,7 @@ public class PaimonTimestampLocalTZObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveWritableObject() {
+    void testGetPrimitiveWritableObject() {
         PaimonTimestampLocalTZObjectInspector oi = new PaimonTimestampLocalTZObjectInspector();
 
         LocalDateTime now = LocalDateTime.now().plusNanos(123);
@@ -71,7 +71,7 @@ public class PaimonTimestampLocalTZObjectInspectorTest {
     }
 
     @Test
-    public void testCopyObject() {
+    void testCopyObject() {
         PaimonTimestampLocalTZObjectInspector oi = new PaimonTimestampLocalTZObjectInspector();
 
         // TimestampData is immutable
@@ -89,7 +89,7 @@ public class PaimonTimestampLocalTZObjectInspectorTest {
     }
 
     @Test
-    public void testConvertObject() {
+    void testConvertObject() {
         PaimonTimestampLocalTZObjectInspector oi = new PaimonTimestampLocalTZObjectInspector();
 
         LocalDateTime now = LocalDateTime.now().plusNanos(123);

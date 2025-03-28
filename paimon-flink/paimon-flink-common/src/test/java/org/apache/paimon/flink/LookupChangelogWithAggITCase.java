@@ -31,7 +31,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test Lookup changelog producer with aggregation tables. */
-public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
+class LookupChangelogWithAggITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})

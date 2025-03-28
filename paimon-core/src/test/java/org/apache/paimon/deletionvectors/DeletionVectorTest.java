@@ -26,9 +26,9 @@ import java.util.Random;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DeletionVector}. */
-public class DeletionVectorTest {
+class DeletionVectorTest {
     @Test
-    public void testBitmapDeletionVector() {
+    void testBitmapDeletionVector() {
         HashSet<Integer> toDelete = new HashSet<>();
         Random random = new Random();
         for (int i = 0; i < 10000; i++) {

@@ -36,12 +36,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for postpone bucket tables. */
-public class PostponeBucketTableITCase extends AbstractTestBase {
+class PostponeBucketTableITCase extends AbstractTestBase {
 
     private static final int TIMEOUT = 120;
 
     @Test
-    public void testWriteThenCompact() throws Exception {
+    void testWriteThenCompact() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
                 tableEnvironmentBuilder()
@@ -115,7 +115,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testOverwrite() throws Exception {
+    void testOverwrite() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
                 tableEnvironmentBuilder()
@@ -169,7 +169,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
 
     @Timeout(TIMEOUT)
     @Test
-    public void testLookupChangelogProducer() throws Exception {
+    void testLookupChangelogProducer() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment bEnv =
                 tableEnvironmentBuilder()
@@ -237,7 +237,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testRescaleBucket() throws Exception {
+    void testRescaleBucket() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
                 tableEnvironmentBuilder()
@@ -333,7 +333,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
 
     @Timeout(TIMEOUT)
     @Test
-    public void testInputChangelogProducer() throws Exception {
+    void testInputChangelogProducer() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()

@@ -46,7 +46,7 @@ import java.util.List;
 import static org.apache.paimon.CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER;
 
 /** Test for {@link MergeTreeReaders} check the reader close state when an io exception happens. */
-public class MergeTreeReadersConnectionsLeakTest {
+class MergeTreeReadersConnectionsLeakTest {
     @TempDir java.nio.file.Path tempDir;
 
     String dabaseName = "my_db";

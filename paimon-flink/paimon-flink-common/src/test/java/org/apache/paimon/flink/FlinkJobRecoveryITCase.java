@@ -50,7 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test case for flink source / sink restore from savepoint. */
 @SuppressWarnings("BusyWait")
-public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
+class FlinkJobRecoveryITCase extends CatalogITCaseBase {
 
     private static final String MINI_CLUSTER_FIELD = "miniCluster";
 
@@ -88,7 +88,7 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
     @ParameterizedTest
     @EnumSource(BucketMode.class)
     @Timeout(300)
-    public void testRestoreFromSavepointWithJobGraphChange(BucketMode bucketMode) throws Exception {
+    void testRestoreFromSavepointWithJobGraphChange(BucketMode bucketMode) throws Exception {
         createTargetTable("target_table", bucketMode);
         String beforeRecoverSql =
                 "INSERT INTO `target_table` /*+ OPTIONS('sink.operator-uid.suffix'='test-uid') */ SELECT * FROM source_table1 /*+ OPTIONS('source.operator-uid.suffix'='test-uid') */";
@@ -123,7 +123,7 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
 
     @Test
     @Timeout(300)
-    public void testRestoreFromSavepointWithIgnoreSourceState() throws Exception {
+    void testRestoreFromSavepointWithIgnoreSourceState() throws Exception {
         createTargetTable("target_table", BucketMode.HASH_FIXED);
         String beforeRecoverSql = "INSERT INTO `target_table` SELECT * FROM source_table1";
         String beforeRecoverCheckSql = "SELECT * FROM target_table";
@@ -158,7 +158,7 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
 
     @Test
     @Timeout(300)
-    public void testRestoreFromSavepointWithIgnoreSinkState() throws Exception {
+    void testRestoreFromSavepointWithIgnoreSinkState() throws Exception {
         createTargetTable("target_table", BucketMode.HASH_FIXED);
         createTargetTable("target_table2", BucketMode.HASH_FIXED);
 

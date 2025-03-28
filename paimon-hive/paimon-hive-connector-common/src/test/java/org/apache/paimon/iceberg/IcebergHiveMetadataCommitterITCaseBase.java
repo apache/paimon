@@ -66,7 +66,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
     }
 
     @Test
-    public void testPrimaryKeyTable() throws Exception {
+    void testPrimaryKeyTable() throws Exception {
         TableEnvironment tEnv =
                 TableEnvironmentImpl.create(
                         EnvironmentSettings.newInstance().inBatchMode().build());
@@ -162,7 +162,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
     }
 
     @Test
-    public void testAppendOnlyTable() throws Exception {
+    void testAppendOnlyTable() throws Exception {
         TableEnvironment tEnv =
                 TableEnvironmentImpl.create(
                         EnvironmentSettings.newInstance().inBatchMode().build());
@@ -245,7 +245,7 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
     }
 
     @Test
-    public void testCustomMetastoreClass() {
+    void testCustomMetastoreClass() {
         TableEnvironment tEnv =
                 TableEnvironmentImpl.create(
                         EnvironmentSettings.newInstance().inBatchMode().build());

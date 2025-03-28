@@ -79,7 +79,7 @@ public class SortLookupStoreFactoryTest {
     }
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         file = new File(tempDir.toFile(), UUID.randomUUID().toString());
         if (!file.createNewFile()) {
             throw new IOException("Can not create file: " + file);
@@ -87,7 +87,7 @@ public class SortLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testNormal() throws IOException {
+    void testNormal() throws IOException {
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
         SortLookupStoreFactory factory =
                 new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
@@ -115,7 +115,7 @@ public class SortLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testEmpty() throws IOException {
+    void testEmpty() throws IOException {
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
         SortLookupStoreFactory factory =
                 new SortLookupStoreFactory(Comparator.naturalOrder(), cacheManager, 1024, compress);
@@ -133,7 +133,7 @@ public class SortLookupStoreFactoryTest {
     }
 
     @TestTemplate
-    public void testIntKey() throws IOException {
+    void testIntKey() throws IOException {
         RowCompactedSerializer keySerializer =
                 new RowCompactedSerializer(RowType.of(new IntType()));
         GenericRow row = new GenericRow(1);

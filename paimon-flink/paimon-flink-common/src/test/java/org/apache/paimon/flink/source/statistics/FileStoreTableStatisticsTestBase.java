@@ -59,13 +59,13 @@ public abstract class FileStoreTableStatisticsTestBase {
     protected String commitUser;
 
     @BeforeEach
-    public void before() {
+    void before() {
         tablePath = new Path(tempDir.toString() + "/" + UUID.randomUUID());
         commitUser = UUID.randomUUID().toString();
     }
 
     @Test
-    public void testTableScanStatistics() throws Exception {
+    void testTableScanStatistics() throws Exception {
         FileStoreTable table = writeData();
         Map<String, ColStats<?>> colStatsMap = new HashMap<>();
         colStatsMap.put("pt", ColStats.newColStats(0, 2L, 1, 2, 0L, null, null));
@@ -129,14 +129,14 @@ public abstract class FileStoreTableStatisticsTestBase {
     }
 
     @Test
-    public void testTableStreamingStatistics() throws Exception {
+    void testTableStreamingStatistics() throws Exception {
         FileStoreTable table = writeData();
         DataTableSource streamSource = new DataTableSource(identifier, table, true, null, null);
         Assertions.assertThat(streamSource.reportStatistics()).isEqualTo(TableStats.UNKNOWN);
     }
 
     @Test
-    public void testTableFilterPartitionStatistics() throws Exception {
+    void testTableFilterPartitionStatistics() throws Exception {
         FileStoreTable table = writeData();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
         DataTableSource partitionFilterSource =
@@ -214,7 +214,7 @@ public abstract class FileStoreTableStatisticsTestBase {
     }
 
     @Test
-    public void testTableFilterKeyStatistics() throws Exception {
+    void testTableFilterKeyStatistics() throws Exception {
         FileStoreTable table = writeData();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
         DataTableSource keyFilterSource =
@@ -292,7 +292,7 @@ public abstract class FileStoreTableStatisticsTestBase {
     }
 
     @Test
-    public void testTableFilterValueStatistics() throws Exception {
+    void testTableFilterValueStatistics() throws Exception {
         FileStoreTable table = writeData();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
         DataTableSource keyFilterSource =

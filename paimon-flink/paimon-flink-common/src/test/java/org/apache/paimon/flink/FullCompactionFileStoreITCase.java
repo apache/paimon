@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** SQL ITCase for continuous file store. */
-public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
+class FullCompactionFileStoreITCase extends CatalogITCaseBase {
     private final String table = "T";
     private final String options =
             " WITH('changelog-producer'='full-compaction', 'changelog-producer.compaction-interval' = '1s')";

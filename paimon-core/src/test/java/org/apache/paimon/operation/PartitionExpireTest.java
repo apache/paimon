@@ -80,7 +80,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PartitionExpire}. */
-public class PartitionExpireTest {
+class PartitionExpireTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -89,7 +89,7 @@ public class PartitionExpireTest {
     private List<Map<String, String>> deletedPartitions;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         path = new Path(tempDir.toUri());
     }
 
@@ -145,7 +145,7 @@ public class PartitionExpireTest {
     }
 
     @Test
-    public void testNonPartitionedTable() {
+    void testNonPartitionedTable() {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
         assertThatThrownBy(
                         () ->
@@ -162,7 +162,7 @@ public class PartitionExpireTest {
     }
 
     @Test
-    public void testIllegalPartition() throws Exception {
+    void testIllegalPartition() throws Exception {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
@@ -185,7 +185,7 @@ public class PartitionExpireTest {
     }
 
     @Test
-    public void test() throws Exception {
+    void test() throws Exception {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
@@ -228,7 +228,7 @@ public class PartitionExpireTest {
     }
 
     @Test
-    public void testFilterCommittedAfterExpiring() throws Exception {
+    void testFilterCommittedAfterExpiring() throws Exception {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
@@ -303,7 +303,7 @@ public class PartitionExpireTest {
     }
 
     @Test
-    public void testDeleteExpiredPartition() throws Exception {
+    void testDeleteExpiredPartition() throws Exception {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(

@@ -26,7 +26,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link RESTUtil}. */
-public class RESTUtilTest {
+class RESTUtilTest {
     @Test
     void testMerge() {
         {

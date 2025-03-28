@@ -82,7 +82,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
     }
 
     @Test
-    public void testTimestampLTZWithLegacyWriteAndRead() throws IOException {
+    void testTimestampLTZWithLegacyWriteAndRead() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
         PositionOutputStream out = fileIO.newOutputStream(file, false);
@@ -109,7 +109,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
     }
 
     @Test
-    public void testTimestampLTZWithNewWriteAndRead() throws IOException {
+    void testTimestampLTZWithNewWriteAndRead() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
         PositionOutputStream out = fileIO.newOutputStream(file, false);
@@ -136,7 +136,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
     }
 
     @Test
-    public void testTimestampLTZWithNewWriteAndLegacyRead() throws IOException {
+    void testTimestampLTZWithNewWriteAndLegacyRead() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
         PositionOutputStream out = fileIO.newOutputStream(file, false);
@@ -168,7 +168,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
     }
 
     @Test
-    public void testTimestampLTZWithLegacyWriteAndNewRead() throws IOException {
+    void testTimestampLTZWithLegacyWriteAndNewRead() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
         PositionOutputStream out = fileIO.newOutputStream(file, false);

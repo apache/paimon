@@ -57,7 +57,7 @@ public class FileBasedBloomFilterTest {
     }
 
     @TestTemplate
-    public void testProbe() throws IOException {
+    void testProbe() throws IOException {
         MemorySegment segment = MemorySegment.wrap(new byte[1000]);
         BloomFilter.Builder builder = new BloomFilter.Builder(segment, 100);
         int[] inputs = CommonTestUtils.generateRandomInts(100);

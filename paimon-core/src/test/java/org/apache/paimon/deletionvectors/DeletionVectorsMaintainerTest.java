@@ -44,16 +44,16 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DeletionVectorsMaintainer}. */
-public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
+class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
     private IndexFileHandler fileHandler;
 
     @BeforeEach
-    public void beforeEach() throws Exception {
+    void beforeEach() throws Exception {
         fileHandler = table.store().newIndexFileHandler();
     }
 
     @Test
-    public void test0() {
+    void test0() {
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
         DeletionVectorsMaintainer dvMaintainer =
@@ -77,7 +77,7 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void test1() {
+    void test1() {
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
 
@@ -129,7 +129,7 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testCompactDeletion() throws IOException {
+    void testCompactDeletion() throws IOException {
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
         DeletionVectorsMaintainer dvMaintainer =

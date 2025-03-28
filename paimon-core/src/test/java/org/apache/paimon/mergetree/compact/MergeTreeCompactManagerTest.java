@@ -54,18 +54,18 @@ public class MergeTreeCompactManagerTest {
     private static ExecutorService service;
 
     @BeforeAll
-    public static void before() {
+    static void before() {
         service = Executors.newSingleThreadExecutor();
     }
 
     @AfterAll
-    public static void after() {
+    static void after() {
         service.shutdownNow();
         service = null;
     }
 
     @Test
-    public void testOutputToZeroLevel() throws ExecutionException, InterruptedException {
+    void testOutputToZeroLevel() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
                         new LevelMinMax(0, 1, 3),
@@ -77,7 +77,7 @@ public class MergeTreeCompactManagerTest {
     }
 
     @Test
-    public void testCompactToPenultimateLayer() throws ExecutionException, InterruptedException {
+    void testCompactToPenultimateLayer() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
                         new LevelMinMax(0, 1, 3),
@@ -89,14 +89,14 @@ public class MergeTreeCompactManagerTest {
     }
 
     @Test
-    public void testNoCompaction() throws ExecutionException, InterruptedException {
+    void testNoCompaction() throws ExecutionException, InterruptedException {
         innerTest(
                 Collections.singletonList(new LevelMinMax(3, 1, 3)),
                 Collections.singletonList(new LevelMinMax(3, 1, 3)));
     }
 
     @Test
-    public void testNormal() throws ExecutionException, InterruptedException {
+    void testNormal() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
                         new LevelMinMax(0, 1, 3),
@@ -106,7 +106,7 @@ public class MergeTreeCompactManagerTest {
     }
 
     @Test
-    public void testUpgrade() throws ExecutionException, InterruptedException {
+    void testUpgrade() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
                         new LevelMinMax(0, 1, 3),
@@ -116,14 +116,14 @@ public class MergeTreeCompactManagerTest {
     }
 
     @Test
-    public void testSmallFiles() throws ExecutionException, InterruptedException {
+    void testSmallFiles() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(new LevelMinMax(0, 1, 1), new LevelMinMax(0, 2, 2)),
                 Collections.singletonList(new LevelMinMax(2, 1, 2)));
     }
 
     @Test
-    public void testSmallFilesNoCompact() throws ExecutionException, InterruptedException {
+    void testSmallFilesNoCompact() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
                         new LevelMinMax(0, 1, 5),
@@ -138,7 +138,7 @@ public class MergeTreeCompactManagerTest {
     }
 
     @Test
-    public void testSmallFilesCrossLevel() throws ExecutionException, InterruptedException {
+    void testSmallFilesCrossLevel() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
                         new LevelMinMax(0, 1, 5),
@@ -152,7 +152,7 @@ public class MergeTreeCompactManagerTest {
     }
 
     @Test
-    public void testComplex() throws ExecutionException, InterruptedException {
+    void testComplex() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
                         new LevelMinMax(0, 1, 5),
@@ -166,7 +166,7 @@ public class MergeTreeCompactManagerTest {
     }
 
     @Test
-    public void testSmallInComplex() throws ExecutionException, InterruptedException {
+    void testSmallInComplex() throws ExecutionException, InterruptedException {
         innerTest(
                 Arrays.asList(
                         new LevelMinMax(0, 1, 5),
@@ -180,7 +180,7 @@ public class MergeTreeCompactManagerTest {
     }
 
     @Test
-    public void testIsCompacting() {
+    void testIsCompacting() {
         List<LevelMinMax> inputs =
                 Arrays.asList(
                         new LevelMinMax(0, 1, 3),

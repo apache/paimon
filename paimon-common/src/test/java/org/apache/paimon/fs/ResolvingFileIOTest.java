@@ -41,7 +41,7 @@ public class ResolvingFileIOTest {
     private ResolvingFileIO resolvingFileIO;
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         resolvingFileIO = new ResolvingFileIO();
         Options options = new Options();
         CatalogContext catalogContext = CatalogContext.create(options);
@@ -49,7 +49,7 @@ public class ResolvingFileIOTest {
     }
 
     @Test
-    public void testFileIONullSchemeReturnsFallbackFileIO() throws IOException {
+    void testFileIONullSchemeReturnsFallbackFileIO() throws IOException {
         Path path = new Path("/path/to/file");
         FileIO result = resolvingFileIO.fileIO(path);
         assertNotNull(result);
@@ -57,7 +57,7 @@ public class ResolvingFileIOTest {
     }
 
     @Test
-    public void testFileIOReturnsLocalFileIO() throws IOException {
+    void testFileIOReturnsLocalFileIO() throws IOException {
         Path path = new Path("file:///path/to/file");
         FileIO result = resolvingFileIO.fileIO(path);
         assertNotNull(result);
@@ -65,7 +65,7 @@ public class ResolvingFileIOTest {
     }
 
     @Test
-    public void testFileIOWithSchemeReturnsHdfsFileIO() throws IOException {
+    void testFileIOWithSchemeReturnsHdfsFileIO() throws IOException {
         Path path = new Path("hdfs:///path/to/file");
         FileIO result = resolvingFileIO.fileIO(path);
         assertNotNull(result);
@@ -73,7 +73,7 @@ public class ResolvingFileIOTest {
     }
 
     @Test
-    public void testFileIOConcurrentAccessInitializesFallbackFileIO() throws Exception {
+    void testFileIOConcurrentAccessInitializesFallbackFileIO() throws Exception {
         Path fileSchemePath = new Path("file:///path/to/file");
         ExecutorService executorService = Executors.newFixedThreadPool(2);
         Future<FileIO> future1 =
@@ -115,7 +115,7 @@ public class ResolvingFileIOTest {
     }
 
     @Test
-    public void testFileIOMapStoresFileIOInstances() throws IOException {
+    void testFileIOMapStoresFileIOInstances() throws IOException {
         Path localPath = new Path("file:///path/to/local/file1");
         Path hdfsPath = new Path("hdfs:///path/to/hdfs/file1");
 

@@ -52,7 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link RESTObjectMapper}. */
-public class RESTObjectMapperTest {
+class RESTObjectMapperTest {
 
     @Test
     void configResponseParseTest() throws Exception {

@@ -52,7 +52,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CdcRecordChannelComputer}. */
-public class CdcMultiplexRecordChannelComputerTest {
+class CdcMultiplexRecordChannelComputerTest {
 
     @TempDir java.nio.file.Path tempDir;
     private CatalogLoader catalogLoader;

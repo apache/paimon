@@ -32,11 +32,11 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link RemoveUnexistingFilesAction}. */
-public class RemoveUnexistingFilesActionITCase extends ActionITCaseBase {
+class RemoveUnexistingFilesActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(ints = {-1, 3})
-    public void testAction(int bucket) throws Exception {
+    void testAction(int bucket) throws Exception {
         int numPartitions = 2;
         int numFiles = 10;
         int[] numDeletes = new int[numPartitions];

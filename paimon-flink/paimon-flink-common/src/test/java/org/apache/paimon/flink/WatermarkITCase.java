@@ -29,7 +29,7 @@ import java.time.LocalDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** SQL ITCase for watermark definition. */
-public class WatermarkITCase extends CatalogITCaseBase {
+class WatermarkITCase extends CatalogITCaseBase {
 
     @Override
     protected int defaultParallelism() {
@@ -37,12 +37,12 @@ public class WatermarkITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWatermark() throws Exception {
+    void testWatermark() throws Exception {
         innerTestWatermark();
     }
 
     @Test
-    public void testAuditLogWatermark() throws Exception {
+    void testAuditLogWatermark() throws Exception {
         String[] options =
                 new String[] {
                     "'scan.watermark.idle-timeout'='1s'",
@@ -76,7 +76,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
 
     @Disabled // TODO unstable alignment may block watermark generation
     @Test
-    public void testWatermarkAlignment() throws Exception {
+    void testWatermarkAlignment() throws Exception {
         innerTestWatermark(
                 "'scan.watermark.idle-timeout'='1s'",
                 "'scan.watermark.alignment.group'='group'",

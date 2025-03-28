@@ -34,11 +34,11 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
-public class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
+class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolution() throws Exception {
+    void testSchemaEvolution() throws Exception {
         String topic = "schema-evolution";
         Map<String, String> tableOptions = new HashMap<>();
 
@@ -93,7 +93,7 @@ public class KafkaJsonSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
     @Test
     @Timeout(60)
-    public void testComputedColumn() throws Exception {
+    void testComputedColumn() throws Exception {
         String topic = "computed_column";
         Map<String, String> tableOptions = new HashMap<>();
 

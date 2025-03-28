@@ -145,7 +145,7 @@ public class HiveWriteITCase {
     }
 
     @Test
-    public void testInsert() throws Exception {
+    void testInsert() throws Exception {
         List<InternalRow> emptyData = Collections.emptyList();
 
         String outputTableName =
@@ -170,7 +170,7 @@ public class HiveWriteITCase {
     }
 
     @Test
-    public void testHiveCreateAndHiveWrite() throws Exception {
+    void testHiveCreateAndHiveWrite() throws Exception {
         List<InternalRow> emptyData = Collections.emptyList();
 
         hiveShell.execute(
@@ -191,7 +191,7 @@ public class HiveWriteITCase {
     }
 
     @Test
-    public void testInsertTimestampAndDate() throws Exception {
+    void testInsertTimestampAndDate() throws Exception {
         List<InternalRow> emptyData = Collections.emptyList();
 
         // test different precisions
@@ -222,7 +222,7 @@ public class HiveWriteITCase {
     }
 
     @Test
-    public void testInsertLocalZonedTimestamp() throws Exception {
+    void testInsertLocalZonedTimestamp() throws Exception {
         List<InternalRow> emptyData = Collections.emptyList();
 
         // test different precisions

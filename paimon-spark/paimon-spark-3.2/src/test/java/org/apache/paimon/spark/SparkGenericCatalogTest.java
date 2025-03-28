@@ -41,14 +41,14 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base tests for spark read. */
-public class SparkGenericCatalogTest {
+class SparkGenericCatalogTest {
 
     protected static SparkSession spark = null;
 
     protected static Path warehousePath = null;
 
     @BeforeAll
-    public static void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
+    static void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         warehousePath = new Path("file:" + tempDir.toString());
         spark =
                 SparkSession.builder()
@@ -64,7 +64,7 @@ public class SparkGenericCatalogTest {
     }
 
     @AfterAll
-    public static void stopMetastoreAndSpark() {
+    static void stopMetastoreAndSpark() {
         if (spark != null) {
             spark.stop();
             spark = null;
@@ -72,7 +72,7 @@ public class SparkGenericCatalogTest {
     }
 
     @Test
-    public void testPaimonTable() throws Exception {
+    void testPaimonTable() throws Exception {
         spark.sql(
                 "CREATE TABLE PT (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
                         + " ('file.format'='avro')");
@@ -99,7 +99,7 @@ public class SparkGenericCatalogTest {
     }
 
     @Test
-    public void testCsvTable() {
+    void testCsvTable() {
         spark.sql("CREATE TABLE CT (a INT, b INT, c STRING) USING csv");
         spark.sql("INSERT INTO CT VALUES (1, 2, '3'), (4, 5, '6')").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM CT").collectAsList();

@@ -37,10 +37,10 @@ import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.ro
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileStoreSourceSplitGenerator}. */
-public class FileStoreSourceSplitGeneratorTest {
+class FileStoreSourceSplitGeneratorTest {
 
     @Test
-    public void test() {
+    void test() {
         List<DataSplit> scanSplits =
                 Arrays.asList(
                         dataSplit(1, 0, "f0", "f1"),

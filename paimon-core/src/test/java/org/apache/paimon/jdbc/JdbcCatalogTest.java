@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Tests for {@link JdbcCatalog}. */
-public class JdbcCatalogTest extends CatalogTestBase {
+class JdbcCatalogTest extends CatalogTestBase {
 
     @BeforeEach
     public void setUp() throws Exception {

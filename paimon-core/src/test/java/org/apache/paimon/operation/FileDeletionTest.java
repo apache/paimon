@@ -191,7 +191,7 @@ public class FileDeletionTest {
 
     // only exists bucket directories
     @Test
-    public void testNoPartitions() throws Exception {
+    void testNoPartitions() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -251,7 +251,7 @@ public class FileDeletionTest {
      * </ul>
      */
     @Test
-    public void testExpireWithExistingTags() throws Exception {
+    void testExpireWithExistingTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
@@ -329,7 +329,7 @@ public class FileDeletionTest {
     }
 
     @Test
-    public void testExpireWithUpgradeAndTags() throws Exception {
+    void testExpireWithUpgradeAndTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
@@ -383,7 +383,7 @@ public class FileDeletionTest {
     }
 
     @Test
-    public void testDeleteTagWithSnapshot() throws Exception {
+    void testDeleteTagWithSnapshot() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
@@ -457,7 +457,7 @@ public class FileDeletionTest {
     }
 
     @Test
-    public void testDeleteTagWithOtherTag() throws Exception {
+    void testDeleteTagWithOtherTag() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
@@ -545,7 +545,7 @@ public class FileDeletionTest {
      * simulate the read exception.
      */
     @Test
-    public void testExpireWithMissingManifest() throws Exception {
+    void testExpireWithMissingManifest() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
@@ -643,7 +643,7 @@ public class FileDeletionTest {
     }
 
     @Test
-    public void testExpireWithDeletingTags() throws Exception {
+    void testExpireWithDeletingTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2);
         tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();

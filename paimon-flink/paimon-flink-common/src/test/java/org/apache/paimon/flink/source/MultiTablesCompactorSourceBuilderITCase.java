@@ -68,8 +68,7 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CombinedTableCompactorSourceBuilder}. */
-public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
-        implements Serializable {
+class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase implements Serializable {
     private String warehouse;
     private Options catalogOptions;
 
@@ -82,7 +81,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
     private static final Map<String, RowType> ROW_TYPE_MAP = new HashMap<>(TABLE_NAMES.length);
 
     @BeforeAll
-    public static void beforeAll() {
+    static void beforeAll() {
         // set different datatype and RowType
         DataType[] dataTypes1 =
                 new DataType[] {
@@ -98,7 +97,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
     }
 
     @BeforeEach
-    public void before() throws IOException {
+    void before() throws IOException {
         warehouse = getTempDirPath();
         catalogOptions = new Options();
         commitUser = UUID.randomUUID().toString();
@@ -106,7 +105,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
 
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
-    public void testBatchRead(boolean defaultOptions) throws Exception {
+    void testBatchRead(boolean defaultOptions) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
         if (!defaultOptions) {
@@ -197,7 +196,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
 
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
-    public void testStreamingRead(boolean defaultOptions) throws Exception {
+    void testStreamingRead(boolean defaultOptions) throws Exception {
         Map<String, String> options = new HashMap<>();
         if (!defaultOptions) {
             // change options to test whether CompactorSourceBuilder work normally
@@ -368,7 +367,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
 
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
-    public void testIncludeAndExcludeTableRead(boolean defaultOptions) throws Exception {
+    void testIncludeAndExcludeTableRead(boolean defaultOptions) throws Exception {
         Map<String, String> options = new HashMap<>();
         if (!defaultOptions) {
             // change options to test whether CompactorSourceBuilder work normally
@@ -495,7 +494,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
 
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
-    public void testHistoryPatitionRead(boolean defaultOptions) throws Exception {
+    void testHistoryPatitionRead(boolean defaultOptions) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
         if (!defaultOptions) {

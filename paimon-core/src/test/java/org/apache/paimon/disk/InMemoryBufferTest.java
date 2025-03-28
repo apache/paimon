@@ -39,12 +39,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for {@link InMemoryBuffer}. */
-public class InMemoryBufferTest {
+class InMemoryBufferTest {
 
     private InternalRowSerializer serializer;
 
     @BeforeEach
-    public void before() {
+    void before() {
         this.serializer = new InternalRowSerializer(DataTypes.STRING());
     }
 

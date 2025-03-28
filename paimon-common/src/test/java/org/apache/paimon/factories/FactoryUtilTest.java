@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link FactoryUtil}. */
 public class FactoryUtilTest {
     @Test
-    public void testDiscoverFactory() {
+    void testDiscoverFactory() {
         DummyFactory factory =
                 FactoryUtil.discoverFactory(
                         Thread.currentThread().getContextClassLoader(),

@@ -43,7 +43,7 @@ public class CommitMetricsTest {
     /** Tests that the metrics are updated properly. */
     @SuppressWarnings("unchecked")
     @Test
-    public void testMetricsAreUpdated() {
+    void testMetricsAreUpdated() {
         CommitMetrics commitMetrics = getCommitMetrics();
         Map<String, Metric> registeredGenericMetrics = commitMetrics.getMetricGroup().getMetrics();
 

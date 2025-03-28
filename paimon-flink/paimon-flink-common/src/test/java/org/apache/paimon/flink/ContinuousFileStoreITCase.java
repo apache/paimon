@@ -50,7 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
-public class ContinuousFileStoreITCase extends CatalogITCaseBase {
+class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
@@ -61,7 +61,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSourceReuseWithScanPushDown() {
+    void testSourceReuseWithScanPushDown() {
         // source can be reused with projection applied
         sEnv.executeSql("CREATE TEMPORARY TABLE print1 (a STRING) WITH ('connector'='print')");
         sEnv.executeSql("CREATE TEMPORARY TABLE print2 (b STRING) WITH ('connector'='print')");
@@ -89,27 +89,27 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWithoutPrimaryKey() throws Exception {
+    void testWithoutPrimaryKey() throws Exception {
         testSimple("T1");
     }
 
     @Test
-    public void testWithPrimaryKey() throws Exception {
+    void testWithPrimaryKey() throws Exception {
         testSimple("T2");
     }
 
     @Test
-    public void testProjectionWithoutPrimaryKey() throws Exception {
+    void testProjectionWithoutPrimaryKey() throws Exception {
         testProjection("T1");
     }
 
     @Test
-    public void testProjectionWithPrimaryKey() throws Exception {
+    void testProjectionWithPrimaryKey() throws Exception {
         testProjection("T2");
     }
 
     @Test
-    public void testConsumerId() throws Exception {
+    void testConsumerId() throws Exception {
         String table = "T2";
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
@@ -142,7 +142,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConsumerIdInBatch() throws Exception {
+    void testConsumerIdInBatch() throws Exception {
         String table = "T2";
 
         batchSql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
@@ -170,7 +170,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     @Timeout(120)
-    public void testSnapshotWatermark() throws Exception {
+    void testSnapshotWatermark() throws Exception {
         streamSqlIter(
                 "CREATE TEMPORARY TABLE gen (a STRING, b STRING, c STRING,"
                         + " dt AS NOW(), WATERMARK FOR dt AS dt) WITH ('connector'='datagen')");
@@ -221,7 +221,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testContinuousLatest() throws Exception {
+    void testContinuousLatest() throws Exception {
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
 
         BlockingIterator<Row, Row> iterator =
@@ -235,7 +235,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testContinuousLatestStartingFromEmpty() throws Exception {
+    void testContinuousLatestStartingFromEmpty() throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
                         streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest') */"));
@@ -252,7 +252,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testContinuousFromTimestamp() throws Exception {
+    void testContinuousFromTimestamp() throws Exception {
         String sql =
                 "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp', 'log.scan.timestamp-millis'='%s') */";
 
@@ -318,7 +318,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLackStartupTimestamp() {
+    void testLackStartupTimestamp() {
         assertThatThrownBy(
                         () ->
                                 streamSqlIter(
@@ -329,7 +329,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConfigureStartupTimestamp() throws Exception {
+    void testConfigureStartupTimestamp() throws Exception {
         // Configure 'log.scan.timestamp-millis' without 'log.scan'.
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
@@ -354,7 +354,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConfigureStartupSnapshot() throws Exception {
+    void testConfigureStartupSnapshot() throws Exception {
         // Configure 'scan.snapshot-id' without 'scan.mode'.
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
@@ -403,7 +403,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testConfigureStartupSnapshotFull() throws Exception {
+    void testConfigureStartupSnapshotFull() throws Exception {
         // Configure 'scan.snapshot-id' with 'scan.mode'='from-snapshot-full'.
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
@@ -449,7 +449,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreOverwrite() throws Exception {
+    void testIgnoreOverwrite() throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM T1"));
 
@@ -466,7 +466,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testUnsupportedUpsert() {
+    void testUnsupportedUpsert() {
         assertThatThrownBy(
                         () ->
                                 streamSqlIter(
@@ -477,7 +477,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testUnsupportedEventual() {
+    void testUnsupportedEventual() {
         assertThatThrownBy(
                         () ->
                                 streamSqlIter(
@@ -488,7 +488,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFlinkMemoryPool() {
+    void testFlinkMemoryPool() {
         // Check if the configuration is effective
         assertThatThrownBy(
                         () ->
@@ -508,7 +508,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDynamicPartitionPruningNotWork() throws Exception {
+    void testDynamicPartitionPruningNotWork() throws Exception {
         // dim table
         sql("CREATE TABLE dim (x INT PRIMARY KEY NOT ENFORCED, y STRING, z INT)");
         sql("INSERT INTO dim VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2)");
@@ -542,7 +542,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDelete() throws Exception {
+    void testIgnoreDelete() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
                         + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true')");
@@ -566,7 +566,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testScanFromOldSchema() throws Exception {
+    void testScanFromOldSchema() throws Exception {
         sql("CREATE TABLE select_old (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
 
         sql("INSERT INTO select_old VALUES (1, 'a'), (2, 'b')");
@@ -598,7 +598,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     @ParameterizedTest(name = "changelog-producer = {0}")
     @ValueSource(strings = {"none", "input"})
-    public void testScanFromChangelog(String changelogProducer) throws Exception {
+    void testScanFromChangelog(String changelogProducer) throws Exception {
         batchSql(
                 "CREATE TABLE IF NOT EXISTS T3 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)\n"
                         + " WITH ('changelog-producer'='%s', 'bucket' = '1', \n"
@@ -641,7 +641,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAvroRetractNotNullField() {
+    void testAvroRetractNotNullField() {
         List<Row> input =
                 Arrays.asList(
                         Row.ofKind(RowKind.INSERT, 1, "A"), Row.ofKind(RowKind.DELETE, 1, "A"));

@@ -120,7 +120,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
     }
 
     @Test
-    public void testAsyncCompactionFileDeletedWhenShutdown() throws Exception {
+    void testAsyncCompactionFileDeletedWhenShutdown() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
                 new AppendOnlySingleTableCompactionWorkerOperator.Factory(getTableDefault(), "user")

@@ -37,11 +37,11 @@ import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link DefaultErrorHandler}. */
-public class DefaultErrorHandlerTest {
+class DefaultErrorHandlerTest {
     private ErrorHandler defaultErrorHandler;
 
     @BeforeEach
-    public void setUp() throws IOException {
+    void setUp() throws IOException {
         defaultErrorHandler = DefaultErrorHandler.getInstance();
     }
 

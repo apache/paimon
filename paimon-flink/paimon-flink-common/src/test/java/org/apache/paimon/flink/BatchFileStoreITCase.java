@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for batch file store. */
-public class BatchFileStoreITCase extends CatalogITCaseBase {
+class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
@@ -60,7 +60,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAQEWithWriteManifest() {
+    void testAQEWithWriteManifest() {
         batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c");
@@ -73,7 +73,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAQEWithDynamicBucket() {
+    void testAQEWithDynamicBucket() {
         batchSql("CREATE TABLE IF NOT EXISTS D_T (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT)");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         batchSql("INSERT INTO D_T SELECT a, b, c FROM T GROUP BY a,b,c");
@@ -82,7 +82,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testOverwriteEmpty() {
+    void testOverwriteEmpty() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
@@ -91,7 +91,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTimeTravelRead() throws Exception {
+    void testTimeTravelRead() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         long time1 = System.currentTimeMillis();
 
@@ -257,7 +257,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     @Timeout(120)
-    public void testTimeTravelReadWithWatermark() throws Exception {
+    void testTimeTravelReadWithWatermark() throws Exception {
         streamSqlIter(
                 "CREATE TEMPORARY TABLE gen (a STRING, b STRING, c STRING,"
                         + " dt AS NOW(), WATERMARK FOR dt AS dt) WITH ('connector'='datagen')");
@@ -286,7 +286,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTimeTravelReadWithSnapshotExpiration() throws Exception {
+    void testTimeTravelReadWithSnapshotExpiration() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
 
         paimonTable("T").createTag("tag1", 1);
@@ -306,7 +306,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIncrementBetweenReadWithSnapshotExpiration() throws Exception {
+    void testIncrementBetweenReadWithSnapshotExpiration() throws Exception {
         String tableName = "T";
         batchSql(String.format("INSERT INTO %s VALUES (1, 11, 111)", tableName));
 
@@ -334,7 +334,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSortSpillMerge() {
+    void testSortSpillMerge() {
         sql(
                 "CREATE TABLE IF NOT EXISTS KT (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('sort-spill-threshold'='2')");
         sql("INSERT INTO KT VALUES (1, '1')");
@@ -353,7 +353,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTruncateTable() {
+    void testTruncateTable() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
@@ -365,7 +365,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     /** NOTE: only supports INNER JOIN. */
     @Test
-    public void testDynamicPartitionPruning() {
+    void testDynamicPartitionPruning() {
         // dim table
         sql("CREATE TABLE dim (x INT PRIMARY KEY NOT ENFORCED, y STRING, z INT)");
         sql("INSERT INTO dim VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2)");
@@ -398,7 +398,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDynamicPartitionPruningOnTwoFactTables() {
+    void testDynamicPartitionPruningOnTwoFactTables() {
         // dim table
         sql("CREATE TABLE dim (x INT PRIMARY KEY NOT ENFORCED, y STRING, z INT)");
         sql("INSERT INTO dim VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2)");
@@ -454,7 +454,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRowKindField() {
+    void testRowKindField() {
         sql(
                 "CREATE TABLE R_T (pk INT PRIMARY KEY NOT ENFORCED, v INT, rf STRING) "
                         + "WITH ('rowkind.field'='rf')");
@@ -465,7 +465,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDelete() {
+    void testIgnoreDelete() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
                         + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1')");
@@ -481,7 +481,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDeleteWithRowKindField() {
+    void testIgnoreDeleteWithRowKindField() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "
                         + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
@@ -497,7 +497,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDeleteWithPkLookup() throws Exception {
+    void testDeleteWithPkLookup() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
                         + "WITH ('changelog-producer' = 'lookup', 'bucket' = '1')");

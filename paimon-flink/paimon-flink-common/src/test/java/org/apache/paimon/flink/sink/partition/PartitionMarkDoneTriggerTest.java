@@ -64,7 +64,7 @@ class PartitionMarkDoneTriggerTest {
     }
 
     @Test
-    public void testWithoutEndInput() throws Exception {
+    void testWithoutEndInput() throws Exception {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
                         state,
@@ -128,7 +128,7 @@ class PartitionMarkDoneTriggerTest {
     }
 
     @Test
-    public void testWithEndInput() throws Exception {
+    void testWithEndInput() throws Exception {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
                         state,
@@ -145,7 +145,7 @@ class PartitionMarkDoneTriggerTest {
     }
 
     @Test
-    public void testParseNonDateFormattedPartition() throws Exception {
+    void testParseNonDateFormattedPartition() throws Exception {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
                         state,

@@ -35,10 +35,10 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for analyze table. */
-public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
+class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
 
     @Test
-    public void testAnalyzeTable() throws Catalog.TableNotExistException {
+    void testAnalyzeTable() throws Catalog.TableNotExistException {
         sql(
                 "CREATE TABLE T ("
                         + " id STRING"
@@ -76,7 +76,7 @@ public class FlinkAnalyzeTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAnalyzeTableColumn() throws Catalog.TableNotExistException {
+    void testAnalyzeTableColumn() throws Catalog.TableNotExistException {
         sql(
                 "CREATE TABLE T ("
                         + "id STRING, name STRING, bytes_col BYTES, int_col INT, long_col bigint,\n"

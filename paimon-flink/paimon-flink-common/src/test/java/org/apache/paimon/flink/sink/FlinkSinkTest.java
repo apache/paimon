@@ -54,12 +54,12 @@ import java.util.Collections;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test class for {@link FlinkSink}. */
-public class FlinkSinkTest {
+class FlinkSinkTest {
 
     @TempDir Path tempPath;
 
     @Test
-    public void testOptimizeKeyValueWriterForBatch() throws Exception {
+    void testOptimizeKeyValueWriterForBatch() throws Exception {
         // test for batch mode auto enable spillable
         FileStoreTable fileStoreTable = createFileStoreTable();
         StreamExecutionEnvironment streamExecutionEnvironment =

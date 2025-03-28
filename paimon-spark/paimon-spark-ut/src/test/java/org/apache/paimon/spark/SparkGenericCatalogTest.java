@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Base tests for spark read. */
-public class SparkGenericCatalogTest {
+class SparkGenericCatalogTest {
 
     protected SparkSession spark = null;
 

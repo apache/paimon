@@ -85,7 +85,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
-    public void testUpgradePartitionTable(String format, boolean isNamedArgument) throws Exception {
+    void testUpgradePartitionTable(String format, boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -149,8 +149,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
         Assertions.assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
     }
 
-    public void testUpgradeNonPartitionTable(String format, boolean isNamedArgument)
-            throws Exception {
+    void testUpgradeNonPartitionTable(String format, boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");

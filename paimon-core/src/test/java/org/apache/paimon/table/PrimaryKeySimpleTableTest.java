@@ -645,7 +645,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @Override
     @Test
-    public void testReadFilter() throws Exception {
+    void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         StreamTableWrite write = table.newWrite(commitUser);

@@ -49,42 +49,42 @@ public class BitmapIndexBenchmark {
     @Rule public TemporaryFolder folder = new TemporaryFolder();
 
     @Test
-    public void testQuery10() throws Exception {
+    void testQuery10() throws Exception {
         testQuery(10);
     }
 
     @Test
-    public void testQuery100() throws Exception {
+    void testQuery100() throws Exception {
         testQuery(100);
     }
 
     @Test
-    public void testQuery1000() throws Exception {
+    void testQuery1000() throws Exception {
         testQuery(1000);
     }
 
     @Test
-    public void testQuery10000() throws Exception {
+    void testQuery10000() throws Exception {
         testQuery(10000);
     }
 
     @Test
-    public void testQuery30000() throws Exception {
+    void testQuery30000() throws Exception {
         testQuery(30000);
     }
 
     @Test
-    public void testQuery50000() throws Exception {
+    void testQuery50000() throws Exception {
         testQuery(50000);
     }
 
     @Test
-    public void testQuery80000() throws Exception {
+    void testQuery80000() throws Exception {
         testQuery(80000);
     }
 
     @Test
-    public void testQuery100000() throws Exception {
+    void testQuery100000() throws Exception {
         testQuery(100000);
     }
 

@@ -33,10 +33,10 @@ import static org.apache.paimon.format.orc.OrcFileFormatFactory.IDENTIFIER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link OrcFileFormatFactory}. */
-public class OrcFileFormatTest {
+class OrcFileFormatTest {
 
     @Test
-    public void testAbsent() {
+    void testAbsent() {
         Options options = new Options();
         options.setString("orc.haha", "1");
         OrcFileFormat orc =
@@ -45,7 +45,7 @@ public class OrcFileFormatTest {
     }
 
     @Test
-    public void testPresent() {
+    void testPresent() {
         Options options = new Options();
         options.setString("orc.haha", "1");
         options.setString("orc.compress", "zlib");
@@ -56,7 +56,7 @@ public class OrcFileFormatTest {
     }
 
     @Test
-    public void testSupportedDataTypes() {
+    void testSupportedDataTypes() {
         OrcFileFormat orc =
                 new OrcFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
 
@@ -85,7 +85,7 @@ public class OrcFileFormatTest {
     }
 
     @Test
-    public void testCreateCost() {
+    void testCreateCost() {
         double createConfCost = createConfigCost();
         for (int i = 0; i < 1000; i++) {
             create();
@@ -100,7 +100,7 @@ public class OrcFileFormatTest {
     }
 
     @Test
-    public void testCreateCostWithRandomConfig() {
+    void testCreateCostWithRandomConfig() {
         double createConfCost = createConfigCost();
         for (int i = 0; i < 1000; i++) {
             createRandomConfig();

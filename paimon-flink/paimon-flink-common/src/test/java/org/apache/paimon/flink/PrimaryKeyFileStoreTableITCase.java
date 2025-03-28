@@ -64,7 +64,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for changelog table with primary keys. */
-public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
+class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     private static final int TIMEOUT = 180;
     private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeyFileStoreTableITCase.class);
@@ -78,7 +78,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     private String externalPath2;
 
     @BeforeEach
-    public void before() throws IOException {
+    void before() throws IOException {
         path = getTempDirPath();
         externalPath1 = getTempDirPath();
         externalPath2 = getTempDirPath();
@@ -151,7 +151,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testFullCompactionTriggerInterval() throws Exception {
+    void testFullCompactionTriggerInterval() throws Exception {
         innerTestChangelogProducing(
                 Arrays.asList(
                         "'changelog-producer' = 'full-compaction'",
@@ -160,7 +160,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testFullCompactionWithLongCheckpointInterval() throws Exception {
+    void testFullCompactionWithLongCheckpointInterval() throws Exception {
         // create table
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
         bEnv.executeSql(createCatalogSql("testCatalog", path));
@@ -225,12 +225,12 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testLookupChangelog() throws Exception {
+    void testLookupChangelog() throws Exception {
         innerTestChangelogProducing(Collections.singletonList("'changelog-producer' = 'lookup'"));
     }
 
     @Test
-    public void testTableReadWriteWithExternalPathRoundRobin() throws Exception {
+    void testTableReadWriteWithExternalPathRoundRobin() throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()
@@ -287,7 +287,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testDropTableWithExternalPaths() throws Exception {
+    void testDropTableWithExternalPaths() throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()
@@ -352,7 +352,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testTableReadWriteWithExternalPathSpecificFS() throws Exception {
+    void testTableReadWriteWithExternalPathSpecificFS() throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()
@@ -401,7 +401,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testTableReadWriteBranch() throws Exception {
+    void testTableReadWriteBranch() throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()
@@ -532,7 +532,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchJobWithConflictAndRestart() throws Exception {
+    void testBatchJobWithConflictAndRestart() throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().allowRestart(10).build();
         tEnv.executeSql(
                 "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '" + path + "' )");
@@ -568,7 +568,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(TIMEOUT)
     @ParameterizedTest()
     @ValueSource(booleans = {false, true})
-    public void testRecreateTableWithException(boolean isReloadData) throws Exception {
+    void testRecreateTableWithException(boolean isReloadData) throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         bEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
         bEnv.executeSql("USE CATALOG testCatalog");
@@ -641,7 +641,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testDeleteFallbackBranch() {
+    void testDeleteFallbackBranch() {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         bEnv.executeSql(
                 createCatalogSql("testCatalog", path + "/warehouse", "'cache-enabled' = 'false'"));
@@ -667,7 +667,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testChangelogCompactInBatchWrite() throws Exception {
+    void testChangelogCompactInBatchWrite() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         String catalogDdl =
                 "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '" + path + "' )";
@@ -757,7 +757,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testChangelogCompactInStreamWrite() throws Exception {
+    void testChangelogCompactInStreamWrite() throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()
@@ -864,14 +864,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testNoChangelogProducerBatchRandom() throws Exception {
+    void testNoChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testNoChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
     @Timeout(TIMEOUT)
-    public void testNoChangelogProducerStreamingRandom() throws Exception {
+    void testNoChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
@@ -884,14 +884,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testFullCompactionChangelogProducerBatchRandom() throws Exception {
+    void testFullCompactionChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
     @Timeout(TIMEOUT)
-    public void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
+    void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
@@ -904,7 +904,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testStandAloneFullCompactJobRandom() throws Exception {
+    void testStandAloneFullCompactJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
@@ -917,14 +917,14 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testLookupChangelogProducerBatchRandom() throws Exception {
+    void testLookupChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         testLookupChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
     @Timeout(TIMEOUT)
-    public void testLookupChangelogProducerStreamingRandom() throws Exception {
+    void testLookupChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
@@ -937,7 +937,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
-    public void testStandAloneLookupJobRandom() throws Exception {
+    void testStandAloneLookupJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()

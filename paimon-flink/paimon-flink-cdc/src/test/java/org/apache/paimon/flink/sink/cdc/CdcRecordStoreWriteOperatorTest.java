@@ -64,7 +64,7 @@ import java.util.function.Predicate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CdcRecordStoreWriteOperator}. */
-public class CdcRecordStoreWriteOperatorTest {
+class CdcRecordStoreWriteOperatorTest {
 
     @TempDir java.nio.file.Path tempDir;
 

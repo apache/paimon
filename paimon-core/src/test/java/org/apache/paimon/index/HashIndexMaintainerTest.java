@@ -43,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link HashIndexMaintainer}. */
-public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
+class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
 
     private IndexFileHandler fileHandler;
     private StreamWriteBuilder writeBuilder;
@@ -51,7 +51,7 @@ public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
     private StreamTableCommit commit;
 
     @BeforeEach
-    public void beforeEach() throws Exception {
+    void beforeEach() throws Exception {
         fileHandler = table.store().newIndexFileHandler();
         writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = writeBuilder.newWrite();

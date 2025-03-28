@@ -57,10 +57,10 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link UnawareBucketNewFilesCompactionCoordinatorOperator}. */
-public class UnawareBucketNewFilesCompactionCoordinatorOperatorTest {
+class UnawareBucketNewFilesCompactionCoordinatorOperatorTest {
 
     @Test
-    public void testPrepareSnapshotWithMultipleFiles() throws Exception {
+    void testPrepareSnapshotWithMultipleFiles() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofMebiBytes(8));
         UnawareBucketNewFilesCompactionCoordinatorOperator operator =
@@ -87,7 +87,7 @@ public class UnawareBucketNewFilesCompactionCoordinatorOperatorTest {
     }
 
     @Test
-    public void testPrepareSnapshotWithSingleFile() throws Exception {
+    void testPrepareSnapshotWithSingleFile() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofMebiBytes(8));
         UnawareBucketNewFilesCompactionCoordinatorOperator operator =
@@ -114,7 +114,7 @@ public class UnawareBucketNewFilesCompactionCoordinatorOperatorTest {
     }
 
     @Test
-    public void testPrepareSnapshotWithMultiplePartitions() throws Exception {
+    void testPrepareSnapshotWithMultiplePartitions() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofMebiBytes(8));
         UnawareBucketNewFilesCompactionCoordinatorOperator operator =
@@ -155,7 +155,7 @@ public class UnawareBucketNewFilesCompactionCoordinatorOperatorTest {
     }
 
     @Test
-    public void testSkipLargeFiles() throws Exception {
+    void testSkipLargeFiles() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofMebiBytes(8));
         UnawareBucketNewFilesCompactionCoordinatorOperator operator =

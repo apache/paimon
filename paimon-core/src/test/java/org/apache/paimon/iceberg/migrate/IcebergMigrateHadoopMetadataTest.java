@@ -42,7 +42,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for {@link IcebergMigrateHadoopMetadata}. */
-public class IcebergMigrateHadoopMetadataTest {
+class IcebergMigrateHadoopMetadataTest {
     @TempDir java.nio.file.Path iceTempDir;
 
     Schema iceSchema =
@@ -53,7 +53,7 @@ public class IcebergMigrateHadoopMetadataTest {
                     Types.NestedField.required(4, "hh", Types.StringType.get()));
 
     @Test
-    public void testGetIcebergMetadataWithCustomFileIO() {
+    void testGetIcebergMetadataWithCustomFileIO() {
         createIcebergTable();
 
         Map<String, String> icebergProperties = new HashMap<>();

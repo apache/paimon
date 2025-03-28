@@ -35,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link FileBasedPrivilegeManager}. */
-public class FileBasedPrivilegeManagerTest {
+class FileBasedPrivilegeManagerTest {
 
     private static final String PASSWORD_ROOT = "123456";
 
@@ -55,13 +55,13 @@ public class FileBasedPrivilegeManagerTest {
     }
 
     @Test
-    public void testInitializeMultipleTimes() throws Exception {
+    void testInitializeMultipleTimes() throws Exception {
         initPrivilege();
         assertThrows(IllegalStateException.class, this::initPrivilege);
     }
 
     @Test
-    public void testUsers() throws Exception {
+    void testUsers() throws Exception {
         initPrivilege();
 
         FileBasedPrivilegeManager rootManager = getPrivilegeManager("root", PASSWORD_ROOT);
@@ -85,7 +85,7 @@ public class FileBasedPrivilegeManagerTest {
     }
 
     @Test
-    public void testGrantAndRevoke() throws Exception {
+    void testGrantAndRevoke() throws Exception {
         initPrivilege();
 
         FileBasedPrivilegeManager rootManager = getPrivilegeManager("root", PASSWORD_ROOT);

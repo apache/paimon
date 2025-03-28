@@ -129,7 +129,7 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
-    public void testNormallyRemovingWithExternalPath() throws Throwable {
+    void testNormallyRemovingWithExternalPath() throws Throwable {
         // recreate the table with another option
         this.write.close();
         this.commit.close();
@@ -146,7 +146,7 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
-    public void testNormallyRemoving() throws Throwable {
+    void testNormallyRemoving() throws Throwable {
         normallyRemoving(tablePath);
     }
 
@@ -237,7 +237,7 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
-    public void testNormallyRemovingMixedWithExternalPath() throws Throwable {
+    void testNormallyRemovingMixedWithExternalPath() throws Throwable {
         int commitTimes = 30;
         List<List<TestPojo>> committedData = new ArrayList<>();
         Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
@@ -516,7 +516,7 @@ public class LocalOrphanFilesCleanTest {
 
     /** Manually make a FileNotFoundException to simulate snapshot expire while clean. */
     @Test
-    public void testAbnormallyRemoving() throws Exception {
+    void testAbnormallyRemoving() throws Exception {
         // generate randomly number of snapshots
         int num = RANDOM.nextInt(5) + 1;
         for (int i = 0; i < num; i++) {

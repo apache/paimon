@@ -138,7 +138,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @BeforeAll
-    public static void before() {
+    static void before() {
         branch = BranchManager.DEFAULT_MAIN_BRANCH;
     }
 
@@ -152,7 +152,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testRowSourceSink() throws Exception {
+    void testRowSourceSink() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
@@ -188,7 +188,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testPartitioned() throws Exception {
+    void testPartitioned() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
@@ -209,7 +209,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testNonPartitioned() throws Exception {
+    void testNonPartitioned() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});
 
         // write
@@ -227,7 +227,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testOverwrite() throws Exception {
+    void testOverwrite() throws Exception {
         assumeTrue(isBatch);
 
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
@@ -295,7 +295,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testPartitionedNonKey() throws Exception {
+    void testPartitionedNonKey() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[0]);
 
         // write
@@ -318,12 +318,12 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testKeyedProjection() throws Exception {
+    void testKeyedProjection() throws Exception {
         testProjection(buildFileStoreTable(new int[0], new int[] {2}));
     }
 
     @TestTemplate
-    public void testNonKeyedProjection() throws Exception {
+    void testNonKeyedProjection() throws Exception {
         testProjection(buildFileStoreTable(new int[0], new int[0]));
     }
 
@@ -367,17 +367,17 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testContinuous() throws Exception {
+    void testContinuous() throws Exception {
         innerTestContinuous(buildFileStoreTable(new int[0], new int[] {2}));
     }
 
     @TestTemplate
-    public void testContinuousWithoutPK() throws Exception {
+    void testContinuousWithoutPK() throws Exception {
         innerTestContinuous(buildFileStoreTable(new int[0], new int[0]));
     }
 
     @TestTemplate
-    public void testContinuousBounded() throws Exception {
+    void testContinuousBounded() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});
         table =
                 table.copy(
@@ -391,7 +391,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testCommitUserWithPrefix() throws Exception {
+    void testCommitUserWithPrefix() throws Exception {
         String commitUserPrefix = "commitUserPrefix";
 
         FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});

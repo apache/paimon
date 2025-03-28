@@ -45,12 +45,12 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CdcRecordChannelComputer}. */
-public class CdcRecordChannelComputerTest {
+class CdcRecordChannelComputerTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testSchemaWithPartition() throws Exception {
+    void testSchemaWithPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         RowType rowType =
                 RowType.of(
@@ -85,7 +85,7 @@ public class CdcRecordChannelComputerTest {
     }
 
     @Test
-    public void testSchemaNoPartition() throws Exception {
+    void testSchemaNoPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         RowType rowType =
                 RowType.of(

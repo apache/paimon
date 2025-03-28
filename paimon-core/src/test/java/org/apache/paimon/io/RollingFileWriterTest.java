@@ -47,7 +47,7 @@ import java.util.HashMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link RollingFileWriter}. */
-public class RollingFileWriterTest {
+class RollingFileWriterTest {
 
     private static final RowType SCHEMA =
             RowType.of(new DataType[] {new IntType()}, new String[] {"id"});

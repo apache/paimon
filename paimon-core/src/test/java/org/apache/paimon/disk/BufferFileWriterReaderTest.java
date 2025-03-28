@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
 /** Test for {@link BufferFileReader} and {@link BufferFileWriter}. */
-public class BufferFileWriterReaderTest {
+class BufferFileWriterReaderTest {
 
     private static final int BUFFER_SIZE = 32 * 1024;
 

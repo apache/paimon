@@ -110,12 +110,12 @@ public class MergeSorterTest {
     }
 
     @TestTemplate
-    public void testSortAndMerge() throws Exception {
+    void testSortAndMerge() throws Exception {
         innerTest(null);
     }
 
     @TestTemplate
-    public void testWithUserDefineSequence() throws Exception {
+    void testWithUserDefineSequence() throws Exception {
         innerTest(
                 new FieldsComparator() {
                     @Override

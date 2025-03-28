@@ -191,7 +191,7 @@ public class EqualiserCodeGeneratorTest {
 
     @ParameterizedTest
     @EnumSource(DataTypeRoot.class)
-    public void testSingleField(DataTypeRoot dataTypeRoot) {
+    void testSingleField(DataTypeRoot dataTypeRoot) {
         GeneratedData testData = TEST_DATA.get(dataTypeRoot);
         if (testData == null) {
             throw new UnsupportedOperationException("Unsupported type: " + dataTypeRoot);

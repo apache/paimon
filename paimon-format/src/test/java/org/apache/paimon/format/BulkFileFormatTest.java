@@ -39,15 +39,15 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** test bulk based format. */
-public class BulkFileFormatTest {
+class BulkFileFormatTest {
 
     @Test
-    public void testAvro(@TempDir java.nio.file.Path tempDir) throws IOException {
+    void testAvro(@TempDir java.nio.file.Path tempDir) throws IOException {
         testFormatWriteRead(tempDir, "avro", "snappy");
     }
 
     @Test
-    public void testOrc(@TempDir java.nio.file.Path tempDir) throws IOException {
+    void testOrc(@TempDir java.nio.file.Path tempDir) throws IOException {
         testFormatWriteRead(tempDir, "orc", "snappy");
     }
 
@@ -57,8 +57,8 @@ public class BulkFileFormatTest {
         return FileFormat.fromIdentifier(format, tableOptions);
     }
 
-    public void testFormatWriteRead(
-            @TempDir java.nio.file.Path tempDir, String format, String codec) throws IOException {
+    void testFormatWriteRead(@TempDir java.nio.file.Path tempDir, String format, String codec)
+            throws IOException {
         FileFormat fileFormat = createFileFormat(format, codec);
         RowType rowType =
                 RowType.builder().fields(Arrays.asList(new IntType(), new IntType())).build();

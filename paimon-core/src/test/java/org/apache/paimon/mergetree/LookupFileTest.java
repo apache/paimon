@@ -29,10 +29,10 @@ import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link LookupFile}. */
-public class LookupFileTest {
+class LookupFileTest {
 
     @Test
-    public void testLocalFilePrefix() {
+    void testLocalFilePrefix() {
         RowType partType = RowType.of(DataTypes.STRING());
         assertThat(
                         localFilePrefix(

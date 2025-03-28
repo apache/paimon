@@ -40,7 +40,7 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for batch file store. */
-public class DynamicBucketTableITCase extends CatalogITCaseBase {
+class DynamicBucketTableITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
@@ -57,7 +57,7 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWriteReadDelete() {
+    void testWriteReadDelete() {
         sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(
@@ -84,7 +84,7 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWriteWithAssignerParallelism() {
+    void testWriteWithAssignerParallelism() {
         sql(
                 "INSERT INTO T /*+ OPTIONS('dynamic-bucket.initial-buckets'='3') */ "
                         + "VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
@@ -94,7 +94,7 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWriteWithAssignerParallelism1() {
+    void testWriteWithAssignerParallelism1() {
         sql(
                 "INSERT INTO T /*+ OPTIONS('dynamic-bucket.initial-buckets'='1') */ "
                         + "VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
@@ -103,7 +103,7 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testOverwrite() throws Exception {
+    void testOverwrite() throws Exception {
         sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(

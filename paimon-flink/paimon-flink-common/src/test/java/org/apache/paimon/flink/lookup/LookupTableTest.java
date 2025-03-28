@@ -113,7 +113,7 @@ public class LookupTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPkTable() throws Exception {
+    void testPkTable() throws Exception {
         FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
         FullCacheLookupTable.Context context =
                 new FullCacheLookupTable.Context(

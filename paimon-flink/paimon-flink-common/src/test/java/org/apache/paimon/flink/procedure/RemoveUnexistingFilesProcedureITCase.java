@@ -33,11 +33,11 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link RemoveUnexistingFilesProcedure}. */
-public class RemoveUnexistingFilesProcedureITCase extends AbstractTestBase {
+class RemoveUnexistingFilesProcedureITCase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(ints = {-1, 3})
-    public void testProcedure(int bucket) throws Exception {
+    void testProcedure(int bucket) throws Exception {
         String warehouse = getTempDirPath();
         int numPartitions = 2;
         int numFiles = 10;

@@ -29,7 +29,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 
 /** ITCase for deletion vector table. */
-public class DeletionVectorITCase extends CatalogITCaseBase {
+class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"input"})

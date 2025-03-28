@@ -57,7 +57,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
 
 /** Test for {@link HttpClient}. */
-public class HttpClientTest {
+class HttpClientTest {
 
     private static final String MOCK_PATH = "/v1/api/mock";
     private static final String TOKEN = "token";

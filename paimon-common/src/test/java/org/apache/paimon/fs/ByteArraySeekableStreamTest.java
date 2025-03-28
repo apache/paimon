@@ -32,7 +32,7 @@ public class ByteArraySeekableStreamTest {
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testBasic() throws IOException {
+    void testBasic() throws IOException {
         int bl = 100000;
         byte[] b = randomBytes(bl);
         ByteArraySeekableStream byteArraySeekableStream = new ByteArraySeekableStream(b);
@@ -66,7 +66,7 @@ public class ByteArraySeekableStreamTest {
     }
 
     @Test
-    public void testThrow() {
+    void testThrow() {
         int bl = 10;
         byte[] b = randomBytes(bl);
         ByteArraySeekableStream byteArraySeekableStream = new ByteArraySeekableStream(b);

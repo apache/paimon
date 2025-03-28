@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PaimonCallStatement} of {@link PaimonSparkSessionExtensions}. */
-public class CallStatementParserTest {
+class CallStatementParserTest {
 
     private SparkSession spark = null;
     private ParserInterface parser = null;
@@ -159,7 +159,7 @@ public class CallStatementParserTest {
     }
 
     @Test
-    public void testCallWithParseException() {
+    void testCallWithParseException() {
         assertThatThrownBy(() -> parser.parsePlan("CALL catalog.sys.rollback abc"))
                 .isInstanceOf(PaimonParseException.class)
                 .hasMessageContaining("missing '(' at 'abc'");

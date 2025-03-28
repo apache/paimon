@@ -42,7 +42,7 @@ public class OffHeapDirectMemorySegmentTest extends MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testHeapSegmentSpecifics() {
+    void testHeapSegmentSpecifics() {
         final int bufSize = 411;
         MemorySegment seg = createSegment(bufSize);
 
