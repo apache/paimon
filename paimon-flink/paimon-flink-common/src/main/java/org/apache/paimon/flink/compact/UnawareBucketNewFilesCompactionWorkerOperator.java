@@ -102,6 +102,7 @@ public class UnawareBucketNewFilesCompactionWorkerOperator
         return new CommitMessageImpl(
                 message.partition(),
                 message.bucket(),
+                message.totalBuckets(),
                 new DataIncrement(
                         message.compactIncrement().compactAfter(),
                         Collections.emptyList(),

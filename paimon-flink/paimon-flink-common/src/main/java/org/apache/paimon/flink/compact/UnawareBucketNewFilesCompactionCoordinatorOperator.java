@@ -61,6 +61,7 @@ public class UnawareBucketNewFilesCompactionCoordinatorOperator
 
     private final long targetFileSize;
     private final long compactionFileSize;
+    private final int totalBuckets;
 
     private transient UnawareBucketNewFilesCompactionCoordinator coordinator;
     private transient long checkpointId;
@@ -68,6 +69,7 @@ public class UnawareBucketNewFilesCompactionCoordinatorOperator
     public UnawareBucketNewFilesCompactionCoordinatorOperator(CoreOptions options) {
         this.targetFileSize = options.targetFileSize(false);
         this.compactionFileSize = options.compactionFileSize(false);
+        this.totalBuckets = options.bucket();
     }
 
     @Override
@@ -124,6 +126,7 @@ public class UnawareBucketNewFilesCompactionCoordinatorOperator
                 new CommitMessageImpl(
                         message.partition(),
                         message.bucket(),
+                        message.totalBuckets(),
                         new DataIncrement(
                                 skippedFiles,
                                 message.newFilesIncrement().deletedFiles(),
@@ -163,6 +166,7 @@ public class UnawareBucketNewFilesCompactionCoordinatorOperator
                         new CommitMessageImpl(
                                 p.getKey(),
                                 BucketMode.UNAWARE_BUCKET,
+                                totalBuckets,
                                 new DataIncrement(
                                         Collections.singletonList(p.getValue().get(0)),
                                         Collections.emptyList(),

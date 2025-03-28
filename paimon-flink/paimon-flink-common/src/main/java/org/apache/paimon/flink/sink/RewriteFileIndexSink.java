@@ -127,16 +127,16 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
             ManifestEntry entry = element.getValue();
             BinaryRow partition = entry.partition();
             int bucket = entry.bucket();
-            DataFileMeta file = entry.file();
-            DataFileMeta indexedFile = fileIndexProcessor.process(partition, bucket, file);
+            DataFileMeta indexedFile = fileIndexProcessor.process(partition, bucket, entry);
 
             CommitMessageImpl commitMessage =
                     new CommitMessageImpl(
                             partition,
                             bucket,
+                            entry.totalBuckets(),
                             DataIncrement.emptyIncrement(),
                             new CompactIncrement(
-                                    Collections.singletonList(file),
+                                    Collections.singletonList(entry.file()),
                                     Collections.singletonList(indexedFile),
                                     Collections.emptyList()));
 
@@ -176,8 +176,9 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
             this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
         }
 
-        public DataFileMeta process(BinaryRow partition, int bucket, DataFileMeta dataFileMeta)
+        public DataFileMeta process(BinaryRow partition, int bucket, ManifestEntry manifestEntry)
                 throws IOException {
+            DataFileMeta dataFileMeta = manifestEntry.file();
             DataFilePathFactory dataFilePathFactory = pathFactories.get(partition, bucket);
             SchemaInfo schemaInfo = schemaInfoCache.schemaInfo(dataFileMeta.schemaId());
             List<String> extras = new ArrayList<>(dataFileMeta.extraFiles());
@@ -245,6 +246,7 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
                                                         pathFactory
                                                                 .bucketPath(partition, bucket)
                                                                 .toString())
+                                                .withTotalBuckets(manifestEntry.totalBuckets())
                                                 .withDataFiles(
                                                         Collections.singletonList(dataFileMeta))
                                                 .rawConvertible(true)

@@ -94,6 +94,7 @@ class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
                 new CommitMessageImpl(
                         BinaryRow.EMPTY_ROW,
                         0,
+                        1,
                         DataIncrement.emptyIncrement(),
                         CompactIncrement.emptyIncrement(),
                         new IndexIncrement(fileMetas1));
@@ -115,6 +116,7 @@ class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
                 new CommitMessageImpl(
                         BinaryRow.EMPTY_ROW,
                         0,
+                        1,
                         DataIncrement.emptyIncrement(),
                         CompactIncrement.emptyIncrement(),
                         new IndexIncrement(fileMetas2));

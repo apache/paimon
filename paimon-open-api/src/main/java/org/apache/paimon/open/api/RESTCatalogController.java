@@ -78,7 +78,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.rest.RESTCatalog.QUERY_PARAMETER_WAREHOUSE_KEY;
 
-/** RESTCatalog management APIs. */
+/** RESTCatalog open APIs. */
 @CrossOrigin(origins = "http://localhost:8081")
 @RestController
 public class RESTCatalogController {
@@ -757,7 +757,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema())})
     })
-    @GetMapping("/v1/{prefix}/databases/{database}/views")
+    @GetMapping("/v1/{prefix}/databases/{database}/view-details")
     public ListViewDetailsResponse listViewDetails(
             @PathVariable String prefix,
             @PathVariable String database,

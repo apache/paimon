@@ -49,6 +49,7 @@ class ChangelogCompactTaskSerializerTest {
                 new ChangelogCompactTask(
                         1L,
                         partition,
+                        2,
                         new HashMap<Integer, List<DataFileMeta>>() {
                             {
                                 put(0, newFiles(20));
@@ -61,7 +62,7 @@ class ChangelogCompactTaskSerializerTest {
                                 put(1, newFiles(10));
                             }
                         });
-        ChangelogCompactTask serializeTask = serializer.deserialize(1, serializer.serialize(task));
+        ChangelogCompactTask serializeTask = serializer.deserialize(2, serializer.serialize(task));
         assertThat(task).isEqualTo(serializeTask);
     }
 

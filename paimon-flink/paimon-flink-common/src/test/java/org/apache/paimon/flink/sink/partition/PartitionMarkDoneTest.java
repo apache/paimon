@@ -112,6 +112,7 @@ class PartitionMarkDoneTest extends TableTestBase {
                     new CommitMessageImpl(
                             BinaryRow.singleColumn(0),
                             0,
+                            1,
                             new DataIncrement(emptyList(), emptyList(), emptyList()),
                             new CompactIncrement(singletonList(file), emptyList(), emptyList()),
                             new IndexIncrement(emptyList()));
@@ -120,6 +121,7 @@ class PartitionMarkDoneTest extends TableTestBase {
                     new CommitMessageImpl(
                             BinaryRow.singleColumn(0),
                             0,
+                            1,
                             new DataIncrement(singletonList(file), emptyList(), emptyList()),
                             new CompactIncrement(emptyList(), emptyList(), emptyList()),
                             new IndexIncrement(emptyList()));

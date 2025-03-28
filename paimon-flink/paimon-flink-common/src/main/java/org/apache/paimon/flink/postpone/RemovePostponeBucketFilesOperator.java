@@ -45,6 +45,7 @@ public class RemovePostponeBucketFilesOperator extends BoundedOneInputOperator<S
                 new CommitMessageImpl(
                         dataSplit.partition(),
                         dataSplit.bucket(),
+                        dataSplit.totalBuckets(),
                         DataIncrement.emptyIncrement(),
                         new CompactIncrement(
                                 dataSplit.dataFiles(),

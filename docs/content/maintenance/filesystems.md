@@ -382,3 +382,41 @@ If you encounter the following exception:
 Caused by: org.apache.http.conn.ConnectionPoolTimeoutException: Timeout waiting for connection from pool.
 ```
 Try to configure this in catalog options: `fs.s3a.connection.maximum=1000`.
+
+## Google Cloud Storage
+
+{{< stable >}}
+
+Download [paimon-gs-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-gs/{{< version >}}/paimon-gs-{{< version >}}.jar).
+
+{{< /stable >}}
+
+{{< unstable >}}
+
+Download [paimon-gs-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-gs/{{< version >}}/).
+
+{{< /unstable >}}
+
+{{< tabs "gs" >}}
+
+{{< tab "Flink" >}}
+
+{{< hint info >}}
+If you have already configured [oss access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
+here you can skip the following configuration.
+{{< /hint >}}
+
+Put `paimon-gs-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
+
+```sql
+CREATE CATALOG my_catalog WITH (
+    'type' = 'paimon',
+    'warehouse' = 'oss://<bucket>/<path>',
+    'fs.gs.auth.type' = 'SERVICE_ACCOUNT_JSON_KEYFILE',
+    'fs.gs.auth.service.account.json.keyfile' = '/path/to/service-account-.json'
+);
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}

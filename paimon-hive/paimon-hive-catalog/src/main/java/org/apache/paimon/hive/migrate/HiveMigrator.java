@@ -163,25 +163,20 @@ public class HiveMigrator implements Migrator {
             FileStoreTable paimonTable = (FileStoreTable) hiveCatalog.getTable(identifier);
             checkPaimonTable(paimonTable);
 
-            List<String> partitionsNames =
-                    client.listPartitionNames(sourceDatabase, sourceTable, Short.MAX_VALUE);
+            List<Partition> partitions =
+                    client.listPartitions(sourceDatabase, sourceTable, Short.MAX_VALUE);
             checkCompatible(sourceHiveTable, paimonTable);
 
             List<MigrateTask> tasks = new ArrayList<>();
             Map<Path, Path> rollBack = new ConcurrentHashMap<>();
-            if (partitionsNames.isEmpty()) {
+            if (partitions.isEmpty()) {
                 tasks.add(
                         importUnPartitionedTableTask(
                                 fileIO, sourceHiveTable, paimonTable, rollBack));
             } else {
                 tasks.addAll(
                         importPartitionedTableTask(
-                                client,
-                                fileIO,
-                                partitionsNames,
-                                sourceHiveTable,
-                                paimonTable,
-                                rollBack));
+                                fileIO, partitions, sourceHiveTable, paimonTable, rollBack));
             }
 
             List<Future<CommitMessage>> futures =
@@ -292,13 +287,11 @@ public class HiveMigrator implements Migrator {
     }
 
     private List<MigrateTask> importPartitionedTableTask(
-            IMetaStoreClient client,
             FileIO fileIO,
-            List<String> partitionNames,
+            List<Partition> partitions,
             Table sourceTable,
             FileStoreTable paimonTable,
-            Map<Path, Path> rollback)
-            throws Exception {
+            Map<Path, Path> rollback) {
         List<MigrateTask> migrateTasks = new ArrayList<>();
         List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
 
@@ -309,17 +302,14 @@ public class HiveMigrator implements Migrator {
                 .getFieldTypes()
                 .forEach(type -> valueSetters.add(BinaryWriter.createValueSetter(type)));
 
-        for (String partitionName : partitionNames) {
-            Partition partition =
-                    client.getPartition(
-                            sourceTable.getDbName(), sourceTable.getTableName(), partitionName);
-            Map<String, String> values = client.partitionNameToSpec(partitionName);
+        for (Partition partition : partitions) {
+            List<String> partitionValues = partition.getValues();
             String format = parseFormat(partition.getSd().getSerdeInfo().toString());
             String location = partition.getSd().getLocation();
             BinaryRow partitionRow =
                     FileMetaUtils.writePartitionValue(
                             partitionRowType,
-                            values,
+                            partitionValues,
                             valueSetters,
                             coreOptions.partitionDefaultName());
             Path path = paimonTable.store().pathFactory().bucketPath(partitionRow, 0);
@@ -426,7 +416,8 @@ public class HiveMigrator implements Migrator {
                             HIDDEN_PATH_FILTER,
                             newDir,
                             rollback);
-            return FileMetaUtils.commitFile(partitionRow, fileMetas);
+            return FileMetaUtils.commitFile(
+                    partitionRow, paimonTable.coreOptions().bucket(), fileMetas);
         }
     }
 }

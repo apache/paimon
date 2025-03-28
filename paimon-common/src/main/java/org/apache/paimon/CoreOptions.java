@@ -666,6 +666,14 @@ public class CoreOptions implements Serializable {
                     .withDescription("Specify the order of sequence.field.");
 
     @Immutable
+    public static final ConfigOption<Boolean> AGGREGATION_REMOVE_RECORD_ON_DELETE =
+            key("aggregation.remove-record-on-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to remove the whole row in aggregation engine when -D records are received.");
+
+    @Immutable
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE =
             key("partial-update.remove-record-on-delete")
                     .booleanType()
@@ -2616,6 +2624,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataFileThinMode() {
         return options.get(DATA_FILE_THIN_MODE);
+    }
+
+    public boolean aggregationRemoveRecordOnDelete() {
+        return options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE);
     }
 
     /** Specifies the merge engine for table with primary key. */

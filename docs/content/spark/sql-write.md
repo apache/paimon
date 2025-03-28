@@ -85,6 +85,8 @@ INSERT INTO my_table VALUES (1, 'p1'), (2, 'p2');
 
 -- Static overwrite (Overwrite the whole table)
 INSERT OVERWRITE my_table VALUES (3, 'p1');
+-- or 
+INSERT OVERWRITE my_table PARTITION (pt) VALUES (3, 'p1');
 
 SELECT * FROM my_table;
 /*
@@ -95,6 +97,19 @@ SELECT * FROM my_table;
 +---+---+
 */
 
+-- Static overwrite with specified partitions (Only overwrite pt='p1')
+INSERT OVERWRITE my_table PARTITION (pt='p1') VALUES (3);
+
+SELECT * FROM my_table;
+/*
++---+---+
+| id| pt|
++---+---+
+|  2| p2|
+|  3| p1|
++---+---+
+*/
+  
 -- Dynamic overwrite (Only overwrite pt='p1')
 SET spark.sql.sources.partitionOverwriteMode=dynamic;
 INSERT OVERWRITE my_table VALUES (3, 'p1');

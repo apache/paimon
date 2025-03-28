@@ -39,7 +39,8 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** Serializer for {@link ChangelogCompactTask}. */
 public class ChangelogCompactTaskSerializer
         implements SimpleVersionedSerializer<ChangelogCompactTask> {
-    private static final int CURRENT_VERSION = 1;
+
+    private static final int CURRENT_VERSION = 2;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
@@ -69,6 +70,7 @@ public class ChangelogCompactTaskSerializer
     private void serialize(ChangelogCompactTask task, DataOutputView view) throws IOException {
         view.writeLong(task.checkpointId());
         serializeBinaryRow(task.partition(), view);
+        view.writeInt(task.totalBuckets());
         // serialize newFileChangelogFiles map
         serializeMap(task.newFileChangelogFiles(), view);
         serializeMap(task.compactChangelogFiles(), view);
@@ -82,6 +84,7 @@ public class ChangelogCompactTaskSerializer
         return new ChangelogCompactTask(
                 view.readLong(),
                 deserializeBinaryRow(view),
+                view.readInt(),
                 deserializeMap(view),
                 deserializeMap(view));
     }

@@ -54,9 +54,9 @@ public class ExpireChangelogsAction extends ActionBase {
     }
 
     public void run() throws Exception {
-        ExpireChangelogsProcedure expireSnapshotsProcedure = new ExpireChangelogsProcedure();
-        expireSnapshotsProcedure.withCatalog(catalog);
-        expireSnapshotsProcedure.call(
+        ExpireChangelogsProcedure expireChangelogsProcedure = new ExpireChangelogsProcedure();
+        expireChangelogsProcedure.withCatalog(catalog);
+        expireChangelogsProcedure.call(
                 new DefaultProcedureContext(env),
                 database + "." + table,
                 retainMax,

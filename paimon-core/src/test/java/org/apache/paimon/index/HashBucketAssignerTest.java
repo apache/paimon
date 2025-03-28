@@ -208,10 +208,12 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         assertThat(assigner.currentPartitions()).contains(row(2));
     }
 
-    private CommitMessage createCommitMessage(BinaryRow partition, int bucket, IndexFileMeta file) {
+    private CommitMessage createCommitMessage(
+            BinaryRow partition, int bucket, int totalBuckets, IndexFileMeta file) {
         return new CommitMessageImpl(
                 partition,
                 bucket,
+                totalBuckets,
                 new DataIncrement(
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()),
                 new CompactIncrement(
@@ -226,8 +228,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(row(1), 0, bucket0),
-                        createCommitMessage(row(1), 2, bucket2)));
+                        createCommitMessage(row(1), 0, 3, bucket0),
+                        createCommitMessage(row(1), 2, 3, bucket2)));
 
         HashBucketAssigner assigner0 = createAssigner(3, 3, 0);
         HashBucketAssigner assigner2 = createAssigner(3, 3, 2);
@@ -252,8 +254,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(row(1), 0, bucket0),
-                        createCommitMessage(row(1), 2, bucket2)));
+                        createCommitMessage(row(1), 0, 3, bucket0),
+                        createCommitMessage(row(1), 2, 3, bucket2)));
 
         HashBucketAssigner assigner0 = createAssigner(3, 3, 0, 1);
         HashBucketAssigner assigner2 = createAssigner(3, 3, 2, 1);
@@ -311,8 +313,10 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(row(1), 0, fileHandler.writeHashIndex(new int[] {0})),
-                        createCommitMessage(row(2), 0, fileHandler.writeHashIndex(new int[] {0}))));
+                        createCommitMessage(
+                                row(1), 0, 1, fileHandler.writeHashIndex(new int[] {0})),
+                        createCommitMessage(
+                                row(2), 0, 1, fileHandler.writeHashIndex(new int[] {0}))));
         assertThat(assigner.currentPartitions()).containsExactlyInAnyOrder(row(1), row(2));
 
         // checkpoint 1, but no commit
@@ -328,7 +332,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         commit.commit(
                 1,
                 Collections.singletonList(
-                        createCommitMessage(row(1), 0, fileHandler.writeHashIndex(new int[] {1}))));
+                        createCommitMessage(
+                                row(1), 0, 1, fileHandler.writeHashIndex(new int[] {1}))));
         assigner.prepareCommit(3);
         assertThat(assigner.currentPartitions()).isEmpty();
     }

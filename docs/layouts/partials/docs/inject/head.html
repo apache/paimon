@@ -24,6 +24,5 @@ under the License.
 <script src="{{.Site.BaseURL}}/js/flink.js"></script>
 <!-- Only takes effect when the `redocPage` variable is true. -->
 {{ if .Params.redocPage }}
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval'; default-src 'self' data: blob: 'unsafe-inline' https://raw.githubusercontent.com/apache/paimon/master/paimon-open-api/;">
     <script src="{{.Site.BaseURL}}/js/redoc.standalone.js"></script>
 {{ end }}

@@ -46,7 +46,11 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 meta.numAddedFiles(),
                 meta.numDeletedFiles(),
                 meta.partitionStats().toRow(),
-                meta.schemaId());
+                meta.schemaId(),
+                meta.minBucket(),
+                meta.maxBucket(),
+                meta.minLevel(),
+                meta.maxLevel());
     }
 
     @Override
@@ -60,12 +64,17 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
             }
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
+
         return new ManifestFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
                 row.getLong(2),
                 row.getLong(3),
                 SimpleStats.fromRow(row.getRow(4, 3)),
-                row.getLong(5));
+                row.getLong(5),
+                row.isNullAt(6) ? null : row.getInt(6),
+                row.isNullAt(7) ? null : row.getInt(7),
+                row.isNullAt(8) ? null : row.getInt(8),
+                row.isNullAt(9) ? null : row.getInt(9));
     }
 }

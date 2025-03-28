@@ -100,6 +100,7 @@ public class FileStoreTestUtils {
                         new CommitMessageImpl(
                                 entryWithPartition.getKey(),
                                 entryWithBucket.getKey(),
+                                store.options().bucket(),
                                 increment.newFilesIncrement(),
                                 increment.compactIncrement()));
             }

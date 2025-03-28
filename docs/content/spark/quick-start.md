@@ -177,9 +177,31 @@ tblproperties (
 
 ## Insert Table
 
+{{< tabs "Insert Paimon Table" >}}
+
+{{< tab "SQL" >}}
+
 ```sql
 INSERT INTO my_table VALUES (1, 'Hi'), (2, 'Hello');
 ```
+
+{{< /tab >}}
+
+{{< tab "DataFrame" >}}
+
+```scala
+-- you can use
+Seq((1, "Hi"), (2, "Hello")).toDF("k", "v")
+  .write.format("paimon").mode("append").saveAsTable("my_table")
+
+-- or
+Seq((1, "Hi"), (2, "Hello")).toDF("k", "v")
+  .write.format("paimon").mode("append").save("file:/tmp/paimon/default.db/my_table")
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ## Query Table
 
@@ -201,8 +223,11 @@ SELECT * FROM my_table;
 {{< tab "DataFrame" >}}
 
 ```scala
-val dataset = spark.read.format("paimon").load("file:/tmp/paimon/default.db/my_table")
-dataset.show()
+-- you can use
+spark.read.format("paimon").table("my_table").show()
+
+-- or
+spark.read.format("paimon").load("file:/tmp/paimon/default.db/my_table").show()
 
 /*
 +---+------+

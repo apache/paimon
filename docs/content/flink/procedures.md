@@ -488,20 +488,27 @@ All available procedures are listed below.
       <td>
          -- for Flink 1.18<br/>
          -- clear table with purge files directly.<br/>
-         CALL [catalog.]sys.purge_files('identifier')<br/><br/>
+         CALL [catalog.]sys.purge_files('identifier')<br/>
+         -- only check what dirs will be deleted, but not really delete them.<br/>
+         CALL [catalog.]sys.purge_files('identifier', true)<br/><br/>
          -- for Flink 1.19 and later<br/>
          -- clear table with purge files directly.<br/>
-         CALL [catalog.]sys.purge_files(`table` => 'default.T')<br/><br/>
+         CALL [catalog.]sys.purge_files(`table` => 'default.T')<br/>
+         -- only check what dirs will be deleted, but not really delete them.<br/>
+         CALL [catalog.]sys.purge_files(`table` => 'default.T', `dry_run` => true)<br/><br/>
       </td>
       <td>
          To clear table with purge files directly. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
+            <li>dry_run (optional): only check what dirs will be deleted, but not really delete them. Default is false.</li>
       </td>
       <td>
          -- for Flink 1.18<br/>
-         CALL sys.purge_files('default.T')<br/><br/>
+         CALL sys.purge_files('default.T')<br/>
+         CALL sys.purge_files('default.T', true)<br/><br/>
          -- for Flink 1.19 and later<br/>
-         CALL sys.purge_files(`table` => 'default.T')
+         CALL sys.purge_files(`table` => 'default.T')<br/>
+         CALL sys.purge_files(`table` => 'default.T', `dry_run` => true)
       </td>
    </tr>
    <tr>

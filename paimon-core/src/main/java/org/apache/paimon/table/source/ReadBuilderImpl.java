@@ -47,6 +47,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Map<String, String> partitionSpec;
 
+    private @Nullable Integer specifiedBucket = null;
     private Filter<Integer> bucketFilter;
 
     private @Nullable RowType readType;
@@ -121,6 +122,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withBucket(int bucket) {
+        this.specifiedBucket = bucket;
+        return this;
+    }
+
+    @Override
     public ReadBuilder withBucketFilter(Filter<Integer> bucketFilter) {
         this.bucketFilter = bucketFilter;
         return this;
@@ -160,6 +167,9 @@ public class ReadBuilderImpl implements ReadBuilder {
                 throw new UnsupportedOperationException(
                         "Unsupported table scan type for shard configuring, the scan is: " + scan);
             }
+        }
+        if (specifiedBucket != null) {
+            scan.withBucket(specifiedBucket);
         }
         if (bucketFilter != null) {
             scan.withBucketFilter(bucketFilter);

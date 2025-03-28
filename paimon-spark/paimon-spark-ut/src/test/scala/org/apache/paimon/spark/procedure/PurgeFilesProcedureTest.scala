@@ -40,4 +40,35 @@ class PurgeFilesProcedureTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql("select * from test.T"), Row("2", "aa") :: Nil)
   }
 
+  test("Paimon procedure: purge files test with dry run.") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING)
+                 |USING PAIMON
+                 |""".stripMargin)
+
+    // There are no dir to be deleted.
+    checkAnswer(
+      spark.sql("CALL paimon.sys.purge_files(table => 'test.T')"),
+      Row("There are no dir to be deleted.") :: Nil
+    )
+
+    spark.sql("insert into T select '1', 'aa'");
+    checkAnswer(spark.sql("select * from test.T"), Row("1", "aa") :: Nil)
+
+    // dry run.
+    checkAnswer(
+      spark.sql("CALL paimon.sys.purge_files(table => 'test.T', dry_run => true)"),
+      Row("snapshot") :: Row("bucket-0") :: Row("manifest") :: Nil
+    )
+    checkAnswer(spark.sql("select * from test.T"), Row("1", "aa") :: Nil)
+
+    // Do delete.
+    spark.sql("CALL paimon.sys.purge_files(table => 'test.T')")
+    checkAnswer(spark.sql("select * from test.T"), Nil)
+
+    // insert new data.
+    spark.sql("insert into T select '2', 'aa'");
+    checkAnswer(spark.sql("select * from test.T"), Row("2", "aa") :: Nil)
+  }
+
 }

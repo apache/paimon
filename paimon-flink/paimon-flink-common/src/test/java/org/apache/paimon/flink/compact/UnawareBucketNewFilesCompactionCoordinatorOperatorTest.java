@@ -218,6 +218,7 @@ class UnawareBucketNewFilesCompactionCoordinatorOperatorTest {
                 new CommitMessageImpl(
                         partition,
                         BucketMode.UNAWARE_BUCKET,
+                        -1,
                         new DataIncrement(
                                 Arrays.stream(mbs)
                                         .mapToObj(this::createDataFileMetaOfSize)
