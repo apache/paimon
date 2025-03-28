@@ -44,18 +44,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "409":
-          description: Resource has exist
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceHasExistErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     get:
       tags:
         - Catalogs
@@ -90,17 +84,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListCatalogsResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
   /v1/catalogs/{catalog}:
     parameters:
       - name: catalog
@@ -124,23 +110,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetCatalogResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     patch:
       tags:
         - Catalogs
@@ -161,23 +135,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AlterCatalogResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
     delete:
       tags:
         - Catalogs
@@ -189,23 +151,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/schemas/ServerErrorResponse'
 components:
   schemas:
     CreateCatalogRequest:
@@ -287,6 +237,54 @@ components:
           type: array
           items:
             type: string
+    UnauthorizedErrorResponse:
+      description:
+        Used for 401 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "No auth for this resource",
+            "code": 401
+          }
+    ResourceNotFoundErrorResponse:
+      description:
+        Used for 404 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Resource is not found",
+            "resourceType": "CATALOG",
+            "resourceName": "lake",
+            "code": 404
+          }
+    ResourceHasExistErrorResponse:
+      description:
+        Used for 409 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Resource has exist",
+            "resourceType": "CATALOG",
+            resourceName: "lake",
+            "code": 409
+          }
+    ServerErrorResponse:
+      description:
+        Used for server 5xx errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Internal Server Error",
+            "code": 500
+          }
     ErrorResponse:
       type: object
       properties:
@@ -294,7 +292,7 @@ components:
           type: string
         resourceType:
           type: string
-          enum: ["DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN"]
+          enum: [ "CATALOG" ]
         resourceName:
           type: string
         code:
