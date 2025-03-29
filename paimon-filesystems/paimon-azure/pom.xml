@@ -63,7 +63,7 @@
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>copy-cosn-classes</id>
+                        <id>copy-azure-classes</id>
                         <phase>prepare-package</phase>
                         <goals>
                             <goal>unpack</goal>
@@ -76,7 +76,7 @@
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-cosn</outputDirectory>
+                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-azure</outputDirectory>
                                     <excludes>META-INF/**</excludes>
                                 </artifactItem>
                                 <artifactItem>
@@ -85,7 +85,7 @@
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-cosn</outputDirectory>
+                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-azure</outputDirectory>
                                     <includes>META-INF/services/**,META-INF/versions/**</includes>
                                 </artifactItem>
                             </artifactItems>
