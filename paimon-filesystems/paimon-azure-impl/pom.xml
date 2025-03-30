@@ -69,6 +69,7 @@
             <groupId>com.microsoft.azure</groupId>
             <artifactId>azure</artifactId>
             <version>${fs.azure.api.version}</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <!-- Hadoop requires jaxb-api for javax.xml.bind.JAXBException -->
