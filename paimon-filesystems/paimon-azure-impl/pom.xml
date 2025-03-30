@@ -70,7 +70,14 @@
             <artifactId>azure</artifactId>
             <version>${fs.azure.api.version}</version>
         </dependency>
-
+        <dependency>
+            <!-- Hadoop requires jaxb-api for javax.xml.bind.JAXBException -->
+            <groupId>javax.xml.bind</groupId>
+            <artifactId>jaxb-api</artifactId>
+            <version>${jaxb.api.version}</version>
+            <!-- packaged as an optional dependency that is only accessible on Java 11+ -->
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
