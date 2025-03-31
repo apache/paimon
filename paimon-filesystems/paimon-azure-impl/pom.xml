@@ -53,24 +53,16 @@
             <version>${fs.hadoopshaded.version}</version>
             <exclusions>
                 <exclusion>
-                    <groupId>org.apache.hadoop</groupId>
-                    <artifactId>hadoop-common</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.hadoop.thirdparty</groupId>
-                    <artifactId>hadoop-shaded-guava</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.hadoop.thirdparty</groupId>
-                    <artifactId>hadoop-shaded-protobuf_3_7</artifactId>
-                </exclusion>
-                <exclusion>
                     <groupId>ch.qos.reload4j</groupId>
                     <artifactId>reload4j</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>hadoop-shaded-guava</artifactId>
+                    <groupId>org.apache.hadoop.thirdparty</groupId>
                 </exclusion>
             </exclusions>
         </dependency>
