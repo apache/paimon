@@ -96,7 +96,7 @@ public abstract class CatalogTestBase {
                     "");
 
     @BeforeEach
-    protected void setUp() throws Exception {
+    public void setUp() throws Exception {
         warehouse = tempFile.toUri().toString();
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
