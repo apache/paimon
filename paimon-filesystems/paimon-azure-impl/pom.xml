@@ -64,7 +64,6 @@
                     <groupId>org.apache.hadoop.thirdparty</groupId>
                     <artifactId>hadoop-shaded-protobuf_3_7</artifactId>
                 </exclusion>
-                <!-- 其他排除项保持不变 -->
                 <exclusion>
                     <groupId>ch.qos.reload4j</groupId>
                     <artifactId>reload4j</artifactId>
