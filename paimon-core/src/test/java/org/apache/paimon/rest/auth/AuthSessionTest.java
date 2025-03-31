@@ -65,10 +65,10 @@ import static org.mockito.Mockito.when;
 
 /** Test for {@link AuthSession}. */
 public class AuthSessionTest {
-
+    
     @Rule public TemporaryFolder folder = new TemporaryFolder();
     private static final ObjectMapper OBJECT_MAPPER_INSTANCE = new ObjectMapper();
-
+    
     @Test
     public void testBearToken() {
         String token = UUID.randomUUID().toString();
@@ -84,7 +84,7 @@ public class AuthSessionTest {
         assertEquals(
                 headers.get(BearTokenAuthProvider.AUTHORIZATION_HEADER_KEY), "Bearer " + token);
     }
-
+    
     @Test
     public void testRefreshDLFAuthTokenFileAuthProvider() throws IOException, InterruptedException {
         String fileName = UUID.randomUUID().toString();
@@ -113,7 +113,7 @@ public class AuthSessionTest {
             assertEquals(theSecondGenerateToken, theSecondFetchToken);
         }
     }
-
+    
     @Test
     public void testRefreshAuthProviderIsSoonExpire() throws IOException, InterruptedException {
         String fileName = UUID.randomUUID().toString();
@@ -137,7 +137,7 @@ public class AuthSessionTest {
         authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(token, authToken);
     }
-
+    
     @Test
     public void testRetryWhenRefreshFail() throws Exception {
         AuthProvider authProvider = Mockito.mock(DLFAuthProvider.class);
@@ -154,7 +154,7 @@ public class AuthSessionTest {
         Thread.sleep(10_000L);
         verify(authProvider, Mockito.times(REFRESH_NUM_RETRIES + 1)).refresh();
     }
-
+    
     @Test
     public void testGetTimeToWaitByExpiresInMills() {
         long expiresInMillis = -100L;
@@ -170,7 +170,7 @@ public class AuthSessionTest {
         timeToWait = AuthSession.getTimeToWaitByExpiresInMills(expiresInMillis);
         assertEquals(timeToWait, MAX_REFRESH_WINDOW_MILLIS);
     }
-
+    
     @Test
     public void testCreateDLFAuthProviderByStsToken() throws IOException {
         Options options = new Options();
@@ -189,7 +189,7 @@ public class AuthSessionTest {
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
     }
-
+    
     @Test
     public void testCreateDLFAuthProviderByAk() throws IOException {
         Options options = new Options();
@@ -206,7 +206,7 @@ public class AuthSessionTest {
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
     }
-
+    
     @Test
     public void testCreateDlfAuthProviderByFileNoDefineRefresh() throws IOException {
         String fileName = UUID.randomUUID().toString();
@@ -221,7 +221,7 @@ public class AuthSessionTest {
         String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
         assertEquals(authToken, token);
     }
-
+    
     @Test
     public void testCreateDLFAuthProviderWithoutNeedConf() {
         assertThrows(
@@ -230,7 +230,7 @@ public class AuthSessionTest {
                         AuthProviderFactory.createAuthProvider(
                                 AuthProviderEnum.DLF.identifier(), new Options()));
     }
-
+    
     @Test
     public void testCreateDlfAuthProviderByDLFTokenLoader()
             throws IOException, InterruptedException {
@@ -267,7 +267,7 @@ public class AuthSessionTest {
             assertEquals(theSecondGenerateToken, theSecondFetchToken);
         }
     }
-
+    
     @Test
     public void testCreateDlfAuthProviderByCustomDLFTokenLoader()
             throws IOException, InterruptedException {
@@ -291,7 +291,7 @@ public class AuthSessionTest {
         assertEquals(fetchToken.getAccessKeySecret(), customToken.getAccessKeySecret());
         assertEquals(fetchToken.getSecurityToken(), customToken.getSecurityToken());
     }
-
+    
     @Test
     public void testCreateDlfAuthProviderByECSTokenProvider()
             throws IOException, InterruptedException {
@@ -322,7 +322,7 @@ public class AuthSessionTest {
             String theFirstFetchTokenStr =
                     OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
             assertEquals(theFirstFetchTokenStr, theFirstMockTokenStr);
-
+            
             DLFToken theSecondMockToken = generateToken();
             String theSecondMockTokenStr =
                     OBJECT_MAPPER_INSTANCE.writeValueAsString(theSecondMockToken);
@@ -335,7 +335,7 @@ public class AuthSessionTest {
             mockECSMetadataService.shutdown();
         }
     }
-
+    
     @Test
     public void testCreateDlfAuthProviderByECSTokenProviderWithDefineRole()
             throws IOException, InterruptedException {
@@ -367,7 +367,7 @@ public class AuthSessionTest {
             String theFirstFetchTokenStr =
                     OBJECT_MAPPER_INSTANCE.writeValueAsString(dlfAuthProvider.token);
             assertEquals(theFirstFetchTokenStr, theFirstMockTokenStr);
-
+            
             DLFToken theSecondMockToken = generateToken();
             String theSecondMockTokenStr =
                     OBJECT_MAPPER_INSTANCE.writeValueAsString(theSecondMockToken);
@@ -380,7 +380,7 @@ public class AuthSessionTest {
             mockECSMetadataService.shutdown();
         }
     }
-
+    
     @Test
     public void testCreateDlfAuthProviderByECSTokenProviderWithInvalidRole()
             throws IOException, InterruptedException {
@@ -409,7 +409,7 @@ public class AuthSessionTest {
             mockECSMetadataService.shutdown();
         }
     }
-
+    
     @Test
     public void testDLFAuthProviderAuthHeaderWhenDataIsNotEmpty() throws Exception {
         String fileName = UUID.randomUUID().toString();
@@ -453,7 +453,7 @@ public class AuthSessionTest {
                 DLFAuthProvider.DLF_CONTENT_SHA56_VALUE,
                 header.get(DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY));
     }
-
+    
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
         File tokenFile = folder.newFile(fileName);
         ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
@@ -464,7 +464,7 @@ public class AuthSessionTest {
         FileUtils.writeStringToFile(tokenFile, tokenStr);
         return Pair.of(tokenFile, tokenStr);
     }
-
+    
     private DLFToken generateToken() {
         String accessKeyId = UUID.randomUUID().toString();
         String accessKeySecret = UUID.randomUUID().toString();
@@ -473,7 +473,7 @@ public class AuthSessionTest {
         String expiration = now.format(TOKEN_DATE_FORMATTER);
         return new DLFToken(accessKeyId, accessKeySecret, securityToken, expiration);
     }
-
+    
     private AuthProvider generateDLFAuthProvider(
             Optional<Long> tokenRefreshInMillsOpt, String fileName, String serverUrl) {
         Options options = new Options();
