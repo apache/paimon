@@ -425,7 +425,8 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testAlterTableWithSyncTblProperties() throws ExecutionException, InterruptedException {
+    public void testAlterTableWithSyncTblProperties()
+            throws ExecutionException, InterruptedException {
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -1657,7 +1658,8 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testRepairTableWithSyncTblProperties() throws ExecutionException, InterruptedException {
+    public void testRepairTableWithSyncTblProperties()
+            throws ExecutionException, InterruptedException {
         tEnv.executeSql(
                         String.join(
                                 "\n",
