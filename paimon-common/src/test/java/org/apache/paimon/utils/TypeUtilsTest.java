@@ -43,7 +43,7 @@ import java.util.TimeZone;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link TypeUtils}. */
-public class TypeUtilsTest {
+class TypeUtilsTest {
     private static TimeZone originalTimeZone;
 
     @BeforeAll
@@ -53,7 +53,7 @@ public class TypeUtilsTest {
     }
 
     @AfterAll
-    static void tearDown() {
+    public static void tearDown() {
         TimeZone.setDefault(originalTimeZone);
     }
 
@@ -198,10 +198,12 @@ public class TypeUtilsTest {
 
     @Test
     void testFloatCastFromString() {
-        String value = "123.456";
-        Object result = TypeUtils.castFromCdcValueString(value, DataTypes.FLOAT());
-        Float expected = 123.456f;
-        assertThat(result).isEqualTo(expected);
+        String[] values = {"123.456", "0.00042", "1.00001"};
+        Float[] expected = {123.456f, 0.00042f, 1.00001f};
+        for (int i = 0; i < values.length; i++) {
+            Object result = TypeUtils.castFromCdcValueString(values[i], DataTypes.FLOAT());
+            assertThat(result).isEqualTo(expected[i]);
+        }
     }
 
     @Test

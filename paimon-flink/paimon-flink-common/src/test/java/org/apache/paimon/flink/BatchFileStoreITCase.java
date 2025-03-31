@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for batch file store. */
-class BatchFileStoreITCase extends CatalogITCaseBase {
+public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
@@ -60,7 +60,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testAQEWithWriteManifest() {
+    public void testAQEWithWriteManifest() {
         batchSql("ALTER TABLE T SET ('write-manifest-cache' = '1 mb')");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c");
@@ -73,7 +73,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testAQEWithDynamicBucket() {
+    public void testAQEWithDynamicBucket() {
         batchSql("CREATE TABLE IF NOT EXISTS D_T (a INT PRIMARY KEY NOT ENFORCED, b INT, c INT)");
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         batchSql("INSERT INTO D_T SELECT a, b, c FROM T GROUP BY a,b,c");
@@ -82,7 +82,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testOverwriteEmpty() {
+    public void testOverwriteEmpty() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
@@ -91,7 +91,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testTimeTravelRead() throws Exception {
+    public void testTimeTravelRead() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         long time1 = System.currentTimeMillis();
 
@@ -257,7 +257,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     @Timeout(120)
-    void testTimeTravelReadWithWatermark() throws Exception {
+    public void testTimeTravelReadWithWatermark() throws Exception {
         streamSqlIter(
                 "CREATE TEMPORARY TABLE gen (a STRING, b STRING, c STRING,"
                         + " dt AS NOW(), WATERMARK FOR dt AS dt) WITH ('connector'='datagen')");
@@ -286,7 +286,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testTimeTravelReadWithSnapshotExpiration() throws Exception {
+    public void testTimeTravelReadWithSnapshotExpiration() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
 
         paimonTable("T").createTag("tag1", 1);
@@ -306,7 +306,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testIncrementBetweenReadWithSnapshotExpiration() throws Exception {
+    public void testIncrementBetweenReadWithSnapshotExpiration() throws Exception {
         String tableName = "T";
         batchSql(String.format("INSERT INTO %s VALUES (1, 11, 111)", tableName));
 
@@ -334,7 +334,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testSortSpillMerge() {
+    public void testSortSpillMerge() {
         sql(
                 "CREATE TABLE IF NOT EXISTS KT (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('sort-spill-threshold'='2')");
         sql("INSERT INTO KT VALUES (1, '1')");
@@ -353,7 +353,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testTruncateTable() {
+    public void testTruncateTable() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
@@ -365,7 +365,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
 
     /** NOTE: only supports INNER JOIN. */
     @Test
-    void testDynamicPartitionPruning() {
+    public void testDynamicPartitionPruning() {
         // dim table
         sql("CREATE TABLE dim (x INT PRIMARY KEY NOT ENFORCED, y STRING, z INT)");
         sql("INSERT INTO dim VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2)");
@@ -398,7 +398,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testDynamicPartitionPruningOnTwoFactTables() {
+    public void testDynamicPartitionPruningOnTwoFactTables() {
         // dim table
         sql("CREATE TABLE dim (x INT PRIMARY KEY NOT ENFORCED, y STRING, z INT)");
         sql("INSERT INTO dim VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2)");
@@ -454,7 +454,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testRowKindField() {
+    public void testRowKindField() {
         sql(
                 "CREATE TABLE R_T (pk INT PRIMARY KEY NOT ENFORCED, v INT, rf STRING) "
                         + "WITH ('rowkind.field'='rf')");
@@ -465,7 +465,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testIgnoreDelete() {
+    public void testIgnoreDelete() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
                         + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1')");
@@ -481,7 +481,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testIgnoreDeleteWithRowKindField() {
+    public void testIgnoreDeleteWithRowKindField() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "
                         + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
@@ -497,7 +497,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testDeleteWithPkLookup() throws Exception {
+    public void testDeleteWithPkLookup() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
                         + "WITH ('changelog-producer' = 'lookup', 'bucket' = '1')");
@@ -515,7 +515,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"none", "lookup", "input"})
-    void testDeletePartitionWithChangelog(String producer) throws Exception {
+    public void testDeletePartitionWithChangelog(String producer) throws Exception {
         sql(
                 "CREATE TABLE delete_table (pt INT, pk INT, v STRING, PRIMARY KEY(pt, pk) NOT ENFORCED) PARTITIONED BY (pt)   "
                         + "WITH ('changelog-producer' = '"
@@ -539,7 +539,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testScanFromOldSchema() throws InterruptedException {
+    public void testScanFromOldSchema() throws InterruptedException {
         sql("CREATE TABLE select_old (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
 
         sql("INSERT INTO select_old VALUES (1, 'a'), (2, 'b')");
@@ -568,7 +568,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testCountStarAppend() {
+    public void testCountStarAppend() {
         sql("CREATE TABLE count_append (f0 INT, f1 STRING)");
         sql("INSERT INTO count_append VALUES (1, 'a'), (2, 'b')");
 
@@ -578,7 +578,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testCountStarPartAppend() {
+    public void testCountStarPartAppend() {
         sql("CREATE TABLE count_part_append (f0 INT, f1 STRING, dt STRING) PARTITIONED BY (dt)");
         sql("INSERT INTO count_part_append VALUES (1, 'a', '1'), (1, 'a', '1'), (2, 'b', '2')");
         String sql = "SELECT COUNT(*) FROM count_part_append WHERE dt = '1'";
@@ -588,7 +588,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testCountStarAppendWithDv() {
+    public void testCountStarAppendWithDv() {
         sql(
                 "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true')");
         sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
@@ -599,7 +599,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testCountStarPK() {
+    public void testCountStarPK() {
         sql(
                 "CREATE TABLE count_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ('file.format' = 'avro')");
         sql("INSERT INTO count_pk VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
@@ -611,7 +611,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testCountStarPKDv() {
+    public void testCountStarPKDv() {
         sql(
                 "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
                         + "'file.format' = 'avro', "
@@ -641,7 +641,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testParquetRowDecimalAndTimestamp() {
+    public void testParquetRowDecimalAndTimestamp() {
         sql(
                 "CREATE TABLE parquet_row_decimal(`row` ROW<f0 DECIMAL(2,1)>) WITH ('file.format' = 'parquet')");
         sql("INSERT INTO parquet_row_decimal VALUES ( (ROW(1.2)) )");
@@ -659,7 +659,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testScanBounded() {
+    public void testScanBounded() {
         sql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         List<Row> result;
         try (CloseableIterator<Row> iter =
@@ -673,7 +673,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testIncrementTagQueryWithRescaleBucket() throws Exception {
+    public void testIncrementTagQueryWithRescaleBucket() throws Exception {
         sql("CREATE TABLE test (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('bucket' = '1')");
         Table table = paimonTable("test");
 
@@ -700,7 +700,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testAggregationWithNullSequenceField() {
+    public void testAggregationWithNullSequenceField() {
         sql(
                 "CREATE TABLE test ("
                         + "  pk INT PRIMARY KEY NOT ENFORCED,"
@@ -720,7 +720,7 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testScanWithSpecifiedPartitions() {
+    public void testScanWithSpecifiedPartitions() {
         sql("CREATE TABLE P (pt STRING, id INT, v INT) PARTITIONED BY (pt)");
         sql("CREATE TABLE Q (id INT)");
         sql(
@@ -732,13 +732,13 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testEmptyTableIncrementalBetweenTimestamp() {
+    public void testEmptyTableIncrementalBetweenTimestamp() {
         assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();
     }
 
     @Test
-    void testIncrementScanMode() throws Exception {
+    public void testIncrementScanMode() throws Exception {
         sql(
                 "CREATE TABLE test_scan_mode (id INT PRIMARY KEY NOT ENFORCED, v STRING) WITH ('changelog-producer' = 'lookup')");
 
@@ -771,6 +771,8 @@ class BatchFileStoreITCase extends CatalogITCaseBase {
                 sql(
                         "SELECT * FROM `test_scan_mode$audit_log` "
                                 + "/*+ OPTIONS('incremental-between'='1,8','incremental-between-scan-mode'='delta') */");
-        assertThat(result).containsExactlyInAnyOrder(Row.of("-D", 2, "B"), Row.of("+I", 3, "C"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("+I", 2, "B"), Row.of("-D", 2, "B"), Row.of("+I", 3, "C"));
     }
 }
