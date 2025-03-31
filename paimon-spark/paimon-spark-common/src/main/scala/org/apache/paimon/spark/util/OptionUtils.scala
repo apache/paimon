@@ -52,7 +52,7 @@ object OptionUtils extends SQLConfHelper {
       if (!paimonExtensionEnabled) {
         throw new RuntimeException(
           """
-            |When using Paimon, it is necessary to configure `spark.sql.extensions` and ensure that it includes `org.apache.paimon.spark.extensions.PaimonSparkSessionExtension`.
+            |When using Paimon, it is necessary to configure `spark.sql.extensions` and ensure that it includes `org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions`.
             |You can disable this check by configuring `spark.paimon.requiredSparkConfsCheck.enabled` to `false`, but it is strongly discouraged to do so.
             |""".stripMargin)
       }
