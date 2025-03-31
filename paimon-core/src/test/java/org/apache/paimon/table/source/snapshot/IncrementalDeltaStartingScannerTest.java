@@ -44,31 +44,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link IncrementalDeltaStartingScanner}. */
 public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
-    
+
     @Test
     public void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write =
                 table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
         StreamTableCommit commit = table.newCommit(commitUser);
-        
+
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(3, 40, 400L));
         write.compact(binaryRow(1), 0, false);
         commit.commit(0, write.prepareCommit(true, 0));
-        
+
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(3, 40, 500L));
         write.compact(binaryRow(1), 0, false);
         commit.commit(1, write.prepareCommit(true, 1));
-        
+
         write.close();
         commit.close();
-        
+
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
-        
+
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(INCREMENTAL_BETWEEN.key(), "1,4");
         List<Split> splits = table.copy(dynamicOptions).newScan().plan().splits();
@@ -80,37 +80,37 @@ public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
                                 "+I 3|40|400",
                                 "-U 3|40|400",
                                 "+U 3|40|500"));
-        
+
         dynamicOptions.put(INCREMENTAL_BETWEEN_SCAN_MODE.key(), "delta");
         splits = table.copy(dynamicOptions).newScan().plan().splits();
         assertThat(getResult(table.newRead(), splits))
                 .hasSameElementsAs(Arrays.asList("+I 2|20|200", "+I 1|10|100", "+I 3|40|500"));
     }
-    
+
     @Test
     public void testIllegalScanSnapshotId() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write =
                 table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
         StreamTableCommit commit = table.newCommit(commitUser);
-        
+
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(3, 40, 400L));
         write.compact(binaryRow(1), 0, false);
         commit.commit(0, write.prepareCommit(true, 0));
-        
+
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         write.write(rowData(3, 40, 500L));
         write.compact(binaryRow(1), 0, false);
         commit.commit(1, write.prepareCommit(true, 1));
-        
+
         write.close();
         commit.close();
-        
+
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
-        
+
         // Allowed starting snapshotId to be equal to the earliest snapshotId -1.
         assertThatNoException()
                 .isThrownBy(
@@ -118,18 +118,18 @@ public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
                                 IncrementalDeltaStartingScanner.betweenSnapshotIds(
                                                 0, 4, snapshotManager, ScanMode.DELTA)
                                         .scan(snapshotReader));
-        
+
         assertThatThrownBy(
-                () ->
-                        IncrementalDeltaStartingScanner.betweenSnapshotIds(
-                                        1, 5, snapshotManager, ScanMode.DELTA)
-                                .scan(snapshotReader))
+                        () ->
+                                IncrementalDeltaStartingScanner.betweenSnapshotIds(
+                                                1, 5, snapshotManager, ScanMode.DELTA)
+                                        .scan(snapshotReader))
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "The specified scan snapshotId range [1, 5] is out of available snapshotId range [1, 4]."));
     }
-    
+
     @Override
     protected FileStoreTable createFileStoreTable() throws Exception {
         Options conf = new Options();
