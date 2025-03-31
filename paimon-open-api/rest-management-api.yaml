@@ -16,7 +16,7 @@
 #
 
 ---
-openapi: 3.0.1
+openapi: 3.1.1
 info:
   title: REST Management API
   description: This API exposes endpoints to REST management.
@@ -44,14 +44,12 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "409":
-          description: Resource has exist
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/ResourceHasExistErrorResponse'
         "500":
-          description: Internal Server Error
+          $ref: '#/components/responses/ServerErrorResponse'
     get:
       tags:
         - Catalogs
@@ -86,13 +84,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListCatalogsResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
-          description: Internal Server Error
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/catalogs/{catalog}:
     parameters:
       - name: catalog
@@ -116,19 +110,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetCatalogResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
+          $ref: '#/components/responses/ServerErrorResponse'
     patch:
       tags:
         - Catalogs
@@ -149,19 +135,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AlterCatalogResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
+          $ref: '#/components/responses/ServerErrorResponse'
     delete:
       tags:
         - Catalogs
@@ -173,19 +151,11 @@ paths:
         "200":
           description: Success, no content
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/catalogs/id/{id}:
     get:
       tags:
@@ -209,20 +179,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetCatalogResponse'
         "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
-          description: Resource not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/ResourceNotFoundErrorResponse'
         "500":
-          description: Internal Server Error
+          $ref: '#/components/responses/ServerErrorResponse'
 components:
+  responses:
+    UnauthorizedErrorResponse:
+      description:
+        Unauthorized. Authentication is required, check your token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "No auth for this resource",
+            "code": 401
+          }
+    ResourceNotFoundErrorResponse:
+      description:
+        Used for 404 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Resource is not found",
+            "resourceType": "CATALOG",
+            "resourceName": "lake",
+            "code": 404
+          }
+    ResourceHasExistErrorResponse:
+      description:
+        Used for 409 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Resource has exist",
+            "resourceType": "CATALOG",
+            resourceName: "lake",
+            "code": 409
+          }
+    ServerErrorResponse:
+      description:
+        Used for server 5xx errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Internal Server Error",
+            "code": 500
+          }
   schemas:
     CreateCatalogRequest:
       type: object
@@ -314,7 +325,7 @@ components:
           type: string
         resourceType:
           type: string
-          enum: ["DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN"]
+          enum: [ "CATALOG" ]
         resourceName:
           type: string
         code:

@@ -96,7 +96,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/config")
     public ConfigResponse getConfig(@RequestParam(QUERY_PARAMETER_WAREHOUSE_KEY) String warehouse) {
@@ -120,7 +120,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases")
     public ListDatabasesResponse listDatabases(
@@ -145,7 +145,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases")
     public void createDatabases(
@@ -168,7 +168,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}")
     public GetDatabaseResponse getDatabases(
@@ -201,7 +201,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @DeleteMapping("/v1/{prefix}/databases/{database}")
     public void dropDatabase(@PathVariable String prefix, @PathVariable String database) {}
@@ -229,7 +229,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/properties")
     public AlterDatabaseResponse alterDatabase(
@@ -255,7 +255,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables")
     public ListTablesResponse listTables(
@@ -282,7 +282,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/table-details")
     public ListTableDetailsResponse listTableDetails(
@@ -333,7 +333,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}")
     public GetTableResponse getTable(
@@ -370,7 +370,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables")
     public void createTable(
@@ -393,7 +393,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}")
     public void alterTable(
@@ -417,7 +417,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @DeleteMapping("/v1/{prefix}/databases/{database}/tables/table")
     public void dropTable(
@@ -440,7 +440,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/tables/rename")
     public void renameTable(@PathVariable String prefix, @RequestBody RenameTableRequest request) {}
@@ -462,7 +462,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/commit")
     public CommitTableResponse commitTable(
@@ -488,7 +488,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/rollback")
     public void rollbackTable(
@@ -516,7 +516,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/token")
     public GetTableTokenResponse getTableToken(
@@ -546,7 +546,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/snapshot")
     public GetTableSnapshotResponse getTableSnapshot(
@@ -575,7 +575,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions")
     public ListPartitionsResponse listPartitions(
@@ -606,7 +606,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/partitions/mark")
     public void markDonePartitions(
@@ -634,7 +634,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches")
     public ListBranchesResponse listBranches(
@@ -655,7 +655,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches")
     public void createBranch(
@@ -675,7 +675,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward")
     public void forwardBranch(
@@ -700,7 +700,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @DeleteMapping("/v1/{prefix}/databases/{database}/tables/table/branches/branch")
     public void dropBranch(
@@ -708,35 +708,6 @@ public class RESTCatalogController {
             @PathVariable String database,
             @PathVariable String table,
             @PathVariable String branch) {}
-
-    @Operation(
-            summary = "List views",
-            tags = {"view"})
-    @ApiResponses({
-        @ApiResponse(
-                responseCode = "200",
-                content = {@Content(schema = @Schema(implementation = ListViewsResponse.class))}),
-        @ApiResponse(
-                responseCode = "401",
-                description = "Unauthorized",
-                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
-        @ApiResponse(
-                responseCode = "404",
-                description = "Resource not found",
-                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
-        @ApiResponse(
-                responseCode = "500",
-                content = {@Content(schema = @Schema())})
-    })
-    @GetMapping("/v1/{prefix}/databases/{database}/views")
-    public ListViewsResponse listViews(
-            @PathVariable String prefix,
-            @PathVariable String database,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
-        // support paged list views in this database with provided maxResults and pageToken
-        return new ListViewsResponse(ImmutableList.of("view1"), null);
-    }
 
     @Operation(
             summary = "List view details",
@@ -755,7 +726,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/view-details")
     public ListViewDetailsResponse listViewDetails(
@@ -803,7 +774,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases/{database}/views")
     public void createView(
@@ -828,7 +799,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @GetMapping("/v1/{prefix}/databases/{database}/views/{view}")
     public GetViewResponse getView(
@@ -870,7 +841,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/views/rename")
     public void renameView(@PathVariable String prefix, @RequestBody RenameTableRequest request) {}
@@ -890,7 +861,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
         @ApiResponse(
                 responseCode = "500",
-                content = {@Content(schema = @Schema())})
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @DeleteMapping("/v1/{prefix}/databases/{database}/views/{view}")
     public void dropView(
