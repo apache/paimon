@@ -26,8 +26,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
 import org.apache.flink.util.TestLogger;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.*;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,19 +40,29 @@ import static org.junit.jupiter.api.Assertions.fail;
  * implementation, but covers all runtime-related aspects for all the iterator-based sources
  * together.
  */
-public class IteratorSourcesITCase extends TestLogger {
+class IteratorSourcesITCase extends TestLogger {
 
     private static final int PARALLELISM = 4;
 
-    @ClassRule
-    public static final MiniClusterWithClientResource MINI_CLUSTER =
-            new MiniClusterWithClientResource(
-                    new MiniClusterResourceConfiguration.Builder()
-                            .setNumberTaskManagers(1)
-                            .setNumberSlotsPerTaskManager(PARALLELISM)
-                            .build());
+    private static MiniClusterWithClientResource miniCluster;
 
-    // ------------------------------------------------------------------------
+    @BeforeAll
+    static void setUp() throws Exception {
+        miniCluster =
+                new MiniClusterWithClientResource(
+                        new MiniClusterResourceConfiguration.Builder()
+                                .setNumberTaskManagers(1)
+                                .setNumberSlotsPerTaskManager(PARALLELISM)
+                                .build());
+        miniCluster.before();
+    }
+
+    @AfterAll
+    static void tearDown() {
+        if (miniCluster != null) {
+            miniCluster.after();
+        }
+    }
 
     @Test
     void testParallelSourceExecution() throws Exception {
