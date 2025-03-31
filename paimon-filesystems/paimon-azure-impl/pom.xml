@@ -20,7 +20,6 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-
     <parent>
         <artifactId>paimon-filesystems</artifactId>
         <groupId>org.apache.paimon</groupId>
@@ -68,7 +67,6 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
-
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
@@ -209,39 +207,10 @@
                 </exclusion>
             </exclusions>
         </dependency>
-
-        <!-- AWS dependencies (bundled) -->
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-core</artifactId>
-            <version>${fs.s3.aws.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-s3</artifactId>
-            <version>${fs.s3.aws.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-kms</artifactId>
-            <version>${fs.s3.aws.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-dynamodb</artifactId>
-            <version>${fs.s3.aws.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-sts</artifactId>
-            <version>${fs.s3.aws.version}</version>
-        </dependency>
-
-        <!-- Hadoop's s3 support classes (bundled) -->
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-azure</artifactId>
-            <version>${fs.hadoopshaded.version}</version>
+            <version>${fs.azure.sdk.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.apache.hadoop</groupId>
@@ -363,6 +332,7 @@
                                         <exclude>META-INF/maven/**</exclude>
                                         <exclude>META-INF/versions/11/META-INF/maven/**</exclude>
                                         <exclude>META-INF/LICENSE.txt</exclude>
+                                        <exclude>META-INF/gfprobe-provider.xml</exclude>
                                     </excludes>
                                 </filter>
                                 <filter>
@@ -374,15 +344,6 @@
                                         <exclude>META-INF/LICENSE.txt</exclude>
                                     </excludes>
                                 </filter>
-                                <filter>
-                                    <artifact>com.amazonaws:aws-java-sdk-s3</artifact>
-                                    <!-- Make sure we are using the overridden XmlResponsesSaxParser.
-                                        Filter must be removed as soon as XmlResponsesSaxParser of this module is
-                                        dropped, for example when discontinuing support for Java 8. -->
-                                    <excludes>
-                                        <exclude>com/amazonaws/services/s3/model/transform/XmlResponsesSaxParser**</exclude>
-                                    </excludes>
-                                </filter>
                             </filters>
                         </configuration>
                     </execution>
@@ -390,5 +351,4 @@
             </plugin>
         </plugins>
     </build>
-
 </project>

@@ -51,13 +51,6 @@
                 </exclusion>
             </exclusions>
         </dependency>
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-test-utils</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-
     </dependencies>
 
     <build>
@@ -87,7 +80,7 @@
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>copy-s3-classes</id>
+                        <id>copy-azure-classes</id>
                         <phase>prepare-package</phase>
                         <goals>
                             <goal>unpack</goal>
@@ -100,7 +93,7 @@
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-s3</outputDirectory>
+                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-azure</outputDirectory>
                                     <excludes>META-INF/**</excludes>
                                 </artifactItem>
                                 <artifactItem>
@@ -109,7 +102,7 @@
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-s3</outputDirectory>
+                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-azure</outputDirectory>
                                     <includes>META-INF/services/**,META-INF/versions/**</includes>
                                 </artifactItem>
                             </artifactItems>
@@ -147,5 +140,4 @@
             </plugin>
         </plugins>
     </build>
-
 </project>
