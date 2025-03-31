@@ -424,12 +424,16 @@ public class Snapshot implements Serializable {
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,
-                watermark);
+                watermark,
+                statistics);
     }
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof Snapshot)) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
             return false;
         }
         Snapshot that = (Snapshot) o;
@@ -451,7 +455,8 @@ public class Snapshot implements Serializable {
                 && Objects.equals(totalRecordCount, that.totalRecordCount)
                 && Objects.equals(deltaRecordCount, that.deltaRecordCount)
                 && Objects.equals(changelogRecordCount, that.changelogRecordCount)
-                && Objects.equals(watermark, that.watermark);
+                && Objects.equals(watermark, that.watermark)
+                && Objects.equals(statistics, that.statistics);
     }
 
     /** Type of changes in this snapshot. */
