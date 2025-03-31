@@ -37,7 +37,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 
 /** IT cases for {@link RollbackToAction}. */
-public class RollbackToActionITCase extends ActionITCaseBase {
+class RollbackToActionITCase extends ActionITCaseBase {
 
     private static final DataType[] FIELD_TYPES =
             new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()};
@@ -45,13 +45,13 @@ public class RollbackToActionITCase extends ActionITCaseBase {
     private static final RowType ROW_TYPE = RowType.of(FIELD_TYPES, new String[] {"k", "v"});
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         init(warehouse);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
-    public void rollbackToSnapshotTest(String invoker) throws Exception {
+    void rollbackToSnapshotTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         ROW_TYPE,
@@ -106,7 +106,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
-    public void rollbackToTagTest(String invoker) throws Exception {
+    void rollbackToTagTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         ROW_TYPE,
@@ -163,7 +163,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
-    public void rollbackToTimestampTest(String invoker) throws Exception {
+    void rollbackToTimestampTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         ROW_TYPE,

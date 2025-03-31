@@ -51,7 +51,7 @@ import java.util.LinkedList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** test file format suffix. */
-public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
+class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
 
     private static final RowType SCHEMA =
             RowType.of(
@@ -59,7 +59,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                     new String[] {"id", "name", "dt"});
 
     @Test
-    public void testFileSuffix(@TempDir java.nio.file.Path tempDir) throws Exception {
+    void testFileSuffix(@TempDir java.nio.file.Path tempDir) throws Exception {
         String format = "avro";
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         Path path = writerFactory.pathFactory(0).newPath();

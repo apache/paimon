@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 public class ColumnarRowIteratorTest {
 
     @Test
-    public void testRowIterator() {
+    void testRowIterator() {
         Random random = new Random();
         HeapIntVector heapIntVector = new HeapIntVector(100);
         for (int i = 0; i < 100; i++) {

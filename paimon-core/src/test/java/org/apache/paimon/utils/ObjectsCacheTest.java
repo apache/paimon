@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ObjectsCacheTest {
 
     @Test
-    public void testObjectsCacheAndMetrics() throws IOException {
+    void testObjectsCacheAndMetrics() throws IOException {
         Map<String, List<String>> map = new HashMap<>();
         ObjectsCache<String, String> cache =
                 new ObjectsCache<>(

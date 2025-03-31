@@ -63,7 +63,7 @@ public abstract class MemorySegmentTestBase {
     // ------------------------------------------------------------------------
 
     @TestTemplate
-    public void testByteAccess() {
+    void testByteAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
         long seed = random.nextLong();
@@ -112,7 +112,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testBooleanAccess() {
+    void testBooleanAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
         long seed = random.nextLong();
@@ -149,7 +149,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testEqualTo() {
+    void testEqualTo() {
         MemorySegment seg1 = createSegment(pageSize);
         MemorySegment seg2 = createSegment(pageSize);
 
@@ -170,7 +170,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testCharAccess() {
+    void testCharAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
         long seed = random.nextLong();
@@ -222,7 +222,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testShortAccess() {
+    void testShortAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
         long seed = random.nextLong();
@@ -273,7 +273,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testIntAccess() {
+    void testIntAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
         long seed = random.nextLong();
@@ -326,7 +326,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testLongAccess() {
+    void testLongAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
         long seed = random.nextLong();
@@ -403,7 +403,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testFloatAccess() {
+    void testFloatAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
         long seed = random.nextLong();
@@ -458,7 +458,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testDoubleAccess() {
+    void testDoubleAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
         long seed = random.nextLong();
@@ -539,7 +539,7 @@ public abstract class MemorySegmentTestBase {
     // ------------------------------------------------------------------------
 
     @TestTemplate
-    public void testBulkByteAccess() {
+    void testBulkByteAccess() {
         // test expected correct behavior with default offset / length
         {
             final MemorySegment segment = createSegment(pageSize);
@@ -637,7 +637,7 @@ public abstract class MemorySegmentTestBase {
     // ------------------------------------------------------------------------
 
     @TestTemplate
-    public void testDataInputOutput() throws IOException {
+    void testDataInputOutput() throws IOException {
         MemorySegment seg = createSegment(pageSize);
         byte[] contents = new byte[pageSize];
         random.nextBytes(contents);
@@ -678,7 +678,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testDataInputOutputStreamUnderflowOverflow() throws IOException {
+    void testDataInputOutputStreamUnderflowOverflow() throws IOException {
         final int segmentSize = 1337;
 
         // segment with random contents
@@ -739,7 +739,7 @@ public abstract class MemorySegmentTestBase {
     // ------------------------------------------------------------------------
 
     @TestTemplate
-    public void testByteBufferGet() {
+    void testByteBufferGet() {
         testByteBufferGet(false);
         testByteBufferGet(true);
     }
@@ -774,13 +774,13 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testHeapByteBufferGetReadOnly() {
+    void testHeapByteBufferGetReadOnly() {
         assertThatThrownBy(() -> testByteBufferGetReadOnly(false))
                 .isInstanceOf(ReadOnlyBufferException.class);
     }
 
     @TestTemplate
-    public void testOffHeapByteBufferGetReadOnly() {
+    void testOffHeapByteBufferGetReadOnly() {
         assertThatThrownBy(() -> testByteBufferGetReadOnly(true))
                 .isInstanceOf(ReadOnlyBufferException.class);
     }
@@ -804,7 +804,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testByteBufferPut() {
+    void testByteBufferPut() {
         testByteBufferPut(false);
         testByteBufferPut(true);
     }
@@ -844,7 +844,7 @@ public abstract class MemorySegmentTestBase {
     // ------------------------------------------------------------------------
 
     @TestTemplate
-    public void testSlicedByteBufferGet() {
+    void testSlicedByteBufferGet() {
         testSlicedByteBufferGet(false);
         testSlicedByteBufferGet(true);
     }
@@ -882,7 +882,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testSlicedByteBufferPut() {
+    void testSlicedByteBufferPut() {
         testSlicedByteBufferPut(false);
         testSlicedByteBufferPut(true);
     }
@@ -922,7 +922,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testCompareBytes() {
+    void testCompareBytes() {
         final byte[] bytes1 = new byte[pageSize];
         final byte[] bytes2 = new byte[pageSize];
 
@@ -963,7 +963,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testCompareBytesWithDifferentLength() {
+    void testCompareBytesWithDifferentLength() {
         final byte[] bytes1 = new byte[] {'a', 'b', 'c'};
         final byte[] bytes2 = new byte[] {'a', 'b', 'c', 'd'};
 
@@ -982,7 +982,7 @@ public abstract class MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testSwapBytes() {
+    void testSwapBytes() {
         final int halfPageSize = pageSize / 2;
 
         final byte[] bytes1 = new byte[pageSize];
@@ -1020,7 +1020,7 @@ public abstract class MemorySegmentTestBase {
     // ------------------------------------------------------------------------
 
     @TestTemplate
-    public void testByteBufferWrapping() {
+    void testByteBufferWrapping() {
         MemorySegment seg = createSegment(1024);
 
         ByteBuffer buf1 = seg.wrap(13, 47);

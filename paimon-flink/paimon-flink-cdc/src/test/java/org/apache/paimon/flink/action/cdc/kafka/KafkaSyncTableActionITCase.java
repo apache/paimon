@@ -252,7 +252,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         }
     }
 
-    public void testNotSupportFormat(String format) throws Exception {
+    void testNotSupportFormat(String format) throws Exception {
         final String topic = "not_support";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/%s/table/schemaevolution/%s-data-1.txt", format, format);
@@ -382,7 +382,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
-    public void testStarUpOptionTimestamp(String format) throws Exception {
+    void testStarUpOptionTimestamp(String format) throws Exception {
         final String topic = "start_up_timestamp";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(
@@ -423,7 +423,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
-    public void testStarUpOptionEarliest(String format) throws Exception {
+    void testStarUpOptionEarliest(String format) throws Exception {
         final String topic = "start_up_earliest";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
@@ -463,7 +463,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
-    public void testStarUpOptionGroup(String format) throws Exception {
+    void testStarUpOptionGroup(String format) throws Exception {
         final String topic = "start_up_group";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
@@ -503,7 +503,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
-    public void testComputedColumn(String format) throws Exception {
+    void testComputedColumn(String format) throws Exception {
         String topic = "computed_column";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/%s/table/computedcolumn/%s-data-1.txt", format, format);
@@ -590,7 +590,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         waitForResult(expectedReplace, table, rowType, primaryKeys);
     }
 
-    public void testKafkaBuildSchemaWithDelete(String format) throws Exception {
+    void testKafkaBuildSchemaWithDelete(String format) throws Exception {
         final String topic = "test_kafka_schema";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(
@@ -618,7 +618,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         assertThat(kafkaSchema.fields()).isEqualTo(fields);
     }
 
-    public void testWaterMarkSyncTable(String format) throws Exception {
+    void testWaterMarkSyncTable(String format) throws Exception {
         String topic = "watermark";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/%s/table/watermark/%s-data-1.txt", format, format);
@@ -656,7 +656,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         }
     }
 
-    public void testSchemaIncludeRecord(String format) throws Exception {
+    void testSchemaIncludeRecord(String format) throws Exception {
         String topic = "schema_include";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/debezium/table/schema/include/debezium-data-1.txt");
@@ -690,7 +690,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     }
 
     // TODO some types are different from mysql cdc; maybe need to fix
-    public void testAllTypesWithSchemaImpl(String format) throws Exception {
+    void testAllTypesWithSchemaImpl(String format) throws Exception {
         String topic = "schema_include_all_type";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/debezium/table/schema/alltype/debezium-data-1.txt");

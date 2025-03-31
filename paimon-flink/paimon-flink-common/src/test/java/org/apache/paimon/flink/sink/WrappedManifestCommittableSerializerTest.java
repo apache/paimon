@@ -47,7 +47,7 @@ class WrappedManifestCommittableSerializerTest {
     private static final int VERSION = WrappedManifestCommittableSerializer.CURRENT_VERSION;
 
     @Test
-    public void testCommittableSerDe() throws IOException {
+    void testCommittableSerDe() throws IOException {
         WrappedManifestCommittableSerializer serializer = serializer();
         ManifestCommittable committable1 = createManifestCommittable();
         ManifestCommittable committable2 = createManifestCommittable();

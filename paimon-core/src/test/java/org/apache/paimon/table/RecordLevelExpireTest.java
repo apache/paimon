@@ -82,7 +82,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void test() throws Exception {
+    void test() throws Exception {
         writeCommit(GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 2));
 
         // can be queried
@@ -124,7 +124,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIsExpireFile() throws Exception {
+    void testIsExpireFile() throws Exception {
         CoreOptions coreOptions = table.coreOptions();
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
@@ -231,7 +231,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTotallyExpire() throws Exception {
+    void testTotallyExpire() throws Exception {
         Map<String, String> map = new HashMap<>();
         map.put(CoreOptions.TARGET_FILE_SIZE.key(), "1500 B");
         table = table.copy(map);

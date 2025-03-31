@@ -103,7 +103,7 @@ class DataTableSourceTest {
     }
 
     @Test
-    public void testInferStreamParallelism() throws Exception {
+    void testInferStreamParallelism() throws Exception {
         FileStoreTable fileStoreTable = createTable(ImmutableMap.of("bucket", "-1"));
 
         DataTableSource tableSource =
@@ -122,7 +122,7 @@ class DataTableSourceTest {
     }
 
     @Test
-    public void testSystemTableParallelism() throws Exception {
+    void testSystemTableParallelism() throws Exception {
         FileStoreTable fileStoreTable =
                 createTable(
                         ImmutableMap.of("bucket", "1", "bucket-key", "a", "scan.parallelism", "3"));

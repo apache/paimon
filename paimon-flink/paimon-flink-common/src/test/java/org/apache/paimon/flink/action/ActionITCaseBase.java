@@ -69,7 +69,7 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     private long incrementalIdentifier;
 
     @BeforeEach
-    public void before() throws IOException {
+    void before() throws IOException {
         warehouse = getTempDirPath();
         database = "default";
         tableName = "test_table_" + UUID.randomUUID();

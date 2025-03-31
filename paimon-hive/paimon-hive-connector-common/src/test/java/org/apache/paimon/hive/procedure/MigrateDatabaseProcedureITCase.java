@@ -29,7 +29,6 @@ import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -43,6 +42,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.hive.procedure.MigrateTableProcedureITCase.data;
+import static org.assertj.core.api.Assertions.assertThatList;
 
 /** Tests for {@link MigrateDatabaseProcedure}. */
 public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
@@ -146,8 +146,8 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
                 ImmutableList.copyOf(
                         tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
 
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
-        Assertions.assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
     }
 
     public void testUpgradeNonPartitionTable(String format, boolean isNamedArgument)
@@ -209,8 +209,8 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
                 ImmutableList.copyOf(
                         tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
 
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
-        Assertions.assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
     }
 
     @ParameterizedTest
@@ -271,7 +271,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
                 ImmutableList.copyOf(
                         tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
 
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
-        Assertions.assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
     }
 }

@@ -39,19 +39,19 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CreateTagFromTimestampAction}. */
-public class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
+class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
     private static final DataType[] FIELD_TYPES =
             new DataType[] {DataTypes.STRING(), DataTypes.STRING()};
 
     private static final RowType ROW_TYPE = RowType.of(FIELD_TYPES, new String[] {"k", "v"});
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         init(warehouse);
     }
 
     @Test
-    public void testCreateTagFromTimestampAction() throws Exception {
+    void testCreateTagFromTimestampAction() throws Exception {
         FileStoreTable table = prepareTable();
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);

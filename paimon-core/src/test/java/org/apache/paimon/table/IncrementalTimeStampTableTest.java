@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IncrementalTimeStampTableTest extends TableTestBase {
 
     @Test
-    public void testPrimaryKeyTable() throws Exception {
+    void testPrimaryKeyTable() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -129,12 +129,9 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                                 String.format("%s,%s", timestampEarliest, timestampSnapshot2)));
         assertThat(result2)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(1, 1, 1),
-                        GenericRow.of(1, 2, 1),
-                        GenericRow.of(1, 3, 1),
-                        GenericRow.of(2, 1, 1),
                         GenericRow.of(1, 1, 2),
                         GenericRow.of(1, 2, 2),
+                        GenericRow.of(1, 3, 1),
                         GenericRow.of(1, 4, 1),
                         GenericRow.of(2, 1, 2));
         result2 =
@@ -147,12 +144,9 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                                         timestampEarliestString, timestampSnapshot2String)));
         assertThat(result2)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(1, 1, 1),
-                        GenericRow.of(1, 2, 1),
-                        GenericRow.of(1, 3, 1),
-                        GenericRow.of(2, 1, 1),
                         GenericRow.of(1, 1, 2),
                         GenericRow.of(1, 2, 2),
+                        GenericRow.of(1, 3, 1),
                         GenericRow.of(1, 4, 1),
                         GenericRow.of(2, 1, 2));
 
@@ -164,13 +158,10 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                                 String.format("%s,%s", timestampSnapshot2, timestampSnapshot4)));
         assertThat(result3)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(1, 1, 3),
-                        GenericRow.of(1, 2, 3),
-                        GenericRow.of(2, 1, 3),
-                        GenericRow.of(2, 2, 1),
                         GenericRow.of(1, 1, 4),
                         GenericRow.of(1, 2, 4),
-                        GenericRow.of(2, 1, 4));
+                        GenericRow.of(2, 1, 4),
+                        GenericRow.of(2, 2, 1));
         result3 =
                 read(
                         table,
@@ -181,17 +172,14 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                                         timestampSnapshot2String, timestampSnapshot4String)));
         assertThat(result3)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(1, 1, 3),
-                        GenericRow.of(1, 2, 3),
-                        GenericRow.of(2, 1, 3),
-                        GenericRow.of(2, 2, 1),
                         GenericRow.of(1, 1, 4),
                         GenericRow.of(1, 2, 4),
-                        GenericRow.of(2, 1, 4));
+                        GenericRow.of(2, 1, 4),
+                        GenericRow.of(2, 2, 1));
     }
 
     @Test
-    public void testPrimaryKeyTableTotalRecordCountWithOnePartition() throws Exception {
+    void testPrimaryKeyTableTotalRecordCountWithOnePartition() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -229,7 +217,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPrimaryKeyTableTotalRecordCountWithMultiPartition() throws Exception {
+    void testPrimaryKeyTableTotalRecordCountWithMultiPartition() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -288,7 +276,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAppendTable() throws Exception {
+    void testAppendTable() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()

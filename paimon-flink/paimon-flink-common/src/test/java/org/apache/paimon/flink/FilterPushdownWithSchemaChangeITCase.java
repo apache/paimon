@@ -50,7 +50,7 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testDecimalToDecimal() {
+    void testDecimalToDecimal() {
         // to higher precision
         sql(
                 "CREATE TABLE T ("
@@ -92,7 +92,7 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testNumericPrimitiveToDecimal() {
+    void testNumericPrimitiveToDecimal() {
         String ddl =
                 "CREATE TABLE T ("
                         + "  id INT,"
@@ -123,7 +123,7 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testDecimalToNumericPrimitive() {
+    void testDecimalToNumericPrimitive() {
         // to higher precision
         sql(
                 "CREATE TABLE T ("
@@ -165,7 +165,7 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testNumericPrimitive() {
+    void testNumericPrimitive() {
         // no checks for high scale to low scale because we don't pushdown it
 
         // integer to higher scale integer
@@ -214,7 +214,7 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testNumericToString() {
+    void testNumericToString() {
         // no more string related tests because we don't push down it
         sql(
                 "CREATE TABLE T ("

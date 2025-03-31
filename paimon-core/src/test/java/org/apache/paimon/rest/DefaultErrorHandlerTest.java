@@ -29,24 +29,24 @@ import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link DefaultErrorHandler}. */
-public class DefaultErrorHandlerTest {
+class DefaultErrorHandlerTest {
     private ErrorHandler defaultErrorHandler;
 
-    @Before
-    public void setUp() throws IOException {
+    @BeforeEach
+    void setUp() throws IOException {
         defaultErrorHandler = DefaultErrorHandler.getInstance();
     }
 
     @Test
-    public void testHandleErrorResponse() {
+    void testHandleErrorResponse() {
         assertThrows(
                 BadRequestException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(400)));

@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** test default value on streaming scan. */
 public class DefaultValueScannerTest extends ScannerTestBase {
     @Test
-    public void testDefaultValue() throws Exception {
+    void testDefaultValue() throws Exception {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);

@@ -84,7 +84,7 @@ public class AuditLogTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadAuditLogFromLatest() throws Exception {
+    void testReadAuditLogFromLatest() throws Exception {
         List<InternalRow> expectRow = getExpectedResult();
         List<InternalRow> result = read(auditLogTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);

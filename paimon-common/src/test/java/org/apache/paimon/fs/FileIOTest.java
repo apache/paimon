@@ -50,7 +50,7 @@ public class FileIOTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testRequireOptions() throws IOException {
+    void testRequireOptions() throws IOException {
         Options options = new Options();
 
         try {
@@ -73,7 +73,7 @@ public class FileIOTest {
     }
 
     @Test
-    public void testCopy() throws Exception {
+    void testCopy() throws Exception {
         Path srcFile = new Path(tempDir.resolve("src.txt").toUri());
         Path dstFile = new Path(tempDir.resolve("dst.txt").toUri());
 
@@ -137,7 +137,7 @@ public class FileIOTest {
     }
 
     @Test
-    public void testListFiles() throws Exception {
+    void testListFiles() throws Exception {
         Path fileA = new Path(tempDir.resolve("a").toUri());
         Path dirB = new Path(tempDir.resolve("b").toUri());
         Path fileBC = new Path(tempDir.resolve("b/c").toUri());

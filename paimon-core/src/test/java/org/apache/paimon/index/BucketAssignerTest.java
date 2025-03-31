@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class BucketAssignerTest {
 
     @Test
-    public void testComputeAssigner() {
+    void testComputeAssigner() {
         assertThat(computeAssigner(MAX_VALUE, 0, 5, 5)).isEqualTo(2);
         assertThat(computeAssigner(MAX_VALUE, 1, 5, 5)).isEqualTo(3);
         assertThat(computeAssigner(MAX_VALUE, 2, 5, 5)).isEqualTo(4);

@@ -34,14 +34,14 @@ import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.ro
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CommittableSerializer}. */
-public class CommittableSerializerTest {
+class CommittableSerializerTest {
 
     private final CommitMessageSerializer fileSerializer = new CommitMessageSerializer();
 
     private final CommittableSerializer serializer = new CommittableSerializer(fileSerializer);
 
     @Test
-    public void testFile() throws IOException {
+    void testFile() throws IOException {
         DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage committable =
@@ -59,7 +59,7 @@ public class CommittableSerializerTest {
     }
 
     @Test
-    public void testLogOffset() throws IOException {
+    void testLogOffset() throws IOException {
         LogOffsetCommittable committable = new LogOffsetCommittable(2, 3);
         LogOffsetCommittable newCommittable =
                 (LogOffsetCommittable)

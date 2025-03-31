@@ -33,10 +33,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT case for Spark time travel with DataFrames. */
-public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
+class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
 
     @Test
-    public void testTravelToVersion() throws Exception {
+    void testTravelToVersion() throws Exception {
         // snapshot 2
         writeTable(
                 "t1",
@@ -58,7 +58,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToTimestamp() throws Exception {
+    void testTravelToTimestamp() throws Exception {
         long anchor = System.currentTimeMillis();
 
         // snapshot 2
@@ -81,7 +81,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToOldSchema() throws Exception {
+    void testTravelToOldSchema() throws Exception {
         long anchor = System.currentTimeMillis();
 
         // new schema
@@ -109,7 +109,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToNonExistedVersion() {
+    void testTravelToNonExistedVersion() {
         assertThatThrownBy(
                         () ->
                                 spark.read()
@@ -125,7 +125,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToNonExistedTimestamp() {
+    void testTravelToNonExistedTimestamp() {
         Dataset<Row> dataset =
                 spark.read()
                         .format("paimon")
@@ -136,7 +136,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToTag() throws Exception {
+    void testTravelToTag() throws Exception {
         // snapshot 2
         writeTable(
                 "t1",
@@ -161,7 +161,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testIllegalVersion() {
+    void testIllegalVersion() {
         assertThatThrownBy(
                         () ->
                                 spark.read()

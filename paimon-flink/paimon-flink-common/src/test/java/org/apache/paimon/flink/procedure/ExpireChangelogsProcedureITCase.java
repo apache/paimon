@@ -41,10 +41,10 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link ExpireChangelogsProcedure}. */
-public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
+class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testExpireChangelogsProcedure() throws Exception {
+    void testExpireChangelogsProcedure() throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999', 'changelog-producer' = 'input', "
@@ -189,7 +189,7 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExpireChangelogsAction() throws Exception {
+    void testExpireChangelogsAction() throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999', 'changelog-producer' = 'input', "

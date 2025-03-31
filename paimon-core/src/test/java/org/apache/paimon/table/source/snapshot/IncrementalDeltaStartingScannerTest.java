@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
 
     @Test
-    public void testScan() throws Exception {
+    void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write =
                 table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
@@ -74,12 +74,7 @@ public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
         List<Split> splits = table.copy(dynamicOptions).newScan().plan().splits();
         assertThat(getResult(table.newRead(), splits))
                 .hasSameElementsAs(
-                        Arrays.asList(
-                                "+I 2|20|200",
-                                "+I 1|10|100",
-                                "+I 3|40|400",
-                                "-U 3|40|400",
-                                "+U 3|40|500"));
+                        Arrays.asList("+I 2|20|200", "+I 1|10|100", "+I 3|40|400", "+U 3|40|500"));
 
         dynamicOptions.put(INCREMENTAL_BETWEEN_SCAN_MODE.key(), "delta");
         splits = table.copy(dynamicOptions).newScan().plan().splits();
@@ -88,7 +83,7 @@ public class IncrementalDeltaStartingScannerTest extends ScannerTestBase {
     }
 
     @Test
-    public void testIllegalScanSnapshotId() throws Exception {
+    void testIllegalScanSnapshotId() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write =
                 table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));

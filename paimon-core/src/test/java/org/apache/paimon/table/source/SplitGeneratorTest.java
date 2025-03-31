@@ -63,7 +63,7 @@ public class SplitGeneratorTest {
     }
 
     @Test
-    public void testAppend() {
+    void testAppend() {
         List<DataFileMeta> files =
                 Arrays.asList(
                         newFileFromSequence("1", 11, 0, 20),
@@ -104,7 +104,7 @@ public class SplitGeneratorTest {
     }
 
     @Test
-    public void testMergeTree() {
+    void testMergeTree() {
         List<DataFileMeta> files =
                 Arrays.asList(
                         fromMinMax("1", 0, 10),
@@ -132,7 +132,7 @@ public class SplitGeneratorTest {
     }
 
     @Test
-    public void testSplitRawConvertible() {
+    void testSplitRawConvertible() {
         Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
         MergeTreeSplitGenerator mergeTreeSplitGenerator =
                 new MergeTreeSplitGenerator(comparator, 100, 2, false, DEDUPLICATE);
@@ -197,7 +197,7 @@ public class SplitGeneratorTest {
     }
 
     @Test
-    public void testMergeTreeSplitRawConvertible() {
+    void testMergeTreeSplitRawConvertible() {
         Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
         MergeTreeSplitGenerator mergeTreeSplitGenerator =
                 new MergeTreeSplitGenerator(comparator, 100, 2, false, DEDUPLICATE);

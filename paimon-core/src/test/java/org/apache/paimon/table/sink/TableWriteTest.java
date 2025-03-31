@@ -77,13 +77,13 @@ public class TableWriteTest {
     private String commitUser;
 
     @BeforeEach
-    public void before() {
+    void before() {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         commitUser = UUID.randomUUID().toString();
     }
 
     @AfterEach
-    public void after() {
+    void after() {
         // assert all connections are closed
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
@@ -91,7 +91,7 @@ public class TableWriteTest {
     }
 
     @Test
-    public void testExtractAndRecoverState() throws Exception {
+    void testExtractAndRecoverState() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int commitCount = random.nextInt(10) + 1;
         int extractCount = random.nextInt(10) + 1;
@@ -181,7 +181,7 @@ public class TableWriteTest {
     }
 
     @Test
-    public void testChangelogWhenNotWaitForCompaction() throws Exception {
+    void testChangelogWhenNotWaitForCompaction() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 1);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
@@ -228,7 +228,7 @@ public class TableWriteTest {
     }
 
     @Test
-    public void testUpgradeToMaxLevel() throws Exception {
+    void testUpgradeToMaxLevel() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 1);
         conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.FULL_COMPACTION);
@@ -264,7 +264,7 @@ public class TableWriteTest {
     }
 
     @Test
-    public void testWaitAllSnapshotsOfSpecificIdentifier() throws Exception {
+    void testWaitAllSnapshotsOfSpecificIdentifier() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 1);
 

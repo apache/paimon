@@ -27,10 +27,10 @@ import java.util.List;
 import java.util.UUID;
 
 /** Tests for reading and writing file store in batch jobs. */
-public class FileStoreBatchE2eTest extends E2eTestBase {
+class FileStoreBatchE2eTest extends E2eTestBase {
 
     @Test
-    public void testWithoutPk() throws Exception {
+    void testWithoutPk() throws Exception {
         List<String> data =
                 Arrays.asList(
                         "20211110,08,Alice,Food,10",

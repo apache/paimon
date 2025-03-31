@@ -102,7 +102,7 @@ public class LocalOrphanFilesCleanTest {
     private List<Path> manuallyAddedFiles;
 
     @BeforeEach
-    public void beforeEach() throws Exception {
+    void beforeEach() throws Exception {
         tablePath = new Path(tempDir.toString());
         fileIO = LocalFileIO.create();
         rowType =
@@ -122,14 +122,14 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         write.close();
         commit.close();
         TestPojo.reset();
     }
 
     @Test
-    public void testNormallyRemovingWithExternalPath() throws Throwable {
+    void testNormallyRemovingWithExternalPath() throws Throwable {
         // recreate the table with another option
         this.write.close();
         this.commit.close();
@@ -146,7 +146,7 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
-    public void testNormallyRemoving() throws Throwable {
+    void testNormallyRemoving() throws Throwable {
         normallyRemoving(tablePath);
     }
 
@@ -237,7 +237,7 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
-    public void testNormallyRemovingMixedWithExternalPath() throws Throwable {
+    void testNormallyRemovingMixedWithExternalPath() throws Throwable {
         int commitTimes = 30;
         List<List<TestPojo>> committedData = new ArrayList<>();
         Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
@@ -453,8 +453,7 @@ public class LocalOrphanFilesCleanTest {
 
     @ValueSource(strings = {"none", "input"})
     @ParameterizedTest(name = "changelog-producer = {0}")
-    public void testCleanOrphanFilesWithChangelogDecoupled(String changelogProducer)
-            throws Exception {
+    void testCleanOrphanFilesWithChangelogDecoupled(String changelogProducer) throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);
         options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
@@ -464,7 +463,7 @@ public class LocalOrphanFilesCleanTest {
 
     @ValueSource(strings = {"none", "input"})
     @ParameterizedTest(name = "changelog-producer = {0}")
-    public void testCleanOrphanFilesWithChangelogDecoupledWithExternalPath(String changelogProducer)
+    void testCleanOrphanFilesWithChangelogDecoupledWithExternalPath(String changelogProducer)
             throws Exception {
         Options options = new Options();
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 15);
@@ -517,7 +516,7 @@ public class LocalOrphanFilesCleanTest {
 
     /** Manually make a FileNotFoundException to simulate snapshot expire while clean. */
     @Test
-    public void testAbnormallyRemoving() throws Exception {
+    void testAbnormallyRemoving() throws Exception {
         // generate randomly number of snapshots
         int num = RANDOM.nextInt(5) + 1;
         for (int i = 0; i < num; i++) {

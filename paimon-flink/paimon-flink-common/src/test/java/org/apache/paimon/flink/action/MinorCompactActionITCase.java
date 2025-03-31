@@ -36,11 +36,11 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for compact strategy {@link CompactAction}. */
-public class MinorCompactActionITCase extends CompactActionITCaseBase {
+class MinorCompactActionITCase extends CompactActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testBatchMinorCompactStrategy() throws Exception {
+    void testBatchMinorCompactStrategy() throws Exception {
         FileStoreTable table =
                 prepareTable(
                         Arrays.asList("dt", "hh"),
@@ -101,7 +101,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testBatchFullCompactStrategy() throws Exception {
+    void testBatchFullCompactStrategy() throws Exception {
         FileStoreTable table =
                 prepareTable(
                         Arrays.asList("dt", "hh"),
@@ -148,7 +148,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testStreamingFullCompactStrategy() throws Exception {
+    void testStreamingFullCompactStrategy() throws Exception {
         prepareTable(
                 Arrays.asList("dt", "hh"),
                 Arrays.asList("dt", "hh", "k"),
@@ -177,7 +177,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testCompactStrategyWithWrongUsage() throws Exception {
+    void testCompactStrategyWithWrongUsage() throws Exception {
         prepareTable(
                 Arrays.asList("dt", "hh"),
                 Arrays.asList("dt", "hh", "k"),

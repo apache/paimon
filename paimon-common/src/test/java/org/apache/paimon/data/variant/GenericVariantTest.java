@@ -28,7 +28,7 @@ import static org.apache.paimon.types.DataTypesTest.assertThat;
 public class GenericVariantTest {
 
     @Test
-    public void testToJson() {
+    void testToJson() {
         String json =
                 "{\n"
                         + "  \"object\": {\n"
@@ -55,7 +55,7 @@ public class GenericVariantTest {
     }
 
     @Test
-    public void testVariantGet() {
+    void testVariantGet() {
         String json =
                 "{\n"
                         + "  \"object\": {\n"

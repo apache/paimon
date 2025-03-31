@@ -60,17 +60,17 @@ public class FileBasedRandomInputViewTest {
     }
 
     @TestTemplate
-    public void testMatched() throws IOException {
+    void testMatched() throws IOException {
         innerTest(1024 * 512, 5000);
     }
 
     @TestTemplate
-    public void testNotMatched() throws IOException {
+    void testNotMatched() throws IOException {
         innerTest(131092, 1000);
     }
 
     @TestTemplate
-    public void testRandom() throws IOException {
+    void testRandom() throws IOException {
         innerTest(rnd.nextInt(5000, 100000), 100);
     }
 

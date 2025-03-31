@@ -28,7 +28,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for batch file store. */
-public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
+class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
@@ -67,7 +67,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBulkLoad() {
+    void testBulkLoad() {
         sql("INSERT INTO T VALUES (1, 1, 1), (2, 1, 2), (1, 3, 3), (2, 4, 4), (3, 3, 5)");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(2, 1, 2), Row.of(3, 3, 5), Row.of(2, 4, 4));
@@ -89,7 +89,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBulkLoad2() {
+    void testBulkLoad2() {
         sql(
                 "INSERT INTO partial_update_t VALUES"
                         + " (1, 3, 1, 1),"
@@ -102,7 +102,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWriteRead() {
+    void testWriteRead() {
         sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(
@@ -135,7 +135,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWriteWithAssignerParallelism() {
+    void testWriteWithAssignerParallelism() {
         sql(
                 "INSERT INTO T /*+ OPTIONS('dynamic-bucket.assigner-parallelism'='3') */ "
                         + "VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
@@ -144,7 +144,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLargeRecords() {
+    void testLargeRecords() {
         sql(
                 "create table large_t (pt int, k int, v int, primary key (k) not enforced) partitioned by (pt) with ("
                         + "'bucket'='-1', "
@@ -165,7 +165,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
 
     @Disabled // TODO support this
     @Test
-    public void testPkContainsPartialPartitionFields() {
+    void testPkContainsPartialPartitionFields() {
         sql(
                 "create table partial_part (pt1 int, pt2 int, k int, v int, primary key (k, pt1) not enforced) partitioned by (pt1, pt2)");
         sql("insert into partial_part values (1, 1, 1, 1)");

@@ -67,7 +67,7 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     }
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         IOManager ioManager = IOManager.create(tempPath.toString());
         this.query0 = table.newLocalTableQuery().withIOManager(ioManager);
         this.query1 = table.newLocalTableQuery().withIOManager(ioManager);
@@ -111,7 +111,7 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    void afterEach() throws Exception {
         shutdownServers();
         if (client != null) {
             client.shutdownFuture().get();
@@ -136,7 +136,7 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testRemoteGet() throws Exception {
+    void testRemoteGet() throws Exception {
         // test not exists
         BinaryRow[] result = client.getValues(row(1), 0, new BinaryRow[] {row(1)}).get();
         assertThat(result).containsOnly((BinaryRow) null);
@@ -160,7 +160,7 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testServerRestartSamePorts() throws Throwable {
+    void testServerRestartSamePorts() throws Throwable {
         innerTestServerRestart(
                 () -> {
                     shutdownServers();
@@ -171,7 +171,7 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testServerRestartSwitchPorts() throws Throwable {
+    void testServerRestartSwitchPorts() throws Throwable {
         innerTestServerRestart(
                 () -> {
                     shutdownServers();
@@ -182,7 +182,7 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testServerRestartChangePorts() throws Throwable {
+    void testServerRestartChangePorts() throws Throwable {
         innerTestServerRestart(
                 () -> {
                     shutdownServers();

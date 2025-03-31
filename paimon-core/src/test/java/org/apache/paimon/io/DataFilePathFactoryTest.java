@@ -27,12 +27,12 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link DataFilePathFactory}. */
-public class DataFilePathFactoryTest {
+class DataFilePathFactoryTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testNoPartition() {
+    void testNoPartition() {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
                         new Path(tempDir + "/bucket-123"),
@@ -62,7 +62,7 @@ public class DataFilePathFactoryTest {
     }
 
     @Test
-    public void testWithPartition() {
+    void testWithPartition() {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
                         new Path(tempDir + "/dt=20211224/bucket-123"),

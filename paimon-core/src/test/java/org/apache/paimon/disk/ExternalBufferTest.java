@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link ExternalBuffer}. */
-public class ExternalBufferTest {
+class ExternalBufferTest {
 
     @TempDir Path tempDir;
 
@@ -51,7 +51,7 @@ public class ExternalBufferTest {
     private BinaryRowSerializer serializer;
 
     @BeforeEach
-    public void before() {
+    void before() {
         this.ioManager = IOManager.create(tempDir.toString());
         this.random = new Random();
         this.serializer = new BinaryRowSerializer(1);
@@ -71,7 +71,7 @@ public class ExternalBufferTest {
     }
 
     @Test
-    public void testLess() throws Exception {
+    void testLess() throws Exception {
         ExternalBuffer buffer = newBuffer();
 
         int number = 100;
@@ -88,7 +88,7 @@ public class ExternalBufferTest {
     }
 
     @Test
-    public void testSpill() throws Exception {
+    void testSpill() throws Exception {
         ExternalBuffer buffer = newBuffer();
 
         int number = 5000; // 16 * 5000
@@ -105,7 +105,7 @@ public class ExternalBufferTest {
     }
 
     @Test
-    public void testSpillMaxDiskSize() throws Exception {
+    void testSpillMaxDiskSize() throws Exception {
         ExternalBuffer buffer = newBuffer(MemorySize.ofKibiBytes(1));
 
         int number = 5000; // 16 * 5000
@@ -123,7 +123,7 @@ public class ExternalBufferTest {
     }
 
     @Test
-    public void testBufferReset() throws Exception {
+    void testBufferReset() throws Exception {
         ExternalBuffer buffer = newBuffer();
 
         // less
@@ -145,7 +145,7 @@ public class ExternalBufferTest {
     }
 
     @Test
-    public void testBufferResetWithSpill() throws Exception {
+    void testBufferResetWithSpill() throws Exception {
         int inMemoryThreshold = 20;
         ExternalBuffer buffer = newBuffer();
 
@@ -175,7 +175,7 @@ public class ExternalBufferTest {
     }
 
     @Test
-    public void testHugeRecord() {
+    void testHugeRecord() {
         ExternalBuffer buffer =
                 new ExternalBuffer(
                         ioManager,

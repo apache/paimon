@@ -53,7 +53,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionMultiTopic() throws Exception {
+    void testSchemaEvolutionMultiTopic() throws Exception {
         final String topic1 = "schema_evolution_0";
         final String topic2 = "schema_evolution_1";
         final String topic3 = "schema_evolution_2";
@@ -88,7 +88,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionOneTopic() throws Exception {
+    void testSchemaEvolutionOneTopic() throws Exception {
         final String topic = "schema_evolution";
         boolean writeOne = true;
         int fileCount = 3;
@@ -239,7 +239,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTableAffixMultiTopic() throws Exception {
+    void testTableAffixMultiTopic() throws Exception {
         // create table t1
         createFileStoreTable(
                 "test_prefix_t1_test_suffix",
@@ -282,7 +282,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTableAffixOneTopic() throws Exception {
+    void testTableAffixOneTopic() throws Exception {
         // create table t1
         createFileStoreTable(
                 "test_prefix_t1_test_suffix",
@@ -419,7 +419,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIncludingTables() throws Exception {
+    void testIncludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "flink|paimon.+",
                 null,
@@ -429,7 +429,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testExcludingTables() throws Exception {
+    void testExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 null,
                 "flink|paimon.+",
@@ -439,7 +439,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIncludingAndExcludingTables() throws Exception {
+    void testIncludingAndExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "flink|paimon.+",
                 "paimon_1",
@@ -477,7 +477,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTypeMappingToString() throws Exception {
+    void testTypeMappingToString() throws Exception {
         final String topic = "map-to-string";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/database/tostring/canal-data-1.txt");
@@ -509,7 +509,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    public void testCatalogAndTableConfig() {
+    void testCatalogAndTableConfig() {
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(getBasicKafkaConfig())
                         .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
@@ -523,7 +523,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testCaseInsensitive() throws Exception {
+    void testCaseInsensitive() throws Exception {
         final String topic = "case-insensitive";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/database/case-insensitive/canal-data-1.txt");
@@ -564,7 +564,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testCannotSynchronizeIncompleteJson() throws Exception {
+    void testCannotSynchronizeIncompleteJson() throws Exception {
         final String topic = "incomplete";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/database/incomplete/canal-data-1.txt");
@@ -590,7 +590,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSpecifyKeys() throws Exception {
+    void testSpecifyKeys() throws Exception {
         final String topic = "specify-keys";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/database/specify-keys/canal-data-1.txt");
@@ -646,7 +646,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(240)
-    public void testExpressionNow() throws Exception {
+    void testExpressionNow() throws Exception {
         final String topic = "expression-now";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, "kafka/canal/database/audit-time/canal-data-1.txt");
@@ -738,7 +738,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testMultipleTablePartitionKeys() throws Exception {
+    void testMultipleTablePartitionKeys() throws Exception {
         final String topic = "multiple-table-partition-keys";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(

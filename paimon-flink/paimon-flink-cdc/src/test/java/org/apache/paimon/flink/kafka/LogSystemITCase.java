@@ -56,7 +56,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testAppendOnlyWithEventual() throws Exception {
+    void testAppendOnlyWithEventual() throws Exception {
         createTopicIfNotExists("T", 1);
         // disable checkpointing to test eventual
         env.getCheckpointConfig().disableCheckpointing();
@@ -82,7 +82,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadFromFile() throws Exception {
+    void testReadFromFile() throws Exception {
         createTopicIfNotExists("test-double-sink", 1);
         env.getCheckpointConfig().setCheckpointInterval(3 * 1000);
         env.setParallelism(1);
@@ -119,7 +119,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadFromLog() throws Exception {
+    void testReadFromLog() throws Exception {
         createTopicIfNotExists("test-single-sink", 1);
         // disable checkpointing to test eventual
         env.getCheckpointConfig().disableCheckpointing();
@@ -168,7 +168,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testReadFromLogWithOutSteamingReadMode() throws Exception {
+    void testReadFromLogWithOutSteamingReadMode() throws Exception {
         createTopicIfNotExists("test-single-sink", 1);
         env.setParallelism(1);
 
@@ -203,7 +203,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
 
     @Test
     @Timeout(60)
-    public void testLogSystemAutoRegister() throws TableNotExistException {
+    void testLogSystemAutoRegister() throws TableNotExistException {
         // enable log system auto registration
         tEnv.executeSql(
                 String.format(
@@ -310,7 +310,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
 
     @Test
     @Timeout(60)
-    public void testLogSystemAutoRegisterWithDefaultOption() {
+    void testLogSystemAutoRegisterWithDefaultOption() {
         // enable log system auto registration
         tEnv.executeSql(
                 String.format(
@@ -334,7 +334,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testLogWriteRead() throws Exception {
+    void testLogWriteRead() throws Exception {
         String topic = UUID.randomUUID().toString();
 
         try {
@@ -361,7 +361,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testLogWriteReadWithVirtual() throws Exception {
+    void testLogWriteReadWithVirtual() throws Exception {
         String topic = UUID.randomUUID().toString();
         createTopicIfNotExists(topic, 1);
 
@@ -395,7 +395,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
 
     @Test
     @Timeout(120)
-    public void testAppendOnlyWithUnawareBucket() throws Exception {
+    void testAppendOnlyWithUnawareBucket() throws Exception {
         String topic = UUID.randomUUID().toString();
         createTopicIfNotExists(topic, 2);
 

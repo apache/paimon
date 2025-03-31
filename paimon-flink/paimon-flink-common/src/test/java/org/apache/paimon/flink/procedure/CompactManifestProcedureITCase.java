@@ -26,10 +26,10 @@ import org.junit.jupiter.api.Test;
 import java.util.Objects;
 
 /** IT Case for {@link CompactManifestProcedure}. */
-public class CompactManifestProcedureITCase extends CatalogITCaseBase {
+class CompactManifestProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testManifestCompactProcedure() {
+    void testManifestCompactProcedure() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -77,7 +77,7 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testManifestCompactProcedureWithBranch() {
+    void testManifestCompactProcedureWithBranch() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"

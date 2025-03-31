@@ -54,7 +54,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class IncrementalTableTest extends TableTestBase {
 
     @Test
-    public void testPrimaryKeyTable() throws Exception {
+    void testPrimaryKeyTable() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -104,17 +104,14 @@ public class IncrementalTableTest extends TableTestBase {
         List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, "2,5"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(1, 1, 3),
-                        GenericRow.of(1, 2, 3),
-                        GenericRow.of(2, 1, 3),
-                        GenericRow.of(2, 2, 1),
                         GenericRow.of(1, 1, 4),
                         GenericRow.of(1, 2, 4),
-                        GenericRow.of(2, 1, 4));
+                        GenericRow.of(2, 1, 4),
+                        GenericRow.of(2, 2, 1));
     }
 
     @Test
-    public void testAppendTable() throws Exception {
+    void testAppendTable() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -169,7 +166,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAuditLog() throws Exception {
+    void testAuditLog() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -211,18 +208,16 @@ public class IncrementalTableTest extends TableTestBase {
         List<InternalRow> result = read(auditLog, Pair.of(INCREMENTAL_BETWEEN, "1,3"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(fromString("-D"), 1, 1, 1),
-                        GenericRow.of(fromString("-D"), 1, 2, 1),
-                        GenericRow.of(fromString("+I"), 1, 4, 1),
-                        GenericRow.of(fromString("+I"), 2, 1, 2),
-                        GenericRow.of(fromString("-D"), 1, 3, 1),
-                        GenericRow.of(fromString("+I"), 1, 1, 2),
                         GenericRow.of(fromString("+I"), 2, 1, 3),
-                        GenericRow.of(fromString("+I"), 2, 2, 1));
+                        GenericRow.of(fromString("+I"), 2, 2, 1),
+                        GenericRow.of(fromString("+I"), 1, 1, 2),
+                        GenericRow.of(fromString("+I"), 1, 4, 1),
+                        GenericRow.of(fromString("-D"), 1, 2, 1),
+                        GenericRow.of(fromString("-D"), 1, 3, 1));
     }
 
     @Test
-    public void testTagIncremental() throws Exception {
+    void testTagIncremental() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -298,7 +293,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testAppendTableTag() throws Exception {
+    void testAppendTableTag() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -321,7 +316,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testIncrementalToTagFirst() throws Exception {
+    void testIncrementalToTagFirst() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -345,7 +340,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testIncrementalToAutoTag() throws Exception {
+    void testIncrementalToAutoTag() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -414,7 +409,7 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
-    public void testIncrementalEmptyResult() throws Exception {
+    void testIncrementalEmptyResult() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()

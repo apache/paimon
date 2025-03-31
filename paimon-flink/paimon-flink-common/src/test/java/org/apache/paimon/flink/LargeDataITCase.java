@@ -26,10 +26,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Large data ITCase. */
-public class LargeDataITCase extends CatalogITCaseBase {
+class LargeDataITCase extends CatalogITCaseBase {
 
     @Test
-    public void testSpillableWriteBuffer() throws Exception {
+    void testSpillableWriteBuffer() throws Exception {
         // set Parallelism to 1, or multiple source tasks resulting in uncertain order.
         setParallelism(1);
         sql(
@@ -57,7 +57,7 @@ public class LargeDataITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionedSpillableWriteBuffer() throws Exception {
+    void testPartitionedSpillableWriteBuffer() throws Exception {
         sql(
                 "CREATE TABLE T1 (a INT, b INT, c INT, PRIMARY KEY (a, b) NOT ENFORCED) PARTITIONED BY (b) WITH ("
                         + "'write-buffer-size'='1 mb', 'write-buffer-spillable'='true')");

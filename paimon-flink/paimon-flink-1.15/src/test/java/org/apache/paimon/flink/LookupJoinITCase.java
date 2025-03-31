@@ -45,7 +45,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookup() throws Exception {
+    void testLookup() throws Exception {
         batchSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =

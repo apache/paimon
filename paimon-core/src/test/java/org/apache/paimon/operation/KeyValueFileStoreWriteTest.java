@@ -61,7 +61,7 @@ public class KeyValueFileStoreWriteTest {
     }
 
     @Test
-    public void testRadicalLookupCompactStrategy() throws Exception {
+    void testRadicalLookupCompactStrategy() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.LOOKUP_COMPACT.key(), "radical");
@@ -82,7 +82,7 @@ public class KeyValueFileStoreWriteTest {
     }
 
     @Test
-    public void testGentleLookupCompactStrategy() throws Exception {
+    void testGentleLookupCompactStrategy() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.LOOKUP_COMPACT.key(), "gentle");

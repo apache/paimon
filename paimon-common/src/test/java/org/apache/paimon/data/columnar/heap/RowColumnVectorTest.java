@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class RowColumnVectorTest {
 
     @Test
-    public void testRowVector() {
+    void testRowVector() {
 
         HeapIntVector heapIntVector = new HeapIntVector(100);
 

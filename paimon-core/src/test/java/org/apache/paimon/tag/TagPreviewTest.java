@@ -43,14 +43,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TagPreviewTest extends PrimaryKeyTableTestBase {
 
     @Test
-    public void testExtractTag() {
+    void testExtractTag() {
         TagPreview preview = create();
         Optional<String> tag = preview.extractTag(-1, utcMills("2023-07-18T12:12:00"));
         assertThat(tag).hasValue("2023-07-18");
     }
 
     @Test
-    public void testTimeTravel() {
+    void testTimeTravel() {
         TagPreview preview = create();
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "3");

@@ -26,7 +26,7 @@ import org.testcontainers.containers.Container;
 import java.util.UUID;
 
 /** Tests for {@code FlinkActions}. */
-public class FlinkActionsWithKafkaE2eTest extends FlinkActionsE2eTestBase {
+class FlinkActionsWithKafkaE2eTest extends FlinkActionsE2eTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkActionsWithKafkaE2eTest.class);
 
@@ -35,7 +35,7 @@ public class FlinkActionsWithKafkaE2eTest extends FlinkActionsE2eTestBase {
     }
 
     @Test
-    public void testCompact() throws Exception {
+    void testCompact() throws Exception {
         String topicName = "ts-topic-" + UUID.randomUUID();
         createKafkaTopic(topicName, 1);
         // prepare first part of test data

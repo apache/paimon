@@ -123,10 +123,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
-public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @Test
-    public void testMultipleWriters() throws Exception {
+    void testMultipleWriters() throws Exception {
         WriteSelector selector =
                 createFileStoreTable(options -> options.set("bucket", "5"))
                         .newBatchWriteBuilder()
@@ -139,7 +139,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testAsyncReader() throws Exception {
+    void testAsyncReader() throws Exception {
         FileStoreTable table = createFileStoreTable();
         table =
                 table.copy(
@@ -176,7 +176,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchWriteBuilder() throws Exception {
+    void testBatchWriteBuilder() throws Exception {
         FileStoreTable table = createFileStoreTable();
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
@@ -204,7 +204,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchRecordsWrite() throws Exception {
+    void testBatchRecordsWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         List<InternalRow> list = new ArrayList<>();
@@ -247,7 +247,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testSequenceField() throws Exception {
+    void testSequenceField() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "b"));
         StreamTableWrite write = table.newWrite(commitUser);
@@ -286,7 +286,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchReadWrite() throws Exception {
+    void testBatchReadWrite() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
@@ -304,7 +304,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBranchBatchReadWrite() throws Exception {
+    void testBranchBatchReadWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
         FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
@@ -323,7 +323,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchProjection() throws Exception {
+    void testBatchProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
@@ -337,7 +337,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testBatchFilter(boolean statsDenseStore) throws Exception {
+    void testBatchFilter(boolean statsDenseStore) throws Exception {
         Consumer<Options> optionsSetter =
                 options -> {
                     if (statsDenseStore) {
@@ -365,7 +365,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingReadWrite() throws Exception {
+    void testStreamingReadWrite() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
@@ -385,7 +385,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBranchStreamingReadWrite() throws Exception {
+    void testBranchStreamingReadWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
 
@@ -413,7 +413,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingProjection() throws Exception {
+    void testStreamingProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
@@ -428,7 +428,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingFilter() throws Exception {
+    void testStreamingFilter() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
@@ -454,7 +454,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingInputChangelog() throws Exception {
+    void testStreamingInputChangelog() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
         StreamTableWrite write = table.newWrite(commitUser);
@@ -488,12 +488,12 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingFullChangelog() throws Exception {
+    void testStreamingFullChangelog() throws Exception {
         innerTestStreamingFullChangelog(options -> {});
     }
 
     @Test
-    public void testStreamingFullChangelogWithSpill() throws Exception {
+    void testStreamingFullChangelogWithSpill() throws Exception {
         innerTestStreamingFullChangelog(
                 options -> options.set(CoreOptions.SORT_SPILL_THRESHOLD, 2));
     }
@@ -645,7 +645,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @Override
     @Test
-    public void testReadFilter() throws Exception {
+    void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         StreamTableWrite write = table.newWrite(commitUser);
@@ -718,7 +718,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testPartialUpdateIgnoreDelete() throws Exception {
+    void testPartialUpdateIgnoreDelete() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -746,13 +746,13 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testWithShard() throws Exception {
+    void testWithShard() throws Exception {
         FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 5));
         innerTestWithShard(table);
     }
 
     @Test
-    public void testWithShardDeletionVectors() throws Exception {
+    void testWithShardDeletionVectors() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -763,7 +763,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testDeletionVectorsWithFileIndexInFile() throws Exception {
+    void testDeletionVectorsWithFileIndexInFile() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -802,7 +802,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testDeletionVectorsWithParquetFilter() throws Exception {
+    void testDeletionVectorsWithParquetFilter() throws Exception {
         // RowGroup record range [pk] :
         //
         // RowGroup-0 :  [0-93421)
@@ -919,7 +919,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testDeletionVectorsWithFileIndexInMeta() throws Exception {
+    void testDeletionVectorsWithFileIndexInMeta() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -955,7 +955,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testDeletionVectorsCombineWithFileIndexPushDownParquet() throws Exception {
+    void testDeletionVectorsCombineWithFileIndexPushDownParquet() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -1063,7 +1063,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testWithShardFirstRow() throws Exception {
+    void testWithShardFirstRow() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -1074,7 +1074,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testSlowCommit() throws Exception {
+    void testSlowCommit() throws Exception {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -1110,7 +1110,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testIncrementalSplitOverwrite() throws Exception {
+    void testIncrementalSplitOverwrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);
         InnerTableCommit commit = table.newCommit(commitUser);
@@ -1141,7 +1141,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testAuditLogWithDefaultValueFields() throws Exception {
+    void testAuditLogWithDefaultValueFields() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -1191,7 +1191,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testAuditLog() throws Exception {
+    void testAuditLog() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
         StreamTableWrite write = table.newWrite(commitUser);
@@ -1270,7 +1270,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testAggregationRemoveRecordOnDelete() throws Exception {
+    void testAggregationRemoveRecordOnDelete() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -1327,7 +1327,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testPartialUpdateRemoveRecordOnDelete() throws Exception {
+    void testPartialUpdateRemoveRecordOnDelete() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -1384,7 +1384,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testPartialUpdateRemoveRecordOnSequenceGroup() throws Exception {
+    void testPartialUpdateRemoveRecordOnSequenceGroup() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -1468,7 +1468,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testPartialUpdateWithAgg() throws Exception {
+    void testPartialUpdateWithAgg() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -1519,7 +1519,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testAggMergeFunc() throws Exception {
+    void testAggMergeFunc() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -1564,7 +1564,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testAggMergeFuncNotAllowRetract() throws Exception {
+    void testAggMergeFuncNotAllowRetract() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -1590,7 +1590,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testAggMergeFuncRetract() throws Exception {
+    void testAggMergeFuncRetract() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -1630,7 +1630,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testFullCompactedRead() throws Exception {
+    void testFullCompactedRead() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "2");
         options.put(CoreOptions.SCAN_MODE.key(), "compacted-full");
@@ -1674,7 +1674,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testInnerStreamScanMode() throws Exception {
+    void testInnerStreamScanMode() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         FileMonitorTable monitorTable = new FileMonitorTable(table);
@@ -1752,7 +1752,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testReadOptimizedTable() throws Exception {
+    void testReadOptimizedTable() throws Exception {
         // let max level has many files
         FileStoreTable table =
                 createFileStoreTable(options -> options.set(TARGET_FILE_SIZE, new MemorySize(1)));
@@ -1815,7 +1815,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingReadOptimizedTable() throws Exception {
+    void testStreamingReadOptimizedTable() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(options -> options.set(TARGET_FILE_SIZE, new MemorySize(1)));
         StreamTableWrite write = table.newWrite(commitUser);
@@ -1844,7 +1844,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testReadDeletionVectorTable(boolean statsDenseStore) throws Exception {
+    void testReadDeletionVectorTable(boolean statsDenseStore) throws Exception {
         Consumer<Options> optionsSetter =
                 options -> {
                     // let level has many files
@@ -1913,7 +1913,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testReadWithRawConvertibleSplits() throws Exception {
+    void testReadWithRawConvertibleSplits() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
@@ -1988,14 +1988,14 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testTableQueryForLookup() throws Exception {
+    void testTableQueryForLookup() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(options -> options.set(CHANGELOG_PRODUCER, LOOKUP));
         innerTestTableQuery(table);
     }
 
     @Test
-    public void testTableQueryForLookupLocalSortFile() throws Exception {
+    void testTableQueryForLookupLocalSortFile() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
@@ -2006,13 +2006,13 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testTableQueryForNormal() throws Exception {
+    void testTableQueryForNormal() throws Exception {
         FileStoreTable table = createFileStoreTable();
         innerTestTableQuery(table);
     }
 
     @Test
-    public void testLookupWithDropDelete() throws Exception {
+    void testLookupWithDropDelete() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -2050,7 +2050,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @ParameterizedTest(name = "changelog-producer = {0}")
     @ValueSource(strings = {"none", "input"})
-    public void testRollbackToTagWithChangelogDecoupled(String changelogProducer) throws Exception {
+    void testRollbackToTagWithChangelogDecoupled(String changelogProducer) throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 6;
         FileStoreTable table =
                 createFileStoreTable(
@@ -2099,7 +2099,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.MergeEngine.class)
-    public void testForceLookupCompaction(CoreOptions.MergeEngine mergeEngine) throws Exception {
+    void testForceLookupCompaction(CoreOptions.MergeEngine mergeEngine) throws Exception {
         Map<MergeEngine, Pair<Long, Long>> testData = new HashMap<>();
         testData.put(DEDUPLICATE, Pair.of(50L, 100L));
         testData.put(PARTIAL_UPDATE, Pair.of(null, 100L));
@@ -2255,12 +2255,12 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void writeMultiplePartitions() throws Exception {
+    void writeMultiplePartitions() throws Exception {
         testWritePreemptMemory(false);
     }
 
     @Test
-    public void writeSinglePartition() throws Exception {
+    void writeSinglePartition() throws Exception {
         testWritePreemptMemory(true);
     }
 

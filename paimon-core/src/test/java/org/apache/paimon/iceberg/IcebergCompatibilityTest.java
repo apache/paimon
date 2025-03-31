@@ -94,7 +94,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for Iceberg compatibility. */
-public class IcebergCompatibilityTest {
+class IcebergCompatibilityTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -103,7 +103,7 @@ public class IcebergCompatibilityTest {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testFileLevelChange() throws Exception {
+    void testFileLevelChange() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
@@ -129,12 +129,12 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testDelete() throws Exception {
+    void testDelete() throws Exception {
         testDeleteImpl(false);
     }
 
     @Test
-    public void testDeleteWithDeletionVector() throws Exception {
+    void testDeleteWithDeletionVector() throws Exception {
         testDeleteImpl(true);
     }
 
@@ -192,7 +192,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testDropPartition() throws Exception {
+    void testDropPartition() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -254,7 +254,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testRetryCreateMetadata() throws Exception {
+    void testRetryCreateMetadata() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
@@ -295,7 +295,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testSchemaChange() throws Exception {
+    void testSchemaChange() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
@@ -333,7 +333,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testIcebergSnapshotExpire() throws Exception {
+    void testIcebergSnapshotExpire() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
@@ -471,7 +471,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testAllTypeStatistics() throws Exception {
+    void testAllTypeStatistics() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -623,7 +623,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testNestedTypes() throws Exception {
+    void testNestedTypes() throws Exception {
         RowType innerType =
                 RowType.of(
                         new DataField(2, "f1", DataTypes.STRING()),
@@ -673,7 +673,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testStringPartitionNullPadding() throws Exception {
+    void testStringPartitionNullPadding() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.VARCHAR(20)},
@@ -774,7 +774,7 @@ public class IcebergCompatibilityTest {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testUnPartitionedPrimaryKeyTable() throws Exception {
+    void testUnPartitionedPrimaryKeyTable() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -818,7 +818,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testPartitionedPrimaryKeyTable() throws Exception {
+    void testPartitionedPrimaryKeyTable() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {

@@ -72,12 +72,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for {@link CommitterOperator}. */
-public class CommitterOperatorTest extends CommitterOperatorTestBase {
+class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     protected String initialCommitUser;
 
     @BeforeEach
-    public void before() {
+    void before() {
         super.before();
         initialCommitUser = UUID.randomUUID().toString();
     }
@@ -87,7 +87,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testFailIntentionallyAfterRestore() throws Exception {
+    void testFailIntentionallyAfterRestore() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
@@ -134,7 +134,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testCheckpointAbort() throws Exception {
+    void testCheckpointAbort() throws Exception {
         FileStoreTable table = createFileStoreTable();
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createRecoverableTestHarness(table);
@@ -171,7 +171,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testSnapshotLostWhenFailed() throws Exception {
+    void testSnapshotLostWhenFailed() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
@@ -228,7 +228,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testRestoreCommitUser() throws Exception {
+    void testRestoreCommitUser() throws Exception {
         FileStoreTable table = createFileStoreTable();
         String commitUser = UUID.randomUUID().toString();
 
@@ -288,7 +288,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testRestoreEmptyMarkDoneState() throws Exception {
+    void testRestoreEmptyMarkDoneState() throws Exception {
         FileStoreTable table = createFileStoreTable(o -> {}, Collections.singletonList("b"));
 
         String commitUser = UUID.randomUUID().toString();
@@ -316,7 +316,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testCommitInputEnd() throws Exception {
+    void testCommitInputEnd() throws Exception {
         FileStoreTable table = createFileStoreTable();
         String commitUser = UUID.randomUUID().toString();
         OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
@@ -480,7 +480,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testWatermarkCommit() throws Exception {
+    void testWatermarkCommit() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
@@ -517,7 +517,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testEmptyCommit() throws Exception {
+    void testEmptyCommit() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
@@ -531,7 +531,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testForceCreateSnapshotCommit() throws Exception {
+    void testForceCreateSnapshotCommit() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options ->
@@ -549,7 +549,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testEmptyCommitWithProcessTimeTag() throws Exception {
+    void testEmptyCommitWithProcessTimeTag() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
@@ -585,7 +585,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     // ------------------------------------------------------------------------
 
     @Test
-    public void testCalcDataBytesSend() throws Exception {
+    void testCalcDataBytesSend() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         StreamTableWrite write = table.newWrite(initialCommitUser);
@@ -614,7 +614,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testCommitMetrics() throws Exception {
+    void testCommitMetrics() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =
@@ -697,7 +697,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
-    public void testParallelism() throws Exception {
+    void testParallelism() throws Exception {
         FileStoreTable table = createFileStoreTable();
         String commitUser = UUID.randomUUID().toString();
         OneInputStreamOperatorFactory<Committable, Committable> operatorFactory =

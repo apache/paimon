@@ -44,7 +44,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testPrimaryKeyTable(String format) throws Exception {
+    void testPrimaryKeyTable(String format) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
         tEnv.executeSql(
@@ -118,7 +118,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testAppendOnlyTable(String format) throws Exception {
+    void testAppendOnlyTable(String format) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
         tEnv.executeSql(
@@ -176,7 +176,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testFilterAllTypes(String format) throws Exception {
+    void testFilterAllTypes(String format) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
         tEnv.executeSql(
@@ -274,7 +274,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
     // orc writer does not write timestamp_ltz correctly, however we won't fix it due to
     // compatibility concern, so we don't test orc here
     @ValueSource(strings = {"parquet"})
-    public void testFilterTimestampLtz(String format) throws Exception {
+    void testFilterTimestampLtz(String format) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
         tEnv.executeSql(
@@ -331,7 +331,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testDropAndRecreateTable(String format) throws Exception {
+    void testDropAndRecreateTable(String format) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
         tEnv.executeSql(
@@ -406,7 +406,7 @@ public abstract class FlinkIcebergITCaseBase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testNestedTypes(String format) throws Exception {
+    void testNestedTypes(String format) throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(2).build();
         tEnv.executeSql(

@@ -50,7 +50,7 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testBatchSelectComputedColumn() throws Exception {
+    void testBatchSelectComputedColumn() throws Exception {
         // test 1
         List<Row> initialRecords =
                 Arrays.asList(
@@ -183,7 +183,7 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testBatchSelectWithWatermark() throws Exception {
+    void testBatchSelectWithWatermark() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow(
@@ -223,7 +223,7 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testStreamingSelectWithWatermark() throws Exception {
+    void testStreamingSelectWithWatermark() throws Exception {
         // physical column as watermark
         List<Row> initialRecords =
                 Arrays.asList(

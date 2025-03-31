@@ -28,10 +28,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link MemoryPoolFactory}. */
-public class MemoryPoolFactoryTest {
+class MemoryPoolFactoryTest {
 
     @Test
-    public void testFreePages() {
+    void testFreePages() {
         MemoryPoolFactory factory =
                 new MemoryPoolFactory(new HeapMemorySegmentPool(1024 * 10, 1024))
                         .addOwners(new ArrayList<>());
@@ -46,7 +46,7 @@ public class MemoryPoolFactoryTest {
     }
 
     @Test
-    public void testAddOwners() {
+    void testAddOwners() {
         MemoryPoolFactory factory =
                 new MemoryPoolFactory(new HeapMemorySegmentPool(1024 * 10, 1024));
 

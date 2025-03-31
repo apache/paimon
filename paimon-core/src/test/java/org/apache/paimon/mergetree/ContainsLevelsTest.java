@@ -70,7 +70,7 @@ import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFact
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test {@link LookupLevels} for contains. */
-public class ContainsLevelsTest {
+class ContainsLevelsTest {
 
     private static final String LOOKUP_FILE_PREFIX = "lookup-";
 
@@ -90,7 +90,7 @@ public class ContainsLevelsTest {
                     DataTypes.FIELD(1, "value", DataTypes.INT()));
 
     @Test
-    public void testMultiLevels() throws IOException {
+    void testMultiLevels() throws IOException {
         Levels levels =
                 new Levels(
                         comparator,
@@ -118,7 +118,7 @@ public class ContainsLevelsTest {
     }
 
     @Test
-    public void testMultiFiles() throws IOException {
+    void testMultiFiles() throws IOException {
         Levels levels =
                 new Levels(
                         comparator,
@@ -158,7 +158,7 @@ public class ContainsLevelsTest {
     }
 
     @Test
-    public void testMaxDiskSize() throws IOException {
+    void testMaxDiskSize() throws IOException {
         List<DataFileMeta> files = new ArrayList<>();
         int fileNum = 10;
         int recordInFile = 1000;

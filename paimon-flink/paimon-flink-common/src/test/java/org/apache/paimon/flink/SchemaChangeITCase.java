@@ -46,7 +46,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
     // TODO cover more cases.
     @Test
-    public void testAddColumn() {
+    void testAddColumn() {
         sql("CREATE TABLE T (a STRING, b DOUBLE, c FLOAT)");
         sql("INSERT INTO T VALUES('aaa', 1.2, 3.4)");
         sql("ALTER TABLE T ADD d INT");
@@ -112,7 +112,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDropColumn() {
+    void testDropColumn() {
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING, d INT, e FLOAT)");
         sql("INSERT INTO T VALUES('aaa', 'bbb', 'ccc', 10, 3.4)");
@@ -143,7 +143,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRenameColumn() {
+    void testRenameColumn() {
         sql("CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING)");
         sql("INSERT INTO T VALUES('paimon', 'bbb', 'ccc')");
         sql("ALTER TABLE T RENAME c TO c1");
@@ -167,7 +167,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDropPrimaryKey() {
+    void testDropPrimaryKey() {
         sql("CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING)");
         assertThatThrownBy(() -> sql("ALTER TABLE T DROP a"))
                 .hasMessageContaining(
@@ -176,7 +176,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDropPartitionKey() {
+    void testDropPartitionKey() {
         sql(
                 "CREATE TABLE MyTable (\n"
                         + "    user_id BIGINT,\n"
@@ -193,7 +193,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromNumericToNumericPrimitive() {
+    void testModifyColumnTypeFromNumericToNumericPrimitive() {
         // decimal and numeric primitive to numeric primitive
         sql(
                 "CREATE TABLE T (a TINYINT COMMENT 'a field', b INT COMMENT 'b field', c FLOAT COMMENT 'c field', d DOUBLE, e DECIMAL(10, 4), f DECIMAL(10, 4), g DOUBLE)");
@@ -226,7 +226,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromNumericToDecimal() {
+    void testModifyColumnTypeFromNumericToDecimal() {
         // decimal and numeric primitive to decimal
         sql("CREATE TABLE T (a DECIMAL(10, 4), b DECIMAL(10, 2), c INT, d FLOAT)");
         sql("INSERT INTO T VALUES(1.23456, 1.23, 123, 3.14156)");
@@ -249,7 +249,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeBooleanAndNumeric() {
+    void testModifyColumnTypeBooleanAndNumeric() {
         // boolean To numeric and numeric To boolean
         sql("CREATE TABLE T (a BOOLEAN, b BOOLEAN, c TINYINT, d INT, e BIGINT, f DOUBLE)");
         sql(
@@ -278,7 +278,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromNumericToString() {
+    void testModifyColumnTypeFromNumericToString() {
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b INT, c DECIMAL(10, 3), d FLOAT, e DOUBLE)");
         sql("INSERT INTO T VALUES('paimon', 123, 300.123, 400.123, 400.1234)");
@@ -302,7 +302,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromBooleanToString() {
+    void testModifyColumnTypeFromBooleanToString() {
         sql("CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b BOOLEAN, c BOOLEAN)");
         sql("INSERT INTO T VALUES('paimon', true, false)");
 
@@ -321,7 +321,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromTimestampToString() {
+    void testModifyColumnTypeFromTimestampToString() {
         // timestamp/date/time/timestamp_ltz to string
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b TIMESTAMP(3), c TIMESTAMP(6), d DATE, f TIME, g TIMESTAMP(3) WITH LOCAL TIME ZONE)");
@@ -356,7 +356,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromStringToString() {
+    void testModifyColumnTypeFromStringToString() {
         sql("CREATE TABLE T (b VARCHAR(10), c VARCHAR(10), d CHAR(5), e CHAR(5))");
         sql("INSERT INTO T VALUES('paimon', '1234567890', '12345', '12345')");
 
@@ -377,7 +377,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromStringToBoolean() {
+    void testModifyColumnTypeFromStringToBoolean() {
         sql("CREATE TABLE T (b VARCHAR(10), c VARCHAR(10), d STRING, e CHAR(1))");
         sql("INSERT INTO T VALUES('true', '1', 'yes', 'y')");
         sql("INSERT INTO T VALUES('false', '0', 'no', 'n')");
@@ -401,7 +401,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromStringToNumeric() {
+    void testModifyColumnTypeFromStringToNumeric() {
         // string to decimal/numeric primitive
         sql("CREATE TABLE T (a VARCHAR(10), b CHAR(1), c VARCHAR(10), d STRING, e STRING)");
         sql("INSERT INTO T VALUES('3.14', '1', '123', '3.14', '3.14')");
@@ -432,7 +432,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromStringToTimestamp() {
+    void testModifyColumnTypeFromStringToTimestamp() {
         // string to timestamp/date/time/timestamp_ltz
         sql("CREATE TABLE T (a VARCHAR(30), b CHAR(20), c VARCHAR(20), d STRING, e STRING)");
         sql(
@@ -465,7 +465,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeStringToBinary() {
+    void testModifyColumnTypeStringToBinary() {
         sql("CREATE TABLE T (a VARCHAR(5), b VARCHAR(10), c VARCHAR(10), d VARCHAR(10))");
         sql(
                 "INSERT INTO T VALUES('Apache Paimon', 'Apache Paimon','Apache Paimon','Apache Paimon')");
@@ -487,7 +487,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromTimestampToTimestamp() {
+    void testModifyColumnTypeFromTimestampToTimestamp() {
         // timestamp/timestamp_ltz to timestamp/timestamp_ltz
         sql(
                 "CREATE TABLE T (a TIMESTAMP(6), b TIMESTAMP(6), c TIMESTAMP(6) WITH LOCAL TIME ZONE, d TIMESTAMP(6) WITH LOCAL TIME ZONE)");
@@ -527,7 +527,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromDateToTimestamp() {
+    void testModifyColumnTypeFromDateToTimestamp() {
         // date to timestamp/timestamp_ltz
         sql("CREATE TABLE T (a DATE, b DATE)");
         sql("INSERT INTO T VALUES(DATE '2022-12-12', DATE '2022-12-11')");
@@ -554,7 +554,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeFromTimeToTimestamp() {
+    void testModifyColumnTypeFromTimeToTimestamp() {
         // time to timestamp/timestamp_ltz
         sql("CREATE TABLE T (a TIME, b TIME(2), c TIME(3))");
         sql("INSERT INTO T VALUES(TIME '09:30:10', TIME '09:30:10.24', TIME '09:30:10.123')");
@@ -576,7 +576,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeBinaryToBinary() {
+    void testModifyColumnTypeBinaryToBinary() {
         sql(
                 "CREATE TABLE T (a BINARY(5), b BINARY(10), c BINARY(10), d BINARY(10), e VARBINARY(5), f VARBINARY(10), g VARBINARY(10), h VARBINARY(10))");
         sql(
@@ -604,7 +604,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnPosition() {
+    void testModifyColumnPosition() {
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING, d INT, e DOUBLE)");
         sql("INSERT INTO T VALUES('paimon', 'bbb', 'ccc', 1, 3.4)");
@@ -666,7 +666,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyNullability() {
+    void testModifyNullability() {
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING, d INT, e FLOAT NOT NULL)");
         List<Row> result = sql("SHOW CREATE TABLE T");
@@ -736,7 +736,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnComment() {
+    void testModifyColumnComment() {
         sql("CREATE TABLE T (a STRING, b STRING COMMENT 'from column b')");
         List<String> result =
                 sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
@@ -763,7 +763,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAddWatermark() {
+    void testAddWatermark() {
         sql("CREATE TABLE T (a STRING, ts TIMESTAMP(3))");
         List<String> result =
                 sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
@@ -787,7 +787,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDropWatermark() {
+    void testDropWatermark() {
         sql(
                 "CREATE TABLE T (a STRING, ts TIMESTAMP(3), WATERMARK FOR ts AS ts - INTERVAL '1' HOUR)");
         List<String> result =
@@ -811,7 +811,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyWatermark() {
+    void testModifyWatermark() {
         sql("CREATE TABLE T (a STRING, ts TIMESTAMP(3))");
 
         // modify watermark
@@ -835,7 +835,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSetAndRemoveOption() throws Exception {
+    void testSetAndRemoveOption() throws Exception {
         sql("CREATE TABLE T (a STRING, b STRING, c STRING)");
         sql("ALTER TABLE T SET ('xyc'='unknown1', 'abc'='unknown2')");
 
@@ -851,7 +851,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSetAndResetImmutableOptionsOnEmptyTables() {
+    void testSetAndResetImmutableOptionsOnEmptyTables() {
         sql("CREATE TABLE T1 (a INT, b INT)");
         sql(
                 "ALTER TABLE T1 SET ('primary-key' = 'a', 'bucket' = '1', 'merge-engine' = 'first-row')");
@@ -870,7 +870,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSetAndResetImmutableOptionsOnNonEmptyTables() {
+    void testSetAndResetImmutableOptionsOnNonEmptyTables() {
         // bucket-key is immutable
         sql(
                 "CREATE TABLE T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'a')");
@@ -908,7 +908,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAlterTableComment() throws Exception {
+    void testAlterTableComment() throws Exception {
         sql("CREATE TABLE T (a STRING, b STRING, c STRING)");
 
         // add table comment
@@ -928,7 +928,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAlterTableSchema() {
+    void testAlterTableSchema() {
         sql("CREATE TABLE T (a STRING, b STRING COMMENT 'from column b')");
         List<String> result =
                 sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
@@ -993,7 +993,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAlterTableNonPhysicalColumn() {
+    void testAlterTableNonPhysicalColumn() {
         sql(
                 "CREATE TABLE T (a INT,  c ROW < a INT, d INT> METADATA, b INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts)");
         sql("ALTER TABLE T ADD e VARCHAR METADATA");
@@ -1013,7 +1013,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSequenceFieldSortOrder() {
+    void testSequenceFieldSortOrder() {
         // test default condition which get the largest record
         sql(
                 "CREATE TABLE T1 (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING) WITH ('sequence.field'='c')");
@@ -1040,7 +1040,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAlterTableMetadataComment() {
+    void testAlterTableMetadataComment() {
         sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
         List<Row> result = sql("SHOW CREATE TABLE T");
         assertThat(result.get(0).toString())
@@ -1070,7 +1070,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAlterBucket() {
+    void testAlterBucket() {
         sql("CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('bucket' = '-1')");
         sql("INSERT INTO T1 VALUES (1, '1')");
         assertThatThrownBy(() -> sql("ALTER TABLE T1 RESET ('bucket')"))
@@ -1092,9 +1092,9 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 "Cannot change bucket to -1."));
     }
 
-    @ParameterizedTest()
+    @ParameterizedTest
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testUpdateNestedColumn(String formatType) {
+    void testUpdateNestedColumn(String formatType) {
         sql(
                 "CREATE TABLE T "
                         + "( k INT, v ROW(f1 INT, f2 ROW(f1 STRING, f2 INT NOT NULL)), PRIMARY KEY (k) NOT ENFORCED ) "
@@ -1139,7 +1139,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
     @ParameterizedTest()
     @ValueSource(strings = {"orc", "avro", "parquet"})
-    public void testUpdateRowInArrayAndMap(String formatType) {
+    void testUpdateRowInArrayAndMap(String formatType) {
         sql(
                 "CREATE TABLE T "
                         + "( k INT, v1 ARRAY<ROW(f1 INT, f2 STRING)>, v2 MAP<INT, ROW(f1 STRING, f2 INT)>, PRIMARY KEY (k) NOT ENFORCED ) "

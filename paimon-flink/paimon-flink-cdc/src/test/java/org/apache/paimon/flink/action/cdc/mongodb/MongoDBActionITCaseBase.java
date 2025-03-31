@@ -48,7 +48,7 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
                     .withLogConsumer(new Slf4jLogConsumer(LOG));
 
     @BeforeAll
-    public static void startContainers() {
+    static void startContainers() {
         LOG.info("Starting containers...");
         // MONGODB_CONTAINER.setPortBindings(Collections.singletonList("27017:27017"));
         Startables.deepStart(Stream.of(MONGODB_CONTAINER)).join();

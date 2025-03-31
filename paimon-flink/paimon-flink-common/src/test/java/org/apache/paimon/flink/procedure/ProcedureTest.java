@@ -34,9 +34,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for procedures. */
-public class ProcedureTest {
+class ProcedureTest {
     @Test
-    public void testProcedureCoverAllActions() {
+    void testProcedureCoverAllActions() {
         Set<String> expectedExclusions = new HashSet<>();
         // Can be covered by `DELETE FROM` syntax. No procedure needed.
         expectedExclusions.add("delete");
@@ -66,7 +66,7 @@ public class ProcedureTest {
     }
 
     @Test
-    public void testProcedureHasNamedArgument() {
+    void testProcedureHasNamedArgument() {
         Set<String> expectedExclusions = new HashSet<>();
         expectedExclusions.add("drop_partition"); // Has been deprecated.
         List<String> identifiers =

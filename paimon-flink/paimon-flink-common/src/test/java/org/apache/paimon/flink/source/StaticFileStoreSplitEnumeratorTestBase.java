@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEnumeratorTestBase {
 
     @Test
-    public void testDynamicPartitionFilteringAfterStarted() {
+    void testDynamicPartitionFilteringAfterStarted() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(1);
 
@@ -88,7 +88,7 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEn
     }
 
     @Test
-    public void testDynamicPartitionFilteringWithProjection() {
+    void testDynamicPartitionFilteringWithProjection() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 getSplitEnumeratorContext(1);
 

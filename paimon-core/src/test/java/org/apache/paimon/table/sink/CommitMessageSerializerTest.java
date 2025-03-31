@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CommitMessageSerializerTest {
 
     @Test
-    public void test() throws IOException {
+    void test() throws IOException {
         CommitMessageSerializer serializer = new CommitMessageSerializer();
 
         DataIncrement dataIncrement = randomNewFilesIncrement();

@@ -34,7 +34,7 @@ public abstract class ObjectSerializerTestBase<T> {
     private static final int TRIES = 100;
 
     @Test
-    public void testToFromRow() {
+    void testToFromRow() {
         ObjectSerializer<T> serializer = serializer();
         for (int i = 0; i < TRIES; i++) {
             T object = object();
@@ -43,7 +43,7 @@ public abstract class ObjectSerializerTestBase<T> {
     }
 
     @Test
-    public void testSerialize() throws IOException {
+    void testSerialize() throws IOException {
         ObjectSerializer<T> serializer = serializer();
         for (int i = 0; i < TRIES; i++) {
             T object = object();

@@ -41,18 +41,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for privilege related procedures. */
-public class PrivilegeProcedureITCase extends AbstractTestBase {
+class PrivilegeProcedureITCase extends AbstractTestBase {
 
     private String path;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         path = getTempDirPath();
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testUserPrivileges(boolean isNamedArgument) throws Exception {
+    void testUserPrivileges(boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 String.format(
@@ -280,7 +280,7 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testDropUser(boolean isNamedArgument) throws Exception {
+    void testDropUser(boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         initializeSingleUserTest(tEnv, isNamedArgument);
 
@@ -302,7 +302,7 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testDropObject(boolean isNamedArgument) throws Exception {
+    void testDropObject(boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         initializeSingleUserTest(tEnv, isNamedArgument);
 
@@ -323,7 +323,7 @@ public class PrivilegeProcedureITCase extends AbstractTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testRenameObject(boolean isNamedArgument) throws Exception {
+    void testRenameObject(boolean isNamedArgument) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         initializeSingleUserTest(tEnv, isNamedArgument);
 

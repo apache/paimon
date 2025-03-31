@@ -36,7 +36,7 @@ public class ArrowUtilsTest {
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testParquetFieldId() {
+    void testParquetFieldId() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.INT());

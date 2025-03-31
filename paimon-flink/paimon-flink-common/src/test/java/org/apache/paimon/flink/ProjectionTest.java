@@ -27,9 +27,9 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link Projection}. */
-public class ProjectionTest {
+class ProjectionTest {
     @Test
-    public void testNestedProjection() {
+    void testNestedProjection() {
         RowType writeType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "f0", DataTypes.INT()),

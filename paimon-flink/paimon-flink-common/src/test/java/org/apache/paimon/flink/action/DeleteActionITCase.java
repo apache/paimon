@@ -46,7 +46,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStream
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link DeleteAction}. */
-public class DeleteActionITCase extends ActionITCaseBase {
+class DeleteActionITCase extends ActionITCaseBase {
     private static final DataType[] FIELD_TYPES =
             new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()};
 
@@ -58,7 +58,7 @@ public class DeleteActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testDeleteAction() throws Exception {
+    void testDeleteAction() throws Exception {
         List<Row> initialRecords =
                 Arrays.asList(
                         changelogRow("+I", 1L, "World"),

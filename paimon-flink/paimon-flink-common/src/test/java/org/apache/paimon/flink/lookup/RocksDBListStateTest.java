@@ -41,7 +41,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link RocksDBListState}. */
-public class RocksDBListStateTest {
+class RocksDBListStateTest {
 
     @TempDir Path tempDir;
 

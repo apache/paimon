@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AddDonePartitionActionTest {
 
     @Test
-    public void test() throws Exception {
+    void test() throws Exception {
         AtomicBoolean closed = new AtomicBoolean(false);
         Set<String> donePartitions = new HashSet<>();
         PartitionHandler partitionHandler =

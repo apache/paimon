@@ -85,7 +85,7 @@ public class SchemaManagerTest {
             new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
 
     @BeforeEach
-    public void beforeEach() throws IOException {
+    void beforeEach() throws IOException {
         // for failure tests
         String failingName = UUID.randomUUID().toString();
         FailingFileIO.reset(failingName, 100, 100);
@@ -95,7 +95,7 @@ public class SchemaManagerTest {
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         // assert no temp file
         File schema = new File(tempDir.toFile(), "schema");
         if (schema.exists()) {
@@ -108,7 +108,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testCreateTable() throws Exception {
+    void testCreateTable() throws Exception {
         TableSchema tableSchema = retryArtificialException(() -> manager.createTable(schema));
 
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
@@ -128,7 +128,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testCreateTableIllegal() {
+    void testCreateTableIllegal() {
         assertThatThrownBy(
                         () ->
                                 retryArtificialException(
@@ -148,7 +148,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testUpdateOptions() throws Exception {
+    void testUpdateOptions() throws Exception {
         retryArtificialException(() -> manager.createTable(this.schema));
         retryArtificialException(
                 () -> manager.commitChanges(SchemaChange.setOption("new_k", "new_v")));
@@ -158,7 +158,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testConcurrentCommit() throws Exception {
+    void testConcurrentCommit() throws Exception {
         retryArtificialException(
                 () ->
                         manager.createTable(
@@ -217,7 +217,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testPrimaryKeyType() throws Exception {
+    void testPrimaryKeyType() throws Exception {
         final RowType mapPrimaryKeyType =
                 RowType.of(
                         new MapType(new IntType(), new BigIntType()),
@@ -257,7 +257,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testPartitionType() {
+    void testPartitionType() {
         final RowType mapPrimaryKeyType =
                 RowType.of(
                         new MapType(new IntType(), new BigIntType()),
@@ -278,7 +278,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testChangelogTableWithFullCompaction() throws Exception {
+    void testChangelogTableWithFullCompaction() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("key", "value");
         options.put(
@@ -291,7 +291,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testDeleteSchemaWithSchemaId() throws Exception {
+    void testDeleteSchemaWithSchemaId() throws Exception {
         Map<String, String> options = new HashMap<>();
         Schema schema =
                 new Schema(
@@ -313,7 +313,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testApplyMoveFirstAndLast() {
+    void testApplyMoveFirstAndLast() {
         // Create the initial list of fields
         List<DataField> fields = new LinkedList<>();
         fields.add(new DataField(0, "f0", DataTypes.INT()));
@@ -354,7 +354,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testMoveAfter() {
+    void testMoveAfter() {
         // Create the initial list of fields
         List<DataField> fields = new LinkedList<>();
         fields.add(new DataField(0, "f0", DataTypes.INT()));
@@ -413,7 +413,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testMoveBefore() {
+    void testMoveBefore() {
         // Create the initial list of fields
         List<DataField> fields = new LinkedList<>();
         fields.add(new DataField(0, "f0", DataTypes.INT()));
@@ -454,7 +454,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testAlterImmutableOptionsOnEmptyTable() throws Exception {
+    void testAlterImmutableOptionsOnEmptyTable() throws Exception {
         // create table without primary keys
         Schema schema =
                 new Schema(
@@ -531,7 +531,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testAddAndDropNestedColumns() throws Exception {
+    void testAddAndDropNestedColumns() throws Exception {
         RowType innerType =
                 RowType.of(
                         new DataField(4, "f1", DataTypes.INT()),
@@ -609,7 +609,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testRenameNestedColumns() throws Exception {
+    void testRenameNestedColumns() throws Exception {
         RowType innerType =
                 RowType.of(
                         new DataField(4, "f1", DataTypes.INT()),
@@ -666,7 +666,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testUpdateNestedColumnType() throws Exception {
+    void testUpdateNestedColumnType() throws Exception {
         RowType innerType =
                 RowType.of(
                         new DataField(4, "f1", DataTypes.INT()),
@@ -715,7 +715,7 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testUpdateRowTypeInArrayAndMap() throws Exception {
+    void testUpdateRowTypeInArrayAndMap() throws Exception {
         RowType innerType =
                 RowType.of(
                         new DataField(2, "f1", DataTypes.INT()),

@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CoreOptionsTest {
 
     @Test
-    public void testDefaultStartupMode() {
+    void testDefaultStartupMode() {
         Options conf = new Options();
         assertThat(conf.get(CoreOptions.SCAN_MODE)).isEqualTo(CoreOptions.StartupMode.DEFAULT);
         assertThat(new CoreOptions(conf).startupMode())
@@ -46,7 +46,7 @@ public class CoreOptionsTest {
     }
 
     @Test
-    public void testStartupModeCompatibility() {
+    void testStartupModeCompatibility() {
         Options conf = new Options();
         conf.setString("log.scan", "latest");
         assertThat(new CoreOptions(conf).startupMode()).isEqualTo(CoreOptions.StartupMode.LATEST);
@@ -58,7 +58,7 @@ public class CoreOptionsTest {
     }
 
     @Test
-    public void testDeprecatedStartupMode() {
+    void testDeprecatedStartupMode() {
         Options conf = new Options();
         conf.set(CoreOptions.SCAN_MODE, CoreOptions.StartupMode.FULL);
         assertThat(new CoreOptions(conf).startupMode())
@@ -66,7 +66,7 @@ public class CoreOptionsTest {
     }
 
     @Test
-    public void testPrepareCommitWaitCompaction() {
+    void testPrepareCommitWaitCompaction() {
         Options conf = new Options();
         CoreOptions options = new CoreOptions(conf);
 

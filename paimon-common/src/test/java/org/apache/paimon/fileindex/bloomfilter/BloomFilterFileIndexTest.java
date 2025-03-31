@@ -38,7 +38,7 @@ public class BloomFilterFileIndexTest {
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testAddFindByRandom() {
+    void testAddFindByRandom() {
         BloomFilterFileIndex filter =
                 new BloomFilterFileIndex(
                         DataTypes.BYTES(),
@@ -84,7 +84,7 @@ public class BloomFilterFileIndexTest {
     }
 
     @Test
-    public void testAddFindByRandomLong() {
+    void testAddFindByRandomLong() {
         BloomFilterFileIndex filter =
                 new BloomFilterFileIndex(
                         DataTypes.BIGINT(),

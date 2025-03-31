@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class FileStoreSourceReaderMetricsTest {
     @Test
-    public void testRecordSnapshotUpdate() {
+    void testRecordSnapshotUpdate() {
         MetricListener metricListener = new MetricListener();
 
         final FileStoreSourceReaderMetrics sourceReaderMetrics =
@@ -41,7 +41,7 @@ class FileStoreSourceReaderMetricsTest {
     }
 
     @Test
-    public void testCurrentFetchLagUpdated() {
+    void testCurrentFetchLagUpdated() {
         MetricListener metricListener = new MetricListener();
 
         final FileStoreSourceReaderMetrics sourceReaderMetrics =

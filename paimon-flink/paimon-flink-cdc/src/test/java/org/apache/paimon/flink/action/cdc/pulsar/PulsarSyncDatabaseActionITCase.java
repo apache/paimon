@@ -38,11 +38,11 @@ import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.TOPIC_
 import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_FORMAT;
 
 /** IT cases for {@link PulsarSyncDatabaseAction}. */
-public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
+class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionMultiTopic() throws Exception {
+    void testSchemaEvolutionMultiTopic() throws Exception {
         final String topic1 = "schema_evolution_0";
         final String topic2 = "schema_evolution_1";
         final String topic3 = "schema_evolution_2";
@@ -86,7 +86,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testSchemaEvolutionOneTopic() throws Exception {
+    void testSchemaEvolutionOneTopic() throws Exception {
         final String topic = "schema_evolution";
         boolean writeOne = true;
         int fileCount = 3;

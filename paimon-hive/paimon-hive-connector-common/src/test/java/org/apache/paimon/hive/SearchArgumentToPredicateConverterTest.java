@@ -43,10 +43,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link org.apache.paimon.hive.SearchArgumentToPredicateConverter}. */
-public class SearchArgumentToPredicateConverterTest {
+class SearchArgumentToPredicateConverterTest {
 
     @Test
-    public void testLiteral() {
+    void testLiteral() {
         testLiteral(PredicateLeaf.Type.BOOLEAN, false, DataTypes.BOOLEAN(), false);
         testLiteral(PredicateLeaf.Type.LONG, 10L, DataTypes.TINYINT(), (byte) 10);
         testLiteral(PredicateLeaf.Type.LONG, 100L, DataTypes.SMALLINT(), (short) 100);
@@ -114,7 +114,7 @@ public class SearchArgumentToPredicateConverterTest {
                             COLUMN_NAMES.toArray(new String[0])));
 
     @Test
-    public void testEqual() {
+    void testEqual() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg = builder.equals("f_bigint", PredicateLeaf.Type.LONG, 100L).build();
         Predicate expected = BUILDER.equal(1, 100L);
@@ -122,7 +122,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testNotEqual() {
+    void testNotEqual() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot().equals("f_bigint", PredicateLeaf.Type.LONG, 100L).end().build();
@@ -131,7 +131,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testLessThan() {
+    void testLessThan() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg = builder.lessThan("f_bigint", PredicateLeaf.Type.LONG, 100L).build();
         Predicate expected = BUILDER.lessThan(1, 100L);
@@ -139,7 +139,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testGreaterOrEqual() {
+    void testGreaterOrEqual() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot()
@@ -151,7 +151,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testLessOrEqual() {
+    void testLessOrEqual() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.lessThanEquals("f_bigint", PredicateLeaf.Type.LONG, 100L).build();
@@ -160,7 +160,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testGreaterThan() {
+    void testGreaterThan() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot()
@@ -172,7 +172,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testIn() {
+    void testIn() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.in("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L, 300L).build();
@@ -190,7 +190,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testInNull() {
+    void testInNull() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.in("f_bigint", PredicateLeaf.Type.LONG, 100L, null, 300L).build();
@@ -199,7 +199,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testNotIn() {
+    void testNotIn() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot()
@@ -211,7 +211,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testNotInNull() {
+    void testNotInNull() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot()
@@ -223,7 +223,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testLargeIn() {
+    void testLargeIn() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         Object[] literals = new Object[30];
         literals[0] = null;
@@ -236,7 +236,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testLargeNotIn() {
+    void testLargeNotIn() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         Object[] literals = new Object[30];
         literals[0] = null;
@@ -250,7 +250,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testBetween() {
+    void testBetween() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.between("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L).build();
@@ -260,7 +260,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testNotBetween() {
+    void testNotBetween() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot()
@@ -273,7 +273,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testIsNull() {
+    void testIsNull() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg = builder.isNull("f_bigint", PredicateLeaf.Type.LONG).build();
         Predicate expected = BUILDER.isNull(1);
@@ -281,7 +281,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testIsNotNull() {
+    void testIsNotNull() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot().isNull("f_bigint", PredicateLeaf.Type.LONG).end().build();
@@ -290,7 +290,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testOr() {
+    void testOr() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startOr()
@@ -306,7 +306,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testNotOr() {
+    void testNotOr() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot()
@@ -326,7 +326,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testAnd() {
+    void testAnd() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startAnd()
@@ -350,7 +350,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testNotAnd() {
+    void testNotAnd() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startNot()
@@ -374,7 +374,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testUnsupported() {
+    void testUnsupported() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.nullSafeEquals("f_bigint", PredicateLeaf.Type.LONG, 100L).build();
@@ -382,7 +382,7 @@ public class SearchArgumentToPredicateConverterTest {
     }
 
     @Test
-    public void testKeepPartialResult() {
+    void testKeepPartialResult() {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.startAnd()

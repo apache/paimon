@@ -75,7 +75,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactorSinkBuilder} and {@link CompactorSink}. */
-public class CompactorSinkITCase extends AbstractTestBase {
+class CompactorSinkITCase extends AbstractTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -94,7 +94,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testCompact() throws Exception {
+    void testCompact() throws Exception {
         FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
@@ -155,7 +155,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testCompactParallelism() throws Exception {
+    void testCompactParallelism() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         StreamExecutionEnvironment env =

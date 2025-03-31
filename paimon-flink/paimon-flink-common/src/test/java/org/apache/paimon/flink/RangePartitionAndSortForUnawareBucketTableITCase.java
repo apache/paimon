@@ -46,12 +46,12 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
  * The IT test for the range partitioning and sort batch writing for append-only bucket unaware
  * tables.
  */
-public class RangePartitionAndSortForUnawareBucketTableITCase extends CatalogITCaseBase {
+class RangePartitionAndSortForUnawareBucketTableITCase extends CatalogITCaseBase {
 
     private static final int SINK_ROW_NUMBER = 1000;
 
     @Test
-    public void testSortConfigurationChecks() {
+    void testSortConfigurationChecks() {
         batchSql(
                 "CREATE TEMPORARY TABLE source1 (col1 INT, col2 INT, col3 INT, col4 INT) "
                         + "WITH ('connector'='values', 'bounded'='true')");
@@ -91,7 +91,7 @@ public class RangePartitionAndSortForUnawareBucketTableITCase extends CatalogITC
     }
 
     @Test
-    public void testRangePartition() throws Exception {
+    void testRangePartition() throws Exception {
         List<Row> inputRows = generateSinkRows();
         String id = TestValuesTableFactory.registerData(inputRows);
         batchSql(
@@ -141,7 +141,7 @@ public class RangePartitionAndSortForUnawareBucketTableITCase extends CatalogITC
     }
 
     @Test
-    public void testRangePartitionAndSortWithOrderStrategy() throws Exception {
+    void testRangePartitionAndSortWithOrderStrategy() throws Exception {
         List<Row> inputRows = generateSinkRows();
         String id = TestValuesTableFactory.registerData(inputRows);
         batchSql(
@@ -194,7 +194,7 @@ public class RangePartitionAndSortForUnawareBucketTableITCase extends CatalogITC
     }
 
     @Test
-    public void testRangePartitionAndSortWithZOrderStrategy() throws Exception {
+    void testRangePartitionAndSortWithZOrderStrategy() throws Exception {
         List<Row> inputRows = generateSinkRows();
         String id = TestValuesTableFactory.registerData(inputRows);
         batchSql(
@@ -221,7 +221,7 @@ public class RangePartitionAndSortForUnawareBucketTableITCase extends CatalogITC
     }
 
     @Test
-    public void testRangePartitionAndSortWithHilbertStrategy() throws Exception {
+    void testRangePartitionAndSortWithHilbertStrategy() throws Exception {
         List<Row> inputRows = generateSinkRows();
         String id = TestValuesTableFactory.registerData(inputRows);
         batchSql(

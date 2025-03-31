@@ -47,12 +47,12 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link RowDataChannelComputer}. */
-public class RowDataChannelComputerTest {
+class RowDataChannelComputerTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testSchemaWithPartition() throws Exception {
+    void testSchemaWithPartition() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.DOUBLE()},
@@ -81,7 +81,7 @@ public class RowDataChannelComputerTest {
     }
 
     @Test
-    public void testSchemaNoPartition() throws Exception {
+    void testSchemaNoPartition() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.BIGINT(), DataTypes.DOUBLE()},

@@ -31,11 +31,11 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test Lookup changelog producer with aggregation tables. */
-public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
+class LookupChangelogWithAggITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testMultipleCompaction(boolean changelogRowDeduplicate) throws Exception {
+    void testMultipleCompaction(boolean changelogRowDeduplicate) throws Exception {
         sql(
                 "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ("
                         + "'bucket'='3', "
@@ -81,7 +81,7 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupChangelogProducerWithValueSwitch() throws Exception {
+    void testLookupChangelogProducerWithValueSwitch() throws Exception {
         sql(
                 "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ("
                         + "'bucket'='3', "
@@ -105,7 +105,7 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupChangelogProducerWithProjection() {
+    void testLookupChangelogProducerWithProjection() {
         sql(
                 "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v1 INT, v2 INT) WITH ("
                         + "'bucket'='3', "

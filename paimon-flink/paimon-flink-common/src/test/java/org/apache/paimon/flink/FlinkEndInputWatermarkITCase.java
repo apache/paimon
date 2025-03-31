@@ -106,7 +106,7 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testEndInputWatermarkBySQL() throws Exception {
+    void testEndInputWatermarkBySQL() throws Exception {
         batchSql(
                 "INSERT INTO T /*+ OPTIONS('end-input.watermark'= '%s') */ VALUES (1, 11, 111), (2, 22, 222)",
                 String.valueOf(END_INPUT_WATERMARK));
@@ -119,7 +119,7 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testEndInputWatermark() throws Exception {
+    void testEndInputWatermark() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write

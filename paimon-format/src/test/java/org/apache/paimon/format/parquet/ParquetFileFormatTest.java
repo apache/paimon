@@ -37,10 +37,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ParquetFileFormatFactory}. */
-public class ParquetFileFormatTest {
+class ParquetFileFormatTest {
 
     @Test
-    public void testConfiguration() {
+    void testConfiguration() {
         ConfigOption<String> parquetKey =
                 ConfigOptions.key("parquet.mykey").stringType().noDefaultValue();
         ConfigOption<String> otherKey = ConfigOptions.key("other").stringType().noDefaultValue();
@@ -57,7 +57,7 @@ public class ParquetFileFormatTest {
     }
 
     @Test
-    public void testFileCompressionHigherPreference() {
+    void testFileCompressionHigherPreference() {
         Options conf = new Options();
         String lz4 = CompressionCodec.LZ4.name();
         conf.setString(ParquetOutputFormat.COMPRESSION, lz4);
@@ -70,7 +70,7 @@ public class ParquetFileFormatTest {
     }
 
     @Test
-    public void testSupportedDataFields() {
+    void testSupportedDataFields() {
         ParquetFileFormat parquet =
                 new ParquetFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
 

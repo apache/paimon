@@ -55,14 +55,14 @@ import static org.apache.paimon.types.RowKind.UPDATE_BEFORE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link LookupChangelogMergeFunctionWrapper}. */
-public class LookupChangelogMergeFunctionWrapperTest {
+class LookupChangelogMergeFunctionWrapperTest {
 
     private static final RecordEqualiser EQUALISER =
             (row1, row2) -> row1.getInt(0) == row2.getInt(0);
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testDeduplicate(boolean changelogRowDeduplicate) {
+    void testDeduplicate(boolean changelogRowDeduplicate) {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
@@ -211,7 +211,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
     }
 
     @Test
-    public void testDeduplicateWithIgnoreFields() {
+    void testDeduplicateWithIgnoreFields() {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         RowType valueType =
                 RowType.builder()
@@ -274,7 +274,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testSum(boolean changelogRowDeduplicate) {
+    void testSum(boolean changelogRowDeduplicate) {
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(
@@ -360,7 +360,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
     }
 
     @Test
-    public void testMergeHighLevelOrder() {
+    void testMergeHighLevelOrder() {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
@@ -437,7 +437,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
     }
 
     @Test
-    public void testFirstRow() {
+    void testFirstRow() {
         Set<InternalRow> highLevel = new HashSet<>();
         FirstRowMergeFunctionWrapper function =
                 new FirstRowMergeFunctionWrapper(

@@ -29,10 +29,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link AlterViewDialectProcedure}. */
-public class AlterViewDialectITCase extends RESTCatalogITCaseBase {
+class AlterViewDialectITCase extends RESTCatalogITCaseBase {
 
     @Test
-    public void testAlterViewDialect() {
+    void testAlterViewDialect() {
 
         sql(
                 String.format(

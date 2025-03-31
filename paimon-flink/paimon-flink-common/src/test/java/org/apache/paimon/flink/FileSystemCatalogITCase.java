@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for {@link FlinkCatalog}. */
-public class FileSystemCatalogITCase extends AbstractTestBase {
+class FileSystemCatalogITCase extends AbstractTestBase {
     private static final AtomicInteger LOCK_COUNT = new AtomicInteger(0);
 
     private static final String DB_NAME = "default";
@@ -54,7 +54,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     private TableEnvironment tEnv;
 
     @BeforeEach
-    public void setup() {
+    void setup() {
         tEnv =
                 tableEnvironmentBuilder()
                         .streamingMode()
@@ -67,7 +67,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testWriteRead() throws Exception {
+    void testWriteRead() throws Exception {
         tEnv.useCatalog("fs");
         tEnv.executeSql(
                 "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'a')");
@@ -75,7 +75,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testRenameTable() throws Exception {
+    void testRenameTable() throws Exception {
         tEnv.useCatalog("fs");
         tEnv.executeSql("CREATE TABLE t1 (a INT) WITH ('bucket' = '1', 'bucket-key' = 'a')")
                 .await();
@@ -107,7 +107,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testCatalogOptionsInheritAndOverride() throws Exception {
+    void testCatalogOptionsInheritAndOverride() throws Exception {
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG fs_with_options WITH ("

@@ -25,10 +25,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CompactTimer}. */
-public class CompactTimerTest {
+class CompactTimerTest {
 
     @Test
-    public void testRandom() {
+    void testRandom() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int totalLength = random.nextInt(1, 1000);
         int queryLength;

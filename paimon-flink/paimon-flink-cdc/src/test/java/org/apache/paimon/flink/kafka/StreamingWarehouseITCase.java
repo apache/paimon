@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class StreamingWarehouseITCase extends KafkaTableTestBase {
 
     @Test
-    public void testUserStory() throws Exception {
+    void testUserStory() throws Exception {
         init(createAndRegisterTempFile("").toString(), 1);
         // Step1: define trade order table schema
         String orderSource =

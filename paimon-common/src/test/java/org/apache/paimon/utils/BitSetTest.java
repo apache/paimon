@@ -29,7 +29,7 @@ import java.util.stream.IntStream;
 public class BitSetTest {
 
     @Test
-    public void testBitSet() {
+    void testBitSet() {
         BitSet bitSet = new BitSet(100);
         Assertions.assertThatThrownBy(
                         () -> bitSet.setMemorySegment(MemorySegment.wrap(new byte[99]), 0))

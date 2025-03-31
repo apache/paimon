@@ -58,7 +58,7 @@ public class CompactionMetricsTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testReportMetrics() {
+    void testReportMetrics() {
         CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
         assertThat(getMetric(metrics, CompactionMetrics.MAX_LEVEL0_FILE_COUNT)).isEqualTo(-1L);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(-1.0);
@@ -109,7 +109,7 @@ public class CompactionMetricsTest {
     }
 
     @Test
-    public void testTotalFileSizeForPrimaryKeyTables() throws Exception {
+    void testTotalFileSizeForPrimaryKeyTables() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path path = new Path(tempDir.toString());
 

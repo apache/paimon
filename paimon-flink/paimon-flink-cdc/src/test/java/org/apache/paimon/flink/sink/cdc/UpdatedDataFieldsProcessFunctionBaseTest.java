@@ -26,7 +26,7 @@ import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class UpdatedDataFieldsProcessFunctionBaseTest {
 
     @Test
-    public void testCanConvertString() {
+    void testCanConvertString() {
         VarCharType oldVarchar = new VarCharType(true, 10);
         VarCharType biggerLengthVarchar = new VarCharType(true, 20);
         VarCharType smallerLengthVarchar = new VarCharType(true, 5);
@@ -52,7 +52,7 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
     }
 
     @Test
-    public void testCanConvertNumber() {
+    void testCanConvertNumber() {
         IntType oldType = new IntType();
         BigIntType bigintType = new BigIntType();
         SmallIntType smallintType = new SmallIntType();
@@ -70,7 +70,7 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
     }
 
     @Test
-    public void testCanConvertDecimal() {
+    void testCanConvertDecimal() {
         DecimalType oldType = new DecimalType(20, 9);
         DecimalType biggerRangeType = new DecimalType(30, 10);
         DecimalType smallerRangeType = new DecimalType(10, 3);
@@ -88,7 +88,7 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
     }
 
     @Test
-    public void testCanConvertTimestamp() {
+    void testCanConvertTimestamp() {
         TimestampType oldType = new TimestampType(true, 3);
         TimestampType biggerLengthTimestamp = new TimestampType(true, 5);
         TimestampType smallerLengthTimestamp = new TimestampType(true, 2);

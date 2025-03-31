@@ -30,19 +30,19 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test {@link ManifestFile}. for table without partition */
-public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
+class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
     private final RowType noPartitionType = RowType.of();
 
     @TempDir java.nio.file.Path tempDir;
     private ManifestFile manifestFile;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         manifestFile = createManifestFile(tempDir.toString());
     }
 
     @Test
-    public void testMerge() {
+    void testMerge() {
         List<ManifestFileMeta> input = createBaseManifestFileMetas(false);
         addDeltaManifests(input, false);
 

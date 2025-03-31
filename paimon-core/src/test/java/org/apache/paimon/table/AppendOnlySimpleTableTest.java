@@ -97,7 +97,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
     @Test
-    public void testMultipleWriters() throws Exception {
+    void testMultipleWriters() throws Exception {
         assertThat(
                         createFileStoreTable(options -> options.set("bucket", "-1"))
                                 .newBatchWriteBuilder()
@@ -106,7 +106,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testReadDeletedFiles() throws Exception {
+    void testReadDeletedFiles() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
@@ -127,7 +127,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchReadWrite() throws Exception {
+    void testBatchReadWrite() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
@@ -151,7 +151,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testReadWriteWithDataDirectory() throws Exception {
+    void testReadWriteWithDataDirectory() throws Exception {
         Consumer<Options> optionsSetter = options -> options.set(DATA_FILE_PATH_DIRECTORY, "data");
         writeData(optionsSetter);
         FileStoreTable table = createFileStoreTable(optionsSetter);
@@ -171,7 +171,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchRecordsWrite() throws Exception {
+    void testBatchRecordsWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         List<InternalRow> list = new ArrayList<>();
@@ -214,7 +214,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBranchBatchReadWrite() throws Exception {
+    void testBranchBatchReadWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
 
@@ -240,7 +240,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchProjection() throws Exception {
+    void testBatchProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
@@ -254,7 +254,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testBatchFilter(boolean statsDenseStore) throws Exception {
+    void testBatchFilter(boolean statsDenseStore) throws Exception {
         Consumer<Options> optionsSetter =
                 options -> {
                     if (statsDenseStore) {
@@ -281,7 +281,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchFilterWithExecution() throws Exception {
+    void testBatchFilterWithExecution() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
@@ -347,7 +347,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testSplitOrder() throws Exception {
+    void testSplitOrder() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         StreamTableWrite write = table.newWrite(commitUser);
@@ -374,7 +374,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchSplitOrderByPartition() throws Exception {
+    void testBatchSplitOrderByPartition() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> options.set(CoreOptions.SCAN_PLAN_SORT_PARTITION, true));
@@ -404,7 +404,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBranchStreamingReadWrite() throws Exception {
+    void testBranchStreamingReadWrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
 
@@ -432,7 +432,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingSplitInUnawareBucketMode() throws Exception {
+    void testStreamingSplitInUnawareBucketMode() throws Exception {
         // in unaware-bucket mode, we split files into splits all the time
         FileStoreTable table =
                 createUnawareBucketFileStoreTable(
@@ -467,7 +467,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBloomFilterInMemory() throws Exception {
+    void testBloomFilterInMemory() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("id", DataTypes.INT())
@@ -533,7 +533,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBloomFilterInDisk() throws Exception {
+    void testBloomFilterInDisk() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("id", DataTypes.INT())
@@ -589,7 +589,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBSIAndBitmapIndexInMemory() throws Exception {
+    void testBSIAndBitmapIndexInMemory() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("id", DataTypes.INT())
@@ -659,7 +659,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBSIAndBitmapIndexInDisk() throws Exception {
+    void testBSIAndBitmapIndexInDisk() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("id", DataTypes.INT())
@@ -729,7 +729,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBitmapIndexResultFilterParquetRowRanges() throws Exception {
+    void testBitmapIndexResultFilterParquetRowRanges() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("id", DataTypes.STRING())
@@ -817,13 +817,13 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testWithShardAppendTable() throws Exception {
+    void testWithShardAppendTable() throws Exception {
         FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, -1));
         innerTestWithShard(table);
     }
 
     @Test
-    public void testWithShardBucketedTable() throws Exception {
+    void testWithShardBucketedTable() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -834,7 +834,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBloomFilterForMapField() throws Exception {
+    void testBloomFilterForMapField() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("id", DataTypes.INT())
@@ -975,7 +975,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingProjection() throws Exception {
+    void testStreamingProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
@@ -989,7 +989,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testStreamingFilter() throws Exception {
+    void testStreamingFilter() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
@@ -1013,7 +1013,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testSequentialRead() throws Exception {
+    void testSequentialRead() throws Exception {
         Random random = new Random();
         int numOfBucket = Math.max(random.nextInt(8), 1);
         FileStoreTable table = createFileStoreTable(numOfBucket);
@@ -1073,7 +1073,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBatchOrderWithCompaction() throws Exception {
+    void testBatchOrderWithCompaction() throws Exception {
         FileStoreTable table = createFileStoreTable();
         table = table.copy(Collections.singletonMap(CoreOptions.ASYNC_FILE_WRITE.key(), "false"));
 

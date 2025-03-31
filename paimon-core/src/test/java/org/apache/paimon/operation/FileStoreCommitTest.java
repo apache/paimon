@@ -99,7 +99,7 @@ public class FileStoreCommitTest {
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeEach
-    public void beforeEach() {
+    void beforeEach() {
         gen = new TestKeyValueGenerator();
         // for failure tests
         failingName = UUID.randomUUID().toString();
@@ -107,7 +107,7 @@ public class FileStoreCommitTest {
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(FailingFileIO.openInputStreams(pathPredicate)).isEmpty();
         assertThat(FailingFileIO.openOutputStreams(pathPredicate)).isEmpty();
@@ -122,7 +122,7 @@ public class FileStoreCommitTest {
         "true,INPUT",
         "true,FULL_COMPACTION"
     })
-    public void testSingleCommitUser(boolean failing, String changelogProducer) throws Exception {
+    void testSingleCommitUser(boolean failing, String changelogProducer) throws Exception {
         testRandomConcurrentNoConflict(
                 1, failing, CoreOptions.ChangelogProducer.valueOf(changelogProducer));
     }
@@ -136,8 +136,7 @@ public class FileStoreCommitTest {
         "true,INPUT",
         "true,FULL_COMPACTION"
     })
-    public void testManyCommitUsersNoConflict(boolean failing, String changelogProducer)
-            throws Exception {
+    void testManyCommitUsersNoConflict(boolean failing, String changelogProducer) throws Exception {
         testRandomConcurrentNoConflict(
                 ThreadLocalRandom.current().nextInt(3) + 2,
                 failing,
@@ -153,7 +152,7 @@ public class FileStoreCommitTest {
         "true,INPUT",
         "true,FULL_COMPACTION"
     })
-    public void testManyCommitUsersWithConflict(boolean failing, String changelogProducer)
+    void testManyCommitUsersWithConflict(boolean failing, String changelogProducer)
             throws Exception {
         testRandomConcurrentWithConflict(
                 ThreadLocalRandom.current().nextInt(3) + 2,
@@ -162,7 +161,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testLatestHint() throws Exception {
+    void testLatestHint() throws Exception {
         testRandomConcurrentNoConflict(1, false, CoreOptions.ChangelogProducer.NONE);
         SnapshotManager snapshotManager = createStore(false, 1).snapshotManager();
         Path snapshotDir = snapshotManager.snapshotDirectory();
@@ -179,7 +178,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testFilterCommittedAfterExpire() throws Exception {
+    void testFilterCommittedAfterExpire() throws Exception {
         testRandomConcurrentNoConflict(1, false, CoreOptions.ChangelogProducer.NONE);
         // remove first snapshot to mimic expiration
         TestFileStore store = createStore(false);
@@ -193,7 +192,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testFilterAllCommits() throws Exception {
+    void testFilterAllCommits() throws Exception {
         testRandomConcurrentNoConflict(1, false, CoreOptions.ChangelogProducer.NONE);
         TestFileStore store = createStore(false);
         SnapshotManager snapshotManager = store.snapshotManager();
@@ -372,7 +371,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testOverwritePartialCommit() throws Exception {
+    void testOverwritePartialCommit() throws Exception {
         Map<BinaryRow, List<KeyValue>> data1 =
                 generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
         logData(
@@ -442,7 +441,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testSnapshotAddLogOffset() throws Exception {
+    void testSnapshotAddLogOffset() throws Exception {
         TestFileStore store = createStore(false, 2);
 
         // commit 1
@@ -465,7 +464,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testSnapshotRecordCount() throws Exception {
+    void testSnapshotRecordCount() throws Exception {
         TestFileStore store = createStore(false);
 
         // commit 1
@@ -511,7 +510,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testCommitEmpty() throws Exception {
+    void testCommitEmpty() throws Exception {
         TestFileStore store = createStore(false, 2);
         Snapshot snapshot =
                 store.commitData(
@@ -550,7 +549,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testCommitOldSnapshotAgain() throws Exception {
+    void testCommitOldSnapshotAgain() throws Exception {
         TestFileStore store = createStore(false, 2);
         List<ManifestCommittable> committables = new ArrayList<>();
 
@@ -585,7 +584,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testCommitWatermarkWithValue() throws Exception {
+    void testCommitWatermarkWithValue() throws Exception {
         TestFileStore store = createStore(false, 2);
 
         // first with watermark
@@ -595,7 +594,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testCommitWatermark() throws Exception {
+    void testCommitWatermark() throws Exception {
         TestFileStore store = createStore(false, 2);
 
         // first with null
@@ -621,7 +620,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testDropPartitions() throws Exception {
+    void testDropPartitions() throws Exception {
         // generate and commit initial data
         Map<BinaryRow, List<KeyValue>> data =
                 generateData(ThreadLocalRandom.current().nextInt(50, 1000));
@@ -703,7 +702,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testDropEmptyPartition() throws Exception {
+    void testDropEmptyPartition() throws Exception {
         TestFileStore store = createStore(false);
         assertThatThrownBy(() -> store.dropPartitions(Collections.emptyList()))
                 .satisfies(
@@ -713,7 +712,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testIndexFiles() throws Exception {
+    void testIndexFiles() throws Exception {
         TestFileStore store = createStore(false, 2);
         IndexFileHandler indexFileHandler = store.newIndexFileHandler();
 
@@ -806,7 +805,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testWriteStats() throws Exception {
+    void testWriteStats() throws Exception {
         TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
         StatsFileHandler statsFileHandler = store.newStatsFileHandler();
         FileStoreCommitImpl fileStoreCommit = store.newCommit();
@@ -871,7 +870,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testDVIndexFiles() throws Exception {
+    void testDVIndexFiles() throws Exception {
         TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
 
         // commit 1
@@ -917,7 +916,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testManifestCompact() throws Exception {
+    void testManifestCompact() throws Exception {
         TestFileStore store = createStore(false);
 
         List<KeyValue> keyValues = generateDataList(1);
@@ -949,7 +948,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testDropStatsForOverwrite() throws Exception {
+    void testDropStatsForOverwrite() throws Exception {
         TestFileStore store = createStore(false);
         store.options().toConfiguration().set(CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS, true);
 
@@ -975,7 +974,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testManifestCompactFull() throws Exception {
+    void testManifestCompactFull() throws Exception {
         // Disable full compaction by options.
         TestFileStore store =
                 createStore(

@@ -55,7 +55,7 @@ public class SnapshotManagerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testSnapshotPath() {
+    void testSnapshotPath() {
         SnapshotManager snapshotManager =
                 newSnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
         for (int i = 0; i < 20; i++) {
@@ -66,7 +66,7 @@ public class SnapshotManagerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testEarliestSnapshot(boolean isRaceCondition) throws IOException {
+    void testEarliestSnapshot(boolean isRaceCondition) throws IOException {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
@@ -82,7 +82,7 @@ public class SnapshotManagerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testEarlierOrEqualWatermark(boolean isRaceCondition) throws IOException {
+    void testEarlierOrEqualWatermark(boolean isRaceCondition) throws IOException {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
@@ -99,7 +99,7 @@ public class SnapshotManagerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testEarlierThanTimeMillis(boolean isRaceCondition) throws IOException {
+    void testEarlierThanTimeMillis(boolean isRaceCondition) throws IOException {
         long base = System.currentTimeMillis();
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
@@ -163,7 +163,7 @@ public class SnapshotManagerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testEarlierOrEqualTimeMills(boolean isRaceCondition) throws IOException {
+    void testEarlierOrEqualTimeMills(boolean isRaceCondition) throws IOException {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
@@ -203,7 +203,7 @@ public class SnapshotManagerTest {
     }
 
     @Test
-    public void testLaterOrEqualTimeMills() throws IOException {
+    void testLaterOrEqualTimeMills() throws IOException {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
@@ -229,7 +229,7 @@ public class SnapshotManagerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testLaterOrEqualWatermark(boolean isRaceCondition) throws IOException {
+    void testLaterOrEqualWatermark(boolean isRaceCondition) throws IOException {
         long millis = Long.MIN_VALUE;
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
@@ -314,7 +314,7 @@ public class SnapshotManagerTest {
     }
 
     @Test
-    public void testLatestSnapshotOfUser() throws IOException, InterruptedException {
+    void testLatestSnapshotOfUser() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
@@ -366,7 +366,7 @@ public class SnapshotManagerTest {
     }
 
     @Test
-    public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
+    void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
         Path path = new Path(tempDir.toString());
         SnapshotManager snapshotManager = newSnapshotManager(localFileIO, path);
@@ -465,7 +465,7 @@ public class SnapshotManagerTest {
     }
 
     @Test
-    public void testLongLivedChangelog() throws Exception {
+    void testLongLivedChangelog() throws Exception {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
@@ -491,7 +491,7 @@ public class SnapshotManagerTest {
     }
 
     @Test
-    public void testCommitChangelogWhenSameChangelogCommitTwice() throws IOException {
+    void testCommitChangelogWhenSameChangelogCommitTwice() throws IOException {
         FileIO localFileIO = LocalFileIO.create();
         ChangelogManager snapshotManager =
                 newChangelogManager(localFileIO, new Path(tempDir.toString()));

@@ -82,10 +82,10 @@ import static org.apache.paimon.utils.ThetaSketch.sketchOf;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** test whether {@link FieldAggregator}' subclasses behaviors are expected. */
-public class FieldAggregatorTest {
+class FieldAggregatorTest {
 
     @Test
-    public void testFieldBoolAndAgg() {
+    void testFieldBoolAndAgg() {
         FieldBoolAndAgg fieldBoolAndAgg =
                 new FieldBoolAndAggFactory().create(new BooleanType(), null, null);
         assertThat(fieldBoolAndAgg.agg(false, true)).isEqualTo(false);
@@ -93,7 +93,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldBoolOrAgg() {
+    void testFieldBoolOrAgg() {
         FieldBoolOrAgg fieldBoolOrAgg =
                 new FieldBoolOrAggFactory().create(new BooleanType(), null, null);
         assertThat(fieldBoolOrAgg.agg(false, true)).isEqualTo(true);
@@ -101,7 +101,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldLastNonNullValueAgg() {
+    void testFieldLastNonNullValueAgg() {
         FieldLastNonNullValueAgg fieldLastNonNullValueAgg =
                 new FieldLastNonNullValueAggFactory().create(new IntType(), null, null);
         Integer accumulator = null;
@@ -114,7 +114,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldLastValueAgg() {
+    void testFieldLastValueAgg() {
         FieldLastValueAgg fieldLastValueAgg =
                 new FieldLastValueAggFactory().create(new IntType(), null, null);
         Integer accumulator = null;
@@ -127,7 +127,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldFirstValueAgg() {
+    void testFieldFirstValueAgg() {
         FieldFirstValueAgg fieldFirstValueAgg =
                 new FieldFirstValueAggFactory().create(new IntType(), null, null);
         assertThat(fieldFirstValueAgg.agg(null, 1)).isEqualTo(1);
@@ -138,7 +138,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldFirstNonNullValueAgg() {
+    void testFieldFirstNonNullValueAgg() {
         FieldFirstNonNullValueAgg fieldFirstNonNullValueAgg =
                 new FieldFirstNonNullValueAggFactory().create(new IntType(), null, null);
         assertThat(fieldFirstNonNullValueAgg.agg(null, null)).isNull();
@@ -150,7 +150,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldListAggWithDefaultDelimiter() {
+    void testFieldListAggWithDefaultDelimiter() {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(new VarCharType(), new CoreOptions(new HashMap<>()), "fieldName");
@@ -161,7 +161,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldListAggWithCustomDelimiter() {
+    void testFieldListAggWithCustomDelimiter() {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
@@ -177,7 +177,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldMaxAgg() {
+    void testFieldMaxAgg() {
         FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new IntType(), null, null);
         Integer accumulator = 1;
         Integer inputField = 10;
@@ -185,7 +185,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldMinAgg() {
+    void testFieldMinAgg() {
         FieldMinAgg fieldMinAgg = new FieldMinAggFactory().create(new IntType(), null, null);
         Integer accumulator = 1;
         Integer inputField = 10;
@@ -193,7 +193,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldSumIntAgg() {
+    void testFieldSumIntAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType(), null, null);
         assertThat(fieldSumAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldSumAgg.agg(1, 10)).isEqualTo(11);
@@ -202,7 +202,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldProductIntAgg() {
+    void testFieldProductIntAgg() {
         FieldProductAgg fieldProductAgg =
                 new FieldProductAggFactory().create(new IntType(), null, null);
         assertThat(fieldProductAgg.agg(null, 10)).isEqualTo(10);
@@ -212,7 +212,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldSumByteAgg() {
+    void testFieldSumByteAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType(), null, null);
         assertThat(fieldSumAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
         assertThat(fieldSumAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 11);
@@ -221,7 +221,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldProductByteAgg() {
+    void testFieldProductByteAgg() {
         FieldProductAgg fieldProductAgg =
                 new FieldProductAggFactory().create(new TinyIntType(), null, null);
         assertThat(fieldProductAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
@@ -231,7 +231,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldProductShortAgg() {
+    void testFieldProductShortAgg() {
         FieldProductAgg fieldProductAgg =
                 new FieldProductAggFactory().create(new SmallIntType(), null, null);
         assertThat(fieldProductAgg.agg(null, (short) 10)).isEqualTo((short) 10);
@@ -241,7 +241,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldSumShortAgg() {
+    void testFieldSumShortAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType(), null, null);
         assertThat(fieldSumAgg.agg(null, (short) 10)).isEqualTo((short) 10);
         assertThat(fieldSumAgg.agg((short) 1, (short) 10)).isEqualTo((short) 11);
@@ -250,7 +250,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldSumLongAgg() {
+    void testFieldSumLongAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType(), null, null);
         assertThat(fieldSumAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldSumAgg.agg(1L, 10L)).isEqualTo(11L);
@@ -259,7 +259,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldProductLongAgg() {
+    void testFieldProductLongAgg() {
         FieldProductAgg fieldProductAgg =
                 new FieldProductAggFactory().create(new BigIntType(), null, null);
         assertThat(fieldProductAgg.agg(null, 10L)).isEqualTo(10L);
@@ -269,7 +269,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldProductFloatAgg() {
+    void testFieldProductFloatAgg() {
         FieldProductAgg fieldProductAgg =
                 new FieldProductAggFactory().create(new FloatType(), null, null);
         assertThat(fieldProductAgg.agg(null, (float) 10)).isEqualTo((float) 10);
@@ -279,7 +279,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldSumFloatAgg() {
+    void testFieldSumFloatAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new FloatType(), null, null);
         assertThat(fieldSumAgg.agg(null, (float) 10)).isEqualTo((float) 10);
         assertThat(fieldSumAgg.agg((float) 1, (float) 10)).isEqualTo((float) 11);
@@ -288,7 +288,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldProductDoubleAgg() {
+    void testFieldProductDoubleAgg() {
         FieldProductAgg fieldProductAgg =
                 new FieldProductAggFactory().create(new DoubleType(), null, null);
         assertThat(fieldProductAgg.agg(null, (double) 10)).isEqualTo((double) 10);
@@ -298,7 +298,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldSumDoubleAgg() {
+    void testFieldSumDoubleAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DoubleType(), null, null);
         assertThat(fieldSumAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldSumAgg.agg((double) 1, (double) 10)).isEqualTo((double) 11);
@@ -307,7 +307,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldProductDecimalAgg() {
+    void testFieldProductDecimalAgg() {
         FieldProductAgg fieldProductAgg =
                 new FieldProductAggFactory().create(new DecimalType(), null, null);
         assertThat(fieldProductAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
@@ -317,7 +317,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldSumDecimalAgg() {
+    void testFieldSumDecimalAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new DecimalType(), null, null);
         assertThat(fieldSumAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldSumAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(11));
@@ -331,7 +331,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldNestedUpdateAgg() {
+    void testFieldNestedUpdateAgg() {
         DataType elementRowType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "k0", DataTypes.INT()),
@@ -373,7 +373,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldNestedAppendAgg() {
+    void testFieldNestedAppendAgg() {
         DataType elementRowType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "k0", DataTypes.INT()),
@@ -420,7 +420,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldCollectAggWithDistinct() {
+    void testFieldCollectAggWithDistinct() {
         FieldCollectAgg agg =
                 new FieldCollectAggFactory()
                         .create(
@@ -447,7 +447,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFiledCollectAggWithRowType() {
+    void testFiledCollectAggWithRowType() {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
         FieldCollectAgg agg =
                 new FieldCollectAggFactory()
@@ -484,7 +484,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFiledCollectAggWithArrayType() {
+    void testFiledCollectAggWithArrayType() {
         ArrayType arrayType = new ArrayType(DataTypes.INT());
         FieldCollectAgg agg =
                 new FieldCollectAggFactory()
@@ -521,7 +521,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFiledCollectAggWithMapType() {
+    void testFiledCollectAggWithMapType() {
         MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
         FieldCollectAgg agg =
                 new FieldCollectAggFactory()
@@ -556,7 +556,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldCollectAggWithoutDistinct() {
+    void testFieldCollectAggWithoutDistinct() {
         FieldCollectAgg agg =
                 new FieldCollectAggFactory()
                         .create(
@@ -583,7 +583,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldCollectAggRetractWithDistinct() {
+    void testFieldCollectAggRetractWithDistinct() {
         FieldCollectAgg agg;
         InternalArray.ElementGetter elementGetter;
 
@@ -689,7 +689,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldCollectAggRetractWithoutDistinct() {
+    void testFieldCollectAggRetractWithoutDistinct() {
         FieldCollectAgg agg;
         InternalArray.ElementGetter elementGetter;
 
@@ -803,7 +803,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldMergeMapAgg() {
+    void testFieldMergeMapAgg() {
         FieldMergeMapAgg agg =
                 new FieldMergeMapAggFactory()
                         .create(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()), null, null);
@@ -823,7 +823,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldMergeMapAggRetract() {
+    void testFieldMergeMapAggRetract() {
         FieldMergeMapAgg agg =
                 new FieldMergeMapAggFactory()
                         .create(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()), null, null);
@@ -835,7 +835,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldThetaSketchAgg() {
+    void testFieldThetaSketchAgg() {
         FieldThetaSketchAgg agg =
                 new FieldThetaSketchAggFactory().create(DataTypes.VARBINARY(20), null, null);
 
@@ -859,7 +859,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldHllSketchAgg() {
+    void testFieldHllSketchAgg() {
         FieldHllSketchAgg agg =
                 new FieldHllSketchAggFactory().create(DataTypes.VARBINARY(20), null, null);
 
@@ -883,7 +883,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldRoaringBitmap32Agg() {
+    void testFieldRoaringBitmap32Agg() {
         FieldRoaringBitmap32Agg agg =
                 new FieldRoaringBitmap32AggFactory().create(DataTypes.VARBINARY(20), null, null);
 
@@ -907,7 +907,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldRoaringBitmap64Agg() throws IOException {
+    void testFieldRoaringBitmap64Agg() throws IOException {
         FieldRoaringBitmap64Agg agg =
                 new FieldRoaringBitmap64AggFactory().create(DataTypes.VARBINARY(20), null, null);
 
@@ -931,7 +931,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testCustomAgg() throws IOException {
+    void testCustomAgg() throws IOException {
         FieldAggregator fieldAggregator =
                 FieldAggregatorFactory.create(
                         DataTypes.STRING(),

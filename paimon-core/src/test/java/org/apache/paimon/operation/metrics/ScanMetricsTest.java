@@ -37,7 +37,7 @@ public class ScanMetricsTest {
 
     /** Tests the registration of the commit metrics. */
     @Test
-    public void testGenericMetricsRegistration() {
+    void testGenericMetricsRegistration() {
         ScanMetrics scanMetrics = getScanMetrics();
         MetricGroup metricGroup = scanMetrics.getMetricGroup();
         assertThat(metricGroup.getGroupName()).isEqualTo(ScanMetrics.GROUP_NAME);
@@ -55,7 +55,7 @@ public class ScanMetricsTest {
 
     /** Tests that the metrics are updated properly. */
     @Test
-    public void testMetricsAreUpdated() {
+    void testMetricsAreUpdated() {
         ScanMetrics scanMetrics = getScanMetrics();
         Map<String, Metric> registeredGenericMetrics = scanMetrics.getMetricGroup().getMetrics();
 

@@ -89,7 +89,7 @@ class HdfsBehaviorTest extends FileIOBehaviorTestBase {
     }
 
     @Test
-    public void testAtomicWrite() throws IOException {
+    void testAtomicWrite() throws IOException {
         Path file = new Path(getBasePath(), randomName());
         fs.tryAtomicOverwriteViaRename(file, "Hi");
         assertThat(fs.readFileUtf8(file)).isEqualTo("Hi");
@@ -99,7 +99,7 @@ class HdfsBehaviorTest extends FileIOBehaviorTestBase {
     }
 
     @Test
-    public void testAtomicWriteMultipleThreads() throws InterruptedException {
+    void testAtomicWriteMultipleThreads() throws InterruptedException {
         FileIOTest.testOverwriteFileUtf8(new Path(getBasePath(), randomName()), fs);
     }
 }

@@ -68,12 +68,12 @@ public class TableCommitTest {
     private static final Map<String, Set<Long>> commitCallbackResult = new ConcurrentHashMap<>();
 
     @Test
-    public void testCommitCallbackWithFailureFixedBucket() throws Exception {
+    void testCommitCallbackWithFailureFixedBucket() throws Exception {
         innerTestCommitCallbackWithFailure(1);
     }
 
     @Test
-    public void testCommitCallbackWithFailureDynamicBucket() throws Exception {
+    void testCommitCallbackWithFailureDynamicBucket() throws Exception {
         innerTestCommitCallbackWithFailure(-1);
     }
 
@@ -193,7 +193,7 @@ public class TableCommitTest {
     }
 
     @Test
-    public void testRecoverDeletedFiles() throws Exception {
+    void testRecoverDeletedFiles() throws Exception {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(

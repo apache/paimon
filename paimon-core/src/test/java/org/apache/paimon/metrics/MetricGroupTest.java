@@ -25,10 +25,10 @@ import java.util.HashMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for the {@link MetricGroup}. */
-public class MetricGroupTest {
+class MetricGroupTest {
 
     @Test
-    public void testGroupRegisterMetrics() {
+    void testGroupRegisterMetrics() {
         TestMetricRegistry registry = new TestMetricRegistry();
         MetricGroup group = registry.tableMetricGroup("commit", "myTable");
 
@@ -48,7 +48,7 @@ public class MetricGroupTest {
     }
 
     @Test
-    public void testTolerateMetricNameCollisions() {
+    void testTolerateMetricNameCollisions() {
         final String name = "abctestname";
         TestMetricRegistry registry = new TestMetricRegistry();
         MetricGroup group = registry.tableMetricGroup("commit", "myTable");

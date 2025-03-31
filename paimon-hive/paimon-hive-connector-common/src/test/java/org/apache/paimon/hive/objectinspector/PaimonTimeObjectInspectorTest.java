@@ -26,10 +26,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link PaimonTimeObjectInspector}. */
-public class PaimonTimeObjectInspectorTest {
+class PaimonTimeObjectInspectorTest {
 
     @Test
-    public void testCategoryAndClass() {
+    void testCategoryAndClass() {
         PaimonTimeObjectInspector oi = new PaimonTimeObjectInspector();
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
@@ -41,7 +41,7 @@ public class PaimonTimeObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveJavaObject() {
+    void testGetPrimitiveJavaObject() {
         PaimonTimeObjectInspector oi = new PaimonTimeObjectInspector();
 
         int input = 1;
@@ -50,7 +50,7 @@ public class PaimonTimeObjectInspectorTest {
     }
 
     @Test
-    public void testGetPrimitiveWritableObject() {
+    void testGetPrimitiveWritableObject() {
         PaimonTimeObjectInspector oi = new PaimonTimeObjectInspector();
 
         int input = 86_399_000;

@@ -43,7 +43,7 @@ public class FileIndexFormatFormatTest {
     private static final Random RANDOM = new Random();
 
     @Test
-    public void testWriteRead() throws IOException {
+    void testWriteRead() throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
 
@@ -78,7 +78,7 @@ public class FileIndexFormatFormatTest {
     }
 
     @Test
-    public void testEmptyFileIndex() throws IOException {
+    void testEmptyFileIndex() throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
 

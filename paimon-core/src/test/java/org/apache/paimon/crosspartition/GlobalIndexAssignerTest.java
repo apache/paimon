@@ -44,7 +44,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link GlobalIndexAssigner}. */
-public class GlobalIndexAssignerTest extends TableTestBase {
+class GlobalIndexAssignerTest extends TableTestBase {
 
     private GlobalIndexAssigner createAssigner(MergeEngine mergeEngine) throws Exception {
         return createAssigner(mergeEngine, false);
@@ -77,12 +77,12 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     @Test
-    public void testBucketAssign() throws Exception {
+    void testBucketAssign() throws Exception {
         innerTestBucketAssign(false);
     }
 
     @Test
-    public void testEnableTtl() throws Exception {
+    void testEnableTtl() throws Exception {
         innerTestBucketAssign(true);
     }
 
@@ -124,7 +124,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     @Test
-    public void testUpsert() throws Exception {
+    void testUpsert() throws Exception {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
         List<Pair<InternalRow, Integer>> output = new ArrayList<>();
         assigner.open(0, ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
@@ -164,7 +164,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     @Test
-    public void testUseOldPartition() throws Exception {
+    void testUseOldPartition() throws Exception {
         MergeEngine mergeEngine =
                 ThreadLocalRandom.current().nextBoolean()
                         ? MergeEngine.PARTIAL_UPDATE
@@ -192,7 +192,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     @Test
-    public void testFirstRow() throws Exception {
+    void testFirstRow() throws Exception {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.FIRST_ROW);
         List<Pair<InternalRow, Integer>> output = new ArrayList<>();
         assigner.open(0, ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
@@ -214,7 +214,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     @Test
-    public void testBootstrapRecords() throws Exception {
+    void testBootstrapRecords() throws Exception {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
         List<List<Integer>> output = new ArrayList<>();
         assigner.open(
@@ -245,7 +245,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     @Test
-    public void testBootstrapWithTTL() throws Exception {
+    void testBootstrapWithTTL() throws Exception {
         // enableTtl is true
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE, true);
         List<List<Integer>> output = new ArrayList<>();

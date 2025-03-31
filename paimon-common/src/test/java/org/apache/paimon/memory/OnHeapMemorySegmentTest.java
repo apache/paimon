@@ -41,7 +41,7 @@ public class OnHeapMemorySegmentTest extends MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testHeapSegmentSpecifics() {
+    void testHeapSegmentSpecifics() {
         final byte[] buffer = new byte[411];
         MemorySegment seg = MemorySegment.wrap(buffer);
 
@@ -60,7 +60,7 @@ public class OnHeapMemorySegmentTest extends MemorySegmentTestBase {
     }
 
     @TestTemplate
-    public void testReadOnlyByteBufferPut() {
+    void testReadOnlyByteBufferPut() {
         final byte[] buffer = new byte[100];
         MemorySegment seg = MemorySegment.wrap(buffer);
 

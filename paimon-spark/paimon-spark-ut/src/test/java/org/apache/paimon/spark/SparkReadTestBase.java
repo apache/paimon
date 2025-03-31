@@ -89,7 +89,7 @@ public abstract class SparkReadTestBase {
     }
 
     @BeforeEach
-    public void beforeEach() throws Exception {
+    void beforeEach() throws Exception {
 
         // Paimon sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
@@ -123,7 +123,7 @@ public abstract class SparkReadTestBase {
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         List<Row> tables = spark.sql("show tables").collectAsList();
         tables.forEach(
                 table -> spark.sql("DROP TABLE " + table.getString(0) + "." + table.getString(1)));

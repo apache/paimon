@@ -64,7 +64,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     }
 
     @Test
-    public void testWriteAndRead() {
+    void testWriteAndRead() {
         batchSql(
                 String.format(
                         "INSERT INTO %s.%s VALUES ('1', 11), ('2', 22)",
@@ -74,7 +74,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     }
 
     @Test
-    public void testExpiredDataToken() {
+    void testExpiredDataToken() {
         Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
         RESTToken expiredDataToken =
                 new RESTToken(

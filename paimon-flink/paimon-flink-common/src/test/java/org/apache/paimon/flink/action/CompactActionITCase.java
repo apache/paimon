@@ -50,11 +50,11 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactAction}. */
-public class CompactActionITCase extends CompactActionITCaseBase {
+class CompactActionITCase extends CompactActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testBatchCompact() throws Exception {
+    void testBatchCompact() throws Exception {
         FileStoreTable table =
                 prepareTable(
                         Arrays.asList("dt", "hh"),
@@ -92,7 +92,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    public void testStreamingCompact() throws Exception {
+    void testStreamingCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
         tableOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
@@ -164,7 +164,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     @ParameterizedTest(name = "mode = {0}")
     @ValueSource(booleans = {true, false})
     @Timeout(60)
-    public void testHistoryPartitionCompact(boolean mode) throws Exception {
+    void testHistoryPartitionCompact(boolean mode) throws Exception {
         String partitionIdleTime = "5s";
         FileStoreTable table;
         if (mode) {
@@ -235,7 +235,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    public void testUnawareBucketStreamingCompact() throws Exception {
+    void testUnawareBucketStreamingCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
@@ -278,7 +278,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    public void testUnawareBucketBatchCompact() throws Exception {
+    void testUnawareBucketBatchCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
         tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
@@ -312,7 +312,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    public void testTableConf() throws Exception {
+    void testTableConf() throws Exception {
         prepareTable(
                 Arrays.asList("dt", "hh"),
                 Arrays.asList("dt", "hh", "k"),
@@ -337,7 +337,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    public void testSpecifyNonPartitionField() throws Exception {
+    void testSpecifyNonPartitionField() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
@@ -360,7 +360,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
-    public void testWrongUsage() throws Exception {
+    void testWrongUsage() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");

@@ -47,7 +47,7 @@ class AppendDeletionFileMaintainerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void test() throws Exception {
+    void test() throws Exception {
         TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
 
         Map<String, List<Integer>> dvs = new HashMap<>();

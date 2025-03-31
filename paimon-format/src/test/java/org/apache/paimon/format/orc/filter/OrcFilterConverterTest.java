@@ -61,10 +61,10 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit Tests for {@link org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor}. */
-public class OrcFilterConverterTest {
+class OrcFilterConverterTest {
 
     @Test
-    public void testApplyCompoundPredicate() {
+    void testApplyCompoundPredicate() {
 
         PredicateBuilder builder =
                 new PredicateBuilder(
@@ -124,7 +124,7 @@ public class OrcFilterConverterTest {
 
     @ParameterizedTest
     @MethodSource("dataTypeProvider")
-    public void testApplyPredicate(Tuple4 tuple4) {
+    void testApplyPredicate(Tuple4 tuple4) {
         PredicateBuilder builder =
                 new PredicateBuilder(
                         new RowType(

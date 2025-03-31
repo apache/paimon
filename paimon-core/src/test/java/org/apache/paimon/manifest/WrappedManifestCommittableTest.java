@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class WrappedManifestCommittableTest {
 
     @Test
-    public void testEquals() {
+    void testEquals() {
         ManifestCommittable committable1 = create();
         ManifestCommittable committable2 = create();
 

@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class LocalZoneTimestampTest {
 
     @Test
-    public void testNormal() {
+    void testNormal() {
         // From long to TimestampData and vice versa
         assertThat(LocalZoneTimestamp.fromEpochMillis(1123L).getMillisecond()).isEqualTo(1123L);
         assertThat(LocalZoneTimestamp.fromEpochMillis(-1123L).getMillisecond()).isEqualTo(-1123L);
@@ -73,7 +73,7 @@ public class LocalZoneTimestampTest {
     }
 
     @Test
-    public void testDaylightSavingTime() {
+    void testDaylightSavingTime() {
         TimeZone tz = TimeZone.getDefault();
         TimeZone.setDefault(TimeZone.getTimeZone("America/Los_Angeles"));
 
@@ -89,7 +89,7 @@ public class LocalZoneTimestampTest {
     }
 
     @Test
-    public void testToString() {
+    void testToString() {
 
         java.sql.Timestamp t = java.sql.Timestamp.valueOf("1969-01-02 00:00:00.123456789");
         assertThat(LocalZoneTimestamp.fromSQLTimestamp(t).toString())
@@ -108,7 +108,7 @@ public class LocalZoneTimestampTest {
     }
 
     @Test
-    public void testToMicros() {
+    void testToMicros() {
         java.sql.Timestamp t = java.sql.Timestamp.valueOf("2005-01-02 00:00:00.123456789");
         assertThat(LocalZoneTimestamp.fromSQLTimestamp(t).toString())
                 .isEqualTo("2005-01-02T00:00:00.123456789");

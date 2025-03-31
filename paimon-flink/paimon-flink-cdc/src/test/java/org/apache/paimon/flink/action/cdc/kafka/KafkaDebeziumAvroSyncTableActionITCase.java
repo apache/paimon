@@ -90,7 +90,7 @@ public class KafkaDebeziumAvroSyncTableActionITCase extends KafkaActionITCaseBas
 
     @Test
     @Timeout(60)
-    public void testAllTypes() throws Exception {
+    void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
         for (int i = 0; i < 2; i++) {

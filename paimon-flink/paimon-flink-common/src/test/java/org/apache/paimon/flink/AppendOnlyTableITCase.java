@@ -48,7 +48,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     @TempDir Path tempExternalPath2;
 
     @Test
-    public void testCreateUnawareBucketTableWithBucketKey() {
+    void testCreateUnawareBucketTableWithBucketKey() {
         assertThatThrownBy(
                         () ->
                                 batchSql(
@@ -60,7 +60,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateUnawareBucketTableWithFullCompaction() {
+    void testCreateUnawareBucketTableWithFullCompaction() {
         assertThatThrownBy(
                         () ->
                                 batchSql(
@@ -72,12 +72,12 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadEmpty() {
+    void testReadEmpty() {
         assertThat(batchSql("SELECT * FROM append_table")).isEmpty();
     }
 
     @Test
-    public void testReadWrite() {
+    void testReadWrite() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
@@ -94,7 +94,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadWriteWithExternalPathRoundRobinStrategy1() {
+    void testReadWriteWithExternalPathRoundRobinStrategy1() {
         String externalPaths =
                 TraceableFileIO.SCHEME
                         + "://"
@@ -138,7 +138,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadWriteWithExternalPathRoundRobinStrategy2() {
+    void testReadWriteWithExternalPathRoundRobinStrategy2() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
         List<Row> rows = batchSql("SELECT * FROM append_table");
         assertThat(rows.size()).isEqualTo(2);
@@ -182,7 +182,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadWriteWithExternalPathSpecificFSStrategy() {
+    void testReadWriteWithExternalPathSpecificFSStrategy() {
         String externalPaths = TraceableFileIO.SCHEME + "://" + tempExternalPath1.toString();
         batchSql(
                 "ALTER TABLE append_table SET ('data-file.external-paths' = '"
@@ -221,7 +221,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadWriteWithExternalPathNoneStrategy() {
+    void testReadWriteWithExternalPathNoneStrategy() {
         String externalPaths = TraceableFileIO.SCHEME + "://" + tempExternalPath1.toString();
         batchSql(
                 "ALTER TABLE append_table SET ('data-file.external-paths' = '"
@@ -257,7 +257,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadUnwareBucketTableWithRebalanceShuffle() throws Exception {
+    void testReadUnwareBucketTableWithRebalanceShuffle() throws Exception {
         batchSql(
                 "CREATE TABLE append_scalable_table (id INT, data STRING) "
                         + "WITH ('bucket' = '-1', 'consumer-id' = 'test', 'consumer.expiration-time' = '365 d', 'target-file-size' = '1 B', 'source.split.target-size' = '1 B', 'scan.parallelism' = '4')");
@@ -273,7 +273,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadPartitionOrder() {
+    void testReadPartitionOrder() {
         setParallelism(1);
         batchSql("INSERT INTO part_table VALUES (1, 'AAA', 'part-1')");
         batchSql("INSERT INTO part_table VALUES (2, 'BBB', 'part-2')");
@@ -287,7 +287,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSkipDedup() {
+    void testSkipDedup() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (1, 'AAA'), (2, 'BBB'), (3, 'BBB')");
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
@@ -308,7 +308,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIngestFromSource() {
+    void testIngestFromSource() {
         List<Row> input =
                 Arrays.asList(
                         Row.ofKind(RowKind.INSERT, 1, "AAA"),
@@ -341,7 +341,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAutoCompaction() {
+    void testAutoCompaction() {
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
 
@@ -397,28 +397,28 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRejectDelete() {
+    void testRejectDelete() {
         testRejectChanges(RowKind.DELETE);
     }
 
     @Test
-    public void testRejectUpdateBefore() {
+    void testRejectUpdateBefore() {
         testRejectChanges(RowKind.UPDATE_BEFORE);
     }
 
     @Test
-    public void testRejectUpdateAfter() {
+    void testRejectUpdateAfter() {
         testRejectChanges(RowKind.UPDATE_BEFORE);
     }
 
     @Test
-    public void testComplexType() {
+    void testComplexType() {
         batchSql("INSERT INTO complex_table VALUES (1, CAST(NULL AS MAP<INT, INT>))");
         assertThat(batchSql("SELECT * FROM complex_table")).containsExactly(Row.of(1, null));
     }
 
     @Test
-    public void testNestedTypeDDL() {
+    void testNestedTypeDDL() {
         assertThrows(
                 RuntimeException.class,
                 () ->
@@ -428,7 +428,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTimestampLzType() {
+    void testTimestampLzType() {
         sql("CREATE TABLE t_table (id INT, data TIMESTAMP_LTZ(3))");
         batchSql("INSERT INTO t_table VALUES (1, TIMESTAMP '2023-02-03 20:20:20')");
         assertThat(batchSql("SELECT * FROM t_table"))
@@ -441,7 +441,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDynamicOptions() throws Exception {
+    void testDynamicOptions() throws Exception {
         sql("CREATE TABLE T (id INT)");
         batchSql("INSERT INTO T VALUES (1)");
         sEnv.getConfig()
@@ -460,7 +460,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadWriteBranch() throws Exception {
+    void testReadWriteBranch() throws Exception {
         // create table
         sql("CREATE TABLE T (id INT)");
         // insert data
@@ -476,7 +476,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBranchNotExist() throws Exception {
+    void testBranchNotExist() throws Exception {
         // create table
         sql("CREATE TABLE T (id INT)");
         // insert data

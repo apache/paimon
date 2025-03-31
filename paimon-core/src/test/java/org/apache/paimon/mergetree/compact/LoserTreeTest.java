@@ -42,14 +42,14 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link LoserTree}. */
-public class LoserTreeTest {
+class LoserTreeTest {
     private static final Comparator<KeyValue> KEY_COMPARATOR =
             Comparator.<KeyValue>comparingInt(o -> o.key().getInt(0)).reversed();
     private static final Comparator<KeyValue> SEQUENCE_COMPARATOR =
             Comparator.comparingLong(KeyValue::sequenceNumber).reversed();
 
     @RepeatedTest(100)
-    public void testLoserTreeIsOrdered() throws IOException {
+    void testLoserTreeIsOrdered() throws IOException {
         List<ReusingTestData> reusingTestData = new ArrayList<>();
         List<RecordReader<KeyValue>> sortedTestReaders =
                 createSortedTestReaders(reusingTestData, 0, () -> Function::identity);
@@ -68,7 +68,7 @@ public class LoserTreeTest {
     }
 
     @RepeatedTest(100)
-    public void testLoserTreeCloseNormally() {
+    void testLoserTreeCloseNormally() {
         List<RecordReader<KeyValue>> sortedTestReaders =
                 createSortedTestReaders(
                         new ArrayList<>(),

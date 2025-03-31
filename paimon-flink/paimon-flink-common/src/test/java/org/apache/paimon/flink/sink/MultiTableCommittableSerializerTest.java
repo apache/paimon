@@ -45,7 +45,7 @@ class MultiTableCommittableSerializerTest {
             new MultiTableCommittableSerializer(fileSerializer);
 
     @Test
-    public void testDeserialize() {
+    void testDeserialize() {
         DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
@@ -78,7 +78,7 @@ class MultiTableCommittableSerializerTest {
     }
 
     @Test
-    public void testSerialize() {
+    void testSerialize() {
         DataIncrement newFilesIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =

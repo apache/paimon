@@ -50,10 +50,10 @@ import static org.apache.paimon.spark.SparkTypeTest.ALL_TYPES;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkInternalRow}. */
-public class SparkInternalRowTest {
+class SparkInternalRowTest {
 
     @Test
-    public void test() {
+    void test() {
         TimeZone tz = TimeZone.getDefault();
         TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
         InternalRow rowData =

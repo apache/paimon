@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
 
     @Test
-    public void testCompactDatabaseAndTable() {
+    void testCompactDatabaseAndTable() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -83,7 +83,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testUserPrivileges() throws Exception {
+    void testUserPrivileges() throws Exception {
         sql(
                 String.format(
                         "CREATE CATALOG mycat WITH (\n"
@@ -240,7 +240,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExpirePartitionsProcedure() throws Exception {
+    void testExpirePartitionsProcedure() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -269,7 +269,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateDeleteTag() {
+    void testCreateDeleteTag() {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -305,7 +305,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateDeleteAndForwardBranch() throws Exception {
+    void testCreateDeleteAndForwardBranch() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " pt INT"
@@ -355,7 +355,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionMarkDone() {
+    void testPartitionMarkDone() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -372,7 +372,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMergeInto() {
+    void testMergeInto() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -402,7 +402,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testMigrateProcedures() {
+    void testMigrateProcedures() {
         sql(
                 "CREATE TABLE S ("
                         + " k INT,"
@@ -421,7 +421,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testQueryService() {
+    void testQueryService() {
         sql(
                 "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
         assertThatCode(
@@ -434,7 +434,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRemoveOrphanFiles() {
+    void testRemoveOrphanFiles() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -450,7 +450,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRepair() {
+    void testRepair() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -466,7 +466,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testResetConsumer() {
+    void testResetConsumer() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -482,7 +482,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRewriteFileIndex() {
+    void testRewriteFileIndex() {
         sql(
                 "CREATE TABLE T ("
                         + " k INT,"
@@ -498,7 +498,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExpireTags() throws Exception {
+    void testExpireTags() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -525,7 +525,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReplaceTags() throws Exception {
+    void testReplaceTags() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " id INT,"
