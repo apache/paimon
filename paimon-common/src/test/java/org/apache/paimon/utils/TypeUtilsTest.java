@@ -197,7 +197,7 @@ class TypeUtilsTest {
     }
 
     @Test
-    void testFloatCastFromString() {
+    public void testFloatCastFromString() {
         String[] values = {"123.456", "0.00042", "1.00001"};
         Float[] expected = {123.456f, 0.00042f, 1.00001f};
         for (int i = 0; i < values.length; i++) {
