@@ -34,12 +34,39 @@
         <fs.azure.sdk.version>3.3.4</fs.azure.sdk.version>
         <fs.azure.api.version>1.16.0</fs.azure.api.version>
     </properties>
+    <dependencyManagement>
+        <dependencies>
+            <!-- Override the parent dependencyManagement definition for hadoop-common to ensure
+                ${fs.hadoopshaded.version} is used for this file system -->
+            <dependency>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-common</artifactId>
+                <version>${fs.hadoopshaded.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>ch.qos.reload4j</groupId>
+                        <artifactId>reload4j</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>org.slf4j</groupId>
+                        <artifactId>slf4j-reload4j</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>jdk.tools</groupId>
+                        <artifactId>jdk.tools</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+
+            <dependency>
+                <!-- Bumped for security purposes -->
+                <groupId>commons-beanutils</groupId>
+                <artifactId>commons-beanutils</artifactId>
+                <version>${commons.beanutils.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
     <dependencies>
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-hadoop-shaded</artifactId>
-            <version>${project.version}</version>
-        </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
@@ -53,16 +80,16 @@
             <version>${fs.hadoopshaded.version}</version>
             <exclusions>
                 <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                </exclusion>
+                <exclusion>
                     <groupId>ch.qos.reload4j</groupId>
                     <artifactId>reload4j</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>hadoop-shaded-guava</artifactId>
-                    <groupId>org.apache.hadoop.thirdparty</groupId>
                 </exclusion>
             </exclusions>
         </dependency>
