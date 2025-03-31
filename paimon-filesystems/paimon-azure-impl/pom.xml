@@ -57,6 +57,10 @@
                     <artifactId>hadoop-common</artifactId>
                 </exclusion>
                 <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-shaded-guava</artifactId>
+                </exclusion>
+                <exclusion>
                     <groupId>ch.qos.reload4j</groupId>
                     <artifactId>reload4j</artifactId>
                 </exclusion>
