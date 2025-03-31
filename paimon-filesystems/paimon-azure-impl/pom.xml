@@ -196,6 +196,10 @@
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop.thirdparty</groupId>
+                    <artifactId>hadoop-shaded-guava</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -220,14 +224,14 @@
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
                 </exclusion>
-                <exclusion>
+            <!--    <exclusion>
                     <groupId>org.apache.hadoop.thirdparty</groupId>
                     <artifactId>hadoop-shaded-guava</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>org.apache.hadoop.thirdparty</groupId>
                     <artifactId>hadoop-shaded-protobuf_3_7</artifactId>
-                </exclusion>
+                </exclusion>-->
             </exclusions>
         </dependency>
         <dependency>
