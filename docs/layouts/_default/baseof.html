@@ -21,7 +21,9 @@ under the License.
 
 <head>
   {{ hugo.Generator }}
-  {{ partial "docs/html-head" . }}
+  {{ if not .Params.redocPage }}
+    {{ partial "docs/html-head" . }}
+  {{end}}
   {{ partial "docs/inject/head" . }}
   <!-- Matomo -->
   <script>
@@ -45,17 +47,23 @@ under the License.
 </head>
 
 <body dir={{ .Site.Language.LanguageDirection }}>
-  <input type="checkbox" class="hidden toggle" id="menu-control" />
-  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  {{ if not .Params.redocPage }}
+    <input type="checkbox" class="hidden toggle" id="menu-control" />
+    <input type="checkbox" class="hidden toggle" id="toc-control" />
+  {{end}}
   <main class="container flex">
-    <aside class="book-menu">
-      {{ template "menu" . }} <!-- Left menu Content -->
-    </aside>
+    {{ if not .Params.redocPage }}
+      <aside class="book-menu">
+        {{ template "menu" . }} <!-- Left menu Content -->
+      </aside>
+    {{end}}
 
     <div class="book-page">
-      <header class="book-header">
-        {{ template "header" . }} <!-- Mobile layout header -->
-      </header>
+      {{ if not .Params.redocPage }}
+        <header class="book-header">
+          {{ template "header" . }} <!-- Mobile layout header -->
+        </header>
+      {{end}}
 
       {{ partial "docs/inject/content-before" . }}
       {{ template "main" . }} <!-- Page Content -->
