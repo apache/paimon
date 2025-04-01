@@ -25,6 +25,8 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.FieldIdentifier;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -33,8 +35,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * A {@link ProcessFunction} to handle schema changes. New schema is represented by a {@link
@@ -50,6 +55,8 @@ public class MultiTableUpdatedDataFieldsProcessFunction
             LoggerFactory.getLogger(MultiTableUpdatedDataFieldsProcessFunction.class);
 
     private final Map<Identifier, SchemaManager> schemaManagers = new HashMap<>();
+
+    private final Map<Identifier, Set<FieldIdentifier>> latestFieldsMap = new HashMap<>();
 
     public MultiTableUpdatedDataFieldsProcessFunction(
             CatalogLoader catalogLoader, TypeMapping typeMapping) {
@@ -73,14 +80,34 @@ public class MultiTableUpdatedDataFieldsProcessFunction
                             }
                             return new SchemaManager(table.fileIO(), table.location());
                         });
-
         if (Objects.isNull(schemaManager)) {
             LOG.error("Failed to get schema manager for table " + tableId);
-        } else {
-            for (SchemaChange schemaChange :
-                    extractSchemaChanges(schemaManager, updatedSchema.f1)) {
-                applySchemaChange(schemaManager, schemaChange, tableId);
-            }
+            return;
         }
+
+        Set<FieldIdentifier> latestFields =
+                latestFieldsMap.computeIfAbsent(tableId, id -> new HashSet<>());
+        List<DataField> actualUpdatedDataFields =
+                actualUpdatedDataFields(updatedSchema.f1.fields(), latestFields);
+
+        if (actualUpdatedDataFields.isEmpty() && updatedSchema.f1.comment() == null) {
+            return;
+        }
+
+        CdcSchema actualUpdatedSchema =
+                new CdcSchema(
+                        actualUpdatedDataFields,
+                        updatedSchema.f1.primaryKeys(),
+                        updatedSchema.f1.comment());
+
+        for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, actualUpdatedSchema)) {
+            applySchemaChange(schemaManager, schemaChange, tableId);
+        }
+        /*
+         * Here, actualUpdatedDataFields cannot be used to update latestFields because there is a
+         * non-SchemaChange.AddColumn scenario. Otherwise, the previously existing fields cannot be
+         * modified again.
+         */
+        latestFieldsMap.put(tableId, updateLatestFields(schemaManager));
     }
 }

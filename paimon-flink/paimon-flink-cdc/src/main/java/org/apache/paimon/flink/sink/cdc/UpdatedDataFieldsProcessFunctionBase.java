@@ -29,6 +29,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.FieldIdentifier;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -44,6 +45,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Base class for update data fields process function. */
 public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends ProcessFunction<I, O> {
@@ -278,6 +281,20 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             result.add(SchemaChange.updateComment(updatedSchema.comment()));
         }
         return result;
+    }
+
+    protected List<DataField> actualUpdatedDataFields(
+            List<DataField> newFields, Set<FieldIdentifier> latestFields) {
+        return newFields.stream()
+                .filter(dataField -> !latestFields.contains(new FieldIdentifier(dataField)))
+                .collect(Collectors.toList());
+    }
+
+    protected Set<FieldIdentifier> updateLatestFields(SchemaManager schemaManager) {
+        RowType oldRowType = schemaManager.latest().get().logicalRowType();
+        return oldRowType.getFields().stream()
+                .map(FieldIdentifier::new)
+                .collect(Collectors.toSet());
     }
 
     @Override
