@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
@@ -44,6 +45,9 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -59,6 +63,8 @@ import java.util.stream.Collectors;
  * branch does not have a partition, it will read that partition from the fallback branch.
  */
 public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FallbackReadFileStoreTable.class);
 
     private final FileStoreTable fallback;
 
@@ -397,10 +403,17 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             DataSplit dataSplit = (DataSplit) split;
             if (!dataSplit.dataFiles().isEmpty()
                     && dataSplit.dataFiles().get(0).minKey().getFieldCount() > 0) {
-                return fallbackRead.createReader(split);
-            } else {
-                return mainRead.createReader(split);
+                try {
+                    return fallbackRead.createReader(split);
+                } catch (Exception ignored) {
+                    LOG.error(
+                            "Reading from fallback branch has problems for files: {}",
+                            dataSplit.dataFiles().stream()
+                                    .map(DataFileMeta::fileName)
+                                    .collect(Collectors.joining(", ")));
+                }
             }
+            return mainRead.createReader(split);
         }
     }
 }
