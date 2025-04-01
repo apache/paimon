@@ -21,7 +21,11 @@ under the License.
 
 <head>
   {{ hugo.Generator }}
-  {{ if not .Params.redocPage }}
+  {{ if .Params.redocPage }}
+    <meta charset="UTF-8">
+    <title>{{ partial "docs/title" . }} | {{ .Site.Title -}}</title>
+    <link rel="icon" href="{{ "favicon.png" | relURL }}" type="image/x-icon">
+  {{else}}
     {{ partial "docs/html-head" . }}
   {{end}}
   {{ partial "docs/inject/head" . }}
