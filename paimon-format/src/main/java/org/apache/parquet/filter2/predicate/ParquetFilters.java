@@ -27,6 +27,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
@@ -48,7 +49,9 @@ import org.apache.paimon.types.VariantType;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.io.api.Binary;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** Convert {@link Predicate} to {@link FilterCompat.Filter}. */
 public class ParquetFilters {
@@ -74,6 +77,12 @@ public class ParquetFilters {
         }
 
         return result != null ? FilterCompat.get(result) : FilterCompat.NOOP;
+    }
+
+    public static List<DataField> getFilterFields(List<Predicate> predicates) {
+        return predicates.stream()
+                .flatMap(p -> p.visit(FilterFieldsVisitor.INSTANCE).stream())
+                .collect(Collectors.toList());
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -307,6 +316,87 @@ public class ParquetFilters {
         @Override
         public Operators.Column<?> visit(RowType rowType) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    /** To get fields in filter. */
+    private static class FilterFieldsVisitor implements FunctionVisitor<List<DataField>> {
+
+        public static final FilterFieldsVisitor INSTANCE = new FilterFieldsVisitor();
+
+        @Override
+        public List<DataField> visitIsNotNull(FieldRef fieldRef) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitIsNull(FieldRef fieldRef) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitStartsWith(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitEndsWith(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitContains(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitLessThan(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitNotEqual(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitLessOrEqual(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitEqual(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitGreaterThan(FieldRef fieldRef, Object literal) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitIn(FieldRef fieldRef, List<Object> literals) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitNotIn(FieldRef fieldRef, List<Object> literals) {
+            return Collections.singletonList(new DataField(-1, fieldRef.name(), fieldRef.type()));
+        }
+
+        @Override
+        public List<DataField> visitAnd(List<List<DataField>> children) {
+            return children.stream().flatMap(List::stream).collect(Collectors.toList());
+        }
+
+        @Override
+        public List<DataField> visitOr(List<List<DataField>> children) {
+            return children.stream().flatMap(List::stream).collect(Collectors.toList());
         }
     }
 }
