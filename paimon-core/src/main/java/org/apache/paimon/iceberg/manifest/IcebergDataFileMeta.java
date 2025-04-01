@@ -218,7 +218,7 @@ public class IcebergDataFileMeta {
         fields.add(new DataField(134, "content", DataTypes.INT().notNull()));
         fields.add(new DataField(100, "file_path", DataTypes.STRING().notNull()));
         fields.add(new DataField(101, "file_format", DataTypes.STRING().notNull()));
-        fields.add(new DataField(102, "partition", partitionType));
+        fields.add(new DataField(102, "partition", partitionType.notNull()));
         fields.add(new DataField(103, "record_count", DataTypes.BIGINT().notNull()));
         fields.add(new DataField(104, "file_size_in_bytes", DataTypes.BIGINT().notNull()));
         fields.add(
