@@ -242,6 +242,7 @@ SELECT * FROM test_table;
 SELECT COUNT(1) FROM test_table;
 ```
 
+
 {{< /tab >}}
 {{< tab "Trino" >}}
 
@@ -415,6 +416,99 @@ CREATE CATALOG my_catalog WITH (
     'fs.gs.auth.type' = 'SERVICE_ACCOUNT_JSON_KEYFILE',
     'fs.gs.auth.service.account.json.keyfile' = '/path/to/service-account-.json'
 );
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+## Microsoft Azure Storage
+
+{{< stable >}}
+
+Download [paimon-azure-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-gs/{{< version >}}/paimon-gs-{{< version >}}.jar).
+
+{{< /stable >}}
+
+{{< unstable >}}
+
+Download [paimon-gs-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-gs/{{< version >}}/).
+
+{{< /unstable >}}
+
+{{< tabs "gs" >}}
+
+{{< tab "Flink" >}}
+
+{{< hint info >}}
+If you have already configured [oss access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/gcs/) (Via Flink FileSystem),
+here you can skip the following configuration.
+{{< /hint >}}
+
+Put `paimon-gs-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
+
+```sql
+CREATE CATALOG my_catalog WITH (
+    'type' = 'paimon',
+    'warehouse' = 'oss://<bucket>/<path>',
+    'fs.gs.auth.type' = 'SERVICE_ACCOUNT_JSON_KEYFILE',
+    'fs.gs.auth.service.account.json.keyfile' = '/path/to/service-account-.json'
+);
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+
+## Microsoft Azure Storage
+
+{{< stable >}}
+
+Download [paimon-azure-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-azure/{{< version >}}/paimon-azure-{{< version >}}.jar).
+
+{{< /stable >}}
+
+{{< unstable >}}
+
+Download [paimon-azure-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-azure/{{< version >}}/).
+
+{{< /unstable >}}
+
+{{< tabs "azure" >}}
+
+{{< tab "Flink" >}}
+
+{{< hint info >}}
+If you have already configured [azure access through Flink](https://nightlies.apache.org/flink/flink-docs-release-2.0/docs/deployment/filesystems/azure/) (Via Flink FileSystem),
+here you can skip the following configuration.
+{{< /hint >}}
+
+Put `paimon-azure-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
+
+```sql
+CREATE CATALOG my_catalog WITH (
+   'type' = 'paimon',
+   'warehouse' = 'wasb://,<container>@<account>.blob.core.windows.net/<path>',
+   'fs.azure.account.key.Account.blob.core.windows.net' = 'yyy'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+
+{{< hint info >}}
+If you have already configured azure access through Spark (Via Hadoop FileSystem), here you can skip the following configuration.
+{{< /hint >}}
+
+Place `paimon-azure-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
+
+```shell
+spark-sql \
+  --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+  --conf spark.sql.catalog.paimon.warehouse=wasb://,<container>@<account>.blob.core.windows.net/<path> \
+  --conf fs.azure.account.key.Account.blob.core.windows.net=yyy \
 ```
 
 {{< /tab >}}

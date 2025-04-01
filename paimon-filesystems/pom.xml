@@ -42,6 +42,8 @@
         <module>paimon-jindo</module>
         <module>paimon-gs</module>
         <module>paimon-gs-impl</module>
+        <module>paimon-azure</module>
+        <module>paimon-azure-impl</module>
     </modules>
 
     <properties>
