@@ -49,6 +49,8 @@ import org.apache.paimon.types.VariantType;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.io.api.Binary;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -79,10 +81,12 @@ public class ParquetFilters {
         return result != null ? FilterCompat.get(result) : FilterCompat.NOOP;
     }
 
-    public static List<DataField> getFilterFields(List<Predicate> predicates) {
-        return predicates.stream()
-                .flatMap(p -> p.visit(FilterFieldsVisitor.INSTANCE).stream())
-                .collect(Collectors.toList());
+    public static List<DataField> getFilterFields(@Nullable List<Predicate> predicates) {
+        return predicates == null
+                ? Collections.emptyList()
+                : predicates.stream()
+                        .flatMap(p -> p.visit(FilterFieldsVisitor.INSTANCE).stream())
+                        .collect(Collectors.toList());
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
