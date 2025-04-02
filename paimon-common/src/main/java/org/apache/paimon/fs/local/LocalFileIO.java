@@ -381,5 +381,10 @@ public class LocalFileIO implements FileIO {
         public long getModificationTime() {
             return file.lastModified();
         }
+
+        @Override
+        public String toString() {
+            return "{" + "file=" + file + ", length=" + length + ", scheme='" + scheme + '\'' + '}';
+        }
     }
 }

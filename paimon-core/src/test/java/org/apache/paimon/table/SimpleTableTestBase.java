@@ -79,9 +79,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -793,10 +790,8 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        List<java.nio.file.Path> files =
-                Files.walk(new File(table.location().toUri().getPath()).toPath())
-                        .collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(14);
+        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
+        assertThat(files).hasSize(8);
     }
 
     // All tags are after the rollback snapshot
@@ -819,25 +814,16 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        List<java.nio.file.Path> files =
-                Files.walk(new File(table.location().toUri().getPath()).toPath())
-                        .collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(15);
-        // table-path
-        // table-path/snapshot
+        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
+        assertThat(files).hasSize(8);
         // table-path/snapshot/LATEST
         // table-path/snapshot/EARLIEST
         // table-path/snapshot/snapshot-1
-        // table-path/pt=0
-        // table-path/pt=0/bucket-0
         // table-path/pt=0/bucket-0/data-0.orc
-        // table-path/manifest
         // table-path/manifest/manifest-list-1
         // table-path/manifest/manifest-0
         // table-path/manifest/manifest-list-0
-        // table-path/schema
         // table-path/schema/schema-0
-        // table-path/tag
     }
 
     // One tag is at the rollback snapshot and others are after it
@@ -871,10 +857,8 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        List<java.nio.file.Path> files =
-                Files.walk(new File(table.location().toUri().getPath()).toPath())
-                        .collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(16);
+        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
+        assertThat(files).hasSize(9);
         // case 0 plus 1:
         // table-path/tag/tag-test3
     }
@@ -912,17 +896,14 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        List<java.nio.file.Path> files =
-                Files.walk(new File(table.location().toUri().getPath()).toPath())
-                        .collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(23);
-        // case 0 plus 7:
+        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
+        assertThat(files).hasSize(14);
+        // case 0 plus 6:
         // table-path/manifest/manifest-list-2
         // table-path/manifest/manifest-list-3
         // table-path/manifest/manifest-1
         // table-path/snapshot/snapshot-2
-        // table-path/pt=1
-        // table-path/pt=1/bucket-0
+        // table-path/tag/tag-test3
         // table-path/pt=1/bucket-0/data-0.orc
     }
 
@@ -968,10 +949,8 @@ public abstract class SimpleTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
-        List<java.nio.file.Path> files =
-                Files.walk(new File(table.location().toUri().getPath()).toPath())
-                        .collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(16);
+        FileStatus[] files = table.fileIO().listFiles(table.location(), true);
+        assertThat(files).hasSize(9);
         // rollback snapshot case 0 plus 1:
         // table-path/tag/tag-test1
     }
@@ -1432,13 +1411,18 @@ public abstract class SimpleTableTestBase {
                         store.manifestFileFactory().create());
 
         List<Path> unusedFileList =
-                Files.walk(Paths.get(tempDir.toString()))
-                        .filter(Files::isRegularFile)
-                        .filter(p -> !p.getFileName().toString().startsWith("snapshot"))
-                        .filter(p -> !p.getFileName().toString().startsWith("schema"))
-                        .filter(p -> !p.getFileName().toString().equals(LATEST))
-                        .filter(p -> !p.getFileName().toString().equals(EARLIEST))
-                        .map(p -> new Path(TraceableFileIO.SCHEME + "://" + p.toString()))
+                Arrays.stream(table.fileIO().listFiles(table.location(), true))
+                        .map(FileStatus::getPath)
+                        .filter(p -> !p.getName().startsWith("snapshot"))
+                        .filter(p -> !p.getName().startsWith("schema"))
+                        .filter(p -> !p.getName().equals(LATEST))
+                        .filter(p -> !p.getName().equals(EARLIEST))
+                        .map(
+                                p ->
+                                        new Path(
+                                                TraceableFileIO.SCHEME
+                                                        + ":"
+                                                        + p.toString().replace("file:", "")))
                         .filter(p -> !filesInUse.contains(p))
                         .collect(Collectors.toList());
 

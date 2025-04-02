@@ -154,22 +154,18 @@ public interface FileIO extends Serializable, Closeable {
             }
 
             private void maybeUnpackDirectory() throws IOException {
-                if (!files.isEmpty()) {
-                    return;
-                }
-                if (directories.isEmpty()) {
-                    return;
-                }
-                FileStatus[] statuses = listStatus(directories.remove());
-                for (FileStatus f : statuses) {
-                    if (!f.isDir()) {
-                        files.add(f);
-                        continue;
+                while (files.isEmpty() && !directories.isEmpty()) {
+                    FileStatus[] statuses = listStatus(directories.remove());
+                    for (FileStatus f : statuses) {
+                        if (!f.isDir()) {
+                            files.add(f);
+                            continue;
+                        }
+                        if (!recursive) {
+                            continue;
+                        }
+                        directories.add(f.getPath());
                     }
-                    if (!recursive) {
-                        continue;
-                    }
-                    directories.add(f.getPath());
                 }
             }
 
