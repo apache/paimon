@@ -440,7 +440,23 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public TableCommitImpl newCommit(String commitUser) {
         CoreOptions options = coreOptions();
+        return new TableCommitImpl(
+                store().newCommit(commitUser, this),
+                newExpireRunnable(),
+                options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
+                options.writeOnly() ? null : store().newTagCreationManager(),
+                CoreOptions.fromMap(options()).consumerExpireTime(),
+                new ConsumerManager(fileIO, path, snapshotManager().branch()),
+                options.snapshotExpireExecutionMode(),
+                name(),
+                options.forceCreatingSnapshot());
+    }
+
+    @Nullable
+    protected Runnable newExpireRunnable() {
+        CoreOptions options = coreOptions();
         Runnable snapshotExpire = null;
+
         if (!options.writeOnly()) {
             boolean changelogDecoupled = options.changelogLifecycleDecoupled();
             ExpireConfig expireConfig = options.expireConfig();
@@ -455,16 +471,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                     };
         }
 
-        return new TableCommitImpl(
-                store().newCommit(commitUser, this),
-                snapshotExpire,
-                options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
-                options.writeOnly() ? null : store().newTagCreationManager(),
-                CoreOptions.fromMap(options()).consumerExpireTime(),
-                new ConsumerManager(fileIO, path, snapshotManager().branch()),
-                options.snapshotExpireExecutionMode(),
-                name(),
-                options.forceCreatingSnapshot());
+        return snapshotExpire;
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
