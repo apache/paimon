@@ -461,7 +461,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
             key("postpone.default-bucket-num")
                     .intType()
-                    .defaultValue(4)
+                    .defaultValue(1)
                     .withDescription(
                             "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 

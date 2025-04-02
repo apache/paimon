@@ -388,6 +388,43 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         collect(client, it, 400 - 2);
     }
 
+    @Test
+    public void testPostponeWriteNotExpireSnapshots() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'snapshot.num-retained.min' = '3',\n"
+                        + "  'snapshot.num-retained.max' = '3'\n"
+                        + ")");
+
+        for (int i = 0; i < 5; i++) {
+            tEnv.executeSql(String.format("INSERT INTO T VALUES (%d, 0, 0)", i)).await();
+        }
+
+        assertThat(collect(tEnv.executeSql("SELECT COUNT(*) FROM `T$snapshots`")))
+                .containsExactlyInAnyOrder("+I[5]");
+    }
+
     private List<String> collect(TableResult result) throws Exception {
         List<String> ret = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {

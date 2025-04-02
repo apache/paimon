@@ -39,6 +39,8 @@ import org.apache.paimon.table.source.MergeTreeSplitGenerator;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.function.BiConsumer;
 
@@ -172,5 +174,15 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public LocalTableQuery newLocalTableQuery() {
         return new LocalTableQuery(this);
+    }
+
+    @Override
+    @Nullable
+    protected Runnable newExpireRunnable() {
+        if (coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
+            return null;
+        } else {
+            return super.newExpireRunnable();
+        }
     }
 }
