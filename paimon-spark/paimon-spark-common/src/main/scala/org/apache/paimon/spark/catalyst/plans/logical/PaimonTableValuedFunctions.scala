@@ -21,8 +21,9 @@ package org.apache.paimon.spark.catalyst.plans.logical
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
-import org.apache.paimon.table.{DataTable, FileStoreTable}
+import org.apache.paimon.table.DataTable
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil.InconsistentTagBucketException
+import org.apache.paimon.utils.ParameterUtils
 
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.SparkSession
@@ -172,12 +173,20 @@ case class IncrementalQuery(override val args: Seq[Expression])
 
   override def parseArgs(args: Seq[Expression]): Map[String, String] = {
     assert(
-      args.size == 2,
-      s"$INCREMENTAL_QUERY needs two parameters: startSnapshotId, and endSnapshotId.")
+      args.size == 2 || args.size == 3,
+      s"$INCREMENTAL_QUERY needs two~three parameters: startSnapshotId, endSnapshotId and table options.")
 
     val start = args.head.eval().toString
-    val end = args.last.eval().toString
-    Map(CoreOptions.INCREMENTAL_BETWEEN.key -> s"$start,$end")
+    val end = args(1).eval().toString
+    val baseMap = Map(CoreOptions.INCREMENTAL_BETWEEN.key -> s"$start,$end")
+
+    if (args.size == 3) {
+      val tableOptions =
+        ParameterUtils.parseCommaSeparatedKeyValues(args(2).eval().toString).asScala.toMap
+      baseMap ++ tableOptions
+    } else {
+      baseMap
+    }
   }
 }
 
@@ -187,12 +196,19 @@ case class IncrementalBetweenTimestamp(override val args: Seq[Expression])
 
   override def parseArgs(args: Seq[Expression]): Map[String, String] = {
     assert(
-      args.size == 2,
-      s"$INCREMENTAL_BETWEEN_TIMESTAMP needs two parameters: startTimestamp, and endTimestamp.")
+      args.size == 2 || args.size == 3,
+      s"$INCREMENTAL_BETWEEN_TIMESTAMP needs two~three parameters: startTimestamp, endTimestamp and table options.")
 
     val start = args.head.eval().toString
-    val end = args.last.eval().toString
-    Map(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key -> s"$start,$end")
+    val end = args(1).eval().toString
+    val baseMap = Map(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key -> s"$start,$end")
+    if (args.size == 3) {
+      val tableOptions =
+        ParameterUtils.parseCommaSeparatedKeyValues(args(2).eval().toString).asScala.toMap
+      baseMap ++ tableOptions
+    } else {
+      baseMap
+    }
   }
 }
 
@@ -201,9 +217,18 @@ case class IncrementalToAutoTag(override val args: Seq[Expression])
   extends PaimonTableValueFunction(INCREMENTAL_TO_AUTO_TAG) {
 
   override def parseArgs(args: Seq[Expression]): Map[String, String] = {
-    assert(args.size == 1, s"$INCREMENTAL_TO_AUTO_TAG needs one parameter: endTagName.")
+    assert(
+      args.size == 1 || args.size == 2,
+      s"$INCREMENTAL_TO_AUTO_TAG needs one~two parameter: endTagName and table options.")
 
     val endTagName = args.head.eval().toString
-    Map(CoreOptions.INCREMENTAL_TO_AUTO_TAG.key -> endTagName)
+    val baseMap = Map(CoreOptions.INCREMENTAL_TO_AUTO_TAG.key -> endTagName)
+    if (args.size == 2) {
+      val tableOptions =
+        ParameterUtils.parseCommaSeparatedKeyValues(args(1).eval().toString).asScala.toMap
+      baseMap ++ tableOptions
+    } else {
+      baseMap
+    }
   }
 }

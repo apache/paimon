@@ -91,6 +91,11 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
                     spark.sql(
                       "SELECT * FROM paimon_incremental_query('t', '1', '3') ORDER BY a, b"),
                     Row(1, 3, "3") :: Row(1, 5, "5") :: Row(1, 7, "7") :: Row(2, 4, "4") :: Nil)
+                  checkAnswer(
+                    spark.sql(
+                      "SELECT * FROM paimon_incremental_query('t', '1', '3', 'incremental-between-scan-mode=diff') ORDER BY a, b"),
+                    Row(1, 3, "3") :: Row(1, 5, "5") :: Row(1, 7, "7") :: Row(2, 4, "4") :: Nil
+                  )
                 }
             }
           }
@@ -138,6 +143,11 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
               sql(
                 s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1String', '$t3String') ORDER BY id"),
               Seq(Row(2), Row(3), Row(4)))
+            checkAnswer(
+              sql(
+                s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1String', '$t3String','incremental-between-scan-mode=diff') ORDER BY id"),
+              Seq(Row(2), Row(3), Row(4))
+            )
           }
         }
     }
