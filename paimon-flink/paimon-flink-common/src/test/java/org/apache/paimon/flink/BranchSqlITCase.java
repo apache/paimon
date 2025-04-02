@@ -142,6 +142,37 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCreateBranchFromAnotherBranch() throws Exception {
+
+        sql(
+                "CREATE TABLE T ("
+                        + " pt INT"
+                        + ", k INT"
+                        + ", v STRING"
+                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
+                        + " ) PARTITIONED BY (pt) WITH ("
+                        + " 'bucket' = '2'"
+                        + " )");
+
+        // snapshot 1.
+        sql("INSERT INTO T VALUES" + " (1, 10, 'apple')," + " (1, 20, 'banana')");
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+
+        sql("CALL sys.create_branch('default.T', 'branch_A', 'tag1')");
+        FileStoreTable branchTable = paimonTable("T$branch_branch_A");
+        assertThat(branchTable.tagManager().tagExists("tag1")).isEqualTo(true);
+        assertThat(collectResult("SELECT * FROM T$branch_branch_A"))
+                .containsExactlyInAnyOrder("+I[1, 10, apple]", "+I[1, 20, banana]");
+
+        // Create branch_B from branch_A.
+        sql("CALL sys.create_branch('default.T$branch_branch_A', 'branch_B', 'tag1')");
+        FileStoreTable branchTableB = paimonTable("T$branch_branch_B");
+        assertThat(branchTableB.tagManager().tagExists("tag1")).isEqualTo(true);
+        assertThat(collectResult("SELECT * FROM T$branch_branch_B"))
+                .containsExactlyInAnyOrder("+I[1, 10, apple]", "+I[1, 20, banana]");
+    }
+
+    @Test
     public void testCreateEmptyBranch() throws Exception {
         sql(
                 "CREATE TABLE T ("

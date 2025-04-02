@@ -102,6 +102,21 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
               spark.sql("SELECT * FROM `T$branch_test_branch` ORDER BY a"),
               Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil
             )
+            // create tags
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_tag(table => 'test.`T$branch_test_branch`', tag => 'test_tag2', snapshot => 3)"),
+              Row(true) :: Nil)
+
+            // create branch from another branch.
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_branch(table => 'test.`T$branch_test_branch`', branch => 'test_branch2', tag => 'test_tag2')"),
+              Row(true) :: Nil)
+            checkAnswer(
+              spark.sql("SELECT * FROM `T$branch_test_branch2` ORDER BY a"),
+              Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil
+            )
 
             // create empty branch
             checkAnswer(
