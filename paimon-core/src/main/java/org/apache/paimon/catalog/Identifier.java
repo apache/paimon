@@ -80,7 +80,10 @@ public class Identifier implements Serializable {
             @JsonProperty(FIELD_DATABASE_NAME) String database,
             @JsonProperty(FIELD_OBJECT_NAME) String object) {
         this.database = database;
-        this.object = object;
+        this.object =
+                object.startsWith("`") && object.endsWith("`")
+                        ? object.substring(1, object.length() - 1)
+                        : object;
     }
 
     public Identifier(String database, String table, @Nullable String branch) {

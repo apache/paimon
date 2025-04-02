@@ -173,6 +173,34 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCreateBranchWithBackQuote() {
+        sql(
+                "CREATE TABLE T ("
+                        + " pt INT"
+                        + ", k INT"
+                        + ", v STRING"
+                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
+                        + " ) PARTITIONED BY (pt) WITH ("
+                        + " 'bucket' = '2'"
+                        + " )");
+
+        // snapshot 1.
+        sql("INSERT INTO T VALUES" + " (1, 10, 'apple')," + " (1, 20, 'banana')");
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+        sql("CALL sys.create_branch('default.T', 'branch_A', 'tag1')");
+
+        // Missing one ` should throw error.
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.create_branch('default.T$branch_branch_A`', 'branch_B', 'tag1')"))
+                .hasMessageContaining("Table default.T$branch_branch_A` does not exist");
+
+        // Use `` quote should be ok.
+        sql("CALL sys.create_branch('default.`T$branch_branch_A`', 'branch_B', 'tag1')");
+    }
+
+    @Test
     public void testCreateEmptyBranch() throws Exception {
         sql(
                 "CREATE TABLE T ("
