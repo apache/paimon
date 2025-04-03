@@ -129,7 +129,8 @@ public class SnapshotManagerTest {
                 // pick a random time equal to one of the snapshots
                 time = millis.get(random.nextInt(numSnapshots));
             }
-            Long actual = TimeTravelUtil.earlierThanTimeMills(snapshotManager, null, time, false);
+            Long actual =
+                    TimeTravelUtil.earlierThanTimeMills(snapshotManager, null, time, false, false);
 
             if (millis.get(numSnapshots - 1) < time) {
                 if (isRaceCondition && millis.size() == 1) {

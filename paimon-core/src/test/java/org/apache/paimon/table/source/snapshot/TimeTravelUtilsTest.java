@@ -83,8 +83,13 @@ public class TimeTravelUtilsTest extends ScannerTestBase {
 
         assertThat(
                         TimeTravelUtil.earlierThanTimeMills(
-                                snapshotManager, table.changelogManager(), 1L, true))
+                                snapshotManager, table.changelogManager(), 1L, true, true))
                 .isNull();
+
+        assertThat(
+                        TimeTravelUtil.earlierThanTimeMills(
+                                snapshotManager, table.changelogManager(), 1L, true, false))
+                .isEqualTo(0);
 
         write.close();
         commit.close();

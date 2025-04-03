@@ -49,7 +49,11 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
         this.startFromChangelog = changelogDecoupled;
         this.startingSnapshotId =
                 TimeTravelUtil.earlierThanTimeMills(
-                        snapshotManager, changelogManager, startupMillis, startFromChangelog);
+                        snapshotManager,
+                        changelogManager,
+                        startupMillis,
+                        startFromChangelog,
+                        false);
     }
 
     @Override
@@ -66,7 +70,11 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
         if (startingSnapshotId == null) {
             startingSnapshotId =
                     TimeTravelUtil.earlierThanTimeMills(
-                            snapshotManager, changelogManager, startupMillis, startFromChangelog);
+                            snapshotManager,
+                            changelogManager,
+                            startupMillis,
+                            startFromChangelog,
+                            false);
         }
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
