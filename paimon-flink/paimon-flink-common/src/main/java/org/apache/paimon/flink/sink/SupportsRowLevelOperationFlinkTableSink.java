@@ -53,6 +53,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
@@ -200,6 +201,16 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                                     PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE.key(),
                                     SEQUENCE_GROUP,
                                     PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP));
+                }
+            case AGGREGATE:
+                if (options.get(AGGREGATION_REMOVE_RECORD_ON_DELETE)) {
+                    return;
+                } else {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Merge engine %s doesn't support batch delete by default. To support batch delete, "
+                                            + "please set %s to true.",
+                                    mergeEngine, AGGREGATION_REMOVE_RECORD_ON_DELETE.key()));
                 }
             default:
                 throw new UnsupportedOperationException(
