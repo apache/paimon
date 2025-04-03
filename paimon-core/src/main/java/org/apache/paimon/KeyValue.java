@@ -111,7 +111,7 @@ public class KeyValue {
     }
 
     public static RowType schema(RowType keyType, RowType valueType) {
-        return new RowType(createKeyValueFields(keyType.getFields(), valueType.getFields()));
+        return new RowType(false, createKeyValueFields(keyType.getFields(), valueType.getFields()));
     }
 
     public static RowType schemaWithLevel(RowType keyType, RowType valueType) {
