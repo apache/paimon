@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SimpleTableTestBase;
 import org.apache.paimon.types.RowType;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
@@ -58,7 +59,7 @@ public abstract class RESTSimpleTableTest extends SimpleTableTestBase {
 
     protected abstract RESTCatalog createRESTCatalog() throws IOException;
 
-    @BeforeEach
+    @AfterEach
     public void after() throws Exception {
         super.after();
         restCatalog.dropTable(identifier, true);
