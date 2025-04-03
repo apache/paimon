@@ -33,6 +33,7 @@ import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
@@ -307,7 +308,8 @@ public class ParquetReadWriteTest {
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4"})
                                 .build(),
                         500,
-                        FilterCompat.NOOP);
+                        FilterCompat.NOOP,
+                        Collections.emptyList());
 
         AtomicInteger cnt = new AtomicInteger(0);
         RecordReader<InternalRow> reader =
@@ -351,7 +353,8 @@ public class ParquetReadWriteTest {
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4", "f99"})
                                 .build(),
                         500,
-                        FilterCompat.NOOP);
+                        FilterCompat.NOOP,
+                        Collections.emptyList());
 
         AtomicInteger cnt = new AtomicInteger(0);
         RecordReader<InternalRow> reader =
@@ -390,7 +393,8 @@ public class ParquetReadWriteTest {
                         new Options(),
                         RowType.builder().fields(fieldTypes, new String[] {"f7"}).build(),
                         batchSize,
-                        FilterCompat.NOOP);
+                        FilterCompat.NOOP,
+                        Collections.emptyList());
 
         AtomicInteger cnt = new AtomicInteger(0);
         try (RecordReader<InternalRow> reader =
@@ -432,15 +436,14 @@ public class ParquetReadWriteTest {
                 new PredicateBuilder(
                         new RowType(
                                 Collections.singletonList(new DataField(0, "f4", new IntType()))));
-        FilterCompat.Filter filter =
-                ParquetFilters.convert(
-                        PredicateBuilder.splitAnd(builder.greaterThan(0, randomStart)));
+        List<Predicate> filters = PredicateBuilder.splitAnd(builder.greaterThan(0, randomStart));
         ParquetReaderFactory format =
                 new ParquetReaderFactory(
                         new Options(),
                         RowType.builder().fields(fieldTypes, new String[] {"f4"}).build(),
                         batchSize,
-                        filter);
+                        ParquetFilters.convert(filters),
+                        ParquetFilters.getFilterFields(filters));
 
         AtomicBoolean isFirst = new AtomicBoolean(true);
         try (RecordReader<InternalRow> reader =
@@ -479,7 +482,11 @@ public class ParquetReadWriteTest {
         }
         ParquetReaderFactory format =
                 new ParquetReaderFactory(
-                        new Options(), NESTED_ARRAY_MAP_TYPE, 500, FilterCompat.NOOP);
+                        new Options(),
+                        NESTED_ARRAY_MAP_TYPE,
+                        500,
+                        FilterCompat.NOOP,
+                        Collections.emptyList());
         RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
@@ -497,7 +504,12 @@ public class ParquetReadWriteTest {
         Path path = createDecimalFile(number, folder, 10);
 
         ParquetReaderFactory format =
-                new ParquetReaderFactory(new Options(), DECIMAL_TYPE, 500, FilterCompat.NOOP);
+                new ParquetReaderFactory(
+                        new Options(),
+                        DECIMAL_TYPE,
+                        500,
+                        FilterCompat.NOOP,
+                        Collections.emptyList());
         RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
@@ -657,7 +669,12 @@ public class ParquetReadWriteTest {
                         .build();
 
         ParquetReaderFactory format =
-                new ParquetReaderFactory(new Options(), paimonRowType, 500, FilterCompat.NOOP);
+                new ParquetReaderFactory(
+                        new Options(),
+                        paimonRowType,
+                        500,
+                        FilterCompat.NOOP,
+                        Collections.emptyList());
 
         RecordReader<InternalRow> reader =
                 format.createReader(
@@ -704,7 +721,8 @@ public class ParquetReadWriteTest {
 
     private int testReadingFile(List<Integer> expected, Path path) throws IOException {
         ParquetReaderFactory format =
-                new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
+                new ParquetReaderFactory(
+                        new Options(), ROW_TYPE, 500, FilterCompat.NOOP, Collections.emptyList());
 
         RecordReader<InternalRow> reader =
                 format.createReader(

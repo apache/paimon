@@ -817,6 +817,123 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testBitmapIndexResultFilterParquetRowRangesAndProjection() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("event", DataTypes.INT())
+                        .field("price", DataTypes.INT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            options.set(WRITE_ONLY, true);
+                            options.set(
+                                    FileIndexOptions.FILE_INDEX
+                                            + "."
+                                            + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "id,price");
+                            options.set(ParquetOutputFormat.BLOCK_SIZE, "1048576");
+                            options.set(
+                                    ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
+                            options.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                        });
+
+        int bound = 300000;
+        Random random = new Random();
+        Map<Integer, Integer> expectedMap = new HashMap<>();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int j = 0; j < 1000000; j++) {
+            int next = random.nextInt(bound);
+            expectedMap.compute(next, (key, value) -> value == null ? 1 : value + 1);
+            write.write(GenericRow.of(next, next, next));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // test eq <price> && projection <price>
+        for (int i = 0; i < 10; i++) {
+            int key = random.nextInt(bound);
+            Predicate predicate = new PredicateBuilder(rowType).equal(2, key);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead()
+                            .withFilter(predicate)
+                            .withReadType(rowType.project(new int[] {2}))
+                            .createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.incrementAndGet();
+                        assertThat(row.getFieldCount()).isEqualTo(1);
+                        assertThat(row.getInt(0)).isEqualTo(key);
+                    });
+            assertThat(cnt.get()).isEqualTo(expectedMap.getOrDefault(key, 0));
+            reader.close();
+        }
+
+        // test eq <id> && projection <event>
+        for (int i = 0; i < 10; i++) {
+            int key = random.nextInt(bound);
+            Predicate predicate = new PredicateBuilder(rowType).equal(0, key);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead()
+                            .withFilter(predicate)
+                            .withReadType(rowType.project(new int[] {1}))
+                            .createReader(plan.splits());
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.incrementAndGet();
+                        assertThat(row.getFieldCount()).isEqualTo(1);
+                        assertThat(row.getInt(0)).isEqualTo(key);
+                    });
+            assertThat(cnt.get()).isEqualTo(expectedMap.getOrDefault(key, 0));
+            reader.close();
+        }
+
+        // test filter <id, price> && projection <event>
+        for (int i = 0; i < 10; i++) {
+            int max = random.nextInt(bound) + 1;
+            int min = random.nextInt(max);
+            Predicate predicate =
+                    PredicateBuilder.and(
+                            new PredicateBuilder(rowType).greaterOrEqual(0, min),
+                            new PredicateBuilder(rowType).lessOrEqual(2, max));
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead()
+                            .withFilter(predicate)
+                            .withReadType(rowType.project(new int[] {1}))
+                            .createReader(plan.splits());
+
+            AtomicInteger cnt = new AtomicInteger(0);
+            reader.forEachRemaining(
+                    row -> {
+                        cnt.addAndGet(1);
+                        assertThat(row.getFieldCount()).isEqualTo(1);
+                        assertThat(row.getInt(0)).isGreaterThanOrEqualTo(min);
+                        assertThat(row.getInt(0)).isLessThanOrEqualTo(max);
+                    });
+            Optional<Integer> reduce =
+                    expectedMap.entrySet().stream()
+                            .filter(x -> x.getKey() >= min && x.getKey() <= max)
+                            .map(Map.Entry::getValue)
+                            .reduce(Integer::sum);
+            assertThat(cnt.get()).isEqualTo(reduce.orElse(0));
+            reader.close();
+        }
+    }
+
+    @Test
     public void testWithShardAppendTable() throws Exception {
         FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, -1));
         innerTestWithShard(table);

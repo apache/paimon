@@ -97,11 +97,25 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
 
     public ParquetReaderFactory(
-            Options conf, RowType readType, int batchSize, FilterCompat.Filter filter) {
+            Options conf,
+            RowType readType,
+            int batchSize,
+            FilterCompat.Filter filter,
+            List<DataField> filterFields) {
         this.conf = conf;
-        this.readFields = readType.getFields().toArray(new DataField[0]);
+        this.readFields = getReadFields(readType, filterFields);
         this.batchSize = batchSize;
         this.filter = filter;
+    }
+
+    private DataField[] getReadFields(RowType readType, List<DataField> filterFields) {
+        List<DataField> readFields = new ArrayList<>(readType.getFields());
+        for (DataField field : filterFields) {
+            if (readFields.stream().noneMatch(f -> f.name().equals(field.name()))) {
+                readFields.add(field);
+            }
+        }
+        return readFields.toArray(new DataField[0]);
     }
 
     // TODO: remove this when new reader is stable
