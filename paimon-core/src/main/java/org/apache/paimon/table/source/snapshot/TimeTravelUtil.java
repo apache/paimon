@@ -139,8 +139,8 @@ public class TimeTravelUtil {
     }
 
     /**
-     * Returns the latest snapshot earlier than the timestamp mills. A non-existent snapshot may be
-     * returned if all snapshots are equal to or later than the timestamp mills.
+     * Returns the latest snapshot earlier than the timestamp mills. A non-existent snapshot or null
+     * may be returned if all snapshots are equal to or later than the timestamp mills.
      */
     public static @Nullable Long earlierThanTimeMills(
             SnapshotManager snapshotManager,
@@ -155,7 +155,7 @@ public class TimeTravelUtil {
         Snapshot earliestSnapshot =
                 earliestSnapshot(snapshotManager, changelogManager, startFromChangelog, latest);
         if (earliestSnapshot == null) {
-            return latest - 1;
+            return null;
         }
 
         if (earliestSnapshot.timeMillis() >= timestampMills) {
