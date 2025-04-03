@@ -159,7 +159,8 @@ public class TimeTravelUtil {
         }
 
         if (earliestSnapshot.timeMillis() >= timestampMills) {
-            return earliestSnapshot.id() - 1;
+            // Please return null if the earliest snapshot is later than the timestamp.
+            return null;
         }
 
         long earliest = earliestSnapshot.id();
