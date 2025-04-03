@@ -147,7 +147,7 @@ public class TimeTravelUtil {
             ChangelogManager changelogManager,
             long timestampMills,
             boolean startFromChangelog,
-            boolean returnNullIfTooLealy) {
+            boolean returnNullIfTooEarly) {
         Long latest = snapshotManager.latestSnapshotId();
         if (latest == null) {
             return null;
@@ -160,7 +160,7 @@ public class TimeTravelUtil {
         }
 
         if (earliestSnapshot.timeMillis() >= timestampMills) {
-            return returnNullIfTooLealy ? null : earliestSnapshot.id() - 1;
+            return returnNullIfTooEarly ? null : earliestSnapshot.id() - 1;
         }
 
         long earliest = earliestSnapshot.id();
