@@ -122,7 +122,7 @@ public interface DeletionVector {
                 throw new RuntimeException(
                         "Size not match, actual size: "
                                 + actualSize
-                                + ", expert size: "
+                                + ", expected size: "
                                 + deletionFile.length()
                                 + ", file path: "
                                 + path);
