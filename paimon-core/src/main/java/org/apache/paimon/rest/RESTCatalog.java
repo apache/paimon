@@ -279,7 +279,7 @@ public class RESTCatalog implements Catalog {
             AlterDatabaseRequest request =
                     new AlterDatabaseRequest(new ArrayList<>(removeKeys), updateProperties);
             client.post(
-                    resourcePaths.databaseProperties(name),
+                    resourcePaths.database(name),
                     request,
                     AlterDatabaseResponse.class,
                     restAuthFunction);
