@@ -174,30 +174,32 @@ public class BranchSqlITCase extends CatalogITCaseBase {
 
     @Test
     public void testCreateBranchWithBackQuote() {
+        String tableName = "`table`";
         sql(
-                "CREATE TABLE T ("
+                "CREATE TABLE %s ("
                         + " pt INT"
                         + ", k INT"
                         + ", v STRING"
                         + ", PRIMARY KEY (pt, k) NOT ENFORCED"
                         + " ) PARTITIONED BY (pt) WITH ("
                         + " 'bucket' = '2'"
-                        + " )");
+                        + " )",
+                tableName);
 
-        // snapshot 1.
-        sql("INSERT INTO T VALUES" + " (1, 10, 'apple')," + " (1, 20, 'banana')");
-        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
-        sql("CALL sys.create_branch('default.T', 'branch_A', 'tag1')");
+        sql("INSERT INTO %s VALUES" + " (1, 10, 'apple')," + " (1, 20, 'banana')", tableName);
+        sql("CALL sys.create_tag('default.%s', 'tag1', 1)", tableName);
+        sql("CALL sys.create_branch('default.%s', 'branch_A', 'tag1')", tableName);
 
-        // Missing one ` should throw error.
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CALL sys.create_branch('default.T$branch_branch_A`', 'branch_B', 'tag1')"))
-                .hasMessageContaining("Table default.T$branch_branch_A` does not exist");
+        // default.table$branch_branch_A
+        sql("CALL sys.create_branch('default.table$branch_branch_A', 'branch_B', 'tag1')");
 
-        // Use `` quote should be ok.
-        sql("CALL sys.create_branch('default.`T$branch_branch_A`', 'branch_B', 'tag1')");
+        // default.`table`$branch_branch_A
+        sql("CALL sys.create_branch('default.%s$branch_branch_A', 'branch_C', 'tag1')", tableName);
+
+        // default.``table`$branch_branch_A`
+        sql(
+                "CALL sys.create_branch('default.`%s$branch_branch_A`', 'branch_D', 'tag1')",
+                tableName);
     }
 
     @Test
