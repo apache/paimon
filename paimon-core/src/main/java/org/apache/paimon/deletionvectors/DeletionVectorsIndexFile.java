@@ -173,7 +173,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
             int actualSize = inputStream.readInt();
             if (actualSize != size) {
                 throw new RuntimeException(
-                        "Size not match, actual size: " + actualSize + ", expert size: " + size);
+                        "Size not match, actual size: " + actualSize + ", expected size: " + size);
             }
 
             // read DeletionVector bytes
