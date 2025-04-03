@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -79,6 +80,17 @@ public class TimeTravelUtilsTest extends ScannerTestBase {
                 IllegalArgumentException.class,
                 () -> TimeTravelUtil.resolveSnapshotFromOptions(options1, snapshotManager),
                 "scan.snapshot-id scan.tag-name scan.watermark and scan.timestamp-millis can contains only one");
+
+        assertThat(
+                        TimeTravelUtil.earlierThanTimeMills(
+                                snapshotManager, table.changelogManager(), 1L, true, true))
+                .isNull();
+
+        assertThat(
+                        TimeTravelUtil.earlierThanTimeMills(
+                                snapshotManager, table.changelogManager(), 1L, true, false))
+                .isEqualTo(0);
+
         write.close();
         commit.close();
     }
