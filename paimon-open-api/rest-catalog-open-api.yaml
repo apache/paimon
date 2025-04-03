@@ -172,7 +172,6 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/properties:
     post:
       tags:
         - database

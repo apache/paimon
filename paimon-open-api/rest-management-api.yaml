@@ -115,7 +115,7 @@ paths:
           $ref: '#/components/responses/ResourceNotFoundErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-    patch:
+    post:
       tags:
         - Catalogs
       operationId: alterCatalog

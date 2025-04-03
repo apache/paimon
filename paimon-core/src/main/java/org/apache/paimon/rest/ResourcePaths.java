@@ -61,10 +61,6 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName));
     }
 
-    public String databaseProperties(String databaseName) {
-        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), "properties");
-    }
-
     public String tables(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), TABLES);
     }

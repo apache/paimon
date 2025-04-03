@@ -231,7 +231,7 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/properties")
+    @PostMapping("/v1/{prefix}/databases/{database}")
     public AlterDatabaseResponse alterDatabase(
             @PathVariable String prefix,
             @PathVariable String database,
