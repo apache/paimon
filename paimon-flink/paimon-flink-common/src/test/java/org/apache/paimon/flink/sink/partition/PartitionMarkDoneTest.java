@@ -148,6 +148,27 @@ class PartitionMarkDoneTest extends TableTestBase {
             throw new UnsupportedOperationException();
         }
 
+        // @Override is skipped for compatibility with Flink 1.x.
+        public <K, V> BroadcastState<K, V> getBroadcastState(
+                org.apache.flink.api.common.state.v2.MapStateDescriptor<K, V> mapStateDescriptor)
+                throws Exception {
+            throw new UnsupportedOperationException();
+        }
+
+        // @Override is skipped for compatibility with Flink 1.x.
+        public <S> org.apache.flink.api.common.state.v2.ListState<S> getListState(
+                org.apache.flink.api.common.state.v2.ListStateDescriptor<S> listStateDescriptor)
+                throws Exception {
+            throw new UnsupportedOperationException();
+        }
+
+        // @Override is skipped for compatibility with Flink 1.x.
+        public <S> org.apache.flink.api.common.state.v2.ListState<S> getUnionListState(
+                org.apache.flink.api.common.state.v2.ListStateDescriptor<S> listStateDescriptor)
+                throws Exception {
+            throw new UnsupportedOperationException();
+        }
+
         @Override
         public Set<String> getRegisteredStateNames() {
             throw new UnsupportedOperationException();

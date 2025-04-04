@@ -49,7 +49,7 @@ public class QueryServiceProcedure extends ProcedureBase {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"))
             })
-    public String[] call(ProcedureContext procedureContext, String tableId, int parallelism)
+    public String[] call(ProcedureContext procedureContext, String tableId, Integer parallelism)
             throws Exception {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();

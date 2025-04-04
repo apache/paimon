@@ -27,6 +27,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.event.WatermarkEvent;
 import org.apache.flink.runtime.operators.testutils.DummyEnvironment;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
@@ -216,6 +217,9 @@ class LocalMergeOperatorTest {
 
         @Override
         public void emitRecordAttributes(RecordAttributes recordAttributes) {}
+
+        // @Override is skipped for compatibility with Flink 1.x.
+        public void emitWatermark(WatermarkEvent watermarkEvent) {}
 
         @Override
         public void collect(StreamRecord<InternalRow> record) {

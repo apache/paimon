@@ -19,6 +19,7 @@
 package org.apache.paimon.tests;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Container;
@@ -26,9 +27,16 @@ import org.testcontainers.containers.Container;
 import java.util.UUID;
 
 /** Tests for {@code FlinkActions}. */
+@EnabledIf("runTest")
 public class FlinkActionsWithKafkaE2eTest extends FlinkActionsE2eTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkActionsWithKafkaE2eTest.class);
+
+    private static boolean runTest() {
+        // TODO: modify the following condition after paimon-flink-cdc supports flink 2.0
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        return flinkVersion.compareTo("2.0") < 0;
+    }
 
     public FlinkActionsWithKafkaE2eTest() {
         super(true, false);

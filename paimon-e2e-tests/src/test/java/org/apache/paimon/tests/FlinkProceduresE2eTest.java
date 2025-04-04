@@ -28,7 +28,9 @@ import java.util.UUID;
 public class FlinkProceduresE2eTest extends E2eTestBase {
 
     private static boolean runTest() {
-        return System.getProperty("test.flink.main.version").compareTo("1.18") >= 0;
+        // TODO: modify the following condition after paimon-flink-cdc supports flink 2.0
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        return flinkVersion.compareTo("1.18") >= 0 && flinkVersion.compareTo("2.0") < 0;
     }
 
     public FlinkProceduresE2eTest() {

@@ -34,15 +34,9 @@ under the License.
     <packaging>pom</packaging>
 
     <modules>
+        <module>${paimon-flinkx-common}</module>
         <module>paimon-flink-common</module>
-        <module>paimon-flink-1.15</module>
-        <module>paimon-flink-1.16</module>
-        <module>paimon-flink-1.17</module>
-        <module>paimon-flink-1.18</module>
-        <module>paimon-flink-1.19</module>
-        <module>paimon-flink-1.20</module>
         <module>paimon-flink-action</module>
-        <module>paimon-flink-cdc</module>
     </modules>
 
     <dependencies>
@@ -166,16 +160,6 @@ under the License.
     <profiles>
         <profile>
             <id>skip-paimon-flink-tests</id>
-            <modules>
-                <module>paimon-flink-common</module>
-                <module>paimon-flink-1.15</module>
-                <module>paimon-flink-1.16</module>
-                <module>paimon-flink-1.17</module>
-                <module>paimon-flink-1.18</module>
-                <module>paimon-flink-1.19</module>
-                <module>paimon-flink-1.20</module>
-                <module>paimon-flink-cdc</module>
-            </modules>
             <build>
                 <plugins>
                     <plugin>

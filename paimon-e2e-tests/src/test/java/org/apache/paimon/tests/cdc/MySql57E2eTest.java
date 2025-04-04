@@ -20,11 +20,20 @@ package org.apache.paimon.tests.cdc;
 
 import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
 
+import org.junit.jupiter.api.condition.EnabledIf;
+
 /**
  * E2e tests for {@link org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction} with MySQL
  * 5.7.
  */
+@EnabledIf("runTest")
 public class MySql57E2eTest extends MySqlCdcE2eTestBase {
+
+    private static boolean runTest() {
+        // TODO: modify the following condition after paimon-flink-cdc supports flink 2.0
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        return flinkVersion.compareTo("2.0") < 0;
+    }
 
     public MySql57E2eTest() {
         super(MySqlVersion.V5_7);
