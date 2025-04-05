@@ -29,16 +29,18 @@ class DLFAuthProviderFactoryTest {
     @Test
     void getRegion() {
         String region = "cn-hangzhou";
-        String url = "https://dlf-" + region + "-internal.aliyuncs.com";
+        String url = "https://" + region + "-vpc.dlf.aliyuncs.com";
         assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
-        url = "https://dlf-" + region + ".aliyuncs.com";
+        url = "https://" + region + "-intranet.dlf.aliyuncs.com";
         assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
-        url = "https://dlf-pre-" + region + ".aliyuncs.com";
+        url = "https://" + region + ".dlf.aliyuncs.com";
+        assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
+        url = "https://pre-" + region + "-vpc.dlf.aliyuncs.com";
         assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
         region = "us-east-1";
-        url = "https://dlf-" + region + ".aliyuncs.com";
+        url = "https://" + region + "-vpc.dlf.aliyuncs.com";
         assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
-        url = "https://dlf-" + region + "-internal.aliyuncs.com";
+        url = "https://" + region + "-intranet.dlf.aliyuncs.com";
         assertEquals(region, DLFAuthProviderFactory.parseRegionFromUri(url));
         String ipPortUri = "http://127.0.0.1:8080";
         assertThrows(

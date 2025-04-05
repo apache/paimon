@@ -64,7 +64,7 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
 
     protected static String parseRegionFromUri(String uri) {
         try {
-            String regex = "dlf-(?:pre-)?([a-z]+-[a-z]+(?:-\\d+)?)";
+            String regex = "(?:pre-)?([a-z]+-[a-z]+(?:-\\d+)?)";
 
             Pattern pattern = Pattern.compile(regex);
             Matcher matcher = pattern.matcher(uri);
