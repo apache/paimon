@@ -407,6 +407,14 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
                         : Arrays.stream(pkAsString.split(","))
                                 .map(String::trim)
                                 .collect(Collectors.toList());
+
+        for (StructField field : schema.fields()) {
+            if (field.metadata().map().nonEmpty()) {
+                normalizedProperties.put(
+                        "fields." + field.name() + ".metadataJson", field.metadata().json());
+            }
+        }
+
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
                         .options(normalizedProperties)
