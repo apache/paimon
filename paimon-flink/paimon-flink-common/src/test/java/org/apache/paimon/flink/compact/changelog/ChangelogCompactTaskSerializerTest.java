@@ -56,13 +56,24 @@ public class ChangelogCompactTaskSerializerTest {
                                 put(1, newFiles(20));
                             }
                         },
+                        new HashMap<>());
+        ChangelogCompactTask serializeTask =
+                serializer.deserialize(serializer.getVersion(), serializer.serialize(task));
+        assertThat(task).isEqualTo(serializeTask);
+
+        task =
+                new ChangelogCompactTask(
+                        2L,
+                        partition,
+                        2,
+                        new HashMap<>(),
                         new HashMap<Integer, List<DataFileMeta>>() {
                             {
                                 put(0, newFiles(10));
                                 put(1, newFiles(10));
                             }
                         });
-        ChangelogCompactTask serializeTask = serializer.deserialize(2, serializer.serialize(task));
+        serializeTask = serializer.deserialize(2, serializer.serialize(task));
         assertThat(task).isEqualTo(serializeTask);
     }
 

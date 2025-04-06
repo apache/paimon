@@ -430,7 +430,24 @@ public class FlinkConnectorOptions {
                                     + "in order to compact several changelog files (for primary key tables) "
                                     + "or newly created data files (for unaware bucket tables) "
                                     + "from the same partition into large ones, "
-                                    + "which can decrease the number of small files. ");
+                                    + "which can decrease the number of small files.");
+
+    public static final ConfigOption<Integer> CHANGELOG_PRECOMMIT_COMPACT_THREAD_NUM =
+            key("changelog.precommit-compact.thread-num")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Maximum number of threads to copy bytes from small changelog files. "
+                                    + "By default is the number of processors available to the Java virtual machine.");
+
+    @ExcludeFromDocumentation("Most users won't need to adjust this config")
+    public static final ConfigOption<MemorySize> CHANGELOG_PRECOMMIT_COMPACT_BUFFER_SIZE =
+            key("changelog.precommit-compact.buffer-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(128))
+                    .withDescription(
+                            "The buffer size for copying bytes from small changelog files. "
+                                    + "The default value is 128 MB.");
 
     public static final ConfigOption<String> SOURCE_OPERATOR_UID_SUFFIX =
             key("source.operator-uid.suffix")
