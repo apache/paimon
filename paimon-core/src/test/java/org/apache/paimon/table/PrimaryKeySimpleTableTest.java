@@ -1673,19 +1673,23 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 .containsExactly("1|10|200|binary|varbinary|mapKey:mapVal|multiset");
     }
 
-    @Test
-    public void testFileMonitorTableScan() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFileMonitorTableScan(boolean dvEnabled) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(DELETION_VECTORS_ENABLED, dvEnabled));
 
         FileMonitorTable monitorTable = new FileMonitorTable(table);
         ReadBuilder readBuilder = monitorTable.newReadBuilder();
         StreamTableScan scan = readBuilder.newStreamScan();
         TableRead read = readBuilder.newRead();
+        IOManager ioManager = IOManager.create(tempDir.toString());
 
         // 1. first write
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
+        write.withIOManager(ioManager);
         BatchTableCommit commit = writeBuilder.newCommit();
 
         write.write(rowData(1, 10, 100L));
@@ -1707,6 +1711,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         commit.close();
         writeBuilder = table.newBatchWriteBuilder();
         write = writeBuilder.newWrite();
+        write.withIOManager(ioManager);
         commit = writeBuilder.newCommit();
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 11, 101L));
@@ -1736,6 +1741,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         commit.close();
         writeBuilder = table.newBatchWriteBuilder().withOverwrite();
         write = writeBuilder.newWrite();
+        write.withIOManager(ioManager);
         commit = writeBuilder.newCommit();
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 11, 101L));
@@ -1746,38 +1752,6 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         change = FileMonitorTable.toFileChange(results.get(0));
         assertThat(change.beforeFiles()).hasSize(1);
         assertThat(change.dataFiles()).hasSize(1);
-
-        write.close();
-        commit.close();
-    }
-
-    @Test
-    public void testFileMonitorTableScanWithDv() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(options -> options.set(DELETION_VECTORS_ENABLED, true));
-
-        FileMonitorTable monitorTable = new FileMonitorTable(table);
-        ReadBuilder readBuilder = monitorTable.newReadBuilder();
-        StreamTableScan scan = readBuilder.newStreamScan();
-        TableRead read = readBuilder.newRead();
-
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        BatchTableWrite write = writeBuilder.newWrite();
-        write.withIOManager(IOManager.create(tempDir.toString()));
-        BatchTableCommit commit = writeBuilder.newCommit();
-
-        write.write(rowData(1, 10, 100L));
-        write.write(rowData(1, 11, 101L));
-        commit.commit(write.prepareCommit());
-
-        List<InternalRow> results = new ArrayList<>();
-        read.createReader(scan.plan()).forEachRemaining(results::add);
-        read.createReader(scan.plan()).forEachRemaining(results::add);
-        assertThat(results).hasSize(1);
-        FileMonitorTable.FileChange change = FileMonitorTable.toFileChange(results.get(0));
-        assertThat(change.beforeFiles()).hasSize(0);
-        assertThat(change.dataFiles()).hasSize(1);
-        results.clear();
 
         write.close();
         commit.close();
