@@ -1674,7 +1674,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testInnerStreamScanMode() throws Exception {
+    public void testFileMonitorTableScan() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         FileMonitorTable monitorTable = new FileMonitorTable(table);
@@ -1746,6 +1746,38 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         change = FileMonitorTable.toFileChange(results.get(0));
         assertThat(change.beforeFiles()).hasSize(1);
         assertThat(change.dataFiles()).hasSize(1);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testFileMonitorTableScanWithDv() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(DELETION_VECTORS_ENABLED, true));
+
+        FileMonitorTable monitorTable = new FileMonitorTable(table);
+        ReadBuilder readBuilder = monitorTable.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+        TableRead read = readBuilder.newRead();
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.withIOManager(IOManager.create(tempDir.toString()));
+        BatchTableCommit commit = writeBuilder.newCommit();
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 11, 101L));
+        commit.commit(write.prepareCommit());
+
+        List<InternalRow> results = new ArrayList<>();
+        read.createReader(scan.plan()).forEachRemaining(results::add);
+        read.createReader(scan.plan()).forEachRemaining(results::add);
+        assertThat(results).hasSize(1);
+        FileMonitorTable.FileChange change = FileMonitorTable.toFileChange(results.get(0));
+        assertThat(change.beforeFiles()).hasSize(0);
+        assertThat(change.dataFiles()).hasSize(1);
+        results.clear();
 
         write.close();
         commit.close();

@@ -19,9 +19,9 @@
 package org.apache.paimon.mergetree;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.utils.Preconditions;
 
 import java.util.Collections;
 import java.util.Comparator;
@@ -87,9 +87,13 @@ public class SortedRun {
     @VisibleForTesting
     public void validate(Comparator<InternalRow> comparator) {
         for (int i = 1; i < files.size(); i++) {
-            Preconditions.checkState(
-                    comparator.compare(files.get(i).minKey(), files.get(i - 1).maxKey()) > 0,
-                    "SortedRun is not sorted and may contain overlapping key intervals. This is a bug.");
+            BinaryRow minKey = files.get(i).minKey();
+            BinaryRow maxKey = files.get(i - 1).maxKey();
+            if (comparator.compare(minKey, maxKey) <= 0) {
+                throw new IllegalArgumentException(
+                        "SortedRun is not sorted and may contain overlapping key intervals. "
+                                + "This is a bug.");
+            }
         }
     }
 
