@@ -92,8 +92,7 @@ class DDLTest extends DDLTestBase {
       sql("ALTER TABLE T DROP COLUMN t1")
 
       val schema = spark.table("T").schema
-      Assertions.assertTrue(
-        schema.fields.map(f => f.name).sameElements(Array("id", "t2", "t3")))
+      Assertions.assertTrue(schema.fields.map(f => f.name).sameElements(Array("id", "t2", "t3")))
     }
   }
 
