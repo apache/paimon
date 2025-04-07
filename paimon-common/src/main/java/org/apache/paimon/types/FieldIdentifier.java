@@ -22,9 +22,9 @@ import java.util.Objects;
 
 /** Used to indicate the uniqueness of a field. */
 public class FieldIdentifier {
-    private String name;
-    private DataType type;
-    private String description;
+    private final String name;
+    private final DataType type;
+    private final String description;
 
     public FieldIdentifier(DataField dataField) {
         this.name = dataField.name();
