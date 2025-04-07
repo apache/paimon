@@ -36,7 +36,10 @@ import org.apache.paimon.KeyValue;
  */
 public interface MergeFunction<T> {
 
-    /** Reset the merge function to its default state. */
+    /**
+     * Reset the merge function to its default state, call this before calling {@link
+     * #add(KeyValue)} for the first time or after {@link #getResult}.
+     */
     void reset();
 
     /** Add the given {@link KeyValue} to the merge function. */

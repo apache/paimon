@@ -1327,6 +1327,44 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testAggregationRemoveRecordOnDeleteWithoutInsertData() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "aggregation");
+                            options.set("aggregation.remove-record-on-delete", "true");
+                        },
+                        rowType);
+
+        // delete twice to trigger merge when read
+        try (StreamTableWrite write = table.newWrite("");
+                StreamTableCommit commit = table.newCommit("")) {
+            write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 2, 2));
+            commit.commit(0, write.prepareCommit(true, 0));
+            write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 2, 2));
+            commit.commit(1, write.prepareCommit(true, 1));
+        }
+
+        // read auditLog table
+        ReadBuilder builder = new AuditLogTable(table).newReadBuilder();
+        try (RecordReader<InternalRow> reader =
+                builder.newRead().createReader(builder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> {
+                        assertThat(row.getString(0).toString()).isEqualTo("-D");
+                        assertThat(row.isNullAt(1)).isFalse();
+                        assertThat(row.getInt(1)).isEqualTo(1);
+                    });
+        }
+    }
+
+    @Test
     public void testPartialUpdateRemoveRecordOnDelete() throws Exception {
         RowType rowType =
                 RowType.of(

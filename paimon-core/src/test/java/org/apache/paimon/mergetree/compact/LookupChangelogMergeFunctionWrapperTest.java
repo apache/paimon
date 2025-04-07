@@ -286,7 +286,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 new FieldAggregator[] {
                                                     new FieldSumAggFactory()
                                                             .create(DataTypes.INT(), null, null)
-                                                })),
+                                                },
+                                                false,
+                                                null)),
                         key -> null,
                         changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
@@ -373,7 +375,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 new FieldAggregator[] {
                                                     new FieldLastValueAggFactory()
                                                             .create(DataTypes.INT(), null, null)
-                                                })),
+                                                },
+                                                false,
+                                                null)),
                         highLevel::get,
                         null,
                         LookupStrategy.from(false, true, false, false),
