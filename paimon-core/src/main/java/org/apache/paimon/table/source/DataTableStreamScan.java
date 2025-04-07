@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.StreamScanMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.lookup.LookupStrategy;
@@ -48,6 +49,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
+import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
 
 /** {@link StreamTableScan} implementation for streaming planning. */
 public class DataTableStreamScan extends AbstractDataTableScan implements StreamDataTableScan {
@@ -55,6 +57,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     private static final Logger LOG = LoggerFactory.getLogger(DataTableStreamScan.class);
 
     private final CoreOptions options;
+    private final StreamScanMode scanMode;
     private final SnapshotManager snapshotManager;
     private final boolean supportStreamingReadOverwrite;
     private final DefaultValueAssigner defaultValueAssigner;
@@ -80,6 +83,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
         this.options = options;
+        this.scanMode = options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.defaultValueAssigner = defaultValueAssigner;
@@ -139,7 +143,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     private Plan tryFirstPlan() {
         StartingScanner.Result result;
-        if (options.needLookup()) {
+        if (scanMode == FILE_MONITOR) {
+            result = startingScanner.scan(snapshotReader);
+        } else if (options.needLookup()) {
             result = startingScanner.scan(snapshotReader.withLevelFilter(level -> level > 0));
             snapshotReader.withLevelFilter(Filter.alwaysTrue());
         } else if (options.changelogProducer().equals(FULL_COMPACTION)) {
@@ -157,7 +163,9 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
             currentWatermark = scannedResult.currentWatermark();
             long currentSnapshotId = scannedResult.currentSnapshotId();
             LookupStrategy lookupStrategy = options.lookupStrategy();
-            if (!lookupStrategy.produceChangelog && lookupStrategy.deletionVector) {
+            if (scanMode == FILE_MONITOR) {
+                nextSnapshotId = currentSnapshotId + 1;
+            } else if (!lookupStrategy.produceChangelog && lookupStrategy.deletionVector) {
                 // For DELETION_VECTOR_ONLY mode, we need to return the remaining data from level 0
                 // in the subsequent plan.
                 nextSnapshotId = currentSnapshotId;
@@ -250,9 +258,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     }
 
     protected FollowUpScanner createFollowUpScanner() {
-        CoreOptions.StreamScanMode type =
-                options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
-        switch (type) {
+        switch (scanMode) {
             case COMPACT_BUCKET_TABLE:
                 return new DeltaFollowUpScanner();
             case FILE_MONITOR:
