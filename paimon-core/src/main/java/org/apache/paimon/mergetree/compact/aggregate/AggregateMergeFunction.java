@@ -140,10 +140,10 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
     public static MergeFunctionFactory<KeyValue> factory(
             Options conf,
-            List<String> tableNames,
-            List<DataType> tableTypes,
+            List<String> fieldNames,
+            List<DataType> fieldTypes,
             List<String> primaryKeys) {
-        return new Factory(conf, tableNames, tableTypes, primaryKeys);
+        return new Factory(conf, fieldNames, fieldTypes, primaryKeys);
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
@@ -151,31 +151,31 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         private static final long serialVersionUID = 1L;
 
         private final CoreOptions options;
-        private final List<String> tableNames;
-        private final List<DataType> tableTypes;
+        private final List<String> fieldNames;
+        private final List<DataType> fieldTypes;
         private final List<String> primaryKeys;
         private final boolean removeRecordOnDelete;
 
         private Factory(
                 Options conf,
-                List<String> tableNames,
-                List<DataType> tableTypes,
+                List<String> fieldNames,
+                List<DataType> fieldTypes,
                 List<String> primaryKeys) {
             this.options = new CoreOptions(conf);
-            this.tableNames = tableNames;
-            this.tableTypes = tableTypes;
+            this.fieldNames = fieldNames;
+            this.fieldTypes = fieldTypes;
             this.primaryKeys = primaryKeys;
             this.removeRecordOnDelete = options.aggregationRemoveRecordOnDelete();
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            List<String> fieldNames = tableNames;
-            List<DataType> fieldTypes = tableTypes;
+            List<String> fieldNames = this.fieldNames;
+            List<DataType> fieldTypes = this.fieldTypes;
             if (projection != null) {
                 Projection project = Projection.of(projection);
-                fieldNames = project.project(tableNames);
-                fieldTypes = project.project(tableTypes);
+                fieldNames = project.project(fieldNames);
+                fieldTypes = project.project(fieldTypes);
             }
 
             FieldAggregator[] fieldAggregators = new FieldAggregator[fieldNames.size()];
