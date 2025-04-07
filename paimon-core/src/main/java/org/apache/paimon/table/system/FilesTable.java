@@ -96,27 +96,28 @@ public class FilesTable implements ReadonlyTable {
                     Arrays.asList(
                             new DataField(0, "partition", SerializationUtils.newStringType(true)),
                             new DataField(1, "bucket", new IntType(false)),
-                            new DataField(2, "file_path", SerializationUtils.newStringType(false)),
+                            new DataField(2, "total_buckets", new IntType(true)),
+                            new DataField(3, "file_path", SerializationUtils.newStringType(false)),
                             new DataField(
-                                    3, "file_format", SerializationUtils.newStringType(false)),
-                            new DataField(4, "schema_id", new BigIntType(false)),
-                            new DataField(5, "level", new IntType(false)),
-                            new DataField(6, "record_count", new BigIntType(false)),
-                            new DataField(7, "file_size_in_bytes", new BigIntType(false)),
-                            new DataField(8, "min_key", SerializationUtils.newStringType(true)),
-                            new DataField(9, "max_key", SerializationUtils.newStringType(true)),
+                                    4, "file_format", SerializationUtils.newStringType(false)),
+                            new DataField(5, "schema_id", new BigIntType(false)),
+                            new DataField(6, "level", new IntType(false)),
+                            new DataField(7, "record_count", new BigIntType(false)),
+                            new DataField(8, "file_size_in_bytes", new BigIntType(false)),
+                            new DataField(9, "min_key", SerializationUtils.newStringType(true)),
+                            new DataField(10, "max_key", SerializationUtils.newStringType(true)),
                             new DataField(
-                                    10,
+                                    11,
                                     "null_value_counts",
                                     SerializationUtils.newStringType(false)),
                             new DataField(
-                                    11, "min_value_stats", SerializationUtils.newStringType(false)),
+                                    12, "min_value_stats", SerializationUtils.newStringType(false)),
                             new DataField(
-                                    12, "max_value_stats", SerializationUtils.newStringType(false)),
-                            new DataField(13, "min_sequence_number", new BigIntType(true)),
-                            new DataField(14, "max_sequence_number", new BigIntType(true)),
-                            new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS()),
-                            new DataField(16, "file_source", DataTypes.STRING())));
+                                    13, "max_value_stats", SerializationUtils.newStringType(false)),
+                            new DataField(14, "min_sequence_number", new BigIntType(true)),
+                            new DataField(15, "max_sequence_number", new BigIntType(true)),
+                            new DataField(16, "creation_time", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(17, "file_source", DataTypes.STRING())));
 
     private final FileStoreTable storeTable;
 
@@ -392,6 +393,7 @@ public class FilesTable implements ReadonlyTable {
                                         ? null
                                         : partitionCastExecutor.cast(dataSplit.partition()),
                         dataSplit::bucket,
+                        dataSplit::totalBuckets,
                         () ->
                                 BinaryString.fromString(
                                         file.externalPath()
