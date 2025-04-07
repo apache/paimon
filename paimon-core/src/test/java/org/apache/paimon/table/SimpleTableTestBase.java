@@ -1225,7 +1225,7 @@ public abstract class SimpleTableTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Branch name 'main' do not use in fast-forward."));
+                                "Fast-forward from the current branch 'main' is not allowed."));
 
         // Write data to branch1
         try (StreamTableWrite write = tableBranch.newWrite(commitUser);
