@@ -97,9 +97,11 @@ This class use (64-bits) long hash. Store the num hash function (one integer) an
 ## Index: Bitmap
 
 * `file-index.bitmap.columns`: specify the columns that need bitmap index.
-* `file-index.bitmap.version`: specify the bitmap index format version, default version is 1, latest version is 2.
 * `file-index.bitmap.<column_name>.index-block-size`: to config secondary index block size, default value is 16kb.
 
+{{< tabs "bitmap" >}}
+
+{{< tab "V2" >}}
 
 Bitmap file index format (V2):
 
@@ -162,7 +164,13 @@ length:                        4 bytes int
   
 </pre>
 
+{{< /tab >}}
+
+{{< tab "V1 (Legacy)" >}}
+
 (Legacy) Bitmap file index format (V1):
+
+You can configure `file-index.bitmap.version` to use legacy bitmap version 1.
 
 <pre>
 
@@ -200,70 +208,14 @@ offset:                        4 bytes int (when it is negative, it represents t
                                  and its position is the inverse of the negative value)
 </pre>
 
+{{< /tab >}}
+
+{{< /tabs >}}
+
 Integers are all BIG_ENDIAN.
-Integer are all BIG_ENDIAN. In the paimon version that supports v2, the bitmap index version defaults to v2.
 
-Bitmap only support the following data type:
-
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 10%">Paimon Data Type</th>
-      <th class="text-left" style="width: 5%">Supported</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><code>TinyIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>SmallIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>IntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>BigIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DateType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>TimeType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>LocalZonedTimestampType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>TimestampType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>CharType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VarCharType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>StringType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>BooleanType</code></td>
-      <td>true</td>
-    </tr>
-    </tbody>
-</table>
-
+Bitmap only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, DateType, TimeType,
+LocalZonedTimestampType, TimestampType, CharType, VarCharType, StringType, BooleanType.
 
 ## Index: Bit-Slice Index Bitmap
 
@@ -314,47 +266,5 @@ BSI serialized format (V1)
 +-------------------------------------------------+
 </pre>
 
-BSI only support the following data type:
-
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 10%">Paimon Data Type</th>
-      <th class="text-left" style="width: 5%">Supported</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><code>TinyIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>SmallIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>IntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>BigIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DateType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>LocalZonedTimestamp</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>TimestampType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DecimalType(precision, scale)</code></td>
-      <td>true</td>
-    </tr>
-    </tbody>
-</table>
+BSI only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, DateType, LocalZonedTimestamp,
+TimestampType, DecimalType.
