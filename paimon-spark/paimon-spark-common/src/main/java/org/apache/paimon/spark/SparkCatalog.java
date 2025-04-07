@@ -37,6 +37,8 @@ import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
+import org.apache.spark.sql.catalyst.expressions.Literal;
+import org.apache.spark.sql.connector.catalog.ColumnDefaultValue;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -52,6 +54,7 @@ import org.apache.spark.sql.execution.datasources.v2.FileTable;
 import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable;
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable;
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable;
+import org.apache.spark.sql.types.MetadataBuilder;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -64,6 +67,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -275,6 +279,12 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             Identifier ident, TableChange... changes) throws NoSuchTableException {
         List<SchemaChange> schemaChanges =
                 Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());
+        List<SchemaChange> schemaChangesWithDefaultValue =
+                Arrays.stream(changes)
+                        .map(this::toSchemaChangeWithDefaultValue)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
+        schemaChanges.addAll(schemaChangesWithDefaultValue);
         try {
             catalog.alterTable(toIdentifier(ident), schemaChanges, false);
             return loadTable(ident);
@@ -378,6 +388,59 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
                             fieldNames[0], ((TableChange.After) columnPosition).column());
         }
         return move;
+    }
+
+    private SchemaChange toSchemaChangeWithDefaultValue(TableChange change) {
+        // currently only handle basic type's default value
+        if (change instanceof TableChange.AddColumn) {
+            TableChange.AddColumn add = (TableChange.AddColumn) change;
+            if (add.fieldNames().length == 1) {
+                return encodeDefaultValueSetOption(add.defaultValue(), add.fieldNames()[0]);
+            }
+        } else if (change instanceof TableChange.DeleteColumn) {
+            TableChange.DeleteColumn delete = (TableChange.DeleteColumn) change;
+            if (delete.fieldNames().length == 1) {
+                return SchemaChange.removeOption(
+                        "fields." + delete.fieldNames()[0] + ".metadataJson");
+            }
+        } else if (change instanceof TableChange.UpdateColumnDefaultValue) {
+            TableChange.UpdateColumnDefaultValue update =
+                    (TableChange.UpdateColumnDefaultValue) change;
+            if (update.fieldNames().length == 1) {
+                if (!update.newDefaultValue().isEmpty()) {
+                    String metadataJson =
+                            new MetadataBuilder()
+                                    .putString("CURRENT_DEFAULT", update.newDefaultValue())
+                                    .putString("EXISTS_DEFAULT", update.newDefaultValue())
+                                    .build()
+                                    .json();
+                    return SchemaChange.setOption(
+                            "fields." + update.fieldNames()[0] + ".metadataJson", metadataJson);
+                } else {
+                    return SchemaChange.removeOption(
+                            "fields." + update.fieldNames()[0] + ".metadataJson");
+                }
+            }
+        }
+        return null;
+    }
+
+    private SchemaChange encodeDefaultValueSetOption(
+            ColumnDefaultValue defaultValue, String columnName) {
+        if (defaultValue != null) {
+            String existingDefaultValue =
+                    new Literal(defaultValue.getValue().value(), defaultValue.getValue().dataType())
+                            .sql();
+            String currentDefaultValue = defaultValue.getSql();
+            String metadataJson =
+                    new MetadataBuilder()
+                            .putString("EXISTS_DEFAULT", existingDefaultValue)
+                            .putString("CURRENT_DEFAULT", currentDefaultValue)
+                            .build()
+                            .json();
+            return SchemaChange.setOption("fields." + columnName + ".metadataJson", metadataJson);
+        }
+        return null;
     }
 
     private Schema toInitialSchema(
