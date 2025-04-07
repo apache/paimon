@@ -78,6 +78,7 @@ In compaction, you can configure record-Level expire time to expire records, you
 2. `'record-level.time-field'`: time field for record level expire.
 
 Expiration happens in compaction, and there is no strong guarantee to expire records in time.
+You can trigger a full compaction manually to expire records which were not expired in time.
 
 ## Full Compaction
 
