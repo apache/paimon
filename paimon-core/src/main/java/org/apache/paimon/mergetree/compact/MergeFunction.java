@@ -38,7 +38,7 @@ public interface MergeFunction<T> {
 
     /**
      * Reset the merge function to its default state, call this before calling {@link
-     * #add(KeyValue)} for the fist time or after {@link #getResult}.
+     * #add(KeyValue)} for the first time or after {@link #getResult}.
      */
     void reset();
 
