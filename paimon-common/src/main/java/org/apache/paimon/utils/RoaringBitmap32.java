@@ -44,6 +44,11 @@ public class RoaringBitmap32 {
         this.roaringBitmap = roaringBitmap;
     }
 
+    // return roaringBitmap.clone() instead of roaringBitmap
+    protected RoaringBitmap get() {
+        return roaringBitmap.clone();
+    }
+
     public void add(int x) {
         roaringBitmap.add(x);
     }

@@ -45,14 +45,26 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class DeletionVectorsIndexFile extends IndexFile {
 
     public static final String DELETION_VECTORS_INDEX = "DELETION_VECTORS";
+    // Current version id is 1
     public static final byte VERSION_ID_V1 = 1;
+    public static final byte VERSION_ID_V2 = 2;
 
+    private final byte versionID;
     private final MemorySize targetSizePerIndexFile;
 
     public DeletionVectorsIndexFile(
             FileIO fileIO, PathFactory pathFactory, MemorySize targetSizePerIndexFile) {
+        this(fileIO, pathFactory, targetSizePerIndexFile, VERSION_ID_V1);
+    }
+
+    public DeletionVectorsIndexFile(
+            FileIO fileIO,
+            PathFactory pathFactory,
+            MemorySize targetSizePerIndexFile,
+            byte versionID) {
         super(fileIO, pathFactory);
         this.targetSizePerIndexFile = targetSizePerIndexFile;
+        this.versionID = versionID;
     }
 
     /**
@@ -149,7 +161,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
         try {
             DeletionVectorIndexFileWriter writer =
                     new DeletionVectorIndexFileWriter(
-                            this.fileIO, this.pathFactory, this.targetSizePerIndexFile);
+                            this.fileIO, this.pathFactory, this.targetSizePerIndexFile, versionID);
             return writer.write(input);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write deletion vectors.", e);
@@ -158,16 +170,26 @@ public class DeletionVectorsIndexFile extends IndexFile {
 
     private void checkVersion(InputStream in) throws IOException {
         int version = in.read();
-        if (version != VERSION_ID_V1) {
+        if (version != versionID) {
             throw new RuntimeException(
                     "Version not match, actual version: "
                             + version
                             + ", expert version: "
-                            + VERSION_ID_V1);
+                            + versionID);
         }
     }
 
     private DeletionVector readDeletionVector(DataInputStream inputStream, int size) {
+        if (versionID == VERSION_ID_V1) {
+            return readV1DeletionVector(inputStream, size);
+        } else if (versionID == VERSION_ID_V2) {
+            return readV2DeletionVector(inputStream, size);
+        } else {
+            throw new RuntimeException("Unsupported DeletionVector version: " + versionID);
+        }
+    }
+
+    private DeletionVector readV1DeletionVector(DataInputStream inputStream, int size) {
         try {
             // check size
             int actualSize = inputStream.readInt();
@@ -191,6 +213,17 @@ public class DeletionVectorsIndexFile extends IndexFile {
                                 + checkSum);
             }
             return DeletionVector.deserializeFromBytes(bytes);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to read deletion vector", e);
+        }
+    }
+
+    private DeletionVector readV2DeletionVector(DataInputStream inputStream, int size) {
+        try {
+            byte[] bytes = new byte[size];
+            inputStream.readFully(bytes);
+
+            return Bitmap64DeletionVector.deserializeFromBytes(bytes);
         } catch (IOException e) {
             throw new UncheckedIOException("Unable to read deletion vector", e);
         }
