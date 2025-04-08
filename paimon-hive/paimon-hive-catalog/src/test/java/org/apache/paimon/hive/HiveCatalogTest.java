@@ -77,7 +77,10 @@ public class HiveCatalogTest extends CatalogTestBase {
         String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
         String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
-        catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse);
+        Options catalogOptions = new Options();
+        catalogOptions.set(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "false");
+        catalog =
+                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse);
     }
 
     @Test
@@ -214,8 +217,8 @@ public class HiveCatalogTest extends CatalogTestBase {
             Map<String, String> tableProperties = table.getParameters();
 
             // Verify the transformed parameters
-            assertThat(tableProperties).containsEntry("hive.table.owner", "Jon");
-            assertThat(tableProperties).containsEntry("hive.storage.format", "ORC");
+            assertThat(tableProperties).containsEntry("table.owner", "Jon");
+            assertThat(tableProperties).containsEntry("storage.format", "ORC");
             assertThat(tableProperties).containsEntry("comment", "this is a hive table");
             assertThat(tableProperties)
                     .containsEntry(
@@ -270,8 +273,8 @@ public class HiveCatalogTest extends CatalogTestBase {
             Table table = clients.run(client -> client.getTable(databaseName, tableName));
             Map<String, String> tableProperties = table.getParameters();
 
-            assertThat(tableProperties).containsEntry("hive.table.owner", "Hms");
-            assertThat(tableProperties).containsEntry("hive.table.create_time", "2024-01-22");
+            assertThat(tableProperties).containsEntry("table.owner", "Hms");
+            assertThat(tableProperties).containsEntry("table.create_time", "2024-01-22");
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
