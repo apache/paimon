@@ -214,8 +214,8 @@ public class HiveCatalogTest extends CatalogTestBase {
             Map<String, String> tableProperties = table.getParameters();
 
             // Verify the transformed parameters
-            assertThat(tableProperties).containsEntry("table.owner", "Jon");
-            assertThat(tableProperties).containsEntry("storage.format", "ORC");
+            assertThat(tableProperties).containsEntry("hive.table.owner", "Jon");
+            assertThat(tableProperties).containsEntry("hive.storage.format", "ORC");
             assertThat(tableProperties).containsEntry("comment", "this is a hive table");
             assertThat(tableProperties)
                     .containsEntry(
