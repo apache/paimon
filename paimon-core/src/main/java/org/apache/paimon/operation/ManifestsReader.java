@@ -50,6 +50,7 @@ public class ManifestsReader {
 
     private boolean onlyReadRealBuckets = false;
     @Nullable private Integer specifiedBucket = null;
+    @Nullable private Integer specifiedLevel = null;
     @Nullable private PartitionPredicate partitionFilter = null;
 
     public ManifestsReader(
@@ -70,6 +71,11 @@ public class ManifestsReader {
 
     public ManifestsReader withBucket(int bucket) {
         this.specifiedBucket = bucket;
+        return this;
+    }
+
+    public ManifestsReader withLevel(int level) {
+        this.specifiedLevel = level;
         return this;
     }
 
@@ -143,6 +149,15 @@ public class ManifestsReader {
             }
             if (specifiedBucket != null
                     && (specifiedBucket < minBucket || specifiedBucket > maxBucket)) {
+                return false;
+            }
+        }
+
+        Integer minLevel = manifest.minLevel();
+        Integer maxLevel = manifest.maxLevel();
+        if (minLevel != null && maxLevel != null) {
+            if (specifiedLevel != null
+                    && (specifiedLevel < minLevel || specifiedLevel > maxLevel)) {
                 return false;
             }
         }

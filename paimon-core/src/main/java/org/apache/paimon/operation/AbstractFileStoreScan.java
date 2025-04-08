@@ -83,6 +83,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Filter<Integer> bucketFilter = null;
     private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
     protected ScanMode scanMode = ScanMode.ALL;
+    private Integer specifiedLevel = null;
     private Filter<Integer> levelFilter = null;
     private Filter<ManifestEntry> manifestEntryFilter = null;
     private Filter<String> fileNameFilter = null;
@@ -188,6 +189,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withKind(ScanMode scanMode) {
         this.scanMode = scanMode;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withLevel(int level) {
+        manifestsReader.withLevel(level);
+        this.specifiedLevel = level;
         return this;
     }
 
@@ -524,7 +532,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 return false;
             }
 
-            if (levelFilter != null && !levelFilter.test(levelGetter.apply(row))) {
+            int level = levelGetter.apply(row);
+            if (specifiedLevel != null && level != specifiedLevel) {
+                return false;
+            }
+
+            if (levelFilter != null && !levelFilter.test(level)) {
                 return false;
             }
 
