@@ -25,7 +25,6 @@ import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -33,7 +32,6 @@ import org.apache.paimon.utils.Preconditions;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
@@ -62,15 +60,15 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             boolean asyncWrite) {
         super(fileIO, factory, path, converter, compression, asyncWrite);
         this.simpleStatsExtractor = simpleStatsExtractor;
-        if (this.simpleStatsExtractor == null) {
+        if (this.simpleStatsExtractor != null) {
+            this.isStatsDisabled = simpleStatsExtractor.isStatsDisabled();
+        } else {
             this.simpleStatsCollector = new SimpleStatsCollector(writeSchema, statsCollectors);
+            this.isStatsDisabled = simpleStatsCollector.isDisabled();
         }
         Preconditions.checkArgument(
                 statsCollectors.length == writeSchema.getFieldCount(),
                 "The stats collector is not aligned to write schema.");
-        this.isStatsDisabled =
-                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
-                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
         if (isStatsDisabled) {
             this.noneStats =
                     IntStream.range(0, statsCollectors.length)

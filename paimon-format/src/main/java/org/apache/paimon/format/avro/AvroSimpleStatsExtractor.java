@@ -72,6 +72,11 @@ public class AvroSimpleStatsExtractor implements SimpleStatsExtractor {
                 new FileInfo(rowCount));
     }
 
+    @Override
+    public boolean isStatsDisabled() {
+        return true;
+    }
+
     private long getRowCount(InputStream inStream) throws java.io.IOException {
         // an Avro file's layout looks like this:
         //   header|block|block|...

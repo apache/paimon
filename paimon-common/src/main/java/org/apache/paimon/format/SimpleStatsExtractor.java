@@ -32,6 +32,8 @@ public interface SimpleStatsExtractor {
     Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path, long length)
             throws IOException;
 
+    boolean isStatsDisabled();
+
     /** File info fetched from physical file. */
     class FileInfo {
 

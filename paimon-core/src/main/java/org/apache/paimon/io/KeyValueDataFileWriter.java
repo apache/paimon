@@ -103,7 +103,7 @@ public abstract class KeyValueDataFileWriter
                 writeRowType,
                 simpleStatsExtractor,
                 compression,
-                StatsCollectorFactories.createStatsFactories(
+                StatsCollectorFactories.createStatsFactoriesForAvro(
                         statsMode, options, writeRowType.getFieldNames()),
                 options.asyncFileWrite());
 

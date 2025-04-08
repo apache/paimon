@@ -41,6 +41,7 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -291,7 +292,10 @@ public class KeyValueFileWriterFactory {
                                     StatsCollectorFactories.createStatsFactories(
                                             level2Stats.apply(level),
                                             options,
-                                            writeRowType.getFieldNames());
+                                            writeRowType.getFieldNames(),
+                                            thinModeEnabled
+                                                    ? keyType.getFieldNames()
+                                                    : Collections.emptyList());
                             return fileFormat
                                     .createStatsExtractor(writeRowType, statsFactories)
                                     .orElse(null);

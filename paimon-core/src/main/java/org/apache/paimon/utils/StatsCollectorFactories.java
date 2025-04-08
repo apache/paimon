@@ -21,7 +21,10 @@ package org.apache.paimon.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.statistics.TruncateSimpleColStatsCollector;
+import org.apache.paimon.table.SpecialFields;
 
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
@@ -33,21 +36,56 @@ public class StatsCollectorFactories {
 
     public static SimpleColStatsCollector.Factory[] createStatsFactories(
             String statsMode, CoreOptions options, List<String> fields) {
-        Options cfg = options.toConfiguration();
+        return createStatsFactories(statsMode, options, fields, Collections.emptyList());
+    }
+
+    public static SimpleColStatsCollector.Factory[] createStatsFactories(
+            String statsMode, CoreOptions coreOptions, List<String> fields, List<String> keyNames) {
+        Options options = coreOptions.toConfiguration();
         SimpleColStatsCollector.Factory[] modes =
                 new SimpleColStatsCollector.Factory[fields.size()];
         for (int i = 0; i < fields.size(); i++) {
             String field = fields.get(i);
-            String fieldMode =
-                    cfg.get(
-                            key(String.format("%s.%s.%s", FIELDS_PREFIX, field, STATS_MODE_SUFFIX))
-                                    .stringType()
-                                    .noDefaultValue());
+            String fieldMode = fieldMode(options, field);
+            if (fieldMode != null) {
+                modes[i] = SimpleColStatsCollector.from(fieldMode);
+            } else if (SpecialFields.isSystemField(field)
+                    ||
+                    // If we config DATA_FILE_THIN_MODE to true, we need to maintain the
+                    // stats for key fields.
+                    keyNames.contains(SpecialFields.KEY_FIELD_PREFIX + field)) {
+                modes[i] = () -> new TruncateSimpleColStatsCollector(128);
+            } else {
+                modes[i] = SimpleColStatsCollector.from(statsMode);
+            }
+        }
+        return modes;
+    }
+
+    /**
+     * If all are None, return all None to Avro Writer, which can greatly accelerate the writing
+     * speed.
+     */
+    public static SimpleColStatsCollector.Factory[] createStatsFactoriesForAvro(
+            String statsMode, CoreOptions coreOptions, List<String> fields) {
+        Options options = coreOptions.toConfiguration();
+        SimpleColStatsCollector.Factory[] modes =
+                new SimpleColStatsCollector.Factory[fields.size()];
+        for (int i = 0; i < fields.size(); i++) {
+            String field = fields.get(i);
+            String fieldMode = fieldMode(options, field);
             modes[i] =
                     fieldMode != null
                             ? SimpleColStatsCollector.from(fieldMode)
                             : SimpleColStatsCollector.from(statsMode);
         }
         return modes;
+    }
+
+    private static String fieldMode(Options options, String field) {
+        return options.get(
+                key(String.format("%s.%s.%s", FIELDS_PREFIX, field, STATS_MODE_SUFFIX))
+                        .stringType()
+                        .noDefaultValue());
     }
 }

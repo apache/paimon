@@ -26,6 +26,7 @@ import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ObjectSerializer;
@@ -34,6 +35,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.paimon.utils.FileUtils.createFormatReader;
@@ -75,6 +77,12 @@ public class TestSimpleStatsExtractor implements SimpleStatsExtractor {
             statsCollector.collect(record);
         }
         return Pair.of(statsCollector.extract(), new FileInfo(records.size()));
+    }
+
+    @Override
+    public boolean isStatsDisabled() {
+        return Arrays.stream(SimpleColStatsCollector.create(stats))
+                .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
     }
 
     private static <T> List<T> readListFromFile(
