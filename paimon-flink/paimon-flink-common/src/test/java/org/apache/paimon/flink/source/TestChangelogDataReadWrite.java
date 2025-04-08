@@ -196,7 +196,8 @@ public class TestChangelogDataReadWrite {
                                 null,
                                 options,
                                 EXTRACTOR,
-                                tablePath.getName())
+                                tablePath.getName(),
+                                null)
                         .createWriterContainer(partition, bucket, true)
                         .writer;
         ((MemoryOwner) writer)
