@@ -44,6 +44,8 @@
         <module>paimon-gs-impl</module>
         <module>paimon-azure</module>
         <module>paimon-azure-impl</module>
+        <module>paimon-obs</module>
+        <module>paimon-obs-impl</module>
     </modules>
 
     <properties>

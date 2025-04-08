@@ -1,0 +1,67 @@
+paimon-obs-impl
+Copyright 2023-2024 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This project bundles the following dependencies under the Apache Software License 2.0 (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+- com.fasterxml.jackson.core:jackson-annotations:2.10.0
+- com.fasterxml.jackson.core:jackson-core:2.10.0
+- com.fasterxml.jackson.core:jackson-databind:2.12.7
+- com.fasterxml.woodstox:woodstox-core:5.3.0
+- com.google.code.findbugs:jsr305:1.3.9
+- com.google.guava:failureaccess:1.0
+- com.google.guava:guava:27.0-jre
+- com.google.j2objc:j2objc-annotations:1.1
+- com.huaweicloud:esdk-obs-java:3.20.4.2
+- com.jamesmurty.utils:java-xmlbuilder:1.2
+- commons-beanutils:commons-beanutils:1.9.4
+- commons-collections:commons-collections:3.2.2
+- commons-io:commons-io:2.8.0
+- commons-logging:commons-logging:1.1.3
+- org.apache.commons:commons-compress:1.21
+- org.apache.commons:commons-configuration2:2.1.1
+- org.apache.commons:commons-lang3:3.12.0
+- org.apache.commons:commons-text:1.4
+- org.apache.hadoop:hadoop-annotations:3.3.4
+- org.apache.hadoop:hadoop-auth:3.3.4
+- org.apache.hadoop:hadoop-common:3.3.4
+- org.apache.hadoop:hadoop-huaweicloud:3.4.0
+- org.apache.hadoop.thirdparty:hadoop-shaded-guava:1.1.1
+- org.apache.hadoop.thirdparty:hadoop-shaded-protobuf_3_7:1.1.1
+- org.apache.kerby:kerb-core:1.0.1
+- org.apache.kerby:kerby-pkix:1.0.1
+- org.apache.kerby:kerby-asn1:1.0.1
+- org.apache.kerby:kerby-util:1.0.1
+
+This project bundles the following dependencies under BSD-2 License (https://opensource.org/licenses/BSD-2-Clause):
+- dnsjava:dnsjava:2.1.7
+
+This project bundles the following dependencies under the MIT License (https://opensource.org/licenses/MIT):
+- com.squareup.okhttp3:okhttp:3.14.2
+- com.squareup.okio:okio:1.17.2
+- org.checkerframework:checker-qual:2.5.2
+- org.codehaus.mojo:animal-sniffer-annotations:1.17
+- org.slf4j:slf4j-api:1.7.32
+
+This project bundles the following dependencies under the Go License (https://golang.org/LICENSE):
+- com.google.re2j:re2j:1.1
+
+This project bundles the following dependencies under BSD License (https://opensource.org/licenses/bsd-license.php):
+- org.codehaus.woodstox:stax2-api:4.2.1
+
+The bundled Apache Hadoop Relocated (Shaded) Third-party Miscellaneous Libs
+org.apache.hadoop.thirdparty:hadoop-shaded-guava dependency bundles the following dependencies under
+the Apache Software License 2.0 (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+- com.google.guava:guava:27.0-jre
+
+The bundled Apache Hadoop Relocated (Shaded) Third-party Miscellaneous Libs
+org.apache.hadoop.thirdparty:hadoop-shaded-protobuf_3_7 dependency bundles the following dependencies under
+the Apache Software License 2.0 (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+This project bundles the following dependencies under the Eclipse Distribution License - v 1.0
+You find it under licenses/LICENSE.jakarta
+
+- jakarta.activation:jakarta.activation-api:1.2.1
