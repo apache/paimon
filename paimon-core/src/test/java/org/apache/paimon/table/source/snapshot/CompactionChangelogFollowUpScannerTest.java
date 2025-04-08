@@ -67,7 +67,7 @@ public class CompactionChangelogFollowUpScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
 
-        snapshotReader.withLevelFilter(level -> level == table.coreOptions().numLevels() - 1);
+        snapshotReader.withLevel(table.coreOptions().numLevels() - 1);
         TableRead read = table.newRead();
         ChangelogFollowUpScanner scanner = new ChangelogFollowUpScanner();
 

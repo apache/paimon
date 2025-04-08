@@ -72,6 +72,8 @@ public interface FileStoreScan {
 
     FileStoreScan withKind(ScanMode scanMode);
 
+    FileStoreScan withLevel(int level);
+
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
 
     FileStoreScan enableValueFilter();

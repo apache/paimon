@@ -336,6 +336,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withLevel(int level) {
+            wrapped.withLevel(level);
+            return this;
+        }
+
+        @Override
         public SnapshotReader withLevelFilter(Filter<Integer> levelFilter) {
             wrapped.withLevelFilter(levelFilter);
             return this;
