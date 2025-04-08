@@ -21,15 +21,10 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.format.SimpleStatsCollector;
-import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.function.Function;
@@ -43,10 +38,8 @@ import java.util.stream.IntStream;
  */
 public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWriter<T, R> {
 
-    @Nullable private final SimpleStatsExtractor simpleStatsExtractor;
-    @Nullable private SimpleStatsCollector simpleStatsCollector = null;
-    @Nullable private SimpleColStats[] noneStats = null;
-    private final boolean isStatsDisabled;
+    private final SimpleStatsProducer statsProducer;
+    private final SimpleColStats[] noneStats;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
@@ -54,56 +47,46 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             Path path,
             Function<T, InternalRow> converter,
             RowType writeSchema,
-            @Nullable SimpleStatsExtractor simpleStatsExtractor,
+            SimpleStatsProducer statsProducer,
             String compression,
-            SimpleColStatsCollector.Factory[] statsCollectors,
             boolean asyncWrite) {
         super(fileIO, factory, path, converter, compression, asyncWrite);
-        this.simpleStatsExtractor = simpleStatsExtractor;
-        if (this.simpleStatsExtractor != null) {
-            this.isStatsDisabled = simpleStatsExtractor.isStatsDisabled();
-        } else {
-            this.simpleStatsCollector = new SimpleStatsCollector(writeSchema, statsCollectors);
-            this.isStatsDisabled = simpleStatsCollector.isDisabled();
-        }
-        Preconditions.checkArgument(
-                statsCollectors.length == writeSchema.getFieldCount(),
-                "The stats collector is not aligned to write schema.");
-        if (isStatsDisabled) {
+        this.statsProducer = statsProducer;
+        if (statsProducer.isStatsDisabled()) {
             this.noneStats =
-                    IntStream.range(0, statsCollectors.length)
+                    IntStream.range(0, writeSchema.getFieldCount())
                             .mapToObj(i -> SimpleColStats.NONE)
                             .toArray(SimpleColStats[]::new);
+        } else {
+            this.noneStats = null;
         }
     }
 
     @Override
     public void write(T record) throws IOException {
         InternalRow rowData = writeImpl(record);
-        if (simpleStatsCollector != null && !simpleStatsCollector.isDisabled()) {
-            simpleStatsCollector.collect(rowData);
+        if (!statsProducer.isStatsDisabled() && statsProducer.requirePerRecord()) {
+            statsProducer.collect(rowData);
         }
     }
 
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
-        Preconditions.checkState(
-                simpleStatsExtractor != null,
-                "Can't write bundle without simpleStatsExtractor, we may lose all the statistical information");
-
+        if (statsProducer.requirePerRecord()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Can't write bundle for %s, we may lose all the statistical information.",
+                            statsProducer.getClass().getName()));
+        }
         super.writeBundle(bundle);
     }
 
     public SimpleColStats[] fieldStats(long fileSize) throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
-        if (simpleStatsExtractor != null) {
-            if (isStatsDisabled) {
-                return noneStats;
-            } else {
-                return simpleStatsExtractor.extract(fileIO, path, fileSize);
-            }
-        } else {
-            return simpleStatsCollector.extract();
+        if (statsProducer.isStatsDisabled()) {
+            return noneStats;
         }
+
+        return statsProducer.extract(fileIO, path, fileSize);
     }
 }

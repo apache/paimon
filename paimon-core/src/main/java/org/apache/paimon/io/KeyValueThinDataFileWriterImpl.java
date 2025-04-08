@@ -24,15 +24,12 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-
-import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -47,23 +44,6 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
 
     private final int[] keyStatMapping;
 
-    /**
-     * Constructs a KeyValueThinDataFileWriterImpl.
-     *
-     * @param fileIO The file IO interface.
-     * @param factory The format writer factory.
-     * @param path The path to the file.
-     * @param converter The function to convert KeyValue to InternalRow.
-     * @param keyType The row type of the key.
-     * @param valueType The row type of the value.
-     * @param simpleStatsExtractor The simple stats extractor, can be null.
-     * @param schemaId The schema ID.
-     * @param level The level.
-     * @param compression The compression type.
-     * @param options The core options.
-     * @param fileSource The file source.
-     * @param fileIndexOptions The file index options.
-     */
     public KeyValueThinDataFileWriterImpl(
             FileIO fileIO,
             FormatWriterFactory factory,
@@ -71,11 +51,10 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
-            @Nullable SimpleStatsExtractor simpleStatsExtractor,
+            Function<RowType, SimpleStatsProducer> statsProducerFactory,
             long schemaId,
             int level,
             String compression,
-            String statsMode,
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
@@ -88,11 +67,10 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
                 keyType,
                 valueType,
                 KeyValue.schema(RowType.of(), valueType),
-                simpleStatsExtractor,
+                statsProducerFactory,
                 schemaId,
                 level,
                 compression,
-                statsMode,
                 options,
                 fileSource,
                 fileIndexOptions,

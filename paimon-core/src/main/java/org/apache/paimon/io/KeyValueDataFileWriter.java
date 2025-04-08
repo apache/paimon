@@ -26,7 +26,6 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
@@ -34,7 +33,6 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,11 +84,10 @@ public abstract class KeyValueDataFileWriter
             RowType keyType,
             RowType valueType,
             RowType writeRowType,
-            @Nullable SimpleStatsExtractor simpleStatsExtractor,
+            Function<RowType, SimpleStatsProducer> statsProducerFactory,
             long schemaId,
             int level,
             String compression,
-            String statsMode,
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
@@ -101,10 +98,8 @@ public abstract class KeyValueDataFileWriter
                 path,
                 converter,
                 writeRowType,
-                simpleStatsExtractor,
+                statsProducerFactory.apply(writeRowType),
                 compression,
-                StatsCollectorFactories.createStatsFactoriesForAvro(
-                        statsMode, options, writeRowType.getFieldNames()),
                 options.asyncFileWrite());
 
         this.keyType = keyType;

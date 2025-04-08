@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -37,8 +38,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.StatsCollectorFactories;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -123,11 +122,10 @@ public class KeyValueFileWriterFactory {
                         new KeyValueThinSerializer(keyType, valueType)::toRow,
                         keyType,
                         valueType,
-                        formatContext.extractor(level),
+                        type -> formatContext.statsProducer(level, options, type),
                         schemaId,
                         level,
                         formatContext.compression(level),
-                        formatContext.statsMode(level),
                         options,
                         fileSource,
                         fileIndexOptions,
@@ -139,11 +137,10 @@ public class KeyValueFileWriterFactory {
                         new KeyValueSerializer(keyType, valueType)::toRow,
                         keyType,
                         valueType,
-                        formatContext.extractor(level),
+                        type -> formatContext.statsProducer(level, options, type),
                         schemaId,
                         level,
                         formatContext.compression(level),
-                        formatContext.statsMode(level),
                         options,
                         fileSource,
                         fileIndexOptions,
@@ -283,9 +280,6 @@ public class KeyValueFileWriterFactory {
 
                 FileFormat fileFormat =
                         FileFormat.fromIdentifier(format, options.toConfiguration());
-                // In avro format, minValue, maxValue, and nullCount are not counted, set
-                // StatsExtractor is Optional.empty() and will use SimpleStatsExtractor to collect
-                // stats
                 IntFunction<SimpleStatsExtractor> extractor =
                         level -> {
                             SimpleColStatsCollector.Factory[] statsFactories =
@@ -300,7 +294,7 @@ public class KeyValueFileWriterFactory {
                                     .createStatsExtractor(writeRowType, statsFactories)
                                     .orElse(null);
                         };
-                format2Extractor.put(format, format.equals("avro") ? level -> null : extractor);
+                format2Extractor.put(format, extractor);
                 format2WriterFactory.put(format, fileFormat.createWriterFactory(writeRowType));
             }
         }
@@ -320,9 +314,22 @@ public class KeyValueFileWriterFactory {
             return true;
         }
 
-        @Nullable
-        private SimpleStatsExtractor extractor(int level) {
-            return format2Extractor.get(level2Format.apply(level)).apply(level);
+        private SimpleStatsProducer statsProducer(
+                int level, CoreOptions options, RowType writeRowType) {
+            String format = level2Format.apply(level);
+            String statsMode = level2Stats.apply(level);
+            if (format.equals("avro")) {
+                // In avro format, minValue, maxValue, and nullCount are not counted, so use
+                // SimpleStatsExtractor to collect stats
+                SimpleColStatsCollector.Factory[] collectors =
+                        StatsCollectorFactories.createStatsFactoriesForAvro(
+                                statsMode, options, writeRowType.getFieldNames());
+                SimpleStatsCollector collector = new SimpleStatsCollector(writeRowType, collectors);
+                return SimpleStatsProducer.fromCollector(collector);
+            }
+            SimpleStatsExtractor extractor =
+                    format2Extractor.get(level2Format.apply(level)).apply(level);
+            return SimpleStatsProducer.fromExtractor(extractor);
         }
 
         private DataFilePathFactory pathFactory(int level) {
@@ -335,10 +342,6 @@ public class KeyValueFileWriterFactory {
 
         private String compression(int level) {
             return level2Compress.apply(level);
-        }
-
-        private String statsMode(int level) {
-            return level2Stats.apply(level);
         }
     }
 }
