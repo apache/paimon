@@ -89,7 +89,8 @@ public class CatalogBranchManager implements BranchManager {
     public void fastForward(String branchName) {
         executePost(
                 catalog -> {
-                    BranchManager.fastForwardValidate(branchName);
+                    BranchManager.fastForwardValidate(
+                            branchName, identifier.getBranchNameOrDefault());
                     catalog.fastForward(identifier, branchName);
                 });
     }
