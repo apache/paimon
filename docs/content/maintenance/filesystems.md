@@ -42,6 +42,7 @@ FileSystem pluggable jars for user to query tables from Spark/Hive side.
 | Aliyun OSS                   | oss://     | Y         |                                                                        |
 | S3                           | s3://      | Y         |                                                                        |
 | Tencent Cloud Object Storage | cosn://    | Y         |                                                                        |
+| Huawei OBS                   | obs://     | Y         |                                                                        |
 
 ## Dependency
 
