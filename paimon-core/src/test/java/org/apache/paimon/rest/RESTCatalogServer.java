@@ -1089,7 +1089,7 @@ public class RESTCatalogServer {
                 case "POST":
                     if (resources.length == 6) {
                         branch = RESTUtil.decodeString(resources[4]);
-                        branchManager.fastForward(branch, CoreOptions.branch(table.options()));
+                        branchManager.fastForward(branch);
                         branchIdentifier =
                                 new Identifier(
                                         identifier.getDatabaseName(),

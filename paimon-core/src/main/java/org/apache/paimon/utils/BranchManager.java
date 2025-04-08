@@ -38,7 +38,7 @@ public interface BranchManager {
 
     void dropBranch(String branchName);
 
-    void fastForward(String branchName, String currentBranch);
+    void fastForward(String branchName);
 
     List<String> branches();
 
@@ -79,12 +79,16 @@ public interface BranchManager {
 
     static void fastForwardValidate(String branchName, String currentBranch) {
         checkArgument(
-                !branchName.equals(currentBranch),
-                "Fast-forward from the current branch '%s' is not allowed.",
+                !branchName.equals(DEFAULT_MAIN_BRANCH),
+                "Branch name '%s' do not use in fast-forward.",
                 branchName);
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(branchName),
                 "Branch name '%s' is blank.",
+                branchName);
+        checkArgument(
+                !branchName.equals(currentBranch),
+                "Fast-forward from the current branch '%s' is not allowed.",
                 branchName);
     }
 }
