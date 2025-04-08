@@ -90,6 +90,7 @@ public abstract class KeyValueDataFileWriter
             long schemaId,
             int level,
             String compression,
+            String statsMode,
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
@@ -103,7 +104,7 @@ public abstract class KeyValueDataFileWriter
                 simpleStatsExtractor,
                 compression,
                 StatsCollectorFactories.createStatsFactories(
-                        options, writeRowType.getFieldNames(), keyType.getFieldNames()),
+                        statsMode, options, writeRowType.getFieldNames()),
                 options.asyncFileWrite());
 
         this.keyType = keyType;

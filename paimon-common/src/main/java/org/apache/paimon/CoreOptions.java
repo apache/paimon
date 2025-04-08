@@ -1177,6 +1177,17 @@ public class CoreOptions implements Serializable {
                                                             + STATS_MODE_SUFFIX))
                                     .build());
 
+    public static final ConfigOption<Map<String, String>> METADATA_STATS_MODE_PER_LEVEL =
+            key("metadata.stats-mode.per.level")
+                    .mapType()
+                    .defaultValue(new HashMap<>())
+                    .withDescription(
+                            "Define different 'metadata.stats-mode' for different level, you can add the conf like this:"
+                                    + " 'metadata.stats-mode.per.level' = '0:none', if the metadata.stats-mode for level is not provided, "
+                                    + "the default mode which set by `"
+                                    + METADATA_STATS_MODE.key()
+                                    + "` will be used.");
+
     public static final ConfigOption<Boolean> METADATA_STATS_DENSE_STORE =
             key("metadata.stats-dense-store")
                     .booleanType()
@@ -1801,6 +1812,16 @@ public class CoreOptions implements Serializable {
                         Collectors.toMap(
                                 e -> Integer.valueOf(e.getKey()),
                                 e -> normalizeFileFormat(e.getValue())));
+    }
+
+    public String statsMode() {
+        return options.get(METADATA_STATS_MODE);
+    }
+
+    public Map<Integer, String> statsModePerLevel() {
+        Map<String, String> statsPerLevel = options.get(METADATA_STATS_MODE_PER_LEVEL);
+        return statsPerLevel.entrySet().stream()
+                .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
     }
 
     private static String normalizeFileFormat(String fileFormat) {

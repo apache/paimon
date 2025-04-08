@@ -682,7 +682,9 @@ public class AppendOnlyWriterTest {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         CompressOptions.defaultOptions(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
+                                "truncate(16)",
+                                options,
+                                AppendOnlyWriterTest.SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,

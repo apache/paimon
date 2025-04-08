@@ -99,6 +99,7 @@ public class RollingFileWriterTest {
                                         new LongCounter(0),
                                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                                         StatsCollectorFactories.createStatsFactories(
+                                                "truncate(16)",
                                                 new CoreOptions(new HashMap<>()),
                                                 SCHEMA.getFieldNames()),
                                         new FileIndexOptions(),

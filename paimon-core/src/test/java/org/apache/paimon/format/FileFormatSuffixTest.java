@@ -97,7 +97,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         CompressOptions.defaultOptions(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, SCHEMA.getFieldNames()),
+                                "truncate(16)", options, SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,

@@ -21,10 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
-import org.apache.paimon.statistics.TruncateSimpleColStatsCollector;
-import org.apache.paimon.table.SpecialFields;
 
-import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
@@ -35,12 +32,7 @@ import static org.apache.paimon.options.ConfigOptions.key;
 public class StatsCollectorFactories {
 
     public static SimpleColStatsCollector.Factory[] createStatsFactories(
-            CoreOptions options, List<String> fields) {
-        return createStatsFactories(options, fields, Collections.emptyList());
-    }
-
-    public static SimpleColStatsCollector.Factory[] createStatsFactories(
-            CoreOptions options, List<String> fields, List<String> keyNames) {
+            String statsMode, CoreOptions options, List<String> fields) {
         Options cfg = options.toConfiguration();
         SimpleColStatsCollector.Factory[] modes =
                 new SimpleColStatsCollector.Factory[fields.size()];
@@ -51,17 +43,10 @@ public class StatsCollectorFactories {
                             key(String.format("%s.%s.%s", FIELDS_PREFIX, field, STATS_MODE_SUFFIX))
                                     .stringType()
                                     .noDefaultValue());
-            if (fieldMode != null) {
-                modes[i] = SimpleColStatsCollector.from(fieldMode);
-            } else if (SpecialFields.isSystemField(field)
-                    ||
-                    // If we config DATA_FILE_THIN_MODE to true, we need to maintain the
-                    // stats for key fields.
-                    keyNames.contains(SpecialFields.KEY_FIELD_PREFIX + field)) {
-                modes[i] = () -> new TruncateSimpleColStatsCollector(128);
-            } else {
-                modes[i] = SimpleColStatsCollector.from(cfg.get(CoreOptions.METADATA_STATS_MODE));
-            }
+            modes[i] =
+                    fieldMode != null
+                            ? SimpleColStatsCollector.from(fieldMode)
+                            : SimpleColStatsCollector.from(statsMode);
         }
         return modes;
     }

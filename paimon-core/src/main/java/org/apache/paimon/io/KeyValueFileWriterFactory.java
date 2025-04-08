@@ -41,12 +41,10 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
@@ -116,7 +114,7 @@ public class KeyValueFileWriterFactory {
 
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, int level, FileSource fileSource, boolean isExternalPath) {
-        return formatContext.thinModeEnabled()
+        return formatContext.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
                         formatContext.writerFactory(level),
@@ -128,6 +126,7 @@ public class KeyValueFileWriterFactory {
                         schemaId,
                         level,
                         formatContext.compression(level),
+                        formatContext.statsMode(level),
                         options,
                         fileSource,
                         fileIndexOptions,
@@ -143,6 +142,7 @@ public class KeyValueFileWriterFactory {
                         schemaId,
                         level,
                         formatContext.compression(level),
+                        formatContext.statsMode(level),
                         options,
                         fileSource,
                         fileIndexOptions,
@@ -231,10 +231,11 @@ public class KeyValueFileWriterFactory {
 
     private static class WriteFormatContext {
 
-        private final Function<Integer, String> level2Format;
-        private final Function<Integer, String> level2Compress;
+        private final IntFunction<String> level2Format;
+        private final IntFunction<String> level2Compress;
+        private final IntFunction<String> level2Stats;
 
-        private final Map<String, Optional<SimpleStatsExtractor>> format2Extractor;
+        private final Map<String, IntFunction<SimpleStatsExtractor>> format2Extractor;
         private final Map<String, DataFilePathFactory> format2PathFactory;
         private final Map<String, FormatWriterFactory> format2WriterFactory;
 
@@ -267,14 +268,13 @@ public class KeyValueFileWriterFactory {
             this.level2Compress =
                     level -> fileCompressionPerLevel.getOrDefault(level, defaultCompress);
 
+            String statsMode = options.statsMode();
+            Map<Integer, String> statsModePerLevel = options.statsModePerLevel();
+            this.level2Stats = level -> statsModePerLevel.getOrDefault(level, statsMode);
+
             this.format2Extractor = new HashMap<>();
             this.format2PathFactory = new HashMap<>();
             this.format2WriterFactory = new HashMap<>();
-            SimpleColStatsCollector.Factory[] statsCollectorFactories =
-                    StatsCollectorFactories.createStatsFactories(
-                            options,
-                            writeRowType.getFieldNames(),
-                            thinModeEnabled ? keyType.getFieldNames() : Collections.emptyList());
             for (String format : parentFactories.keySet()) {
                 format2PathFactory.put(
                         format,
@@ -285,12 +285,18 @@ public class KeyValueFileWriterFactory {
                 // In avro format, minValue, maxValue, and nullCount are not counted, set
                 // StatsExtractor is Optional.empty() and will use SimpleStatsExtractor to collect
                 // stats
-                format2Extractor.put(
-                        format,
-                        format.equals("avro")
-                                ? Optional.empty()
-                                : fileFormat.createStatsExtractor(
-                                        writeRowType, statsCollectorFactories));
+                IntFunction<SimpleStatsExtractor> extractor =
+                        level -> {
+                            SimpleColStatsCollector.Factory[] statsFactories =
+                                    StatsCollectorFactories.createStatsFactories(
+                                            level2Stats.apply(level),
+                                            options,
+                                            writeRowType.getFieldNames());
+                            return fileFormat
+                                    .createStatsExtractor(writeRowType, statsFactories)
+                                    .orElse(null);
+                        };
+                format2Extractor.put(format, format.equals("avro") ? level -> null : extractor);
                 format2WriterFactory.put(format, fileFormat.createWriterFactory(writeRowType));
             }
         }
@@ -310,13 +316,9 @@ public class KeyValueFileWriterFactory {
             return true;
         }
 
-        private boolean thinModeEnabled() {
-            return thinModeEnabled;
-        }
-
         @Nullable
         private SimpleStatsExtractor extractor(int level) {
-            return format2Extractor.get(level2Format.apply(level)).orElse(null);
+            return format2Extractor.get(level2Format.apply(level)).apply(level);
         }
 
         private DataFilePathFactory pathFactory(int level) {
@@ -329,6 +331,10 @@ public class KeyValueFileWriterFactory {
 
         private String compression(int level) {
             return level2Compress.apply(level);
+        }
+
+        private String statsMode(int level) {
+            return level2Stats.apply(level);
         }
     }
 }
