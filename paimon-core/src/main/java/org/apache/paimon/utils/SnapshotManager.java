@@ -264,7 +264,7 @@ public class SnapshotManager implements Serializable {
     }
 
     /**
-     * Returns a {@link Snapshot} whoes commit time is earlier than or equal to given timestamp
+     * Returns a {@link Snapshot} whose commit time is earlier than or equal to given timestamp
      * mills. If there is no such a snapshot, returns null.
      */
     public @Nullable Snapshot earlierOrEqualTimeMills(long timestampMills) {
@@ -275,7 +275,7 @@ public class SnapshotManager implements Serializable {
 
         Snapshot earliestSnapShot = earliestSnapshot(latest);
         if (earliestSnapShot == null || earliestSnapShot.timeMillis() > timestampMills) {
-            return earliestSnapShot;
+            return null;
         }
         long earliest = earliestSnapShot.id();
 

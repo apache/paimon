@@ -27,7 +27,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT case for flink time travel. */
 public class TimeTravelITCase extends CatalogITCaseBase {
@@ -109,13 +111,17 @@ public class TimeTravelITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTravelToNonExistedTimestamp() {
+    public void testTravelToTimestampBeforeTheEarliestSnapshot() {
         sql("CREATE TABLE t (k INT, v STRING)");
         sql("INSERT INTO t VALUES(1, 'hello'), (2, 'world')");
-        assertThat(
-                        sql("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '1900-01-01 00:00:00'")
-                                .toString())
-                .isEqualTo("[+I[1, hello], +I[2, world]]");
+        assertThatThrownBy(
+                        () ->
+                                sql("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '1900-01-01 00:00:00'")
+                                        .toString())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "There is currently no snapshot earlier than or equal to timestamp"));
     }
 
     @Test
