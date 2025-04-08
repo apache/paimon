@@ -31,7 +31,7 @@ This section introduce all available Paimon Spark functions.
 
 ## max_pt
 
-`max_pt($table_name)`
+`sys.max_pt($table_name)`
 
 It accepts a string type literal to specify the table name and return a max-valid-toplevel partition value.
 - **valid**: the partition which contains data files
@@ -45,10 +45,10 @@ It would throw exception when:
 **Example**
 
 ```shell
-> SELECT max_pt('t');
+> SELECT sys.max_pt('t');
  20250101
  
-> SELECT * FROM t where pt = max_pt('t');
+> SELECT * FROM t where pt = sys.max_pt('t');
  a, 20250101
 ```
 

@@ -71,7 +71,7 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
     Seq("paimon", paimonHiveCatalogName).foreach {
       catalogName =>
         sql(s"use $catalogName")
-        val functions = sql("show user functions").collect()
+        val functions = sql("show user functions in sys").collect()
         assert(functions.exists(_.getString(0).contains("max_pt")), catalogName)
     }
   }
@@ -117,15 +117,12 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
   }
 
   test("Add max_pt function") {
-    Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
+    // spark_catalog does not currently support loading v2 function, see https://github.com/apache/spark/pull/50495
+    Seq("paimon", paimonHiveCatalogName).foreach {
       catalogName =>
         {
           sql(s"use $catalogName")
-          val maxPt = if (catalogName == sparkCatalogName) {
-            "paimon.max_pt"
-          } else {
-            "max_pt"
-          }
+          val maxPt = "sys.max_pt"
 
           intercept[Exception] {
             sql(s"SELECT $maxPt(1)").collect()
