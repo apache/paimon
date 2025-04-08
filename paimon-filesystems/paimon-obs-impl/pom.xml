@@ -105,6 +105,7 @@
                                         <exclude>.gitkeep</exclude>
                                         <exclude>mime.types</exclude>
                                         <exclude>mozilla/**</exclude>
+                                        <exclude>okhttp3/internal/publicsuffix/NOTICE</exclude>
                                     </excludes>
                                 </filter>
                             </filters>

@@ -29,12 +29,12 @@ This project bundles the following dependencies under the Apache Software Licens
 - org.apache.hadoop:hadoop-huaweicloud:3.4.0
 - org.apache.hadoop.thirdparty:hadoop-shaded-guava:1.1.1
 - org.apache.hadoop.thirdparty:hadoop-shaded-protobuf_3_7:1.1.1
+- com.squareup.okhttp3:okhttp:3.14.2
+- com.squareup.okio:okio:1.17.2
 - org.apache.kerby:kerb-core:1.0.1
 - org.apache.kerby:kerby-pkix:1.0.1
 - org.apache.kerby:kerby-asn1:1.0.1
 - org.apache.kerby:kerby-util:1.0.1
-- com.squareup.okhttp3:okhttp:3.14.2
-- com.squareup.okio:okio:1.17.2
 
 This project bundles the following dependencies under BSD-2 License (https://opensource.org/licenses/BSD-2-Clause):
 - dnsjava:dnsjava:2.1.7
