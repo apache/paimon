@@ -66,10 +66,12 @@ public class MergeFunctionTestUtils {
                 expected.add(group.get(group.size() - 1));
             } else {
                 if (group.stream().noneMatch(data -> data.valueKind == RowKind.INSERT)) {
-                    // No insert: fill the pk and left nullable fields to null; sequenceNumber = 0
-                    // because it is not initialized
-                    ReusingTestData finalData = group.get(group.size() - 1);
-                    expected.add(new ReusingTestData(finalData.key, 0, RowKind.DELETE, null));
+                    // No insert: fill the pk and left nullable fields to null; sequenceNumber =
+                    // latest
+                    ReusingTestData last = group.get(group.size() - 1);
+                    expected.add(
+                            new ReusingTestData(
+                                    last.key, last.sequenceNumber, RowKind.DELETE, null));
                 } else {
                     // get the last INSERT data because later DELETE data are ignored
                     group.stream()
@@ -82,7 +84,8 @@ public class MergeFunctionTestUtils {
         return expected;
     }
 
-    public static List<ReusingTestData> getExpectedForAggSum(List<ReusingTestData> input) {
+    public static List<ReusingTestData> getExpectedForAggSum(
+            List<ReusingTestData> input, boolean addOnly, boolean removeRecordOndelete) {
         input = new ArrayList<>(input);
         Collections.sort(input);
 
@@ -96,7 +99,7 @@ public class MergeFunctionTestUtils {
             if (group.size() == 1) {
                 // due to ReducerMergeFunctionWrapper
                 expected.add(group.get(0));
-            } else {
+            } else if (addOnly || !removeRecordOndelete) {
                 long sum =
                         group.stream()
                                 .mapToLong(d -> d.valueKind.isAdd() ? d.value : -d.value)
@@ -104,6 +107,29 @@ public class MergeFunctionTestUtils {
                 ReusingTestData last = group.get(group.size() - 1);
                 expected.add(
                         new ReusingTestData(last.key, last.sequenceNumber, RowKind.INSERT, sum));
+            } else {
+                if (group.stream().noneMatch(data -> data.valueKind == RowKind.INSERT)) {
+                    // No insert: fill the pk and left nullable fields to null; sequenceNumber =
+                    // latest
+                    ReusingTestData last = group.get(group.size() - 1);
+                    expected.add(
+                            new ReusingTestData(
+                                    last.key, last.sequenceNumber, RowKind.DELETE, null));
+                } else {
+                    RowKind rowKind = null;
+                    Long sum = null;
+                    for (ReusingTestData data : group) {
+                        if (data.valueKind == RowKind.INSERT) {
+                            rowKind = RowKind.INSERT;
+                            sum = sum == null ? data.value : sum + data.value;
+                        } else {
+                            rowKind = RowKind.DELETE;
+                            sum = null;
+                        }
+                    }
+                    ReusingTestData last = group.get(group.size() - 1);
+                    expected.add(new ReusingTestData(last.key, last.sequenceNumber, rowKind, sum));
+                }
             }
         }
         return expected;

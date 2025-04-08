@@ -62,6 +62,10 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
         return result;
     }
 
+    public String toString() {
+        return String.format("%d,%d,%s,%d", key, sequenceNumber, valueKind, value);
+    }
+
     public void assertEquals(KeyValue kv) {
         assertThat(kv.key().getInt(0)).isEqualTo(key);
         assertThat(kv.sequenceNumber()).isEqualTo(sequenceNumber);

@@ -175,7 +175,7 @@ public abstract class SortBufferWriteBufferTestBase {
 
         @Override
         protected boolean addOnly() {
-            return true;
+            return addOnly;
         }
 
         @Override
@@ -198,20 +198,31 @@ public abstract class SortBufferWriteBufferTestBase {
     /** Test for {@link SortBufferWriteBuffer} with {@link AggregateMergeFunction}. */
     public static class WithAggMergeFunctionTest extends SortBufferWriteBufferTestBase {
 
+        private final boolean addOnly;
+        private final boolean removeRecordOnDelete;
+
+        private WithAggMergeFunctionTest() {
+            ThreadLocalRandom random = ThreadLocalRandom.current();
+            this.addOnly = random.nextBoolean();
+            this.removeRecordOnDelete = !addOnly && random.nextBoolean();
+        }
+
         @Override
         protected boolean addOnly() {
-            return true;
+            return addOnly;
         }
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return MergeFunctionTestUtils.getExpectedForAggSum(input);
+            return MergeFunctionTestUtils.getExpectedForAggSum(
+                    input, addOnly, removeRecordOnDelete);
         }
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
             Options options = new Options();
             options.set("fields.f1.aggregate-function", "sum");
+            options.set(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE, removeRecordOnDelete);
             return AggregateMergeFunction.factory(
                             options,
                             Arrays.asList("f0", "f1"),
@@ -224,20 +235,31 @@ public abstract class SortBufferWriteBufferTestBase {
     /** Test for {@link SortBufferWriteBuffer} with {@link LookupMergeFunction}. */
     public static class WithLookupFunctionTest extends SortBufferWriteBufferTestBase {
 
+        private final boolean addOnly;
+        private final boolean removeRecordOnDelete;
+
+        private WithLookupFunctionTest() {
+            ThreadLocalRandom random = ThreadLocalRandom.current();
+            this.addOnly = random.nextBoolean();
+            this.removeRecordOnDelete = !addOnly && random.nextBoolean();
+        }
+
         @Override
         protected boolean addOnly() {
-            return true;
+            return addOnly;
         }
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return MergeFunctionTestUtils.getExpectedForAggSum(input);
+            return MergeFunctionTestUtils.getExpectedForAggSum(
+                    input, addOnly, removeRecordOnDelete);
         }
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
             Options options = new Options();
             options.set("fields.f1.aggregate-function", "sum");
+            options.set(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE, removeRecordOnDelete);
             MergeFunctionFactory<KeyValue> aggMergeFunction =
                     AggregateMergeFunction.factory(
                             options,

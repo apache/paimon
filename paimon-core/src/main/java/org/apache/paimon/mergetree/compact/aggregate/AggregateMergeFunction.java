@@ -57,7 +57,6 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     private KeyValue reused;
     private boolean currentDeleteRow;
     private final boolean removeRecordOnDelete;
-    private boolean notNullColumnFilled;
 
     public AggregateMergeFunction(
             InternalRow.FieldGetter[] getters,
@@ -73,7 +72,6 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void reset() {
         this.latestKv = null;
-        this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
         Arrays.stream(aggregators).forEach(FieldAggregator::reset);
         this.currentDeleteRow = false;
@@ -82,18 +80,15 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void add(KeyValue kv) {
         latestKv = kv;
-        boolean isRetract =
-                kv.valueKind() != RowKind.INSERT && kv.valueKind() != RowKind.UPDATE_AFTER;
 
-        currentDeleteRow = removeRecordOnDelete && isRetract;
+        currentDeleteRow = removeRecordOnDelete && kv.valueKind() == RowKind.DELETE;
         if (currentDeleteRow) {
-            if (!notNullColumnFilled) {
-                initRow(row, kv.value());
-                notNullColumnFilled = true;
-            }
+            row = new GenericRow(getters.length);
+            initRow(row, kv.value());
             return;
         }
 
+        boolean isRetract = kv.valueKind().isRetract();
         for (int i = 0; i < getters.length; i++) {
             FieldAggregator fieldAggregator = aggregators[i];
             Object accumulator = getters[i].getFieldOrNull(row);
@@ -104,7 +99,6 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                             : fieldAggregator.agg(accumulator, inputField);
             row.setField(i, mergedField);
         }
-        notNullColumnFilled = true;
     }
 
     private void initRow(GenericRow row, InternalRow value) {
