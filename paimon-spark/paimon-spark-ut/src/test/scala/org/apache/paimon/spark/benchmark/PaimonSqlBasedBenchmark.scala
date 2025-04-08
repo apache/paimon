@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.benchmark
 
-import org.apache.paimon.spark.SparkGenericCatalog
+import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
 import org.apache.spark.sql.{DataFrame, SparkSession}
@@ -40,15 +40,18 @@ trait PaimonSqlBasedBenchmark extends SqlBasedBenchmark {
       .appName(this.getClass.getCanonicalName)
       .config("spark.ui.enabled", value = false)
       .config("spark.sql.warehouse.dir", tempDBDir.getCanonicalPath)
-      .config("spark.sql.catalog.spark_catalog", classOf[SparkGenericCatalog].getName)
-      .config("spark.sql.catalog.spark_catalog.warehouse", tempDBDir.getCanonicalPath)
+      .config("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
+      .config("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
+      .config("spark.sql.defaultCatalog", "paimon")
       .config("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
       .getOrCreate()
   }
 
   def withTempTable(tableNames: String*)(f: => Unit): Unit = {
     try f
-    finally tableNames.foreach(spark.catalog.dropTempView)
+    finally {
+      tableNames.foreach(spark.catalog.dropTempView)
+    }
   }
 
   def withTable(tableNames: String*)(f: => Unit): Unit = {
