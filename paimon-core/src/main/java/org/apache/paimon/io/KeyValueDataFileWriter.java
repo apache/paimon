@@ -84,7 +84,7 @@ public abstract class KeyValueDataFileWriter
             RowType keyType,
             RowType valueType,
             RowType writeRowType,
-            Function<RowType, SimpleStatsProducer> statsProducerFactory,
+            SimpleStatsProducer statsProducer,
             long schemaId,
             int level,
             String compression,
@@ -98,7 +98,7 @@ public abstract class KeyValueDataFileWriter
                 path,
                 converter,
                 writeRowType,
-                statsProducerFactory.apply(writeRowType),
+                statsProducer,
                 compression,
                 options.asyncFileWrite());
 
