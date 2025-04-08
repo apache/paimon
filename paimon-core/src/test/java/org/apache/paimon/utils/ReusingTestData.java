@@ -21,6 +21,8 @@ package org.apache.paimon.utils;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.types.RowKind;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -39,9 +41,9 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
     public final int key;
     public final long sequenceNumber;
     public final RowKind valueKind;
-    public final long value;
+    @Nullable public final Long value;
 
-    public ReusingTestData(int key, long sequenceNumber, RowKind valueKind, long value) {
+    public ReusingTestData(int key, long sequenceNumber, RowKind valueKind, @Nullable Long value) {
         this.key = key;
         this.sequenceNumber = sequenceNumber;
         this.valueKind = valueKind;
@@ -60,11 +62,20 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
         return result;
     }
 
+    public String toString() {
+        return String.format("%d,%d,%s,%d", key, sequenceNumber, valueKind, value);
+    }
+
     public void assertEquals(KeyValue kv) {
         assertThat(kv.key().getInt(0)).isEqualTo(key);
         assertThat(kv.sequenceNumber()).isEqualTo(sequenceNumber);
         assertThat(kv.valueKind()).isEqualTo(valueKind);
-        assertThat(kv.value().getLong(0)).isEqualTo(value);
+        assertThat(kv.value().getInt(0)).isEqualTo(key);
+        if (kv.value().isNullAt(1)) {
+            assertThat(value).isNull();
+        } else {
+            assertThat(kv.value().getLong(1)).isEqualTo(value);
+        }
     }
 
     /**

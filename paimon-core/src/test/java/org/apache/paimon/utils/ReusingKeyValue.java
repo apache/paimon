@@ -37,7 +37,7 @@ public class ReusingKeyValue {
     public ReusingKeyValue() {
         this.key = new BinaryRow(1);
         this.keyWriter = new BinaryRowWriter(key);
-        this.value = new BinaryRow(1);
+        this.value = new BinaryRow(2);
         this.valueWriter = new BinaryRowWriter(value);
         this.kv = new KeyValue();
     }
@@ -45,7 +45,12 @@ public class ReusingKeyValue {
     public KeyValue update(ReusingTestData data) {
         keyWriter.writeInt(0, data.key);
         keyWriter.complete();
-        valueWriter.writeLong(0, data.value);
+        valueWriter.writeInt(0, data.key);
+        if (data.value == null) {
+            valueWriter.setNullAt(1);
+        } else {
+            valueWriter.writeLong(1, data.value);
+        }
         valueWriter.complete();
         return kv.replace(key, data.sequenceNumber, data.valueKind, value);
     }
