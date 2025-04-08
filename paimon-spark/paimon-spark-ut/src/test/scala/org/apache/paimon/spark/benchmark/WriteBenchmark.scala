@@ -36,7 +36,7 @@ object WriteBenchmark extends PaimonSqlBasedBenchmark {
       benchmark: PaimonBenchmark): Unit = {
     benchmark.addCase(s"write table, isPKTable: $isPKTable, keys: $keys, bucket: $bucket", 3) {
       _ =>
-        val tableName = "nonPKTable"
+        val tableName = "targetTable"
         val keyProp = if (keys.isEmpty) {
           ""
         } else if (isPKTable) {
@@ -46,7 +46,7 @@ object WriteBenchmark extends PaimonSqlBasedBenchmark {
         }
         withTable(tableName) {
           sql(s"""
-                 |CREATE TABLE $tableName(id INT, s1 STRING, s2 STRING) USING paimon
+                 |CREATE TABLE $tableName (id INT, s1 STRING, s2 STRING) USING paimon
                  |TBLPROPERTIES (
                  | $keyProp
                  | 'bucket' = '$bucket'
