@@ -270,8 +270,8 @@ public class HiveCatalogTest extends CatalogTestBase {
             Table table = clients.run(client -> client.getTable(databaseName, tableName));
             Map<String, String> tableProperties = table.getParameters();
 
-            assertThat(tableProperties).containsEntry("table.owner", "Hms");
-            assertThat(tableProperties).containsEntry("table.create_time", "2024-01-22");
+            assertThat(tableProperties).containsEntry("hive.table.owner", "Hms");
+            assertThat(tableProperties).containsEntry("hive.table.create_time", "2024-01-22");
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
