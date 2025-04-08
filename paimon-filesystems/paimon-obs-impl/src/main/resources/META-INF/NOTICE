@@ -33,13 +33,14 @@ This project bundles the following dependencies under the Apache Software Licens
 - org.apache.kerby:kerby-pkix:1.0.1
 - org.apache.kerby:kerby-asn1:1.0.1
 - org.apache.kerby:kerby-util:1.0.1
+- com.squareup.okhttp3:okhttp:3.14.2
+- com.squareup.okio:okio:1.17.2
 
 This project bundles the following dependencies under BSD-2 License (https://opensource.org/licenses/BSD-2-Clause):
 - dnsjava:dnsjava:2.1.7
 
 This project bundles the following dependencies under the MIT License (https://opensource.org/licenses/MIT):
-- com.squareup.okhttp3:okhttp:3.14.2
-- com.squareup.okio:okio:1.17.2
+
 - org.checkerframework:checker-qual:2.5.2
 - org.codehaus.mojo:animal-sniffer-annotations:1.17
 - org.slf4j:slf4j-api:1.7.32
