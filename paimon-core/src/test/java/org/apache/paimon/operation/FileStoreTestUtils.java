@@ -62,6 +62,10 @@ public class FileStoreTestUtils {
         assertThat(fileIO.exists(path)).isFalse();
     }
 
+    public static void assertNFilesExists(FileIO fileIO, Path path, int num) throws IOException {
+        assertThat(fileIO.listStatus(path)).hasSize(num);
+    }
+
     // --------------------------------------------------------------------------------
     // writeData & commitData are copied from TestFileStore#commitDataImpl and modified
     // --------------------------------------------------------------------------------
