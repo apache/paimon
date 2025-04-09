@@ -136,7 +136,7 @@ We provide some options to customize the mapping rules. Please use `--type_mappi
 7. `bigint-unsigned-to-bigint`: Map MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` to Paimon `BIGINT`, 
    but there is potential data overflow because `BIGINT UNSIGNED` can store up to 20 digits integer value but Paimon 
    `BIGINT` can only store up to 19 digits integer value. So you should ensure the overflow won't occur when using this option.
-8. `allow_non_string_to_string`: Schema change doesn't support non-string type to string. Use this option to allow this change.
+8. `allow_non_string_to_string`: Schema change doesn't support non-string type to string by default. Use this option to allow this change.
 
 ## Custom Job Settings
 
