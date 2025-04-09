@@ -1825,7 +1825,8 @@ public abstract class HiveCatalogITCaseBase {
                                 + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
                                 + ") PARTITIONED BY (dt, hh)"
                                 + " WITH (\n"
-                                + "'metastore.partitioned-table' = 'true'\n"
+                                + "'metastore.partitioned-table' = 'true',\n"
+                                + "'sync-all-properties' = 'false'\n"
                                 + ");")
                 .await();
         tEnv.executeSql("INSERT INTO t_repair_hive VALUES(1, 'login', '2020-01-02', '09')").await();
