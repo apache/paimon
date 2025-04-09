@@ -114,6 +114,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.meetInsert = false;
         this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
+        this.latestSequenceNumber = 0;
         fieldAggregators.values().forEach(FieldAggregator::reset);
     }
 
