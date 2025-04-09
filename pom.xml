@@ -427,6 +427,12 @@ under the License.
                 <module>paimon-flink/paimon-flink-1.20</module>
                 <module>paimon-flink/paimon-flink-cdc</module>
             </modules>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>flink1</name>
+                </property>
+            </activation>
         </profile>
 
         <profile>
@@ -440,6 +446,11 @@ under the License.
             <modules>
                 <module>paimon-flink/paimon-flink-2.0</module>
             </modules>
+            <activation>
+                <property>
+                    <name>flink2</name>
+                </property>
+            </activation>
         </profile>
     </profiles>
 

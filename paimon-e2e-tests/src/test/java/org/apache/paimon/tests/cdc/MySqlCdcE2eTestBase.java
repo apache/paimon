@@ -51,6 +51,12 @@ import java.util.stream.Stream;
  */
 public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
 
+    protected boolean runTest() {
+        // TODO: modify the following condition after paimon-flink-cdc supports flink 2.0
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        return flinkVersion.compareTo("2.0") < 0;
+    }
+
     private static final Logger LOG = LoggerFactory.getLogger(MySqlCdcE2eTestBase.class);
 
     private static final String USER = "paimonuser";

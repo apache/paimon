@@ -33,12 +33,6 @@ import java.sql.Statement;
 @EnabledIf("runTest")
 public class MySqlTinyIntConvertE2ETest extends MySqlCdcE2eTestBase {
 
-    private static boolean runTest() {
-        // TODO: modify the following condition after paimon-flink-cdc supports flink 2.0
-        String flinkVersion = System.getProperty("test.flink.main.version");
-        return flinkVersion.compareTo("2.0") < 0;
-    }
-
     protected MySqlTinyIntConvertE2ETest() {
         super(MySqlVersion.V5_7);
     }
