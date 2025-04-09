@@ -78,7 +78,9 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
 
     @Override
     public void open() throws Exception {
-        LOG.debug("Opened a append-only multi table compaction worker.");
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Opened a append-only multi table compaction worker.");
+        }
         compactorContainer = new HashMap<>();
         catalog = catalogLoader.load();
     }

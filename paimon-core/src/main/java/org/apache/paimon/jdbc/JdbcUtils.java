@@ -498,7 +498,9 @@ public class JdbcUtils {
         // Check and clear expire lock.
         int affectedRows = distributedLockDialect.tryReleaseTimedOutLock(connections, lockId);
         if (affectedRows > 0) {
-            LOG.debug("Successfully cleared " + affectedRows + " lock records");
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Successfully cleared {} lock records", affectedRows);
+            }
         }
         return distributedLockDialect.lockAcquire(connections, lockId, timeoutMillSeconds);
     }

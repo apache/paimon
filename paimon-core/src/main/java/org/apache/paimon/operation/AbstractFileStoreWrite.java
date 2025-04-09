@@ -367,7 +367,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Extracted state " + result);
+            LOG.debug("Extracted state {}", result);
         }
         return result;
     }

@@ -88,7 +88,7 @@ public abstract class AbstractBinaryExternalMerger<Entry> implements Closeable {
             List<ChannelWithMeta> channelIDs, List<FileIOChannel> openChannels) throws IOException {
         // create one iterator per channel id
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Performing merge of " + channelIDs.size() + " sorted streams.");
+            LOG.debug("Performing merge of {} sorted streams.", channelIDs.size());
         }
 
         final List<MutableObjectIterator<Entry>> iterators = new ArrayList<>(channelIDs.size() + 1);

@@ -72,18 +72,21 @@ public class FileChannelManagerImpl implements FileChannelManager {
             File storageDir = new File(baseDir, subfolder);
 
             if (!storageDir.exists() && !storageDir.mkdirs()) {
-                LOG.warn(
-                        "Failed to create directory {}, temp directory {} will not be used",
-                        storageDir.getAbsolutePath(),
-                        tempDirs[i]);
+                if (LOG.isDebugEnabled()) {
+                    LOG.warn(
+                            "Failed to create directory {}, temp directory {} will not be used",
+                            storageDir.getAbsolutePath(),
+                            tempDirs[i]);
+                }
                 continue;
             }
 
             filesList.add(storageDir);
-
-            LOG.debug(
-                    "FileChannelManager uses directory {} for spill files.",
-                    storageDir.getAbsolutePath());
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "FileChannelManager uses directory {} for spill files.",
+                        storageDir.getAbsolutePath());
+            }
         }
 
         if (filesList.isEmpty()) {

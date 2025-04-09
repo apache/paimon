@@ -218,7 +218,9 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
             shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
         }
         if (!shouldMonitor) {
-            LOG.debug("Source table '{}' is excluded.", mySqlTableName);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Source table '{}' is excluded.", mySqlTableName);
+            }
         }
         return shouldMonitor;
     }
@@ -228,7 +230,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
         if (schemaCompatible(tableSchema, mySqlSchema.fields())) {
             return true;
         } else if (ignoreIncompatible) {
-            LOG.warn(errMsg.get() + "This table will be ignored.");
+            LOG.warn("{} This table will be ignored.", errMsg.get());
             return false;
         } else {
             throw new IllegalArgumentException(

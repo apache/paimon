@@ -140,7 +140,7 @@ public abstract class KeyValueDataFileWriter
         }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Write to Path " + path + " key value " + kv.toString(keyType, valueType));
+            LOG.debug("Write to Path {} key value {}", path, kv.toString(keyType, valueType));
         }
     }
 

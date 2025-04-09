@@ -89,7 +89,9 @@ public class UniversalCompaction implements CompactStrategy {
         if (opCompactionInterval != null) {
             if (lastOptimizedCompaction == null
                     || currentTimeMillis() - lastOptimizedCompaction > opCompactionInterval) {
-                LOG.debug("Universal compaction due to optimized compaction interval");
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Universal compaction due to optimized compaction interval");
+                }
                 updateLastOptimizedCompaction();
                 return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
             }

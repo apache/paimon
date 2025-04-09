@@ -121,7 +121,9 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
         }
 
         if (writeBufferPool == null) {
-            LOG.debug("Use default heap memory segment pool for write buffer.");
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Use default heap memory segment pool for write buffer.");
+            }
             writeBufferPool =
                     new MemoryPoolFactory(
                                     new HeapMemorySegmentPool(
