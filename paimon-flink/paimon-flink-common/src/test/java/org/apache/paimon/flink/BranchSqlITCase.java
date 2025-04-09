@@ -289,6 +289,21 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testBranchSystemTableRead() throws Exception {
+        sql(
+                "CREATE TABLE T ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
+        sql("CALL sys.create_branch('default.T', 'stream')");
+        sql(
+                "INSERT INTO T$branch_stream VALUES (1, 10, 'truck'), (1, 12, 'suv'), (2, 20, 'moto'), (2, 25, 'coupe')");
+        sql("alter table T set ('branch'='stream')");
+
+        assertThat(collectResult("SELECT schema_id, bucket FROM `T$files`"))
+                .containsExactlyInAnyOrder("+I[0, 0]", "+I[0, 0]");
+        assertThat(collectResult("SELECT schema_id, bucket FROM `T$branch_stream$files`"))
+                .containsExactlyInAnyOrder("+I[0, 0]", "+I[0, 0]");
+    }
+
+    @Test
     public void testFallbackBranchBatchRead() throws Exception {
         sql(
                 "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");

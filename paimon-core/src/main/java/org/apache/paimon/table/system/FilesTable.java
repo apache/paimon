@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
@@ -322,9 +323,17 @@ public class FilesTable implements ReadonlyTable {
             List<Iterator<InternalRow>> iteratorList = new ArrayList<>();
             // dataFilePlan.snapshotId indicates there's no files in the table, use the newest
             // schema id directly
+            Long scanSnapshotId = new CoreOptions(storeTable.options()).scanSnapshotId();
             SimpleStatsEvolutions simpleStatsEvolutions =
                     new SimpleStatsEvolutions(
-                            sid -> schemaManager.schema(sid).fields(), storeTable.schema().id());
+                            sid -> schemaManager.schema(sid).fields(),
+                            Objects.requireNonNull(
+                                            scanSnapshotId == null
+                                                    ? storeTable.snapshotManager().latestSnapshot()
+                                                    : storeTable
+                                                            .snapshotManager()
+                                                            .snapshot(scanSnapshotId))
+                                    .schemaId());
 
             @SuppressWarnings("unchecked")
             CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
