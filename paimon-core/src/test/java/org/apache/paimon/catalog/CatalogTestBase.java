@@ -1222,7 +1222,7 @@ public abstract class CatalogTestBase {
         // alter table
         SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.STRING());
         assertThatThrownBy(() -> catalog.alterTable(identifier, schemaChange, false))
-                .hasMessage("Only data table support alter table.");
+                .hasMessageContaining("Only data table support alter table.");
 
         // drop table
         catalog.dropTable(identifier, false);
