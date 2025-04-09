@@ -53,7 +53,7 @@ public class StatsCollectorFactoriesTest {
 
         SimpleColStatsCollector.Factory[] statsFactories =
                 StatsCollectorFactories.createStatsFactories(
-                        new CoreOptions(options), type.getFieldNames());
+                        "truncate(16)", new CoreOptions(options), type.getFieldNames());
         SimpleColStatsCollector[] stats = SimpleColStatsCollector.create(statsFactories);
         assertThat(stats.length).isEqualTo(3);
         assertThat(((TruncateSimpleColStatsCollector) stats[0]).getLength()).isEqualTo(16);

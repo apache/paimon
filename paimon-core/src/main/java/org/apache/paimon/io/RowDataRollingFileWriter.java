@@ -21,12 +21,16 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
+
+import java.util.Arrays;
 
 /** {@link RollingFileWriter} for data files containing {@link InternalRow}. */
 public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, DataFileMeta> {
@@ -52,20 +56,33 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileFormat.createWriterFactory(writeSchema),
                                 pathFactory.newPath(),
                                 writeSchema,
-                                fileFormat instanceof AvroFileFormat
-                                        ? null
-                                        : fileFormat
-                                                .createStatsExtractor(writeSchema, statsCollectors)
-                                                .orElse(null),
+                                createStatsProducer(fileFormat, writeSchema, statsCollectors),
                                 schemaId,
                                 seqNumCounter,
                                 fileCompression,
-                                statsCollectors,
                                 fileIndexOptions,
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
                                 pathFactory.isExternalPath()),
                 targetFileSize);
+    }
+
+    private static SimpleStatsProducer createStatsProducer(
+            FileFormat fileFormat,
+            RowType rowType,
+            SimpleColStatsCollector.Factory[] statsCollectors) {
+        boolean isDisabled =
+                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
+                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
+        if (isDisabled) {
+            return SimpleStatsProducer.disabledProducer();
+        }
+        if (fileFormat instanceof AvroFileFormat) {
+            SimpleStatsCollector collector = new SimpleStatsCollector(rowType, statsCollectors);
+            return SimpleStatsProducer.fromCollector(collector);
+        }
+        return SimpleStatsProducer.fromExtractor(
+                fileFormat.createStatsExtractor(rowType, statsCollectors).orElse(null));
     }
 }

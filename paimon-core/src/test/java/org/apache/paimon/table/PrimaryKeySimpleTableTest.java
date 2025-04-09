@@ -30,6 +30,7 @@ import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
@@ -106,6 +107,7 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
+import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE_PER_LEVEL;
 import static org.apache.paimon.CoreOptions.MergeEngine;
 import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
@@ -124,6 +126,53 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    @ParameterizedTest(name = "format-{0}")
+    @ValueSource(strings = {"avro", "parquet"})
+    public void testStatsModePerLevel(String format) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(FILE_FORMAT, format);
+                            options.set(
+                                    METADATA_STATS_MODE_PER_LEVEL,
+                                    Collections.singletonMap("0", "none"));
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+
+        // first write
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(write.prepareCommit());
+        }
+
+        // assert level 0
+        DataSplit split = (DataSplit) table.newScan().plan().splits().get(0);
+        DataFileMeta file = split.dataFiles().get(0);
+        assertThat(file.level()).isEqualTo(0);
+        assertThat(file.valueStatsCols()).isEmpty();
+
+        // second write
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(write.prepareCommit());
+        }
+
+        // compact
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.compact(split.partition(), split.bucket(), true);
+            commit.commit(write.prepareCommit());
+        }
+
+        // assert level 5
+        file = ((DataSplit) table.newScan().plan().splits().get(0)).dataFiles().get(0);
+        assertThat(file.level()).isEqualTo(5);
+        assertThat(file.valueStats().maxValues().getFieldCount()).isGreaterThan(4);
+    }
 
     @Test
     public void testMultipleWriters() throws Exception {
