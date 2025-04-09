@@ -67,7 +67,9 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for {@link CommitterOperator}. */
 public class CommitterOperatorTest extends CommitterOperatorTestBase {
