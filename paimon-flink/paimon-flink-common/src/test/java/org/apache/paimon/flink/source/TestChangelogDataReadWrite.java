@@ -58,7 +58,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static java.util.Collections.singletonList;
@@ -172,8 +171,6 @@ public class TestChangelogDataReadWrite {
         CoreOptions options =
                 new CoreOptions(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "avro"));
 
-        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put("avro", pathFactory);
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         RecordWriter<KeyValue> writer =
                 new KeyValueFileStoreWrite(
@@ -189,7 +186,7 @@ public class TestChangelogDataReadWrite {
                                 () -> EQUALISER,
                                 DeduplicateMergeFunction.factory(),
                                 pathFactory,
-                                pathFactoryMap,
+                                format -> pathFactory,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
                                 null,
