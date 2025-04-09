@@ -583,6 +583,13 @@ public class CoreOptions implements Serializable {
                             "The size amplification is defined as the amount (in percentage) of additional storage "
                                     + "needed to store a single byte of data in the merge tree for changelog mode table.");
 
+    public static final ConfigOption<Boolean> COMPACTION_FORCE_UP_LEVEL_0 =
+            key("compaction.force-up-level-0")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If set to true, compaction strategy will always include all level 0 files in candidates.");
+
     public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
             key("compaction.size-ratio")
                     .intType()
@@ -2155,6 +2162,10 @@ public class CoreOptions implements Serializable {
 
     public int maxSizeAmplificationPercent() {
         return options.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
+    }
+
+    public boolean compactionForceUpLevel0() {
+        return options.get(COMPACTION_FORCE_UP_LEVEL_0);
     }
 
     public int sortedRunSizeRatio() {

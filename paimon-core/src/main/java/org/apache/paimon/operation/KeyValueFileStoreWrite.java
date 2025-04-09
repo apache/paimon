@@ -241,11 +241,17 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             }
         }
 
-        return new UniversalCompaction(
-                options.maxSizeAmplificationPercent(),
-                options.sortedRunSizeRatio(),
-                options.numSortedRunCompactionTrigger(),
-                options.optimizedCompactionInterval());
+        UniversalCompaction universal =
+                new UniversalCompaction(
+                        options.maxSizeAmplificationPercent(),
+                        options.sortedRunSizeRatio(),
+                        options.numSortedRunCompactionTrigger(),
+                        options.optimizedCompactionInterval());
+        if (options.compactionForceUpLevel0()) {
+            return new ForceUpLevel0Compaction(universal);
+        } else {
+            return universal;
+        }
     }
 
     private CompactManager createCompactManager(
