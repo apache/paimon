@@ -42,7 +42,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
-import static org.apache.paimon.KeyValueFileStore.format2PathFactory;
+import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStoreWrite} for {@code bucket = -2} tables. */
 public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
@@ -56,7 +56,7 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            Function<String, FileStorePathFactory> pathFactory,
+            Function<String, FileStorePathFactory> formatPathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
@@ -87,7 +87,7 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
                         keyType,
                         valueType,
                         this.options.fileFormat(),
-                        format2PathFactory(this.options, pathFactory),
+                        createFormatPathFactories(this.options, formatPathFactory),
                         options.targetFileSize(true));
 
         // Ignoring previous files saves scanning time.
