@@ -39,9 +39,10 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
+
+import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStoreWrite} for {@code bucket = -2} tables. */
 public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
@@ -55,7 +56,7 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            Map<String, FileStorePathFactory> format2PathFactory,
+            Function<String, FileStorePathFactory> formatPathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
@@ -72,15 +73,21 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
                 options.writeMaxWritersToSpill(),
                 options.legacyPartitionName());
 
-        this.options = options;
+        // copy options for postpone bucket
+        this.options = new CoreOptions(options.toConfiguration().toMap());
+
+        // use avro for postpone bucket
+        this.options.toConfiguration().set(CoreOptions.FILE_FORMAT, "avro");
+        this.options.toConfiguration().set(CoreOptions.METADATA_STATS_MODE, "none");
+
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,
                         schema.id(),
                         keyType,
                         valueType,
-                        options.fileFormat(),
-                        format2PathFactory,
+                        this.options.fileFormat(),
+                        createFormatPathFactories(this.options, formatPathFactory),
                         options.targetFileSize(true));
 
         // Ignoring previous files saves scanning time.

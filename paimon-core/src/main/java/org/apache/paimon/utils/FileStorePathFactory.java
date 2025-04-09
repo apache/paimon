@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
@@ -29,9 +30,14 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** Factory which produces {@link Path}s for manifest files. */
@@ -289,5 +295,14 @@ public class FileStorePathFactory {
                 return new Path(statisticsPath(), fileName);
             }
         };
+    }
+
+    public static Map<String, FileStorePathFactory> createFormatPathFactories(
+            CoreOptions options, Function<String, FileStorePathFactory> formatPathFactory) {
+        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
+        Set<String> formats = new HashSet<>(options.fileFormatPerLevel().values());
+        formats.add(options.fileFormatString());
+        formats.forEach(format -> pathFactoryMap.put(format, formatPathFactory.apply(format)));
+        return pathFactoryMap;
     }
 }
