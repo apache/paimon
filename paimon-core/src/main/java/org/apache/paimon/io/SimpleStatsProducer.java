@@ -83,7 +83,9 @@ public interface SimpleStatsProducer {
             }
 
             @Override
-            public void collect(InternalRow row) {}
+            public void collect(InternalRow row) {
+                throw new IllegalStateException();
+            }
 
             @Override
             public SimpleColStats[] extract(FileIO fileIO, Path path, long length)

@@ -38,41 +38,38 @@ import java.util.stream.IntStream;
  */
 public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWriter<T, R> {
 
+    private final RowType rowType;
     private final SimpleStatsProducer statsProducer;
-    private final SimpleColStats[] noneStats;
+    private final boolean isStatsDisabled;
+    private final boolean statsRequirePerRecord;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
             FormatWriterFactory factory,
             Path path,
             Function<T, InternalRow> converter,
-            RowType writeSchema,
+            RowType rowType,
             SimpleStatsProducer statsProducer,
             String compression,
             boolean asyncWrite) {
         super(fileIO, factory, path, converter, compression, asyncWrite);
+        this.rowType = rowType;
         this.statsProducer = statsProducer;
-        if (statsProducer.isStatsDisabled()) {
-            this.noneStats =
-                    IntStream.range(0, writeSchema.getFieldCount())
-                            .mapToObj(i -> SimpleColStats.NONE)
-                            .toArray(SimpleColStats[]::new);
-        } else {
-            this.noneStats = null;
-        }
+        this.isStatsDisabled = statsProducer.isStatsDisabled();
+        this.statsRequirePerRecord = statsProducer.requirePerRecord();
     }
 
     @Override
     public void write(T record) throws IOException {
         InternalRow rowData = writeImpl(record);
-        if (noneStats == null) {
+        if (!isStatsDisabled && statsRequirePerRecord) {
             statsProducer.collect(rowData);
         }
     }
 
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
-        if (statsProducer.requirePerRecord()) {
+        if (statsRequirePerRecord) {
             throw new IllegalArgumentException(
                     String.format(
                             "Can't write bundle for %s, we may lose all the statistical information.",
@@ -83,8 +80,10 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     public SimpleColStats[] fieldStats(long fileSize) throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
-        if (noneStats != null) {
-            return noneStats;
+        if (isStatsDisabled) {
+            return IntStream.range(0, rowType.getFieldCount())
+                    .mapToObj(i -> SimpleColStats.NONE)
+                    .toArray(SimpleColStats[]::new);
         }
 
         return statsProducer.extract(fileIO, path, fileSize);
