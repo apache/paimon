@@ -436,7 +436,8 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL'",
+                                "  'table.type' = 'EXTERNAL',",
+                                "  'sync-all-properties' = 'false'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_03").await();
@@ -464,8 +465,7 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL',",
-                                "  'sync-all-properties' = 'true'",
+                                "  'table.type' = 'EXTERNAL'",
                                 ")"))
                 .await();
 
@@ -1669,7 +1669,8 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL'",
+                                "  'table.type' = 'EXTERNAL',",
+                                "  'sync-all-properties' = 'false'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_repair_03").await();
@@ -1697,8 +1698,7 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
-                                "  'table.type' = 'EXTERNAL',",
-                                "  'sync-all-properties' = 'true'",
+                                "  'table.type' = 'EXTERNAL'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG paimon_catalog_repair_syn_03").await();
