@@ -52,12 +52,10 @@ public class StaticFromSnapshotStartingScanner extends ReadPlanStartingScanner {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
 
         if (earliestSnapshotId == null || latestSnapshotId == null) {
-            LOG.warn("There is currently no snapshot. Waiting for snapshot generation.");
-            return null;
+            throw new IllegalArgumentException("There is currently no snapshot.");
         }
 
-        // Checks earlier whether the specified scan snapshot id is valid and throws the correct
-        // exception.
+        // Checks earlier whether the specified scan snapshot id is valid.
         checkArgument(
                 startingSnapshotId >= earliestSnapshotId && startingSnapshotId <= latestSnapshotId,
                 "The specified scan snapshotId %s is out of available snapshotId range [%s, %s].",
