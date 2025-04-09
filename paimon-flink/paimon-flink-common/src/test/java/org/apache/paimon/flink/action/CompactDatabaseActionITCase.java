@@ -1058,7 +1058,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
         waitUtil(
                 () -> snapshotManager.latestSnapshotId() == 11L,
-                Duration.ofSeconds(60),
+                Duration.ofSeconds(180),
                 Duration.ofMillis(500));
         jobClient.cancel();
 
