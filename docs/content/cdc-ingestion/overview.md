@@ -114,20 +114,29 @@ first day of a week is Sunday).
 
 ## Special Data Type Mapping
 
-1. MySQL TINYINT(1) type will be mapped to Boolean by default. If you want to store number (-128~127) in it like MySQL,
-   you can specify type mapping option `tinyint1-not-bool` (Use `--type_mapping`), then the column will be mapped to TINYINT in Paimon table.
-2. You can use type mapping option `to-nullable` (Use `--type_mapping`) to ignore all NOT NULL constraints (except primary keys).
-3. You can use type mapping option `to-string` (Use `--type_mapping`) to map all MySQL data type to STRING.
-4. You can use type mapping option `char-to-string` (Use `--type_mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
-5. You can use type mapping option `longtext-to-bytes` (Use `--type_mapping`) to map MySQL LONGTEXT types to BYTES.
-6. MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` will be mapped to `DECIMAL(20, 0)` by default. You can 
-use type mapping option `bigint-unsigned-to-bigint` (Use `--type_mapping`) to map these types to Paimon `BIGINT`, but there 
-is potential data overflow because `BIGINT UNSIGNED` can store up to 20 digits integer value but Paimon `BIGINT` can only 
-store up to 19 digits integer value. So you should ensure the overflow won't occur when using this option.
-7. MySQL BIT(1) type will be mapped to Boolean.
-8. When using Hive catalog, MySQL TIME type will be mapped to STRING.
-9. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
-   should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
+It is possible that some data types of upstream systems cannot be directly mapped to Paimon data types. We have some special 
+data types mapping rules:
+
+1. MySQL `TINYINT(1)` type will be mapped to `Boolean`.
+2. MySQL `BIT(1)` type will be mapped to `Boolean`.
+3. MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` will be mapped to `DECIMAL(20, 0)`.
+4. MySQL `BINARY` will be mapped to Paimon `VARBINARY`. This is because the binary value is passed as bytes in binlog, so it
+   should be mapped to byte type (`BYTES` or `VARBINARY`). We choose `VARBINARY` because it can retain the length information. 
+5. Some upstream systems may not pass decimal precision and scale information. In this case, we will use `DECIMAL(38, 18)`.
+6. When using Hive catalog, MySQL `TIME` type will be mapped to `STRING`.
+
+We provide some options to customize the mapping rules. Please use `--type_mapping option1,option2,...` to specify them:
+
+1. `tinyint1-not-bool`: Map MySQL `TINYINT(1)` to Paimon `TINYINT` instead of `Boolean`.
+2. `to-nullable`: Ignore all `NOT NULL` constraints (except primary keys).
+3. `to-string`: Map all MySQL data type to `STRING`.
+4. `char-to-string`: Map MySQL `CHAR(length)`/`VARCHAR(length)` types to `STRING`.
+5. `longtext-to-bytes`: Map MySQL `LONGTEXT` types to `BYTES`.
+6. `decimal_no_change`: Avoid that Paimon CDC framework automatically use `DECIMAL(38, 18)`.
+7. `bigint-unsigned-to-bigint`: Map MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` to Paimon `BIGINT`, 
+   but there is potential data overflow because `BIGINT UNSIGNED` can store up to 20 digits integer value but Paimon 
+   `BIGINT` can only store up to 19 digits integer value. So you should ensure the overflow won't occur when using this option.
+8. `allow_non_string_to_string`: Schema change doesn't support non-string type to string. Use this option to allow this change.
 
 ## Custom Job Settings
 
