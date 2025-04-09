@@ -26,7 +26,6 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.orc.OrcReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
@@ -51,7 +50,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.sql.Date;
-import java.util.Arrays;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -116,12 +114,6 @@ public class OrcSimpleStatsExtractor implements SimpleStatsExtractor {
                             .toArray(SimpleColStats[]::new),
                     new FileInfo(rowCount));
         }
-    }
-
-    @Override
-    public boolean isStatsDisabled() {
-        return Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
-                .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
     }
 
     private SimpleColStats toFieldStats(

@@ -25,7 +25,6 @@ import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
@@ -47,7 +46,6 @@ import org.apache.parquet.schema.PrimitiveType;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.IntStream;
 
@@ -91,12 +89,6 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
                                 })
                         .toArray(SimpleColStats[]::new),
                 statsPair.getRight());
-    }
-
-    @Override
-    public boolean isStatsDisabled() {
-        return Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
-                .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
     }
 
     private SimpleColStats toFieldStats(

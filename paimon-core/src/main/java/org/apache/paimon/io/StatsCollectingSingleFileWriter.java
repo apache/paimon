@@ -65,7 +65,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     @Override
     public void write(T record) throws IOException {
         InternalRow rowData = writeImpl(record);
-        if (!statsProducer.isStatsDisabled() && statsProducer.requirePerRecord()) {
+        if (noneStats == null) {
             statsProducer.collect(rowData);
         }
     }
@@ -83,7 +83,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     public SimpleColStats[] fieldStats(long fileSize) throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
-        if (statsProducer.isStatsDisabled()) {
+        if (noneStats != null) {
             return noneStats;
         }
 

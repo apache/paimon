@@ -32,6 +32,7 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
@@ -41,9 +42,11 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
@@ -234,7 +237,8 @@ public class KeyValueFileWriterFactory {
         private final IntFunction<String> level2Compress;
         private final IntFunction<String> level2Stats;
 
-        private final Map<Pair<String, String>, SimpleStatsExtractor> formatStats2Extractor;
+        private final Map<Pair<String, String>, Optional<SimpleStatsExtractor>>
+                formatStats2Extractor;
         private final Map<String, SimpleColStatsCollector.Factory[]> statsMode2AvroStats;
         private final Map<String, DataFilePathFactory> format2PathFactory;
         private final Map<String, FileFormat> formatFactory;
@@ -320,7 +324,7 @@ public class KeyValueFileWriterFactory {
                 return SimpleStatsProducer.fromCollector(collector);
             }
 
-            SimpleStatsExtractor extractor =
+            Optional<SimpleStatsExtractor> extractor =
                     formatStats2Extractor.computeIfAbsent(
                             Pair.of(format, statsMode),
                             key -> {
@@ -332,11 +336,22 @@ public class KeyValueFileWriterFactory {
                                                 thinModeEnabled
                                                         ? keyType.getFieldNames()
                                                         : Collections.emptyList());
+                                boolean isDisabled =
+                                        Arrays.stream(
+                                                        SimpleColStatsCollector.create(
+                                                                statsFactories))
+                                                .allMatch(
+                                                        p ->
+                                                                p
+                                                                        instanceof
+                                                                        NoneSimpleColStatsCollector);
+                                if (isDisabled) {
+                                    return Optional.empty();
+                                }
                                 return fileFormat(format)
-                                        .createStatsExtractor(writeRowType, statsFactories)
-                                        .orElse(null);
+                                        .createStatsExtractor(writeRowType, statsFactories);
                             });
-            return SimpleStatsProducer.fromExtractor(extractor);
+            return SimpleStatsProducer.fromExtractor(extractor.orElse(null));
         }
 
         private DataFilePathFactory pathFactory(int level) {

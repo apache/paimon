@@ -25,6 +25,8 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 
 /** Produce {@link SimpleColStats} for fields. */
@@ -38,12 +40,12 @@ public interface SimpleStatsProducer {
 
     SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException;
 
-    static SimpleStatsProducer fromExtractor(SimpleStatsExtractor extractor) {
+    static SimpleStatsProducer disabledProducer() {
         return new SimpleStatsProducer() {
 
             @Override
             public boolean isStatsDisabled() {
-                return extractor.isStatsDisabled();
+                return true;
             }
 
             @Override
@@ -57,6 +59,33 @@ public interface SimpleStatsProducer {
             }
 
             @Override
+            public SimpleColStats[] extract(FileIO fileIO, Path path, long length) {
+                throw new IllegalStateException();
+            }
+        };
+    }
+
+    static SimpleStatsProducer fromExtractor(@Nullable SimpleStatsExtractor extractor) {
+        if (extractor == null) {
+            return disabledProducer();
+        }
+
+        return new SimpleStatsProducer() {
+
+            @Override
+            public boolean isStatsDisabled() {
+                return false;
+            }
+
+            @Override
+            public boolean requirePerRecord() {
+                return false;
+            }
+
+            @Override
+            public void collect(InternalRow row) {}
+
+            @Override
             public SimpleColStats[] extract(FileIO fileIO, Path path, long length)
                     throws IOException {
                 return extractor.extract(fileIO, path, length);
@@ -65,6 +94,10 @@ public interface SimpleStatsProducer {
     }
 
     static SimpleStatsProducer fromCollector(SimpleStatsCollector collector) {
+        if (collector.isDisabled()) {
+            return disabledProducer();
+        }
+
         return new SimpleStatsProducer() {
 
             @Override
