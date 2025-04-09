@@ -32,6 +32,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -126,6 +127,26 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    @Test
+    public void testPostponeBucket() throws Exception {
+        FileStoreTable table = createFileStoreTable(options -> options.set(BUCKET, -2));
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(0, 0, 0L), BucketMode.POSTPONE_BUCKET);
+            commit.commit(write.prepareCommit());
+        }
+
+        Snapshot snapshot = table.latestSnapshot().get();
+        ManifestFileMeta manifest =
+                table.manifestListReader().read(snapshot.deltaManifestList()).get(0);
+        DataFileMeta file = table.manifestFileReader().read(manifest.fileName()).get(0).file();
+        assertThat(file.fileName()).endsWith(".avro");
+        assertThat(file.level()).isEqualTo(0);
+        assertThat(file.valueStatsCols()).isEmpty();
+    }
 
     @ParameterizedTest(name = "format-{0}")
     @ValueSource(strings = {"avro", "parquet"})

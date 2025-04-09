@@ -54,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.predicate.PredicateBuilder.and;
@@ -178,7 +179,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     partitionType,
                     keyType,
                     valueType,
-                    format2PathFactory(),
+                    this::pathFactory,
                     snapshotManager(),
                     newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
                     options,
@@ -197,7 +198,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     logDedupEqualSupplier,
                     mfFactory,
                     pathFactory(),
-                    format2PathFactory(),
+                    format2PathFactory(options, this::pathFactory),
                     snapshotManager(),
                     newScan(ScanType.FOR_WRITE).withManifestCacheFilter(manifestFilter),
                     indexFactory,
@@ -208,11 +209,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         }
     }
 
-    private Map<String, FileStorePathFactory> format2PathFactory() {
+    public static Map<String, FileStorePathFactory> format2PathFactory(
+            CoreOptions options, Function<String, FileStorePathFactory> pathFactory) {
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
         Set<String> formats = new HashSet<>(options.fileFormatPerLevel().values());
         formats.add(options.fileFormatString());
-        formats.forEach(format -> pathFactoryMap.put(format, pathFactory(format)));
+        formats.forEach(format -> pathFactoryMap.put(format, pathFactory.apply(format)));
         return pathFactoryMap;
     }
 
