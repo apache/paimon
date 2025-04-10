@@ -628,9 +628,7 @@ public class CoreOptions implements Serializable {
                                             "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
                                                     + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
                                                     + "avoids pending too much small files.")
-                                    .list(
-                                            text("Default value of Append Table is '50'."),
-                                            text("Default value of Bucketed Append Table is '5'."))
+                                    .list(text("Default value of Bucketed Append Table is '5'."))
                                     .build());
 
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =

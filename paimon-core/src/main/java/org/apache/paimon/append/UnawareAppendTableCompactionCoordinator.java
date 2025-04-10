@@ -79,7 +79,6 @@ public class UnawareAppendTableCompactionCoordinator {
     private final long targetFileSize;
     private final long compactionFileSize;
     private final int minFileNum;
-    private final int maxFileNum;
     private final DvMaintainerCache dvMaintainerCache;
     private final FilesIterator filesIterator;
 
@@ -102,8 +101,6 @@ public class UnawareAppendTableCompactionCoordinator {
         this.targetFileSize = options.targetFileSize(false);
         this.compactionFileSize = options.compactionFileSize(false);
         this.minFileNum = options.compactionMinFileNum();
-        // this is global compaction, avoid too many compaction tasks
-        this.maxFileNum = options.compactionMaxFileNum().orElse(50);
         this.dvMaintainerCache =
                 options.deletionVectorsEnabled()
                         ? new DvMaintainerCache(table.store().newIndexFileHandler())
@@ -249,6 +246,10 @@ public class UnawareAppendTableCompactionCoordinator {
             } else {
                 packed = packInDeletionVectorVMode(toCompact);
             }
+            packed =
+                    packed.stream()
+                            .filter(meta -> meta.size() > minFileNum)
+                            .collect(Collectors.toList());
             if (packed.isEmpty()) {
                 // non-packed, we need to grow up age, and check whether to compact once
                 if (++age > COMPACT_AGE && toCompact.size() > 1) {
@@ -275,11 +276,14 @@ public class UnawareAppendTableCompactionCoordinator {
             FileBin fileBin = new FileBin();
             for (DataFileMeta fileMeta : files) {
                 fileBin.addFile(fileMeta);
-                if (fileBin.binReady()) {
+                if (fileBin.binFull()) {
                     result.add(new ArrayList<>(fileBin.bin));
                     // remove it from coordinator memory, won't join in compaction again
                     fileBin.reset();
                 }
+            }
+            if (!fileBin.bin.isEmpty()) {
+                result.add(new ArrayList<>(fileBin.bin));
             }
             return result;
         }
@@ -326,9 +330,8 @@ public class UnawareAppendTableCompactionCoordinator {
                 bin.add(file);
             }
 
-            public boolean binReady() {
-                return (totalFileSize >= targetFileSize && fileNum >= minFileNum)
-                        || fileNum >= maxFileNum;
+            public boolean binFull() {
+                return totalFileSize >= targetFileSize * 50;
             }
         }
     }
