@@ -21,6 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
 import org.apache.spark.sql.connector.expressions._
@@ -64,7 +65,7 @@ case class PaimonScan(
           assert(bucketSpec.getBucketKeys.size() == 1)
           val bucketKey = bucketSpec.getBucketKeys.get(0)
           if (requiredSchema.exists(f => conf.resolver(f.name, bucketKey))) {
-            Some(Expressions.bucket(bucketSpec.getNumBuckets, bucketKey))
+            Some(Expressions.bucket(bucketSpec.getNumBuckets, StringUtils.quote(bucketKey)))
           } else {
             None
           }
