@@ -786,6 +786,59 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                 .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }
 
+    @Test
+    @Timeout(60)
+    public void testCompositePrimaryKey() throws Exception {
+        Map<String, String> postgresConfig = getBasicPostgresConfig();
+        postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
+        postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
+        postgresConfig.put(PostgresSourceOptions.TABLE_NAME.key(), "composite_primary_key_\\d+");
+
+        PostgresSyncTableAction action =
+                syncTableActionBuilder(postgresConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withCompositePrimaryKey("pt")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        checkTableSchema(
+                "[{\"id\":0,\"name\":\"pt\",\"type\":\"STRING NOT NULL\"},"
+                        + "{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\"},"
+                        + "{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\"}]");
+
+        try (Statement statement = getStatement(DATABASE_NAME)) {
+            FileStoreTable table = getFileStoreTable();
+            String table1 = "composite_primary_key_1";
+            String table2 = "composite_primary_key_2";
+
+            statement.executeUpdate("INSERT INTO " + table1 + " VALUES (1, 1, 'one')");
+            statement.executeUpdate(
+                    "INSERT INTO " + table2 + " VALUES (1, 2, 'one'), (1, 1, 'one')");
+
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.STRING().notNull(),
+                                DataTypes.INT().notNull(),
+                                DataTypes.VARCHAR(10)
+                            },
+                            new String[] {"pt", "_id", "v1"});
+            List<String> primaryKeys = Arrays.asList("pt", "_id");
+            List<String> expected =
+                    Arrays.asList(
+                            "+I[" + getPrefix(table1) + "1, 1, one]",
+                            "+I[" + getPrefix(table2) + "1, 1, one]",
+                            "+I[" + getPrefix(table2) + "1, 2, one]");
+            waitForResult(expected, table, rowType, primaryKeys);
+        }
+    }
+
+    private String getPrefix(String table) {
+        return DATABASE_NAME + "_" + table + "_";
+    }
+
     private FileStoreTable getFileStoreTable() throws Exception {
         return getFileStoreTable(tableName);
     }

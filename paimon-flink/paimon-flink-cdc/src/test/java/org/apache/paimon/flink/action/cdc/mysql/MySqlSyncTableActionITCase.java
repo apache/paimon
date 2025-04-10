@@ -1588,4 +1588,62 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             waitForResult(expected, table, rowType, primaryKeys);
         }
     }
+
+    @Test
+    @Timeout(60)
+    public void testCompositePrimaryKey() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "composite_primary_key_\\d+");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withCompositePrimaryKey("pt")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        Schema expectedSchema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.STRING(), "primary")
+                        .column("_id", DataTypes.INT(), "_id")
+                        .column("v1", DataTypes.VARCHAR(10), "v1")
+                        .primaryKey("pt", "_id")
+                        .build();
+
+        checkTableSchema(expectedSchema);
+
+        try (Statement statement = getStatement()) {
+            FileStoreTable table = getFileStoreTable();
+            String table1 = "composite_primary_key_1";
+            String table2 = "composite_primary_key_2";
+            statement.executeUpdate("USE " + DATABASE_NAME);
+
+            statement.executeUpdate("INSERT INTO " + table1 + " VALUES (1, 1, 'one')");
+            statement.executeUpdate(
+                    "INSERT INTO " + table2 + " VALUES (1, 2, 'one'), (1, 1, 'one')");
+
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.STRING().notNull(),
+                                DataTypes.INT().notNull(),
+                                DataTypes.VARCHAR(10)
+                            },
+                            new String[] {"pt", "_id", "v1"});
+            List<String> primaryKeys = Arrays.asList("pt", "_id");
+            List<String> expected =
+                    Arrays.asList(
+                            "+I[" + getPrefix(table1) + "1, 1, one]",
+                            "+I[" + getPrefix(table2) + "1, 1, one]",
+                            "+I[" + getPrefix(table2) + "1, 2, one]");
+            waitForResult(expected, table, rowType, primaryKeys);
+        }
+    }
+
+    private String getPrefix(String table) {
+        return DATABASE_NAME + "_" + table + "_";
+    }
 }

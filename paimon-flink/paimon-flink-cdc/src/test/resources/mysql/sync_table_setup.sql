@@ -63,6 +63,20 @@ CREATE TABLE schema_evolution_comment (
 --  testAllTypes
 -- ################################################################################
 
+CREATE TABLE composite_primary_key_1 (
+    pt INT comment  'primary',
+    _id INT comment  '_id',
+    v1 VARCHAR(10) comment  'v1',
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE composite_primary_key_2 (
+    pt INT comment 'primary',
+    _id INT comment  '_id',
+    v1 VARCHAR(10) comment  'v1',
+    PRIMARY KEY (_id)
+);
+
 CREATE TABLE all_types_table (
     _id INT,
     pt DECIMAL(2, 1),

@@ -83,6 +83,7 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
     // NOTE: current table name is not converted by tableNameConverter
     private String currentTable;
     private String databaseName;
+    private String compositePrimaryKey;
     private final CdcMetadataConverter[] metadataConverters;
 
     private final Set<String> nonPkTables = new HashSet<>();
@@ -91,10 +92,12 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
             Configuration mySqlConfig,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
+            CdcMetadataConverter[] metadataConverters,
+            String compositePrimaryKey) {
         this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
+        this.compositePrimaryKey = compositePrimaryKey;
         objectMapper
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -254,6 +257,10 @@ public class MySqlRecordParser implements FlatMapFunction<CdcSourceRecord, RichC
                             typeMapping,
                             objectValue,
                             serverTimeZone);
+            if (fieldName.equals(compositePrimaryKey)) {
+                newValue = String.format("%s_%s_%s", databaseName, currentTable, newValue);
+            }
+
             resultMap.put(fieldName, newValue);
         }
 
