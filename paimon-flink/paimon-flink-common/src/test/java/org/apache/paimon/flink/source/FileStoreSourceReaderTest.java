@@ -24,6 +24,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.source.KeyValueTableRead;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -135,10 +137,30 @@ public class FileStoreSourceReaderTest {
                 .matches(event -> event.lastConsumeSnapshotId() == 1L);
     }
 
+    @Test
+    public void testIOManagerIsSet() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        KeyValueTableRead tableRead =
+                new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey();
+
+        FileStoreSourceReader reader = createReader(context, tableRead);
+        reader.addSplits(Collections.singletonList(createTestFileSplit("id1")));
+        reader.start();
+        reader.close();
+
+        assertThat(tableRead.ioManager()).isNotNull();
+    }
+
     protected FileStoreSourceReader createReader(TestingReaderContext context) {
+        return createReader(
+                context, new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey());
+    }
+
+    protected FileStoreSourceReader createReader(
+            TestingReaderContext context, TableRead tableRead) {
         return new FileStoreSourceReader(
                 context,
-                new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
+                tableRead,
                 new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
                 IOManager.create(tempDir.toString()),
                 null,
