@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -32,6 +33,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -55,6 +58,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     private transient KeyValueFileStore lazyStore;
 
+    @VisibleForTesting
     PrimaryKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this(fileIO, path, tableSchema, CatalogEnvironment.empty());
     }
@@ -133,7 +137,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             splitAnd(predicate),
                             tableSchema.fieldNames(),
                             tableSchema.trimmedPrimaryKeys());
-            if (keyFilters.size() > 0) {
+            if (!keyFilters.isEmpty()) {
                 ((KeyValueFileStoreScan) scan).withKeyFilter(and(keyFilters));
             }
 
@@ -183,6 +187,15 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             return null;
         } else {
             return super.newExpireRunnable();
+        }
+    }
+
+    @Override
+    public RowKeyExtractor createRowKeyExtractor() {
+        if (coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
+            return new PostponeBucketRowKeyExtractor(schema());
+        } else {
+            return super.createRowKeyExtractor();
         }
     }
 }

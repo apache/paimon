@@ -32,6 +32,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.MemorySize;
@@ -130,19 +131,23 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
     @Test
     public void testPostponeBucket() throws Exception {
-        FileStoreTable table = createFileStoreTable(options -> options.set(BUCKET, -2));
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(rowData(0, 0, 0L), BucketMode.POSTPONE_BUCKET);
+            write.write(rowData(0, 0, 0L));
             commit.commit(write.prepareCommit());
         }
 
         Snapshot snapshot = table.latestSnapshot().get();
         ManifestFileMeta manifest =
                 table.manifestListReader().read(snapshot.deltaManifestList()).get(0);
-        DataFileMeta file = table.manifestFileReader().read(manifest.fileName()).get(0).file();
+        ManifestEntry entry = table.manifestFileReader().read(manifest.fileName()).get(0);
+        assertThat(entry.bucket()).isEqualTo(BucketMode.POSTPONE_BUCKET);
+
+        DataFileMeta file = entry.file();
         assertThat(file.fileName()).endsWith(".avro");
         assertThat(file.level()).isEqualTo(0);
         assertThat(file.valueStatsCols()).isEmpty();

@@ -186,7 +186,7 @@ public class TestChangelogDataReadWrite {
                                 () -> EQUALISER,
                                 DeduplicateMergeFunction.factory(),
                                 pathFactory,
-                                format -> pathFactory,
+                                (coreOptions, format) -> pathFactory,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
                                 null,

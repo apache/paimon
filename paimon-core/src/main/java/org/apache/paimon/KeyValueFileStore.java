@@ -170,6 +170,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             return new PostponeBucketFileStoreWrite(
                     fileIO,
                     schema,
+                    commitUser,
                     partitionType,
                     keyType,
                     valueType,
