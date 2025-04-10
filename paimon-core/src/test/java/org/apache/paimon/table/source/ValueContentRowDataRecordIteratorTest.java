@@ -35,6 +35,8 @@ public class ValueContentRowDataRecordIteratorTest extends RowDataRecordIterator
     public void testIterator() throws Exception {
         List<ReusingTestData> input =
                 ReusingTestData.parse("1, 1, +, 100 | 2, 2, +, 200 | 1, 3, -, 100 | 2, 4, +, 300");
+        // to check ReusingTestData.key
+        List<Integer> expectedKeys = Arrays.asList(1, 2, 1, 2);
         List<Long> expectedValues = Arrays.asList(100L, 200L, 100L, 300L);
         List<RowKind> expectedRowKinds =
                 Arrays.asList(RowKind.INSERT, RowKind.INSERT, RowKind.DELETE, RowKind.INSERT);
@@ -43,8 +45,9 @@ public class ValueContentRowDataRecordIteratorTest extends RowDataRecordIterator
                 input,
                 ValueContentRowDataRecordIterator::new,
                 (rowData, idx) -> {
-                    assertThat(rowData.getFieldCount()).isEqualTo(1);
-                    assertThat(rowData.getLong(0)).isEqualTo(expectedValues.get(idx));
+                    assertThat(rowData.getFieldCount()).isEqualTo(2);
+                    assertThat(rowData.getInt(0)).isEqualTo(expectedKeys.get(idx));
+                    assertThat(rowData.getLong(1)).isEqualTo(expectedValues.get(idx));
                     assertThat(rowData.getRowKind()).isEqualTo(expectedRowKinds.get(idx));
                 });
     }

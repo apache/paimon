@@ -27,26 +27,28 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
@@ -116,7 +118,7 @@ public class KeyValueFileWriterFactory {
 
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, int level, FileSource fileSource, boolean isExternalPath) {
-        return formatContext.thinModeEnabled()
+        return formatContext.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
                         formatContext.writerFactory(level),
@@ -124,7 +126,7 @@ public class KeyValueFileWriterFactory {
                         new KeyValueThinSerializer(keyType, valueType)::toRow,
                         keyType,
                         valueType,
-                        formatContext.extractor(level),
+                        formatContext.statsProducer(level, options),
                         schemaId,
                         level,
                         formatContext.compression(level),
@@ -139,7 +141,7 @@ public class KeyValueFileWriterFactory {
                         new KeyValueSerializer(keyType, valueType)::toRow,
                         keyType,
                         valueType,
-                        formatContext.extractor(level),
+                        formatContext.statsProducer(level, options),
                         schemaId,
                         level,
                         formatContext.compression(level),
@@ -231,15 +233,24 @@ public class KeyValueFileWriterFactory {
 
     private static class WriteFormatContext {
 
-        private final Function<Integer, String> level2Format;
-        private final Function<Integer, String> level2Compress;
+        private final IntFunction<String> level2Format;
+        private final IntFunction<String> level2Compress;
+        private final IntFunction<String> level2Stats;
 
-        private final Map<String, Optional<SimpleStatsExtractor>> format2Extractor;
+        private final Map<Pair<String, String>, Optional<SimpleStatsExtractor>>
+                formatStats2Extractor;
+        private final Map<String, SimpleColStatsCollector.Factory[]> statsMode2AvroStats;
         private final Map<String, DataFilePathFactory> format2PathFactory;
+        private final Map<String, FileFormat> formatFactory;
         private final Map<String, FormatWriterFactory> format2WriterFactory;
 
+        private final BinaryRow partition;
+        private final int bucket;
         private final RowType keyType;
         private final RowType valueType;
+        private final RowType writeRowType;
+        private final Map<String, FileStorePathFactory> parentFactories;
+        private final CoreOptions options;
         private final boolean thinModeEnabled;
 
         private WriteFormatContext(
@@ -250,11 +261,15 @@ public class KeyValueFileWriterFactory {
                 FileFormat defaultFormat,
                 Map<String, FileStorePathFactory> parentFactories,
                 CoreOptions options) {
+            this.partition = partition;
+            this.bucket = bucket;
             this.keyType = keyType;
             this.valueType = valueType;
+            this.parentFactories = parentFactories;
+            this.options = options;
             this.thinModeEnabled =
                     options.dataFileThinMode() && supportsThinMode(keyType, valueType);
-            RowType writeRowType =
+            this.writeRowType =
                     KeyValue.schema(thinModeEnabled ? RowType.of() : keyType, valueType);
             Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
             this.level2Format =
@@ -267,32 +282,15 @@ public class KeyValueFileWriterFactory {
             this.level2Compress =
                     level -> fileCompressionPerLevel.getOrDefault(level, defaultCompress);
 
-            this.format2Extractor = new HashMap<>();
+            String statsMode = options.statsMode();
+            Map<Integer, String> statsModePerLevel = options.statsModePerLevel();
+            this.level2Stats = level -> statsModePerLevel.getOrDefault(level, statsMode);
+
+            this.formatStats2Extractor = new HashMap<>();
+            this.statsMode2AvroStats = new HashMap<>();
             this.format2PathFactory = new HashMap<>();
             this.format2WriterFactory = new HashMap<>();
-            SimpleColStatsCollector.Factory[] statsCollectorFactories =
-                    StatsCollectorFactories.createStatsFactories(
-                            options,
-                            writeRowType.getFieldNames(),
-                            thinModeEnabled ? keyType.getFieldNames() : Collections.emptyList());
-            for (String format : parentFactories.keySet()) {
-                format2PathFactory.put(
-                        format,
-                        parentFactories.get(format).createDataFilePathFactory(partition, bucket));
-
-                FileFormat fileFormat =
-                        FileFormat.fromIdentifier(format, options.toConfiguration());
-                // In avro format, minValue, maxValue, and nullCount are not counted, set
-                // StatsExtractor is Optional.empty() and will use SimpleStatsExtractor to collect
-                // stats
-                format2Extractor.put(
-                        format,
-                        format.equals("avro")
-                                ? Optional.empty()
-                                : fileFormat.createStatsExtractor(
-                                        writeRowType, statsCollectorFactories));
-                format2WriterFactory.put(format, fileFormat.createWriterFactory(writeRowType));
-            }
+            this.formatFactory = new HashMap<>();
         }
 
         private boolean supportsThinMode(RowType keyType, RowType valueType) {
@@ -310,25 +308,75 @@ public class KeyValueFileWriterFactory {
             return true;
         }
 
-        private boolean thinModeEnabled() {
-            return thinModeEnabled;
-        }
+        private SimpleStatsProducer statsProducer(int level, CoreOptions options) {
+            String format = level2Format.apply(level);
+            String statsMode = level2Stats.apply(level);
+            if (format.equals("avro")) {
+                // In avro format, minValue, maxValue, and nullCount are not counted, so use
+                // SimpleStatsExtractor to collect stats
+                SimpleColStatsCollector.Factory[] factories =
+                        statsMode2AvroStats.computeIfAbsent(
+                                statsMode,
+                                key ->
+                                        StatsCollectorFactories.createStatsFactoriesForAvro(
+                                                statsMode, options, writeRowType.getFieldNames()));
+                SimpleStatsCollector collector = new SimpleStatsCollector(writeRowType, factories);
+                return SimpleStatsProducer.fromCollector(collector);
+            }
 
-        @Nullable
-        private SimpleStatsExtractor extractor(int level) {
-            return format2Extractor.get(level2Format.apply(level)).orElse(null);
+            Optional<SimpleStatsExtractor> extractor =
+                    formatStats2Extractor.computeIfAbsent(
+                            Pair.of(format, statsMode),
+                            key -> {
+                                SimpleColStatsCollector.Factory[] statsFactories =
+                                        StatsCollectorFactories.createStatsFactories(
+                                                statsMode,
+                                                options,
+                                                writeRowType.getFieldNames(),
+                                                thinModeEnabled
+                                                        ? keyType.getFieldNames()
+                                                        : Collections.emptyList());
+                                boolean isDisabled =
+                                        Arrays.stream(
+                                                        SimpleColStatsCollector.create(
+                                                                statsFactories))
+                                                .allMatch(
+                                                        p ->
+                                                                p
+                                                                        instanceof
+                                                                        NoneSimpleColStatsCollector);
+                                if (isDisabled) {
+                                    return Optional.empty();
+                                }
+                                return fileFormat(format)
+                                        .createStatsExtractor(writeRowType, statsFactories);
+                            });
+            return SimpleStatsProducer.fromExtractor(extractor.orElse(null));
         }
 
         private DataFilePathFactory pathFactory(int level) {
-            return format2PathFactory.get(level2Format.apply(level));
+            String format = level2Format.apply(level);
+            return format2PathFactory.computeIfAbsent(
+                    format,
+                    key ->
+                            parentFactories
+                                    .get(format)
+                                    .createDataFilePathFactory(partition, bucket));
         }
 
         private FormatWriterFactory writerFactory(int level) {
-            return format2WriterFactory.get(level2Format.apply(level));
+            return format2WriterFactory.computeIfAbsent(
+                    level2Format.apply(level),
+                    format -> fileFormat(format).createWriterFactory(writeRowType));
         }
 
         private String compression(int level) {
             return level2Compress.apply(level);
+        }
+
+        private FileFormat fileFormat(String format) {
+            return formatFactory.computeIfAbsent(
+                    format, k -> FileFormat.fromIdentifier(format, options.toConfiguration()));
         }
     }
 }

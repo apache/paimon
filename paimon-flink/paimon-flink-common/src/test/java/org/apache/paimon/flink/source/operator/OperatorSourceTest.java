@@ -36,6 +36,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
+import org.apache.flink.runtime.event.WatermarkEvent;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.SourceOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
@@ -299,6 +300,9 @@ public class OperatorSourceTest {
 
                     @Override
                     public void emitRecordAttributes(RecordAttributes recordAttributes) {}
+
+                    // @Override is skipped for compatibility with Flink 1.x.
+                    public void emitWatermark(WatermarkEvent watermarkEvent) {}
                 };
 
         AtomicBoolean isRunning = new AtomicBoolean(true);

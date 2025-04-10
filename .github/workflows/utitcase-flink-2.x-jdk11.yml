@@ -16,55 +16,43 @@
 # limitations under the License.
 ################################################################################
 
-name: End to End Tests Flink on JDK 11
+name: UTCase and ITCase Flink 2.x on JDK 11
 
 on:
-  issue_comment:
-    types: [created, edited, deleted]
-
-  # daily run
-  schedule:
-    - cron: "0 0 * * *"
+  push:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
 
 env:
   JDK_VERSION: 11
 
 jobs:
-  build_test:
-    if: |
-      github.event_name == 'schedule' ||
-      (contains(github.event.comment.html_url, '/pull/') && contains(github.event.comment.body, '/jdk11'))
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: true
-      matrix:
-        # Last element should be the current default flink version
-        flink_version: [ '1.15', '1.16', '1.17', '1.18', '1.19', '1.20' ]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
-
       - name: Build Flink
-        run:  mvn -T 1C -B clean install -DskipTests -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }},java11
-
+        run:  mvn -T 1C -B clean install -DskipTests -Pflink2
       - name: Test Flink
         run: |
           # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          profile="flink-${{ matrix.flink_version }}"
-          if [ "${{ matrix.flink_version }}" = "${{ matrix.flink_version[-1] }}" ]; then
-            mvn -T 1C -B test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pjava11
-          else
-            mvn -T 1C -B test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile},java11
-          fi
+          test_modules=""
+          for suffix in 2.0 common; do
+          test_modules+="org.apache.paimon:paimon-flink-${suffix},"
+          done
+          test_modules="${test_modules%,}"
+          mvn -T 1C -B clean install -Pflink2 -pl "${test_modules}" -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

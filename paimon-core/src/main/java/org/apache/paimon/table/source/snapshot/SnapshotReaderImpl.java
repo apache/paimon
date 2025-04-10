@@ -246,6 +246,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withLevel(int level) {
+        scan.withLevel(level);
+        return this;
+    }
+
+    @Override
     public SnapshotReader withLevelFilter(Filter<Integer> levelFilter) {
         scan.withLevelFilter(levelFilter);
         return this;

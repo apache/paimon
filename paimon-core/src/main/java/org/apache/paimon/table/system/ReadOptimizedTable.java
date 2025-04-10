@@ -120,9 +120,9 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
-        if (wrapped.schema().primaryKeys().size() > 0) {
+        if (!wrapped.schema().primaryKeys().isEmpty()) {
             return wrapped.newSnapshotReader()
-                    .withLevelFilter(level -> level == coreOptions().numLevels() - 1)
+                    .withLevel(coreOptions().numLevels() - 1)
                     .enableValueFilter();
         } else {
             return wrapped.newSnapshotReader();
@@ -132,7 +132,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                wrapped.schema().primaryKeys().size() > 0,
+                !wrapped.schema().primaryKeys().isEmpty(),
                 coreOptions(),
                 newSnapshotReader(),
                 DefaultValueAssigner.create(wrapped.schema()));
@@ -140,7 +140,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public StreamDataTableScan newStreamScan() {
-        if (wrapped.schema().primaryKeys().size() > 0) {
+        if (!wrapped.schema().primaryKeys().isEmpty()) {
             throw new UnsupportedOperationException(
                     "Unsupported streaming scan for read optimized table");
         }

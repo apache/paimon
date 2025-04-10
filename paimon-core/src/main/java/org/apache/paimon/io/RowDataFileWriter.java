@@ -21,11 +21,9 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
@@ -59,11 +57,10 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             FormatWriterFactory factory,
             Path path,
             RowType writeSchema,
-            @Nullable SimpleStatsExtractor simpleStatsExtractor,
+            SimpleStatsProducer statsProducer,
             long schemaId,
             LongCounter seqNumCounter,
             String fileCompression,
-            SimpleColStatsCollector.Factory[] statsCollectors,
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
@@ -75,9 +72,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 path,
                 Function.identity(),
                 writeSchema,
-                simpleStatsExtractor,
+                statsProducer,
                 fileCompression,
-                statsCollectors,
                 asyncFileWrite);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;

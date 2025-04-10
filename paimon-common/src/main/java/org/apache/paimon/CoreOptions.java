@@ -583,6 +583,13 @@ public class CoreOptions implements Serializable {
                             "The size amplification is defined as the amount (in percentage) of additional storage "
                                     + "needed to store a single byte of data in the merge tree for changelog mode table.");
 
+    public static final ConfigOption<Boolean> COMPACTION_FORCE_UP_LEVEL_0 =
+            key("compaction.force-up-level-0")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If set to true, compaction strategy will always include all level 0 files in candidates.");
+
     public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
             key("compaction.size-ratio")
                     .intType()
@@ -1176,6 +1183,17 @@ public class CoreOptions implements Serializable {
                                                             + "{field_name}."
                                                             + STATS_MODE_SUFFIX))
                                     .build());
+
+    public static final ConfigOption<Map<String, String>> METADATA_STATS_MODE_PER_LEVEL =
+            key("metadata.stats-mode.per.level")
+                    .mapType()
+                    .defaultValue(new HashMap<>())
+                    .withDescription(
+                            "Define different 'metadata.stats-mode' for different level, you can add the conf like this:"
+                                    + " 'metadata.stats-mode.per.level' = '0:none', if the metadata.stats-mode for level is not provided, "
+                                    + "the default mode which set by `"
+                                    + METADATA_STATS_MODE.key()
+                                    + "` will be used.");
 
     public static final ConfigOption<Boolean> METADATA_STATS_DENSE_STORE =
             key("metadata.stats-dense-store")
@@ -1803,6 +1821,16 @@ public class CoreOptions implements Serializable {
                                 e -> normalizeFileFormat(e.getValue())));
     }
 
+    public String statsMode() {
+        return options.get(METADATA_STATS_MODE);
+    }
+
+    public Map<Integer, String> statsModePerLevel() {
+        Map<String, String> statsPerLevel = options.get(METADATA_STATS_MODE_PER_LEVEL);
+        return statsPerLevel.entrySet().stream()
+                .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
+    }
+
     private static String normalizeFileFormat(String fileFormat) {
         return fileFormat.toLowerCase();
     }
@@ -2134,6 +2162,10 @@ public class CoreOptions implements Serializable {
 
     public int maxSizeAmplificationPercent() {
         return options.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
+    }
+
+    public boolean compactionForceUpLevel0() {
+        return options.get(COMPACTION_FORCE_UP_LEVEL_0);
     }
 
     public int sortedRunSizeRatio() {

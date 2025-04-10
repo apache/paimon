@@ -179,12 +179,15 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
             Matcher matcher = pattern.matcher(fileName);
             Preconditions.checkState(
                     matcher.find(),
-                    "Data file name does not match the pattern. This is unexpected.");
-            int subtaskId = Integer.parseInt(matcher.group(1));
+                    "Data file name %s does not match the pattern. This is unexpected.",
+                    fileName);
 
+            // use long to avoid overflow
+            long subtaskId = Long.parseLong(matcher.group(1));
             // send records written by the same subtask to the same subtask
             // to make sure we replay the written records in the exact order
-            return (Math.abs(dataSplit.partition().hashCode()) + subtaskId) % numChannels;
+            long channel = (Math.abs(dataSplit.partition().hashCode()) + subtaskId) % numChannels;
+            return (int) channel;
         }
     }
 }

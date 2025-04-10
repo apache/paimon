@@ -80,6 +80,8 @@ public interface SnapshotReader {
 
     SnapshotReader withMode(ScanMode scanMode);
 
+    SnapshotReader withLevel(int level);
+
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
     SnapshotReader enableValueFilter();
@@ -131,6 +133,7 @@ public interface SnapshotReader {
         /** Result splits. */
         List<Split> splits();
 
+        @SuppressWarnings({"unchecked", "rawtypes"})
         default List<DataSplit> dataSplits() {
             return (List) splits();
         }

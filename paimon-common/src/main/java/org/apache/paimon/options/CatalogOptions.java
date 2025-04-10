@@ -138,7 +138,9 @@ public class CatalogOptions {
     public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
             ConfigOptions.key("sync-all-properties")
                     .booleanType()
-                    .defaultValue(false)
+                    // We should set default value to true in case of hive metastore losing table
+                    // properties.
+                    .defaultValue(true)
                     .withDescription("Sync all table properties to hive metastore");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =

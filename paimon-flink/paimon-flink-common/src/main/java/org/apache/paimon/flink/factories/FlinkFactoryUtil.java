@@ -54,7 +54,6 @@ import java.util.stream.StreamSupport;
 
 import static org.apache.flink.configuration.ConfigurationUtils.canBePrefixMap;
 import static org.apache.flink.configuration.ConfigurationUtils.filterPrefixMapKey;
-import static org.apache.flink.table.factories.ManagedTableFactory.DEFAULT_IDENTIFIER;
 
 /** Utility for working with {@link Factory}s. */
 public final class FlinkFactoryUtil {
@@ -135,7 +134,6 @@ public final class FlinkFactoryUtil {
                             factoryClass.getName(),
                             foundFactories.stream()
                                     .map(Factory::factoryIdentifier)
-                                    .filter(identifier -> !DEFAULT_IDENTIFIER.equals(identifier))
                                     .distinct()
                                     .sorted()
                                     .collect(Collectors.joining("\n"))));
