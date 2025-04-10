@@ -392,6 +392,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsListObjectsPaged() {
+        return true;
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return true;
     }
