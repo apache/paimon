@@ -20,15 +20,23 @@ package org.apache.paimon.tests;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 
 import java.util.UUID;
 
 /** Tests for reading and writing log store in stream jobs. */
+@EnabledIf("runTest")
 public class LogStoreE2eTest extends E2eTestBase {
 
     private String topicName;
 
     private int bucketNum;
+
+    private static boolean runTest() {
+        // TODO: modify the following condition after paimon-flink-cdc supports flink 2.0
+        String flinkVersion = System.getProperty("test.flink.main.version");
+        return flinkVersion.compareTo("2.0") < 0;
+    }
 
     public LogStoreE2eTest() {
         super(true, false);

@@ -23,6 +23,7 @@ import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
+import org.apache.flink.api.connector.sink2.InitContext;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.WriterInitContext;

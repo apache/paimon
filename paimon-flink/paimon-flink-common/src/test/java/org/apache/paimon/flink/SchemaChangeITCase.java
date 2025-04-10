@@ -1008,7 +1008,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `ts` TIMESTAMP(3),\n"
                                 + "  `ee` VARCHAR(2147483647) METADATA,\n"
                                 + "  WATERMARK FOR `ts` AS `ts`\n"
-                                + ") ")
+                                + ")")
                 .doesNotContain("schema");
     }
 

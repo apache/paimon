@@ -796,6 +796,6 @@ public class PredicateConverterTest {
     }
 
     private static CallExpression call(FunctionDefinition function, ResolvedExpression... args) {
-        return new CallExpression(function, Arrays.asList(args), DataTypes.BOOLEAN());
+        return new CallExpression(false, null, function, Arrays.asList(args), DataTypes.BOOLEAN());
     }
 }

@@ -61,7 +61,7 @@ import java.util.Collections;
  * href="https://github.com/apache/flink/pull/12306/files#diff-bb7687690ffa79fd86950aa23171431fcf707246ca4620d79361a6612ba7b828">Flink
  * PR that introduced this class</a>
  */
-public class TestingSourceOperator<T> extends SourceOperator<T, SimpleSourceSplit> {
+public class TestingSourceOperator<T> extends AbstractTestingSourceOperator<T, SimpleSourceSplit> {
 
     private static final long serialVersionUID = 1L;
 

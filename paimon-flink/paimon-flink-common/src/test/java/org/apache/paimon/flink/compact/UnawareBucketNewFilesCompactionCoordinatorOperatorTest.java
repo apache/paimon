@@ -35,6 +35,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.serialization.SerializerConfigImpl;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -255,7 +256,7 @@ public class UnawareBucketNewFilesCompactionCoordinatorOperatorTest {
                         new CommittableTypeInfo().createSerializer(new ExecutionConfig()),
                         new TupleTypeInfo<>(
                                         BasicTypeInfo.LONG_TYPE_INFO, new CompactionTaskTypeInfo())
-                                .createSerializer(new ExecutionConfig()));
+                                .createSerializer(new SerializerConfigImpl()));
         OneInputStreamOperatorTestHarness harness =
                 new OneInputStreamOperatorTestHarness(operator, 1, 1, 0);
         harness.getStreamConfig().setupNetworkInputs(Preconditions.checkNotNull(serializer));
