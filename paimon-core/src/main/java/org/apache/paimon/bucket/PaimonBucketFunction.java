@@ -16,30 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.bucket;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.types.RowKind;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+/** Paimon default hash function. */
+public class PaimonBucketFunction implements BucketFunction {
 
-/**
- * Utility interface to extract partition keys, bucket id, primary keys for file store ({@code
- * trimmedPrimaryKey}) and primary keys for external log system ({@code logPrimaryKey}) from the
- * given record.
- *
- * @param <T> type of record
- */
-public interface KeyAndBucketExtractor<T> {
-    Logger LOG = LoggerFactory.getLogger(KeyAndBucketExtractor.class);
-
-    void setRecord(T record);
-
-    BinaryRow partition();
-
-    int bucket();
-
-    BinaryRow trimmedPrimaryKey();
-
-    BinaryRow logPrimaryKey();
+    @Override
+    public int bucket(BinaryRow row, int numBuckets) {
+        assert numBuckets > 0 && row.getRowKind() == RowKind.INSERT;
+        int hash = row.hashCode();
+        return Math.abs(hash % numBuckets);
+    }
 }

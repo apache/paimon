@@ -16,30 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.bucket;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.types.RowType;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.io.Serializable;
 
-/**
- * Utility interface to extract partition keys, bucket id, primary keys for file store ({@code
- * trimmedPrimaryKey}) and primary keys for external log system ({@code logPrimaryKey}) from the
- * given record.
- *
- * @param <T> type of record
- */
-public interface KeyAndBucketExtractor<T> {
-    Logger LOG = LoggerFactory.getLogger(KeyAndBucketExtractor.class);
+/** Bucket function. */
+public interface BucketFunction extends Serializable {
 
-    void setRecord(T record);
+    int bucket(BinaryRow row, int numBuckets);
 
-    BinaryRow partition();
+    static BucketFunction create(CoreOptions options, RowType bucketKeyType) {
+        CoreOptions.BucketFunctionType type = options.bucketFunctionType();
+        return create(type, bucketKeyType);
+    }
 
-    int bucket();
-
-    BinaryRow trimmedPrimaryKey();
-
-    BinaryRow logPrimaryKey();
+    static BucketFunction create(
+            CoreOptions.BucketFunctionType bucketFunctionType, RowType bucketKeyType) {
+        switch (bucketFunctionType) {
+            case PAIMON:
+                return new PaimonBucketFunction();
+            default:
+                throw new IllegalArgumentException("Unsupported hash type: " + bucketFunctionType);
+        }
+    }
 }
