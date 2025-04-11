@@ -768,13 +768,15 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       // spark.default.parallelism cannot be change in spark session
       // sparkParallelism is 2, task groups is 6, use 2 as the read parallelism
       spark.conf.set("spark.sql.shuffle.partitions", 2)
-      spark.sql("CALL sys.compact(table => 'T', options => 'compaction.max.file-num=2')")
+      spark.sql(
+        "CALL sys.compact(table => 'T', options => 'source.split.open-file-cost=3200M, compaction.min.file-num=2')")
 
-      // sparkParallelism is 5, task groups is 3, use 3 as the read parallelism
+      // sparkParallelism is 5, task groups is 1, use 1 as the read parallelism
       spark.conf.set("spark.sql.shuffle.partitions", 5)
-      spark.sql("CALL sys.compact(table => 'T', options => 'compaction.max.file-num=2')")
+      spark.sql(
+        "CALL sys.compact(table => 'T', options => 'source.split.open-file-cost=3200M, compaction.min.file-num=2')")
 
-      assertResult(Seq(2, 3))(taskBuffer)
+      assertResult(Seq(2, 1))(taskBuffer)
     } finally {
       spark.sparkContext.removeSparkListener(listener)
     }

@@ -78,6 +78,7 @@ public class UnawareAppendTableCompactionCoordinator {
     private final SnapshotManager snapshotManager;
     private final long targetFileSize;
     private final long compactionFileSize;
+    private final long openFileCost;
     private final int minFileNum;
     private final DvMaintainerCache dvMaintainerCache;
     private final FilesIterator filesIterator;
@@ -100,6 +101,7 @@ public class UnawareAppendTableCompactionCoordinator {
         CoreOptions options = table.coreOptions();
         this.targetFileSize = options.targetFileSize(false);
         this.compactionFileSize = options.compactionFileSize(false);
+        this.openFileCost = options.splitOpenFileCost();
         this.minFileNum = options.compactionMinFileNum();
         this.dvMaintainerCache =
                 options.deletionVectorsEnabled()
@@ -242,10 +244,7 @@ public class UnawareAppendTableCompactionCoordinator {
         private List<List<DataFileMeta>> agePack() {
             List<List<DataFileMeta>> packed;
             if (dvMaintainerCache == null) {
-                packed =
-                        pack(toCompact).stream()
-                                .filter(meta -> meta.size() >= minFileNum)
-                                .collect(Collectors.toList());
+                packed = pack(toCompact);
             } else {
                 packed = packInDeletionVectorVMode(toCompact);
             }
@@ -281,7 +280,7 @@ public class UnawareAppendTableCompactionCoordinator {
                     fileBin.reset();
                 }
             }
-            if (!fileBin.bin.isEmpty()) {
+            if (fileBin.fileNum > minFileNum) {
                 result.add(new ArrayList<>(fileBin.bin));
                 fileBin.reset();
             }
@@ -325,13 +324,13 @@ public class UnawareAppendTableCompactionCoordinator {
             }
 
             public void addFile(DataFileMeta file) {
-                totalFileSize += file.fileSize();
+                totalFileSize += file.fileSize() + openFileCost;
                 fileNum++;
                 bin.add(file);
             }
 
             public boolean binFull() {
-                return totalFileSize >= targetFileSize * 50;
+                return totalFileSize >= targetFileSize * 50 && fileNum >= minFileNum;
             }
         }
     }

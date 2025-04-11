@@ -91,14 +91,14 @@ public class UnawareAppendTableCompactionCoordinatorTest {
                         1000, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 10);
         compactionCoordinator.notifyNewFiles(partition, files);
 
-        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(2);
+        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(3);
         files.clear();
 
         files =
                 generateNewFiles(
                         1050, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 5);
         compactionCoordinator.notifyNewFiles(partition, files);
-        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(6);
+        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(5);
     }
 
     @Test
