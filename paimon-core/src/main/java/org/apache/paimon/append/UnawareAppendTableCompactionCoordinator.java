@@ -242,14 +242,13 @@ public class UnawareAppendTableCompactionCoordinator {
         private List<List<DataFileMeta>> agePack() {
             List<List<DataFileMeta>> packed;
             if (dvMaintainerCache == null) {
-                packed = pack(toCompact);
+                packed =
+                        pack(toCompact).stream()
+                                .filter(meta -> meta.size() >= minFileNum)
+                                .collect(Collectors.toList());
             } else {
                 packed = packInDeletionVectorVMode(toCompact);
             }
-            packed =
-                    packed.stream()
-                            .filter(meta -> meta.size() > minFileNum)
-                            .collect(Collectors.toList());
             if (packed.isEmpty()) {
                 // non-packed, we need to grow up age, and check whether to compact once
                 if (++age > COMPACT_AGE && toCompact.size() > 1) {
