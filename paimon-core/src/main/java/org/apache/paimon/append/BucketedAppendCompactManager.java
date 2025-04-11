@@ -59,7 +59,6 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     private final DeletionVectorsMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
     private final int minFileNum;
-    private final int maxFileNum;
     private final long targetFileSize;
     private final CompactRewriter rewriter;
 
@@ -72,7 +71,6 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             List<DataFileMeta> restored,
             @Nullable DeletionVectorsMaintainer dvMaintainer,
             int minFileNum,
-            int maxFileNum,
             long targetFileSize,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
@@ -81,7 +79,6 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         this.toCompact = new PriorityQueue<>(fileComparator(false));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
-        this.maxFileNum = maxFileNum;
         this.targetFileSize = targetFileSize;
         this.rewriter = rewriter;
         this.metricsReporter = metricsReporter;
@@ -201,8 +198,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             candidates.add(file);
             totalFileSize += file.fileSize();
             fileNum++;
-            if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
-                    || fileNum >= maxFileNum) {
+            if (fileNum >= minFileNum) {
                 return Optional.of(candidates);
             } else if (totalFileSize >= targetFileSize) {
                 // let pointer shift one pos to right

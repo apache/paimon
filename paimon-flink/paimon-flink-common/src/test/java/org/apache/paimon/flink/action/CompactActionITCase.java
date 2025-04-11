@@ -157,7 +157,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                         snapshotManager.latestSnapshotId() - 2
                                 == snapshotManager.earliestSnapshotId(),
                 Duration.ofSeconds(60_000),
-                Duration.ofSeconds(100),
+                Duration.ofSeconds(10),
                 String.format("Cannot validate snapshot expiration in %s milliseconds.", 60_000));
     }
 
@@ -179,7 +179,6 @@ public class CompactActionITCase extends CompactActionITCaseBase {
             Map<String, String> tableOptions = new HashMap<>();
             tableOptions.put(CoreOptions.BUCKET.key(), "-1");
             tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-            tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
             table =
                     prepareTable(
@@ -240,7 +239,6 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
         tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         FileStoreTable table =
                 prepareTable(
@@ -282,7 +280,6 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
         tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         FileStoreTable table =
                 prepareTable(
