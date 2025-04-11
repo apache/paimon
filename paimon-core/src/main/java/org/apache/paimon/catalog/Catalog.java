@@ -736,6 +736,14 @@ public interface Catalog extends AutoCloseable {
             this(database, null);
         }
 
+        private static String formatMessage(String database, Throwable cause) {
+            String message = String.format(MSG, database);
+            if (cause != null) {
+                message += " Cause: " + cause.getMessage();
+            }
+            return message;
+        }
+
         public String database() {
             return database;
         }
@@ -791,12 +799,20 @@ public interface Catalog extends AutoCloseable {
         private final Identifier identifier;
 
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
-            super(String.format(MSG, identifier.getFullName()), cause);
+            super(formatMessage(identifier, cause), cause);
             this.identifier = identifier;
         }
 
         public TableNoPermissionException(Identifier identifier) {
             this(identifier, null);
+        }
+
+        private static String formatMessage(Identifier identifier, Throwable cause) {
+            String message = String.format(MSG, identifier.getFullName());
+            if (cause != null) {
+                message += " Cause: " + cause.getMessage();
+            }
+            return message;
         }
 
         public Identifier identifier() {
