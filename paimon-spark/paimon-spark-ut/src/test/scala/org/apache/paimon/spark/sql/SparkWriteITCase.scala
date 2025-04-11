@@ -18,10 +18,13 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.Snapshot
+import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions
 
 import java.sql.Timestamp
@@ -37,6 +40,34 @@ class SparkWriteWithNoExtensionITCase extends SparkWriteITCase {
 }
 
 class SparkWriteITCase extends PaimonSparkTestBase {
+
+  test("Paimon Write : Postpone Bucket") {
+    withTable("PostponeTable") {
+      spark.sql("""
+                  |CREATE TABLE PostponeTable (
+                  |  id INT,
+                  |  v1 INT,
+                  |  v2 INT
+                  |) TBLPROPERTIES (
+                  | 'bucket' = '-2',
+                  | 'primary-key' = 'id',
+                  | 'file.format' = 'parquet'
+                  |)
+                  |""".stripMargin)
+
+      spark.sql("INSERT INTO PostponeTable VALUES (1, 1, 1)")
+
+      val table = loadTable("PostponeTable")
+      val snapshot = table.latestSnapshot.get
+      val manifestEntry = table.manifestFileReader
+        .read(table.manifestListReader.read(snapshot.deltaManifestList).get(0).fileName)
+        .get(0)
+      val file = manifestEntry.file
+      assertThat(manifestEntry.bucket()).isEqualTo(-2)
+      // default format for postpone bucket is avro
+      assertThat(file.fileName).endsWith(".avro")
+    }
+  }
 
   test("Paimon Write: AllTypes") {
     withTable("AllTypesTable") {
