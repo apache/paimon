@@ -242,15 +242,14 @@ public class HiveWriteITCase extends HiveTestBase {
 
     @Test
     public void testWriteOnlyWithAppendOnlyTableOption() throws Exception {
-
         String innerName = "hive_test_table_output";
-        int maxCompact = 3;
+        int maxCompact = 5;
         String path = folder.newFolder().toURI().toString();
         String tablePath = String.format("%s/test_db.db/%s", path, innerName);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
-        conf.set(CoreOptions.COMPACTION_MAX_FILE_NUM, maxCompact);
+        conf.set(CoreOptions.COMPACTION_MIN_FILE_NUM, maxCompact);
         Identifier identifier = Identifier.create(DATABASE_NAME, innerName);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
