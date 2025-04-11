@@ -283,6 +283,7 @@ public class UnawareAppendTableCompactionCoordinator {
             }
             if (!fileBin.bin.isEmpty()) {
                 result.add(new ArrayList<>(fileBin.bin));
+                fileBin.reset();
             }
             return result;
         }
