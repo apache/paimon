@@ -18,8 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.Snapshot
-import org.apache.paimon.io.DataFileMeta
+import org.apache.paimon.CoreOptions.HashType
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.SparkConf
@@ -261,4 +260,34 @@ class SparkWriteITCase extends PaimonSparkTestBase {
 
     }
   }
+
+  HashType
+    .values()
+    .foreach(
+      hashType => {
+        test(s"Paimon: Bucket table using $hashType hash") {
+          withTable("T") {
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING, c INT) TBLPROPERTIES
+                         |('bucket.hash-type' = '$hashType',
+                         |'bucket-key' = 'a',
+                         |'bucket' = '4',
+                         |'metadata.stats-mode' = 'none'
+                         |)
+                         |""".stripMargin)
+
+            // disable filter by manifest and let bucket filter work
+            for (i <- 0 until 10) {
+              spark.sql(s"INSERT INTO T (a, b, c) VALUES ($i, '$i', $i)")
+            }
+
+            for (i <- 0 until 10) {
+              val rows = spark.sql(s"SELECT * FROM T where a = $i").collect()
+              Assertions.assertEquals(1, rows.length)
+              Assertions.assertEquals(Row.fromSeq(Seq(i, String.valueOf(i), i)), rows(0))
+            }
+          }
+        }
+      })
+
 }

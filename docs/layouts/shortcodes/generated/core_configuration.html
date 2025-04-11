@@ -63,6 +63,12 @@ under the License.
             <td>Specify the paimon distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
         </tr>
         <tr>
+            <td><h5>bucket.hash-type</h5></td>
+            <td style="word-wrap: break-word;">PAIMON</td>
+            <td><p>Enum</p></td>
+            <td>The hash mode for paimon bucket<br /><br />Possible values:<ul><li>"PAIMON"</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>cache-page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>

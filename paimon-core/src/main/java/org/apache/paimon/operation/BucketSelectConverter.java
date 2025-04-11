@@ -18,10 +18,12 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions.HashType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.hash.HashFunction;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -55,9 +57,11 @@ public interface BucketSelectConverter {
     Optional<BiFilter<Integer, Integer>> convert(Predicate predicate);
 
     static Optional<BiFilter<Integer, Integer>> create(
-            Predicate bucketPredicate, RowType bucketKeyType) {
+            Predicate bucketPredicate, RowType bucketKeyType, HashType hashType) {
         @SuppressWarnings("unchecked")
         List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
+
+        HashFunction hashFunction = HashFunction.create(hashType, bucketKeyType);
 
         nextAnd:
         for (Predicate andPredicate : splitAnd(bucketPredicate)) {
@@ -108,16 +112,17 @@ public interface BucketSelectConverter {
         List<Integer> hashCodes = new ArrayList<>();
         assembleRows(
                 bucketValues,
-                columns -> hashCodes.add(hash(columns, serializer)),
+                columns -> hashCodes.add(hash(columns, serializer, hashFunction)),
                 new ArrayList<>(),
                 0);
 
         return Optional.of(new Selector(hashCodes.stream().mapToInt(i -> i).toArray()));
     }
 
-    static int hash(List<Object> columns, InternalRowSerializer serializer) {
+    static int hash(
+            List<Object> columns, InternalRowSerializer serializer, HashFunction hashFunction) {
         BinaryRow binaryRow = serializer.toBinaryRow(GenericRow.of(columns.toArray()));
-        return KeyAndBucketExtractor.bucketKeyHashCode(binaryRow);
+        return KeyAndBucketExtractor.bucketKeyHashCode(binaryRow, hashFunction);
     }
 
     static void assembleRows(
