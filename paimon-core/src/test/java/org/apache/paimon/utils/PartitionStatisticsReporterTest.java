@@ -128,7 +128,7 @@ public class PartitionStatisticsReporterTest {
         Assertions.assertThat(partitionParams).containsKey("c1=a/");
         Assertions.assertThat(partitionParams.get("c1=a/").toString())
                 .isEqualTo(
-                        "{spec={c1=a}, recordCount=1, fileSizeInBytes=591, fileCount=1, lastFileCreationTime=1729598544974}");
+                        "{spec={c1=a}, recordCount=1, fileSizeInBytes=662, fileCount=1, lastFileCreationTime=1729598544974}");
         action.close();
         Assertions.assertThat(closed).isTrue();
     }

@@ -35,6 +35,7 @@ under the License.
         <joda-time.version>2.5</joda-time.version>
         <commons.pool.version>1.6</commons.pool.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
+        <commons.io.version>2.16.1</commons.io.version>
         <storage-api.version>2.8.1</storage-api.version>
     </properties>
 
@@ -155,6 +156,12 @@ under the License.
             <groupId>org.apache.avro</groupId>
             <artifactId>avro</artifactId>
             <version>${avro.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>${commons.io.version}</version>
         </dependency>
 
         <dependency>
@@ -333,6 +340,7 @@ under the License.
                                     <include>com.fasterxml.jackson.core:jackson-databind</include>
                                     <include>com.fasterxml.jackson.core:jackson-annotations</include>
                                     <include>org.apache.commons:commons-compress</include>
+                                    <include>commons-io:commons-io</include>
 
                                     <!-- Parquet -->
                                     <include>org.apache.parquet:parquet-hadoop</include>
