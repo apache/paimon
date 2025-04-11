@@ -230,21 +230,31 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             return 0;
         }
 
-        Set<String> skippingSet = new HashSet<>();
+        Set<String> skippingSet = null;
         try {
-            skippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
+            skippingSet = new HashSet<>(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
         } catch (Exception e) {
-            // maybe snapshot been deleted by other jobs.
-            if (e.getCause() == null || !(e.getCause() instanceof FileNotFoundException)) {
-                throw e;
+            LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
+        }
+        if (skippingSet != null) {
+            for (long id = beginInclusiveId; id < endExclusiveId; id++) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Ready to delete manifests in snapshot #" + id);
+                }
+
+                Snapshot snapshot;
+                try {
+                    snapshot = snapshotManager.tryGetSnapshot(id);
+                } catch (FileNotFoundException e) {
+                    beginInclusiveId = id + 1;
+                    continue;
+                }
+                snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
             }
         }
 
+        // delete snapshot file finally
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete manifests in snapshot #" + id);
-            }
-
             Snapshot snapshot;
             try {
                 snapshot = snapshotManager.tryGetSnapshot(id);
@@ -252,7 +262,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 beginInclusiveId = id + 1;
                 continue;
             }
-            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
             if (expireConfig.isChangelogDecoupled()) {
                 commitChangelog(new Changelog(snapshot));
             }

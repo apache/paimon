@@ -152,6 +152,10 @@ public class TestFileStore extends KeyValueFileStore {
         return new SchemaManager(FileIOFinder.find(new Path(root)), options.path());
     }
 
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
     public AbstractFileStoreWrite<KeyValue> newWrite() {
         return super.newWrite(commitUser);
     }

@@ -27,6 +27,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -38,6 +40,7 @@ import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.types.RowType;
@@ -53,20 +56,24 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.operation.FileStoreCommitImpl.mustConflictCheck;
+import static org.apache.paimon.operation.FileStoreTestUtils.assertNFilesExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
@@ -702,6 +709,130 @@ public class FileDeletionTest {
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }
 
+    @Test
+    public void testDataFileSkippingSetException() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2);
+        tagManager = new TagManager(fileIO, store.options().path());
+        SnapshotManager snapshotManager = store.snapshotManager();
+        ChangelogManager changelogManager = store.changelogManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // step 1: commit A to bucket 0
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        List<KeyValue> kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 0, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        // step 2: commit B to bucket 1 and create tag2
+        writers.clear();
+        kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 1, writers);
+        commitData(store, commitIdentifier++, writers);
+        createTag(snapshotManager.snapshot(2), "tag2", store.options().tagDefaultTimeRetained());
+
+        // step 3: commit -B
+        cleanBucket(store, partition, 1);
+
+        // step 4: commit -A
+        cleanBucket(store, partition, 0);
+
+        // action: expire snapshot 1-3 and throw artificial exception when constructing skipping set
+        // from tag2
+        // result: exist A & B (because of tag2)
+        TestSnapshotDeletion snapshotDeletion =
+                new TestSnapshotDeletion(
+                        store.fileIO(),
+                        store.pathFactory(),
+                        store.manifestFileFactory().create(),
+                        store.manifestListFactory().create(),
+                        store.newIndexFileHandler(),
+                        store.newStatsFileHandler(),
+                        store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                        store.options().cleanEmptyDirectories(),
+                        store.options().deleteFileThreadNum());
+
+        ExpireSnapshots expireSnapshots =
+                new ExpireSnapshotsImpl(
+                        snapshotManager, changelogManager, snapshotDeletion, tagManager);
+        snapshotDeletion.readMergedDataFilesThrowException = true;
+        expireSnapshots
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(1)
+                                .snapshotRetainMin(1)
+                                .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                                .build())
+                .expire();
+
+        FileStorePathFactory pathFactory = store.pathFactory();
+        assertNFilesExists(fileIO, pathFactory.bucketPath(partition, 0), 1);
+        assertNFilesExists(fileIO, pathFactory.bucketPath(partition, 1), 1);
+    }
+
+    @Test
+    public void testManifestFileSkippingSetException() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 2);
+        tagManager = new TagManager(fileIO, store.options().path());
+        SnapshotManager snapshotManager = store.snapshotManager();
+        ChangelogManager changelogManager = store.changelogManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // step 1: commit A to bucket 0
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        List<KeyValue> kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 0, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        // step 2: commit B to bucket 1 and create tag2
+        writers.clear();
+        kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 1, writers);
+        commitData(store, commitIdentifier++, writers);
+        createTag(snapshotManager.snapshot(2), "tag2", store.options().tagDefaultTimeRetained());
+
+        // step 3: commit -B
+        cleanBucket(store, partition, 1);
+
+        // step 4: commit -A
+        cleanBucket(store, partition, 0);
+
+        Path manifestPath = store.pathFactory().manifestPath();
+        int manifestFileNum = fileIO.listStatus(manifestPath).length;
+
+        // action: expire snapshot 1-3 and throw artificial exception when constructing manifest
+        // skipping set
+        // result: no manifests were deleted (manifestFileNum)
+        TestSnapshotDeletion snapshotDeletion =
+                new TestSnapshotDeletion(
+                        store.fileIO(),
+                        store.pathFactory(),
+                        store.manifestFileFactory().create(),
+                        store.manifestListFactory().create(),
+                        store.newIndexFileHandler(),
+                        store.newStatsFileHandler(),
+                        store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                        store.options().cleanEmptyDirectories(),
+                        store.options().deleteFileThreadNum());
+        ExpireSnapshots expireSnapshots =
+                new ExpireSnapshotsImpl(
+                        snapshotManager, changelogManager, snapshotDeletion, tagManager);
+        snapshotDeletion.manifestSkippingSetThrowException = true;
+        expireSnapshots
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(1)
+                                .snapshotRetainMin(1)
+                                .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                                .build())
+                .expire();
+
+        assertNFilesExists(fileIO, manifestPath, manifestFileNum);
+    }
+
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode) throws Exception {
         return createStore(mode, 2);
     }
@@ -807,5 +938,50 @@ public class FileDeletionTest {
 
     private void createTag(Snapshot snapshot, String tagName, Duration timeRetained) {
         tagManager.createTag(snapshot, tagName, timeRetained, Collections.emptyList(), false);
+    }
+
+    private static class TestSnapshotDeletion extends SnapshotDeletion {
+
+        private boolean readMergedDataFilesThrowException = false;
+        private boolean manifestSkippingSetThrowException = false;
+
+        public TestSnapshotDeletion(
+                FileIO fileIO,
+                FileStorePathFactory pathFactory,
+                ManifestFile manifestFile,
+                ManifestList manifestList,
+                IndexFileHandler indexFileHandler,
+                StatsFileHandler statsFileHandler,
+                boolean produceChangelog,
+                boolean cleanEmptyDirectories,
+                int deleteFileThreadNum) {
+            super(
+                    fileIO,
+                    pathFactory,
+                    manifestFile,
+                    manifestList,
+                    indexFileHandler,
+                    statsFileHandler,
+                    produceChangelog,
+                    cleanEmptyDirectories,
+                    deleteFileThreadNum);
+        }
+
+        @Override
+        protected Collection<ExpireFileEntry> readMergedDataFiles(List<ManifestFileMeta> manifests)
+                throws IOException {
+            if (readMergedDataFilesThrowException) {
+                throw new IOException("Throwing exception for test purpose.");
+            }
+            return super.readMergedDataFiles(manifests);
+        }
+
+        @Override
+        public Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
+            if (manifestSkippingSetThrowException) {
+                throw new RuntimeException("Throwing exception for test purpose.");
+            }
+            return super.manifestSkippingSet(skippingSnapshots);
+        }
     }
 }
