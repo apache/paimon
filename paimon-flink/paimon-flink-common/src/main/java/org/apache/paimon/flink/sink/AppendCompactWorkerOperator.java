@@ -71,7 +71,9 @@ public abstract class AppendCompactWorkerOperator<IN>
 
     @Override
     public void open() throws Exception {
-        LOG.debug("Opened a append-only table compaction worker.");
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Opened a append-only table compaction worker.");
+        }
         this.unawareBucketCompactor =
                 new UnawareBucketCompactor(
                         table, commitUser, this::workerExecutor, getMetricGroup());

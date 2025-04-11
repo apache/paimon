@@ -424,7 +424,9 @@ public abstract class OrphanFilesClean implements Serializable {
                     },
                     emptyList());
         } catch (IOException e) {
-            LOG.debug("Failed to list directory {}, skip it.", dir, e);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Failed to list directory {}, skip it.", dir, e);
+            }
             return emptyList();
         }
     }

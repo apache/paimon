@@ -200,7 +200,9 @@ public class PaimonOutputCommitter extends OutputCommitter {
         try {
             fileIO.delete(location, true);
         } catch (IOException e) {
-            LOG.debug("Failed to delete directory {} ", location, e);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Failed to delete directory {} ", location, e);
+            }
         }
         LOG.info("Deleting temporary file for job {} finished", jobContext.getJobID());
     }

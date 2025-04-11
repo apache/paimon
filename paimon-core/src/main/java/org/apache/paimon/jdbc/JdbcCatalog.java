@@ -312,7 +312,9 @@ public class JdbcCatalog extends AbstractCatalog {
                                 }
                             });
             if (insertRecord == 1) {
-                LOG.debug("Successfully committed to new table: {}", identifier);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Successfully committed to new table: {}", identifier);
+                }
             } else {
                 try {
                     fileIO.deleteDirectoryQuietly(path);

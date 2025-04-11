@@ -78,13 +78,10 @@ public class NoticeFileChecker {
         final Set<String> deployedModules = DeployParser.parseDeployOutput(buildResult);
 
         LOG.info(
-                "Extracted "
-                        + deployedModules.size()
-                        + " modules that were deployed and "
-                        + modulesWithBundledDependencies.keySet().size()
-                        + " modules which bundle dependencies with a total of "
-                        + modulesWithBundledDependencies.values().size()
-                        + " dependencies");
+                "Extracted {} modules that were deployed and {} modules which bundle dependencies with a total of {} dependencies",
+                deployedModules.size(),
+                modulesWithBundledDependencies.keySet().size(),
+                modulesWithBundledDependencies.values().size());
 
         // find modules producing a shaded-jar
         List<Path> noticeFiles = findNoticeFiles(root);
@@ -117,13 +114,14 @@ public class NoticeFileChecker {
         final Set<String> modulesSkippingDeployment =
                 new HashSet<>(modulesWithBundledDependencies.keySet());
         modulesSkippingDeployment.removeAll(deployedModules);
-
-        LOG.debug(
-                "The following {} modules are skipping deployment: {}",
-                modulesSkippingDeployment.size(),
-                modulesSkippingDeployment.stream()
-                        .sorted()
-                        .collect(Collectors.joining("\n\t", "\n\t", "")));
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "The following {} modules are skipping deployment: {}",
+                    modulesSkippingDeployment.size(),
+                    modulesSkippingDeployment.stream()
+                            .sorted()
+                            .collect(Collectors.joining("\n\t", "\n\t", "")));
+        }
 
         for (String moduleSkippingDeployment : modulesSkippingDeployment) {
             // TODO: this doesn't work for modules requiring a NOTICE that are bundled indirectly
@@ -143,9 +141,11 @@ public class NoticeFileChecker {
             if (!bundledByDeployedModule) {
                 modulesWithBundledDependencies.remove(moduleSkippingDeployment);
             } else {
-                LOG.debug(
-                        "Including module {} in license checks, despite not being deployed, because it is bundled by another deployed module.",
-                        moduleSkippingDeployment);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Including module {} in license checks, despite not being deployed, because it is bundled by another deployed module.",
+                            moduleSkippingDeployment);
+                }
             }
         }
 
@@ -376,7 +376,9 @@ public class NoticeFileChecker {
                                 .lines()
                                 .filter(line -> !line.startsWith("#") && !line.isEmpty())
                                 .collect(Collectors.toList());
-                LOG.debug("Loaded {} items from resource {}", result.size(), fileName);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Loaded {} items from resource {}", result.size(), fileName);
+                }
                 return result;
             }
         } catch (Throwable e) {

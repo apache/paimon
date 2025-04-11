@@ -412,7 +412,7 @@ public class TestFileStore extends KeyValueFileStore {
             List<ManifestEntry> entries, boolean isStreaming) throws Exception {
         if (LOG.isDebugEnabled()) {
             for (ManifestEntry entry : entries) {
-                LOG.debug("reading from " + entry.toString());
+                LOG.debug("reading from {}", entry.toString());
             }
         }
 

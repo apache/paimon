@@ -67,12 +67,16 @@ public class FullCompactedStartingScanner extends ReadPlanStartingScanner {
         if (startingSnapshotId == null) {
             startingSnapshotId = snapshotManager.latestSnapshotId();
             if (startingSnapshotId == null) {
-                LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
+                }
                 return null;
             } else {
-                LOG.debug(
-                        "No compact snapshot found, reading from the latest snapshot {}.",
-                        startingSnapshotId);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "No compact snapshot found, reading from the latest snapshot {}.",
+                            startingSnapshotId);
+                }
             }
         }
 
