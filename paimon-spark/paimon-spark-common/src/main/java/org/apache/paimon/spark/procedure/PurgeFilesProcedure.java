@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -64,7 +63,7 @@ public class PurgeFilesProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     try {
-                        FileStoreTableUtils.purgeFiles((FileStoreTable) table);
+                        ((FileStoreTable) table).purgeFiles();
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }

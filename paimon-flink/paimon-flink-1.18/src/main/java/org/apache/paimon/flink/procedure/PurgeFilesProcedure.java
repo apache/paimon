@@ -23,16 +23,13 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import static org.apache.paimon.table.FileStoreTableUtils.purgeFiles;
-
 /** A procedure to purge files for a table. */
 public class PurgeFilesProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "purge_files";
 
     public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
-        FileStoreTable table = (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
-        purgeFiles(table);
+        ((FileStoreTable) catalog.getTable(Identifier.fromString(tableId))).purgeFiles();
         return new String[] {"Success"};
     }
 

@@ -27,8 +27,6 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 import org.apache.flink.types.Row;
 
-import static org.apache.paimon.table.FileStoreTableUtils.purgeFiles;
-
 /**
  * A procedure to purge files for a table. Usage:
  *
@@ -44,8 +42,7 @@ public class PurgeFilesProcedure extends ProcedureBase {
     @ProcedureHint(argument = {@ArgumentHint(name = "table", type = @DataTypeHint("STRING"))})
     public @DataTypeHint("ROW<result STRING>") Row[] call(
             ProcedureContext procedureContext, String tableId) throws Exception {
-        FileStoreTable table = (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
-        purgeFiles(table);
+        ((FileStoreTable) catalog.getTable(Identifier.fromString(tableId))).purgeFiles();
         return new Row[] {Row.of("Success")};
     }
 
