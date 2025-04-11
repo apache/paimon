@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -103,6 +104,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public SchemaManager schemaManager() {
         return wrapped.schemaManager();
+    }
+
+    @Override
+    public ConsumerManager consumerManager() {
+        return wrapped.consumerManager();
     }
 
     @Override
