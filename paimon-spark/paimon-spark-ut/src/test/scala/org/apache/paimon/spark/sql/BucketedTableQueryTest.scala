@@ -23,10 +23,15 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.execution.SortExec
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
 
 class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
-  private def checkAnswerAndShuffleSorts(query: String, numShuffles: Int, numSorts: Int): Unit = {
+  private def checkAnswerAndShuffleSorts(
+      query: String,
+      numShuffles: Int,
+      numSorts: Int,
+      extraConf: Option[Array[(String, String)]] = None): Unit = {
     var expectedResult: Array[Row] = null
     // avoid config default value change in future, so specify it manually
     withSparkSQLConf(
@@ -34,9 +39,12 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       "spark.sql.autoBroadcastJoinThreshold" -> "-1") {
       expectedResult = spark.sql(query).collect()
     }
+    val conf = extraConf.getOrElse(Array.empty).toSeq
     withSparkSQLConf(
-      "spark.sql.sources.v2.bucketing.enabled" -> "true",
-      "spark.sql.autoBroadcastJoinThreshold" -> "-1") {
+      Array(
+        "spark.sql.sources.v2.bucketing.enabled" -> "true",
+        "spark.sql.autoBroadcastJoinThreshold" -> "-1") ++ conf: _*
+    ) {
       val df = spark.sql(query)
       checkAnswer(df, expectedResult.toSeq)
       assert(collect(df.queryExecution.executedPlan) {
@@ -47,6 +55,22 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
           case sort: SortExec => sort
         }.size == numSorts)
       }
+    }
+  }
+
+  private def checkInputPartition(query: String, number: Int): Unit = {
+    // disable include partition
+    withSparkSQLConf(
+      "spark.sql.sources.v2.bucketing.enabled" -> "true",
+      "spark.sql.autoBroadcastJoinThreshold" -> "-1",
+      "spark.sql.requireAllClusterKeysForCoPartition" -> "false"
+    ) {
+      val df = spark.sql(query)
+
+      assert(collect(df.queryExecution.executedPlan) {
+        case source: BatchScanExec =>
+          source.inputPartitions.length
+      }.sum == number)
     }
   }
 
@@ -187,6 +211,52 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
         i => spark.sql(s"INSERT INTO t VALUES ($i, 'x1'), ($i, 'x3'), ($i, 'x3')")
       }
       checkAnswerAndShuffleSorts("SELECT id, max(c) FROM t GROUP BY id", 0, 1)
+    }
+  }
+
+  test("Query on partitioned bucket table: partition include in bucket") {
+    withTable("t1", "t2", "t3", "t4") {
+      spark.sql(
+        "CREATE TABLE t1 (id INT, dt STRING) PARTITIONED BY (dt) TBLPROPERTIES ('bucket'='1', 'bucket-key' = 'id')")
+      spark.sql("INSERT INTO t1 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+
+      spark.sql(
+        "CREATE TABLE t2 (id INT, dt STRING) PARTITIONED BY (dt) TBLPROPERTIES ('bucket'='1', 'bucket-key' = 'id')")
+      spark.sql("INSERT INTO t2 VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')")
+      val query1 = "SELECT * FROM t1 JOIN t2 on t1.id = t2.id and t1.dt = t2.dt"
+      checkAnswerAndShuffleSorts(
+        query1,
+        0,
+        2,
+        Some(Array("spark.sql.requireAllClusterKeysForCoPartition" -> "false")))
+      checkInputPartition(query1, 8)
+
+      // partial partition
+      spark.sql(
+        "CREATE TABLE t3 (id INT, dt STRING, app STRING, content STRING ) PARTITIONED BY (dt, app) TBLPROPERTIES ('bucket'='1', 'bucket-key' = 'id')")
+      spark.sql("""INSERT INTO t3 VALUES (1, '20250316', 'x1', 'a'),
+                  | (2, '20250316', 'x3', 'b'),
+                  | (3, '20250317', 'x3', 'c'),
+                  | (4, '20250317', 'x4', 'd'),
+                  | (5, '20250317', 'x5', 'e')""".stripMargin)
+
+      spark.sql(
+        "CREATE TABLE t4 (id INT, dt STRING, app STRING, content STRING) PARTITIONED BY (dt, app) TBLPROPERTIES ('bucket'='1', 'bucket-key' = 'id')")
+      spark.sql("""INSERT INTO t4 VALUES (1, '20250316', 'x1', 'a'),
+                  | (2, '20250316', 'x3', 'b'),
+                  | (3, '20250317', 'x3', 'c'),
+                  | (4, '20250317', 'x4', 'd'),
+                  | (5, '20250317', 'x5', 'e')""".stripMargin)
+
+      // prune the dt column
+      val query2 = "SELECT t3.content FROM t3 JOIN t4 on t3.id = t4.id and t3.app = t4.app"
+      checkAnswerAndShuffleSorts(
+        query2,
+        0,
+        2,
+        Some(Array("spark.sql.requireAllClusterKeysForCoPartition" -> "false")))
+      checkInputPartition(query2, 8)
+
     }
   }
 }
