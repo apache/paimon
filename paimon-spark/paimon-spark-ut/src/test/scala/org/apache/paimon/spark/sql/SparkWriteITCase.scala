@@ -59,10 +59,11 @@ class SparkWriteITCase extends PaimonSparkTestBase {
 
       val table = loadTable("PostponeTable")
       val snapshot = table.latestSnapshot.get
-      val file = table.manifestFileReader
+      val manifestEntry = table.manifestFileReader
         .read(table.manifestListReader.read(snapshot.deltaManifestList).get(0).fileName)
         .get(0)
-        .file
+      val file = manifestEntry.file
+      assertThat(manifestEntry.bucket()).isEqualTo(-2)
       // default format for postpone bucket is avro
       assertThat(file.fileName).endsWith(".avro")
     }

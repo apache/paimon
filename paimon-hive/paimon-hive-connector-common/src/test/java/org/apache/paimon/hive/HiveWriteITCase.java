@@ -30,6 +30,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -1198,15 +1199,16 @@ public class HiveWriteITCase extends HiveTestBase {
         hiveShell.execute("insert into " + tableName + " values (1,2,3),(4,5,6)");
 
         Snapshot snapshot = table.latestSnapshot().get();
-        DataFileMeta file =
+        ManifestEntry manifestEntry =
                 table.manifestFileReader()
                         .read(
                                 table.manifestListReader()
                                         .read(snapshot.deltaManifestList())
                                         .get(0)
                                         .fileName())
-                        .get(0)
-                        .file();
+                        .get(0);
+        DataFileMeta file = manifestEntry.file();
+        assertThat(manifestEntry.bucket()).isEqualTo(-2);
         // default format for postpone bucket is avro
         assertThat(file.fileName()).endsWith(".avro");
     }
