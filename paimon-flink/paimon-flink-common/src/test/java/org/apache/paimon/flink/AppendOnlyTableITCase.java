@@ -342,8 +342,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testAutoCompaction() {
-        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
-        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
+        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '4')");
 
         assertAutoCompaction(
                 "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
