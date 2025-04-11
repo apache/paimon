@@ -71,7 +71,12 @@ public class RollingFileWriterTest {
                         () ->
                                 new RowDataFileWriter(
                                         LocalFileIO.create(),
-                                        fileFormat.createWriterFactory(SCHEMA),
+                                        RowDataRollingFileWriter.createFileWriterContext(
+                                                fileFormat,
+                                                SCHEMA,
+                                                SimpleColStatsCollector.createFullStatsFactories(
+                                                        SCHEMA.getFieldCount()),
+                                                CoreOptions.FILE_COMPRESSION.defaultValue()),
                                         new DataFilePathFactory(
                                                         new Path(tempDir + "/bucket-0"),
                                                         CoreOptions.FILE_FORMAT
@@ -86,18 +91,8 @@ public class RollingFileWriterTest {
                                                         null)
                                                 .newPath(),
                                         SCHEMA,
-                                        SimpleStatsProducer.fromExtractor(
-                                                fileFormat
-                                                        .createStatsExtractor(
-                                                                SCHEMA,
-                                                                SimpleColStatsCollector
-                                                                        .createFullStatsFactories(
-                                                                                SCHEMA
-                                                                                        .getFieldCount()))
-                                                        .orElse(null)),
                                         0L,
                                         new LongCounter(0),
-                                        CoreOptions.FILE_COMPRESSION.defaultValue(),
                                         new FileIndexOptions(),
                                         FileSource.APPEND,
                                         true,

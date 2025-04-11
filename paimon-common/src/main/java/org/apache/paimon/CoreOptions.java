@@ -226,6 +226,26 @@ public class CoreOptions implements Serializable {
                     .defaultValue("changelog-")
                     .withDescription("Specify the file name prefix of changelog files.");
 
+    public static final ConfigOption<String> CHANGELOG_FILE_FORMAT =
+            key("changelog-file.format")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify the message format of changelog files, currently parquet, avro and orc are supported.");
+
+    public static final ConfigOption<String> CHANGELOG_FILE_COMPRESSION =
+            key("changelog-file.compression")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Changelog file compression.");
+
+    public static final ConfigOption<String> CHANGELOG_FILE_STATS_MODE =
+            key("changelog-file.stats-mode")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Changelog file metadata stats collection. none, counts, truncate(16), full is available.");
+
     public static final ConfigOption<Boolean> FILE_SUFFIX_INCLUDE_COMPRESSION =
             key("file.suffix.include.compression")
                     .booleanType()
@@ -1844,6 +1864,21 @@ public class CoreOptions implements Serializable {
 
     public String changelogFilePrefix() {
         return options.get(CHANGELOG_FILE_PREFIX);
+    }
+
+    @Nullable
+    public String changelogFileFormat() {
+        return options.get(CHANGELOG_FILE_FORMAT);
+    }
+
+    @Nullable
+    public String changelogFileCompression() {
+        return options.get(CHANGELOG_FILE_COMPRESSION);
+    }
+
+    @Nullable
+    public String changelogFileStatsMode() {
+        return options.get(CHANGELOG_FILE_STATS_MODE);
     }
 
     public boolean fileSuffixIncludeCompression() {

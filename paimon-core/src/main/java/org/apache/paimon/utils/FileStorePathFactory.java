@@ -30,14 +30,13 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** Factory which produces {@link Path}s for manifest files. */
@@ -297,14 +296,10 @@ public class FileStorePathFactory {
         };
     }
 
-    public static Map<String, FileStorePathFactory> createFormatPathFactories(
+    public static Function<String, FileStorePathFactory> createFormatPathFactories(
             CoreOptions options,
             BiFunction<CoreOptions, String, FileStorePathFactory> formatPathFactory) {
-        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        Set<String> formats = new HashSet<>(options.fileFormatPerLevel().values());
-        formats.add(options.fileFormatString());
-        formats.forEach(
-                format -> pathFactoryMap.put(format, formatPathFactory.apply(options, format)));
-        return pathFactoryMap;
+        Map<String, FileStorePathFactory> map = new ConcurrentHashMap<>();
+        return format -> map.computeIfAbsent(format, k -> formatPathFactory.apply(options, format));
     }
 }
