@@ -280,7 +280,7 @@ public class UnawareAppendTableCompactionCoordinator {
                     fileBin.reset();
                 }
             }
-            if (fileBin.fileNum > minFileNum) {
+            if (fileBin.fileNum >= minFileNum) {
                 result.add(new ArrayList<>(fileBin.bin));
                 fileBin.reset();
             }
