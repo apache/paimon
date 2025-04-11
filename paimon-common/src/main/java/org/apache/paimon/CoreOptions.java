@@ -127,6 +127,18 @@ public class CoreOptions implements Serializable {
                                                     + "if there is no primary key, the full row will be used.")
                                     .build());
 
+    @Immutable
+    public static final ConfigOption<HashType> BUCKET_HASH_TYPE =
+            key("bucket.hash-type")
+                    .enumType(HashType.class)
+                    .defaultValue(HashType.PAIMON)
+                    .withDescription("The hash mode for paimon bucket");
+
+    /** Paimon bucket hash type. */
+    public enum HashType {
+        PAIMON,
+    }
+
     public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS =
             key("data-file.external-paths")
                     .stringType()
@@ -1737,6 +1749,10 @@ public class CoreOptions implements Serializable {
 
     public int bucket() {
         return options.get(BUCKET);
+    }
+
+    public HashType bucketHashType() {
+        return options.get(BUCKET_HASH_TYPE);
     }
 
     public Path path() {
