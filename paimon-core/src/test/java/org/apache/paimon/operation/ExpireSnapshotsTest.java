@@ -629,6 +629,34 @@ public class ExpireSnapshotsTest {
         store.assertCleaned();
     }
 
+    @Test
+    public void testManifestFileSkippingSetFileNotFoundException() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(10, allData, snapshotPositions);
+
+        Snapshot snapshot2 = snapshotManager.snapshot(2);
+        TagManager tagManager = store.newTagManager();
+        tagManager.createTag(snapshot2, "tag2", null, Collections.emptyList(), false);
+
+        // delete manifest list file for tag2 to cause FileNotFoundException
+        Path toDelete =
+                store.pathFactory().manifestListFactory().toPath(snapshot2.baseManifestList());
+        fileIO.deleteQuietly(toDelete);
+
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(1)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build();
+
+        store.newExpire(config).expire();
+
+        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+    }
+
     private TestFileStore createStore() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
