@@ -45,8 +45,6 @@ case class UpdatePaimonTableCommand(
   with AssignmentAlignmentHelper
   with SupportsSubquery {
 
-  private lazy val writer = PaimonSparkWriter(table)
-
   private lazy val updateExpressions = {
     generateAlignedExpressions(relation.output, assignments).zip(relation.output).map {
       case (expr, attr) => Alias(expr, attr.name)()
@@ -60,7 +58,7 @@ case class UpdatePaimonTableCommand(
     } else {
       performUpdateForNonPkTable(sparkSession)
     }
-    writer.commit(commitMessages)
+    dvSafeWriter.commit(commitMessages)
 
     Seq.empty[Row]
   }
@@ -70,7 +68,7 @@ case class UpdatePaimonTableCommand(
     val updatedPlan = Project(updateExpressions, Filter(condition, relation))
     val df = createDataset(sparkSession, updatedPlan)
       .withColumn(ROW_KIND_COL, lit(RowKind.UPDATE_AFTER.toByteValue))
-    writer.write(df)
+    dvSafeWriter.write(df)
   }
 
   /** Update for table without primary keys */
@@ -103,7 +101,7 @@ case class UpdatePaimonTableCommand(
           val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
 
           // Step4: write these deletion vectors.
-          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+          val indexCommitMsg = dvSafeWriter.persistDeletionVectors(deletionVectors)
 
           addCommitMessage ++ indexCommitMsg
         } finally {
@@ -144,7 +142,7 @@ case class UpdatePaimonTableCommand(
       Filter(condition, toUpdateScanRelation)
     }
     val data = createDataset(sparkSession, newPlan).select(updateColumns: _*)
-    writer.write(data)
+    dvSafeWriter.write(data)
   }
 
   private def writeUpdatedAndUnchangedData(
@@ -161,6 +159,6 @@ case class UpdatePaimonTableCommand(
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    writer.write(data)
+    dvSafeWriter.write(data)
   }
 }

@@ -27,12 +27,11 @@ import org.assertj.core.api.Assertions
 class CompactManifestProcedureTest extends PaimonSparkTestBase with StreamTest {
 
   test("Paimon Procedure: compact manifest") {
-    spark.sql(
-      s"""
-         |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
-         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2', 'compaction.max.file-num'='2')
-         |PARTITIONED BY (dt, hh)
-         |""".stripMargin)
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2')
+                 |PARTITIONED BY (dt, hh)
+                 |""".stripMargin)
 
     spark.sql(s"INSERT INTO T VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
     spark.sql(s"INSERT OVERWRITE T VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")

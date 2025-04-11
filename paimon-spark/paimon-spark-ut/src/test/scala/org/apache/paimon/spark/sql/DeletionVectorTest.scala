@@ -160,7 +160,6 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                        |CREATE TABLE T (id INT, name STRING)
                        |TBLPROPERTIES (
                        |  'deletion-vectors.enabled' = 'true',
-                       |  'compaction.max.file-num' = '50',
                        |  'bucket' = '$bucket' $bucketKey)
                        |""".stripMargin)
 

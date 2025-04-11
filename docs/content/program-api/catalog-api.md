@@ -244,7 +244,6 @@ public class AlterTable {
 
         Map<String, String> options = new HashMap<>();
         options.put("bucket", "4");
-        options.put("compaction.max.file-num", "40");
 
         Catalog catalog = CreateCatalog.createFilesystemCatalog();
         catalog.createDatabase("my_db", false);
@@ -283,8 +282,6 @@ public class AlterTable {
 
         // add option
         SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
-        // remove option
-        SchemaChange removeOption = SchemaChange.removeOption("compaction.max.file-num");
         // add column
         SchemaChange addColumn = SchemaChange.addColumn("col1_after", DataTypes.STRING());
         // add a column after col1

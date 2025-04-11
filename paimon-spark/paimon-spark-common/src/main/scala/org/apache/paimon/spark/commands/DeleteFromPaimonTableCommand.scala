@@ -50,8 +50,6 @@ case class DeleteFromPaimonTableCommand(
   with ExpressionHelper
   with SupportsSubquery {
 
-  private lazy val writer = PaimonSparkWriter(table)
-
   override def run(sparkSession: SparkSession): Seq[Row] = {
 
     val commit = table.newBatchWriteBuilder().newCommit()
@@ -96,7 +94,7 @@ case class DeleteFromPaimonTableCommand(
         if (dropPartitions.nonEmpty) {
           commit.truncatePartitions(dropPartitions.asJava)
         } else {
-          writer.commit(Seq.empty)
+          dvSafeWriter.commit(Seq.empty)
         }
       } else {
         val commitMessages = if (usePrimaryKeyDelete()) {
@@ -104,7 +102,7 @@ case class DeleteFromPaimonTableCommand(
         } else {
           performNonPrimaryKeyDelete(sparkSession)
         }
-        writer.commit(commitMessages)
+        dvSafeWriter.commit(commitMessages)
       }
     }
 
@@ -118,7 +116,7 @@ case class DeleteFromPaimonTableCommand(
   private def performPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
     val df = createDataset(sparkSession, Filter(condition, relation))
       .withColumn(ROW_KIND_COL, lit(RowKind.DELETE.toByteValue))
-    writer.write(df)
+    dvSafeWriter.write(df)
   }
 
   private def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
@@ -136,7 +134,7 @@ case class DeleteFromPaimonTableCommand(
         sparkSession)
 
       // Step3: update the touched deletion vectors and index files
-      writer.persistDeletionVectors(deletionVectors)
+      dvSafeWriter.persistDeletionVectors(deletionVectors)
     } else {
       // Step2: extract out the exactly files, which must have at least one record to be updated.
       val touchedFilePaths =
@@ -151,7 +149,7 @@ case class DeleteFromPaimonTableCommand(
       val data = createDataset(sparkSession, toRewriteScanRelation)
 
       // only write new files, should have no compaction
-      val addCommitMessage = writer.writeOnly().write(data)
+      val addCommitMessage = dvSafeWriter.writeOnly().write(data)
 
       // Step5: convert the deleted files that need to be written to commit message.
       val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)

@@ -153,8 +153,6 @@ public class MockRESTMessage {
     public static List<SchemaChange> getChanges() {
         // add option
         SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
-        // remove option
-        SchemaChange removeOption = SchemaChange.removeOption("compaction.max.file-num");
         // update comment
         SchemaChange updateComment = SchemaChange.updateComment(null);
         // add column
@@ -204,7 +202,6 @@ public class MockRESTMessage {
 
         List<SchemaChange> schemaChanges = new ArrayList<>();
         schemaChanges.add(addOption);
-        schemaChanges.add(removeOption);
         schemaChanges.add(updateComment);
         schemaChanges.add(addColumn);
         schemaChanges.add(addColumnMap);

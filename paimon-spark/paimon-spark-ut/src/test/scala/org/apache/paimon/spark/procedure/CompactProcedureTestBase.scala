@@ -456,12 +456,11 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
   }
 
   test("Paimon Procedure: compact unaware bucket append table") {
-    spark.sql(
-      s"""
-         |CREATE TABLE T (id INT, value STRING, pt STRING)
-         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2', 'compaction.max.file-num' = '3')
-         |PARTITIONED BY (pt)
-         |""".stripMargin)
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, pt STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2')
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
 
     val table = loadTable("T")
 
@@ -490,12 +489,11 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
   }
 
   test("Paimon Procedure: compact unaware bucket append table with many small files") {
-    spark.sql(
-      s"""
-         |CREATE TABLE T (id INT, value STRING, pt STRING)
-         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.max.file-num' = '10')
-         |PARTITIONED BY (pt)
-         |""".stripMargin)
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, pt STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
 
     val table = loadTable("T")
 
@@ -543,7 +541,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     spark.sql(
       s"""
          |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
-         |TBLPROPERTIES ('bucket'='1', 'bucket-key'='id', 'write-only'='true', 'compaction.min.file-num'='1', 'compaction.max.file-num'='2')
+         |TBLPROPERTIES ('bucket'='1', 'bucket-key'='id', 'write-only'='true', 'compaction.min.file-num'='1')
          |PARTITIONED BY (dt, hh)
          |""".stripMargin)
 
@@ -599,12 +597,11 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     spark.sql(s"INSERT INTO T VALUES (5, 'e', 'p1'), (6, 'f', 'p2')")
 
     spark.sql(
-      "CALL sys.compact(table => 'T', partitions => 'pt=\"p1\"', options => 'compaction.min.file-num=2,compaction.max.file-num = 3')")
+      "CALL sys.compact(table => 'T', partitions => 'pt=\"p1\"', options => 'compaction.min.file-num=2')")
     Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
     Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
 
-    spark.sql(
-      "CALL sys.compact(table => 'T', options => 'compaction.min.file-num=2,compaction.max.file-num = 3')")
+    spark.sql("CALL sys.compact(table => 'T', options => 'compaction.min.file-num=2')")
     Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
     Assertions.assertThat(lastSnapshotId(table)).isEqualTo(5)
 
@@ -663,12 +660,11 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
   }
 
   test("Paimon Procedure: compact with partition_idle_time for unaware bucket append table") {
-    spark.sql(
-      s"""
-         |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
-         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2', 'compaction.max.file-num'='2')
-         |PARTITIONED BY (dt, hh)
-         |""".stripMargin)
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2')
+                 |PARTITIONED BY (dt, hh)
+                 |""".stripMargin)
 
     val table = loadTable("T")
 

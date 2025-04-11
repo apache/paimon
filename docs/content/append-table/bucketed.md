@@ -82,13 +82,7 @@ control the strategy of compaction:
             <td><h5>compaction.min.file-num</h5></td>
             <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
-            <td>For file set [f_0,...,f_N], the minimum file number which satisfies sum(size(f_i)) &gt;= targetFileSize to trigger a compaction for append table. This value avoids almost-full-file to be compacted, which is not cost-effective.</td>
-        </tr>
-        <tr>
-            <td><h5>compaction.max.file-num</h5></td>
-            <td style="word-wrap: break-word;">5</td>
-            <td>Integer</td>
-            <td>For file set [f_0,...,f_N], the maximum file number to trigger a compaction for append table, even if sum(size(f_i)) &lt; targetFileSize. This value avoids pending too much small files, which slows down the performance.</td>
+            <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append table.</td>
         </tr>
         <tr>
             <td><h5>full-compaction.delta-commits</h5></td>

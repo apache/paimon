@@ -99,7 +99,6 @@ import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
-import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
 import static org.apache.paimon.CoreOptions.CONSUMER_IGNORE_PROGRESS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
@@ -579,7 +578,6 @@ public abstract class SimpleTableTestBase {
                 createFileStoreTable(
                         conf -> {
                             conf.set(WRITE_ONLY, true);
-                            conf.set(COMPACTION_MAX_FILE_NUM, 5);
                             // 'write-only' options will also skip expiration
                             // these options shouldn't have any effect
                             conf.set(SNAPSHOT_NUM_RETAINED_MIN, 3);

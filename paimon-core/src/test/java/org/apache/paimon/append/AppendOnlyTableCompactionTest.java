@@ -183,7 +183,6 @@ public class AppendOnlyTableCompactionTest {
         schemaBuilder.column("f2", DataTypes.STRING());
         schemaBuilder.column("f3", DataTypes.STRING());
         schemaBuilder.option("compaction.min.file-num", "3");
-        schemaBuilder.option("compaction.max.file-num", "6");
         schemaBuilder.option("bucket", "-1");
         return schemaBuilder.build();
     }

@@ -150,8 +150,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testNoCompactionInBatchMode() {
-        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
-        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
+        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '4')");
 
         assertExecuteExpected(
                 "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
@@ -212,8 +211,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testCompactionInStreamingMode() throws Exception {
-        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
-        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
+        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");
 
         sEnv.getConfig()
@@ -237,8 +235,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testCompactionInStreamingModeWithMaxWatermark() throws Exception {
-        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
-        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
+        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '4')");
         batchSql("ALTER TABLE append_table SET ('continuous.discovery-interval' = '1 s')");
 
         sEnv.getConfig()
