@@ -63,6 +63,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.options.MemorySize.VALUE_128_MB;
@@ -223,8 +224,7 @@ public class ContainsLevelsTest {
 
     private KeyValueFileWriterFactory createWriterFactory() {
         Path path = new Path(tempDir.toUri().toString());
-        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put("avro", createNonPartFactory(path));
+        Function<String, FileStorePathFactory> pathFactoryMap = k -> createNonPartFactory(path);
         return KeyValueFileWriterFactory.builder(
                         FileIOFinder.find(path),
                         0,

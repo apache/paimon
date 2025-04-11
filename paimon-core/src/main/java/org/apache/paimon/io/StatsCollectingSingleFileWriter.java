@@ -19,7 +19,6 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -45,16 +44,14 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
-            FormatWriterFactory factory,
+            FileWriterContext context,
             Path path,
             Function<T, InternalRow> converter,
             RowType rowType,
-            SimpleStatsProducer statsProducer,
-            String compression,
             boolean asyncWrite) {
-        super(fileIO, factory, path, converter, compression, asyncWrite);
+        super(fileIO, context.factory(), path, converter, context.compression(), asyncWrite);
         this.rowType = rowType;
-        this.statsProducer = statsProducer;
+        this.statsProducer = context.statsProducer();
         this.isStatsDisabled = statsProducer.isStatsDisabled();
         this.statsRequirePerRecord = statsProducer.requirePerRecord();
     }

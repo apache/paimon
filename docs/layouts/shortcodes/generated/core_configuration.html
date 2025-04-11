@@ -69,10 +69,28 @@ under the License.
             <td>Memory page size for caching.</td>
         </tr>
         <tr>
+            <td><h5>changelog-file.compression</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Changelog file compression.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file.format</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the message format of changelog files, currently parquet, avro and orc are supported.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-file.prefix</h5></td>
             <td style="word-wrap: break-word;">"changelog-"</td>
             <td>String</td>
             <td>Specify the file name prefix of changelog files.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file.stats-mode</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Changelog file metadata stats collection. none, counts, truncate(16), full is available.</td>
         </tr>
         <tr>
             <td><h5>changelog-producer</h5></td>
