@@ -153,18 +153,23 @@ public class KeyValueFileWriterFactory {
     }
 
     public void deleteFile(DataFileMeta file) {
+        // this path factory is only for path generation, so we don't care about the true or false
+        // in WriteFormatKey
         fileIO.deleteQuietly(
                 formatContext.pathFactory(new WriteFormatKey(file.level(), false)).toPath(file));
     }
 
     public void copyFile(DataFileMeta sourceFile, DataFileMeta targetFile) throws IOException {
+        // this path factory is only for path generation, so we don't care about the true or false
+        // in WriteFormatKey
+        boolean isChangelog = false;
         Path sourcePath =
                 formatContext
-                        .pathFactory(new WriteFormatKey(sourceFile.level(), false))
+                        .pathFactory(new WriteFormatKey(sourceFile.level(), isChangelog))
                         .toPath(sourceFile);
         Path targetPath =
                 formatContext
-                        .pathFactory(new WriteFormatKey(targetFile.level(), false))
+                        .pathFactory(new WriteFormatKey(targetFile.level(), isChangelog))
                         .toPath(targetFile);
         fileIO.copyFile(sourcePath, targetPath, true);
     }
