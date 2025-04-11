@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.utils.RoaringBitmap32;
 
+import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.bytes.ByteBufferInputStream;
@@ -74,7 +75,6 @@ import org.apache.parquet.io.ParquetDecodingException;
 import org.apache.parquet.io.SeekableInputStream;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
-import org.apache.yetus.audience.InterfaceAudience.Private;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -179,7 +179,7 @@ public class ParquetFileReader implements Closeable {
         }
 
         // Read all the footer bytes in one time to avoid multiple read operations,
-        // since it can be pretty time consuming for a single read operation in HDFS.
+        // since it can be pretty time-consuming for a single read operation in HDFS.
         ByteBuffer footerBytesBuffer = ByteBuffer.allocate(fileMetadataLength);
         f.readFully(footerBytesBuffer);
         LOG.debug("Finished to read all footer bytes.");
@@ -798,11 +798,11 @@ public class ParquetFileReader implements Closeable {
         if (blockIndex < 0 || blockIndex >= blocks.size()) {
             return null;
         }
-        return new DictionaryPageReader(this, blocks.get(blockIndex));
+        return new DictionaryPageReader(this, blocks.get(blockIndex), options.getAllocator());
     }
 
     public DictionaryPageReader getDictionaryReader(BlockMetaData block) {
-        return new DictionaryPageReader(this, block);
+        return new DictionaryPageReader(this, block, options.getAllocator());
     }
 
     /**
@@ -1003,7 +1003,7 @@ public class ParquetFileReader implements Closeable {
      * @return the column index for the specified column chunk or {@code null} if there is no index
      * @throws IOException if any I/O error occurs during reading the file
      */
-    @Private
+    @InterfaceAudience.Private
     public ColumnIndex readColumnIndex(ColumnChunkMetaData column) throws IOException {
         IndexReference ref = column.getColumnIndexReference();
         if (ref == null) {
@@ -1037,7 +1037,7 @@ public class ParquetFileReader implements Closeable {
      * @return the offset index for the specified column chunk or {@code null} if there is no index
      * @throws IOException if any I/O error occurs during reading the file
      */
-    @Private
+    @InterfaceAudience.Private
     public OffsetIndex readOffsetIndex(ColumnChunkMetaData column) throws IOException {
         IndexReference ref = column.getOffsetIndexReference();
         if (ref == null) {
@@ -1346,7 +1346,8 @@ public class ParquetFileReader implements Closeable {
                     pageBlockDecryptor,
                     aadPrefix,
                     rowGroupOrdinal,
-                    columnOrdinal);
+                    columnOrdinal,
+                    options);
         }
 
         private boolean hasMorePages(long valuesCountReadSoFar, int dataPageCountReadSoFar) {

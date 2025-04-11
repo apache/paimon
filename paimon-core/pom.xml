@@ -210,6 +210,16 @@ under the License.
             <artifactId>iceberg-data</artifactId>
             <version>${iceberg.version}</version>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <artifactId>parquet-hadoop</artifactId>
+                    <groupId>org.apache.parquet</groupId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>parquet-avro</artifactId>
+                    <groupId>org.apache.parquet</groupId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -230,6 +240,19 @@ under the License.
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-parquet</artifactId>
             <version>${iceberg.version}</version>
+            <exclusions>
+                <exclusion>
+                    <artifactId>parquet-avro</artifactId>
+                    <groupId>org.apache.parquet</groupId>
+                </exclusion>
+            </exclusions>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-avro</artifactId>
+            <version>${parquet.version}</version>
             <scope>test</scope>
         </dependency>
 
