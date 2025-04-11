@@ -249,7 +249,9 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             .map(tableSchema.fieldNames().indexOf(_))
             .map(x => col(data.schema.fieldNames(x)))
             .toSeq
-          val args = Seq(lit(bucketNumber)) ++ bucketKeyCol
+          val args = Seq(
+            lit(bucketNumber),
+            lit(new CoreOptions(tableSchema.options()).bucketHashType().toString)) ++ bucketKeyCol
           val repartitioned =
             repartitionByPartitionsAndBucket(
               data.withColumn(BUCKET_COL, call_udf(BucketExpression.FIXED_BUCKET, args: _*)))

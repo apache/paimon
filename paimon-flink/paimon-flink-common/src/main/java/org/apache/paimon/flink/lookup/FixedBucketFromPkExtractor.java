@@ -23,6 +23,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.hash.HashFunction;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
@@ -44,6 +45,8 @@ public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<Interna
     private final Projection partitionProjection;
 
     private final Projection logPrimaryKeyProjection;
+
+    private final HashFunction hashFunction;
 
     public FixedBucketFromPkExtractor(TableSchema schema) {
         this.numBuckets = new CoreOptions(schema.options()).bucket();
@@ -71,6 +74,9 @@ public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<Interna
         this.logPrimaryKeyProjection =
                 CodeGenUtils.newProjection(
                         schema.logicalRowType(), schema.projection(schema.primaryKeys()));
+        this.hashFunction =
+                HashFunction.create(
+                        new CoreOptions(schema.options()), schema.logicalBucketKeyType());
     }
 
     @Override
@@ -95,7 +101,7 @@ public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<Interna
     public int bucket() {
         BinaryRow bucketKey = bucketKey();
         return KeyAndBucketExtractor.bucket(
-                KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+                KeyAndBucketExtractor.bucketKeyHashCode(bucketKey, hashFunction), numBuckets);
     }
 
     @Override
