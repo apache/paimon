@@ -92,12 +92,12 @@ public class KeyValueFileWriterFactory {
 
     @VisibleForTesting
     public DataFilePathFactory pathFactory(int level) {
-        return formatContext.pathFactory(new FormatKey(level, false));
+        return formatContext.pathFactory(new WriteFormatKey(level, false));
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
-        FormatKey key = new FormatKey(level, false);
+        WriteFormatKey key = new WriteFormatKey(level, false);
         return new RollingFileWriter<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
@@ -108,7 +108,7 @@ public class KeyValueFileWriterFactory {
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
-        FormatKey key = new FormatKey(level, true);
+        WriteFormatKey key = new WriteFormatKey(level, true);
         return new RollingFileWriter<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
@@ -122,7 +122,7 @@ public class KeyValueFileWriterFactory {
     }
 
     private KeyValueDataFileWriter createDataFileWriter(
-            Path path, FormatKey key, FileSource fileSource, boolean isExternalPath) {
+            Path path, WriteFormatKey key, FileSource fileSource, boolean isExternalPath) {
         return formatContext.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
@@ -154,17 +154,17 @@ public class KeyValueFileWriterFactory {
 
     public void deleteFile(DataFileMeta file) {
         fileIO.deleteQuietly(
-                formatContext.pathFactory(new FormatKey(file.level(), false)).toPath(file));
+                formatContext.pathFactory(new WriteFormatKey(file.level(), false)).toPath(file));
     }
 
     public void copyFile(DataFileMeta sourceFile, DataFileMeta targetFile) throws IOException {
         Path sourcePath =
                 formatContext
-                        .pathFactory(new FormatKey(sourceFile.level(), false))
+                        .pathFactory(new WriteFormatKey(sourceFile.level(), false))
                         .toPath(sourceFile);
         Path targetPath =
                 formatContext
-                        .pathFactory(new FormatKey(targetFile.level(), false))
+                        .pathFactory(new WriteFormatKey(targetFile.level(), false))
                         .toPath(targetFile);
         fileIO.copyFile(sourcePath, targetPath, true);
     }
@@ -174,7 +174,7 @@ public class KeyValueFileWriterFactory {
     }
 
     public String newChangelogFileName(int level) {
-        return formatContext.pathFactory(new FormatKey(level, true)).newChangelogFileName();
+        return formatContext.pathFactory(new WriteFormatKey(level, true)).newChangelogFileName();
     }
 
     public static Builder builder(
@@ -241,9 +241,9 @@ public class KeyValueFileWriterFactory {
 
     private static class FileWriterContextFactory {
 
-        private final Function<FormatKey, String> key2Format;
-        private final Function<FormatKey, String> key2Compress;
-        private final Function<FormatKey, String> key2Stats;
+        private final Function<WriteFormatKey, String> key2Format;
+        private final Function<WriteFormatKey, String> key2Compress;
+        private final Function<WriteFormatKey, String> key2Stats;
 
         private final Map<Pair<String, String>, Optional<SimpleStatsExtractor>>
                 formatStats2Extractor;
@@ -335,12 +335,12 @@ public class KeyValueFileWriterFactory {
             return true;
         }
 
-        private FileWriterContext fileWriterContext(FormatKey key) {
+        private FileWriterContext fileWriterContext(WriteFormatKey key) {
             return new FileWriterContext(
                     writerFactory(key), statsProducer(key), key2Compress.apply(key));
         }
 
-        private SimpleStatsProducer statsProducer(FormatKey key) {
+        private SimpleStatsProducer statsProducer(WriteFormatKey key) {
             String format = key2Format.apply(key);
             String statsMode = key2Stats.apply(key);
             if (format.equals("avro")) {
@@ -380,7 +380,7 @@ public class KeyValueFileWriterFactory {
             return fileFormat(format).createStatsExtractor(writeRowType, statsFactories);
         }
 
-        private DataFilePathFactory pathFactory(FormatKey key) {
+        private DataFilePathFactory pathFactory(WriteFormatKey key) {
             String format = key2Format.apply(key);
             return format2PathFactory.computeIfAbsent(
                     format,
@@ -390,7 +390,7 @@ public class KeyValueFileWriterFactory {
                                     .createDataFilePathFactory(partition, bucket));
         }
 
-        private FormatWriterFactory writerFactory(FormatKey key) {
+        private FormatWriterFactory writerFactory(WriteFormatKey key) {
             return format2WriterFactory.computeIfAbsent(
                     key2Format.apply(key),
                     format -> fileFormat(format).createWriterFactory(writeRowType));
@@ -402,12 +402,12 @@ public class KeyValueFileWriterFactory {
         }
     }
 
-    private static class FormatKey {
+    private static class WriteFormatKey {
 
         private final int level;
         private final boolean isChangelog;
 
-        private FormatKey(int level, boolean isChangelog) {
+        private WriteFormatKey(int level, boolean isChangelog) {
             this.level = level;
             this.isChangelog = isChangelog;
         }
@@ -417,7 +417,7 @@ public class KeyValueFileWriterFactory {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            FormatKey formatKey = (FormatKey) o;
+            WriteFormatKey formatKey = (WriteFormatKey) o;
             return level == formatKey.level && isChangelog == formatKey.isChangelog;
         }
 
