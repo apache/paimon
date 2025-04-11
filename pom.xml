@@ -106,7 +106,7 @@ under the License.
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
-        <parquet.version>1.13.1</parquet.version>
+        <parquet.version>1.15.1</parquet.version>
         <orc.version>1.9.2</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
@@ -133,7 +133,7 @@ under the License.
         <jaxb.api.version>2.3.1</jaxb.api.version>
         <findbugs.version>1.3.9</findbugs.version>
         <json-smart.version>2.5.2</json-smart.version>
-        <avro.version>1.11.3</avro.version>
+        <avro.version>1.11.4</avro.version>
         <kafka.version>3.2.3</kafka.version>
         <scala-maven-plugin.version>3.2.2</scala-maven-plugin.version>
         <scalatest-maven-plugin.version>2.1.0</scalatest-maven-plugin.version>
@@ -979,7 +979,7 @@ under the License.
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-shade-plugin</artifactId>
-                    <version>3.4.1</version>
+                    <version>3.6.0</version>
                 </plugin>
 
                 <!-- configure scala style -->
