@@ -20,6 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.schema.Schema
+import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.DataTypes
 
@@ -305,4 +306,33 @@ class SparkWriteITCase extends PaimonSparkTestBase {
       )
     }
   }
+
+  BucketFunctionType
+    .values()
+    .foreach(
+      funcType => {
+        test(s"Paimon: Bucket table using $funcType bucket function") {
+          withTable("T") {
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING, c INT) TBLPROPERTIES
+                         |('bucket-function.type' = '$funcType',
+                         |'bucket-key' = 'a',
+                         |'bucket' = '4',
+                         |'metadata.stats-mode' = 'none'
+                         |)
+                         |""".stripMargin)
+
+            // disable filter by manifest and let bucket filter work
+            for (i <- 0 until 10) {
+              spark.sql(s"INSERT INTO T (a, b, c) VALUES ($i, '$i', $i)")
+            }
+
+            for (i <- 0 until 10) {
+              val rows = spark.sql(s"SELECT * FROM T where a = $i").collect()
+              Assertions.assertEquals(1, rows.length)
+              Assertions.assertEquals(Row.fromSeq(Seq(i, String.valueOf(i), i)), rows(0))
+            }
+          }
+        }
+      })
 }

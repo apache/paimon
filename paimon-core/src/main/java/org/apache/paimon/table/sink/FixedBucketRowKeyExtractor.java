@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
@@ -34,10 +35,14 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
 
     private BinaryRow reuseBucketKey;
     private Integer reuseBucket;
+    private final BucketFunction bucketFunction;
 
     public FixedBucketRowKeyExtractor(TableSchema schema) {
         super(schema);
         numBuckets = new CoreOptions(schema.options()).bucket();
+        bucketFunction =
+                BucketFunction.create(
+                        new CoreOptions(schema.options()), schema.logicalBucketKeyType());
         sameBucketKeyAndTrimmedPrimaryKey = schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
         bucketKeyProjection =
                 CodeGenUtils.newProjection(
@@ -66,9 +71,7 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
     public int bucket() {
         BinaryRow bucketKey = bucketKey();
         if (reuseBucket == null) {
-            reuseBucket =
-                    KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+            reuseBucket = bucketFunction.bucket(bucketKey, numBuckets);
         }
         return reuseBucket;
     }

@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
@@ -31,7 +33,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.LocalTableQuery;
-import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -68,6 +69,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private final Projection partitionFromPk;
     private final Projection bucketKeyFromPk;
+    private final BucketFunction bucketFunction;
 
     private PrimaryKeyPartialLookupTable(
             QueryExecutorFactory executorFactory, FileStoreTable table, List<String> joinKey) {
@@ -114,6 +116,9 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                                     .toArray());
         }
         this.trimmedKeyRearrange = trimmedKeyRearrange;
+        this.bucketFunction =
+                BucketFunction.create(
+                        new CoreOptions(schema.options()), schema.logicalBucketKeyType());
     }
 
     @VisibleForTesting
@@ -162,8 +167,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private int bucket(int numBuckets, InternalRow primaryKey) {
         BinaryRow bucketKey = bucketKeyFromPk.apply(primaryKey);
-        return KeyAndBucketExtractor.bucket(
-                KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+        return bucketFunction.bucket(bucketKey, numBuckets);
     }
 
     @Override

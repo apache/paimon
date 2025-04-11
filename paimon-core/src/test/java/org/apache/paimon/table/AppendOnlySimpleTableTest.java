@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.bucket.PaimonBucketFunction;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
@@ -88,8 +89,6 @@ import static org.apache.paimon.CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.io.DataFileTestUtils.row;
-import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
-import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -1025,13 +1024,14 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         List<Map<Integer, List<InternalRow>>> dataset = new ArrayList<>();
         Map<Integer, List<InternalRow>> dataPerBucket = new HashMap<>(numOfBucket);
         int numOfPartition = Math.max(random.nextInt(10), 1);
+        PaimonBucketFunction bucketFunction = new PaimonBucketFunction();
         for (int i = 0; i < numOfPartition; i++) {
             for (int j = 0; j < Math.max(random.nextInt(200), 1); j++) {
                 BinaryRow data =
                         serializer
                                 .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();
-                int bucket = bucket(bucketKeyHashCode(row(data.getInt(1))), numOfBucket);
+                int bucket = bucketFunction.bucket(row(data.getInt(1)), numOfBucket);
                 dataPerBucket.compute(
                         bucket,
                         (k, v) -> {
