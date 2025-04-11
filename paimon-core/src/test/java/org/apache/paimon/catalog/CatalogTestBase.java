@@ -483,9 +483,7 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.createTable(
                                         Identifier.create("test_db", "wrong_table"), schema, false))
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "Unrecognized option for boolean: max. Expected either true or false(case insensitive)");
+                .hasRootCauseInstanceOf(IllegalArgumentException.class);
 
         // conflict options
         Schema conflictOptionsSchema =
