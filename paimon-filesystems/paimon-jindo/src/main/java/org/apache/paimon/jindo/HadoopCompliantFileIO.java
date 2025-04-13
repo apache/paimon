@@ -112,7 +112,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
     }
 
-    private org.apache.hadoop.fs.Path path(Path path) {
+    protected org.apache.hadoop.fs.Path path(Path path) {
         URI uri = path.toUri();
         if (uri.getScheme().equals("oss") && uri.getUserInfo() != null) {
             path = new Path("oss:/" + uri.getPath());
@@ -120,7 +120,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return new org.apache.hadoop.fs.Path(path.toUri());
     }
 
-    private JindoHadoopSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
+    protected JindoHadoopSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         return getFileSystemPair(path).getKey();
     }
 
