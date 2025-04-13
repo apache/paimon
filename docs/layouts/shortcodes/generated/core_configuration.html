@@ -183,16 +183,10 @@ under the License.
             <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table.</td>
         </tr>
         <tr>
-            <td><h5>compaction.max.file-num</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>For file set [f_0,...,f_N], the maximum file number to trigger a compaction for append-only table, even if sum(size(f_i)) &lt; targetFileSize. This value avoids pending too much small files.<ul><li>Default value of Bucketed Append Table is '5'.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>compaction.min.file-num</h5></td>
             <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
-            <td>For file set [f_0,...,f_N], the minimum file number which satisfies sum(size(f_i)) &gt;= targetFileSize to trigger a compaction for append-only table. This value avoids almost-full-file to be compacted, which is not cost-effective.</td>
+            <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append-only table.</td>
         </tr>
         <tr>
             <td><h5>compaction.optimization-interval</h5></td>

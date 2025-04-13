@@ -41,13 +41,11 @@ public class NoopStoreSinkWriteState implements StoreSinkWriteState {
 
     @Override
     public @Nullable List<StateValue> get(String tableName, String key) {
-        throw new UnsupportedOperationException();
+        return null;
     }
 
     @Override
-    public void put(String tableName, String key, List<StateValue> stateValues) {
-        throw new UnsupportedOperationException();
-    }
+    public void put(String tableName, String key, List<StateValue> stateValues) {}
 
     @Override
     public void snapshotState() throws Exception {}

@@ -62,8 +62,6 @@ case class MergeIntoPaimonTable(
 
   lazy val tableSchema: StructType = v2Table.schema
 
-  private lazy val writer = PaimonSparkWriter(table)
-
   private lazy val (targetOnlyCondition, filteredTargetPlan): (Option[Expression], LogicalPlan) = {
     val filtersOnlyTarget = getExpressionOnlyRelated(mergeCondition, targetTable)
     (
@@ -81,12 +79,12 @@ case class MergeIntoPaimonTable(
     } else {
       performMergeForNonPkTable(sparkSession)
     }
-    writer.commit(commitMessages)
+    dvSafeWriter.commit(commitMessages)
     Seq.empty[Row]
   }
 
   private def performMergeForPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
-    writer.write(
+    dvSafeWriter.write(
       constructChangedRows(
         sparkSession,
         createDataset(sparkSession, filteredTargetPlan),
@@ -128,14 +126,14 @@ case class MergeIntoPaimonTable(
         val dvDS = ds.where(
           s"$ROW_KIND_COL = ${RowKind.DELETE.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
         val deletionVectors = collectDeletionVectors(dataFilePathToMeta, dvDS, sparkSession)
-        val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+        val indexCommitMsg = dvSafeWriter.persistDeletionVectors(deletionVectors)
 
         // Step4: filter rows that should be written as the inserted/updated data.
         val toWriteDS = ds
           .where(
             s"$ROW_KIND_COL = ${RowKind.INSERT.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
           .drop(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
-        val addCommitMessage = writer.write(toWriteDS)
+        val addCommitMessage = dvSafeWriter.write(toWriteDS)
 
         // Step5: commit index and data commit messages
         addCommitMessage ++ indexCommitMsg
@@ -192,7 +190,7 @@ case class MergeIntoPaimonTable(
 
       val toWriteDS =
         constructChangedRows(sparkSession, targetDSWithFileTouchedCol).drop(ROW_KIND_COL)
-      val addCommitMessage = writer.write(toWriteDS)
+      val addCommitMessage = dvSafeWriter.write(toWriteDS)
       val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
 
       addCommitMessage ++ deletedCommitMessage

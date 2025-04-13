@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.deletionvectors.BitmapDeletionVector
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
@@ -27,7 +28,7 @@ import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
-import org.apache.paimon.table.{FileStoreTable, KnownSplitsTable}
+import org.apache.paimon.table.{BucketMode, FileStoreTable, KnownSplitsTable}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowType
@@ -49,6 +50,24 @@ import scala.collection.JavaConverters._
 
 /** Helper trait for all paimon commands. */
 trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLConfHelper {
+
+  lazy val dvSafeWriter: PaimonSparkWriter = {
+    if (table.primaryKeys().isEmpty && table.bucketMode() == BucketMode.HASH_FIXED) {
+
+      /**
+       * Writer without compaction, note that some operations may generate Deletion Vectors, and
+       * writing may occur at the same time as generating deletion vectors. If compaction occurs at
+       * this time, it will cause the file that deletion vectors are working on to no longer exist,
+       * resulting in an error.
+       *
+       * For example: Update bucketed append table with deletion vectors enabled
+       */
+      PaimonSparkWriter(table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true")))
+    } else {
+      PaimonSparkWriter(table)
+    }
+
+  }
 
   /**
    * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`

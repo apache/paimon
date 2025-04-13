@@ -185,7 +185,6 @@ public class UnawareAppendTableCompactionCoordinatorTest {
         schemaBuilder.column("f2", DataTypes.STRING());
         schemaBuilder.column("f3", DataTypes.STRING());
         schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "3");
-        schemaBuilder.option(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "6");
         return schemaBuilder.build();
     }
 
