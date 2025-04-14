@@ -20,21 +20,16 @@ package org.apache.paimon.sort;
 
 import org.apache.paimon.disk.FileIOChannel;
 
-import java.io.Closeable;
 import java.io.File;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** Channel manager to manage the life cycle of spill channels. */
-public class SpillChannelManager implements Closeable {
+public class SpillChannelManager {
 
     private final HashSet<FileIOChannel.ID> channels;
     private final HashSet<FileIOChannel> openChannels;
-
-    private volatile boolean closed;
 
     public SpillChannelManager() {
         this.channels = new HashSet<>(64);
@@ -43,13 +38,11 @@ public class SpillChannelManager implements Closeable {
 
     /** Add a new File channel. */
     public synchronized void addChannel(FileIOChannel.ID id) {
-        checkArgument(!closed);
         channels.add(id);
     }
 
     /** Open File channels. */
     public synchronized void addOpenChannels(List<FileIOChannel> toOpen) {
-        checkArgument(!closed);
         for (FileIOChannel channel : toOpen) {
             openChannels.add(channel);
             channels.remove(channel.getChannelID());
@@ -57,7 +50,6 @@ public class SpillChannelManager implements Closeable {
     }
 
     public synchronized void removeChannel(FileIOChannel.ID id) {
-        checkArgument(!closed);
         channels.remove(id);
     }
 
@@ -83,14 +75,5 @@ public class SpillChannelManager implements Closeable {
             } catch (Throwable ignored) {
             }
         }
-    }
-
-    @Override
-    public synchronized void close() {
-        if (this.closed) {
-            return;
-        }
-        this.closed = true;
-        reset();
     }
 }
