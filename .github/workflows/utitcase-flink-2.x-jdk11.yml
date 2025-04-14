@@ -41,7 +41,9 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
       - name: Build Flink
-        run:  mvn -T 1C -B clean install -DskipTests -Pflink2,spark3
+        run:  |
+          mvn -T 1C -B clean install -DskipTests -Pflink1,spark3
+          mvn -T 1C -B clean install -DskipTests -Pflink2,spark3
       - name: Test Flink
         run: |
           # run tests with random timezone to find out timezone related bugs
