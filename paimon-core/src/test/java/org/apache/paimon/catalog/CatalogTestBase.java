@@ -483,9 +483,7 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.createTable(
                                         Identifier.create("test_db", "wrong_table"), schema, false))
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "Unrecognized option for boolean: max. Expected either true or false(case insensitive)");
+                .hasRootCauseInstanceOf(IllegalArgumentException.class);
 
         // conflict options
         Schema conflictOptionsSchema =
@@ -1222,7 +1220,7 @@ public abstract class CatalogTestBase {
         // alter table
         SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.STRING());
         assertThatThrownBy(() -> catalog.alterTable(identifier, schemaChange, false))
-                .hasMessage("Only data table support alter table.");
+                .hasMessageContaining("Only data table support alter table.");
 
         // drop table
         catalog.dropTable(identifier, false);

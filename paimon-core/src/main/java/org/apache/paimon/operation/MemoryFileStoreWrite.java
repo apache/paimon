@@ -74,10 +74,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                 dvMaintainerFactory,
                 tableName,
                 options,
-                options.bucket(),
-                partitionType,
-                options.writeMaxWritersToSpill(),
-                options.legacyPartitionName());
+                partitionType);
         this.options = options;
         this.cacheManager =
                 new CacheManager(

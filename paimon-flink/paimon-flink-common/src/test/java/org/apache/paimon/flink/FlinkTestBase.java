@@ -132,11 +132,12 @@ public abstract class FlinkTestBase extends AbstractTestBase {
         ResolvedSchema resolvedSchema =
                 new ResolvedSchema(resolvedColumns, Collections.emptyList(), constraint);
         CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
-                        "a comment",
-                        partitionKeys,
-                        options);
+                CatalogTable.newBuilder()
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .comment("a comment")
+                        .partitionKeys(partitionKeys)
+                        .options(options)
+                        .build();
         return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 

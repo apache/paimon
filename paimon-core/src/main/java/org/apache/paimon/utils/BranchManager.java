@@ -77,7 +77,7 @@ public interface BranchManager {
                 branchName);
     }
 
-    static void fastForwardValidate(String branchName) {
+    static void fastForwardValidate(String branchName, String currentBranch) {
         checkArgument(
                 !branchName.equals(DEFAULT_MAIN_BRANCH),
                 "Branch name '%s' do not use in fast-forward.",
@@ -85,6 +85,10 @@ public interface BranchManager {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(branchName),
                 "Branch name '%s' is blank.",
+                branchName);
+        checkArgument(
+                !branchName.equals(currentBranch),
+                "Fast-forward from the current branch '%s' is not allowed.",
                 branchName);
     }
 }

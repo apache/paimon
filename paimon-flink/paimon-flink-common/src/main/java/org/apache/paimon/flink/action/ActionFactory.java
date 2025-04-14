@@ -23,7 +23,6 @@ import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.options.CatalogOptions;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,8 +78,7 @@ public interface ActionFactory extends Factory {
 
         LOG.info("{} job args: {}", actionFactory.identifier(), String.join(" ", actionArgs));
 
-        MultipleParameterToolAdapter params =
-                new MultipleParameterToolAdapter(MultipleParameterTool.fromArgs(actionArgs));
+        MultipleParameterToolAdapter params = new MultipleParameterToolAdapter(actionArgs);
         if (params.has(HELP)) {
             actionFactory.printHelp();
             return Optional.empty();

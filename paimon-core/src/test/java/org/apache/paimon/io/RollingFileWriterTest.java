@@ -32,7 +32,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
-import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.junit.jupiter.api.Test;
@@ -42,7 +41,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -73,7 +71,12 @@ public class RollingFileWriterTest {
                         () ->
                                 new RowDataFileWriter(
                                         LocalFileIO.create(),
-                                        fileFormat.createWriterFactory(SCHEMA),
+                                        RowDataRollingFileWriter.createFileWriterContext(
+                                                fileFormat,
+                                                SCHEMA,
+                                                SimpleColStatsCollector.createFullStatsFactories(
+                                                        SCHEMA.getFieldCount()),
+                                                CoreOptions.FILE_COMPRESSION.defaultValue()),
                                         new DataFilePathFactory(
                                                         new Path(tempDir + "/bucket-0"),
                                                         CoreOptions.FILE_FORMAT
@@ -88,19 +91,8 @@ public class RollingFileWriterTest {
                                                         null)
                                                 .newPath(),
                                         SCHEMA,
-                                        fileFormat
-                                                .createStatsExtractor(
-                                                        SCHEMA,
-                                                        SimpleColStatsCollector
-                                                                .createFullStatsFactories(
-                                                                        SCHEMA.getFieldCount()))
-                                                .orElse(null),
                                         0L,
                                         new LongCounter(0),
-                                        CoreOptions.FILE_COMPRESSION.defaultValue(),
-                                        StatsCollectorFactories.createStatsFactories(
-                                                new CoreOptions(new HashMap<>()),
-                                                SCHEMA.getFieldNames()),
                                         new FileIndexOptions(),
                                         FileSource.APPEND,
                                         true,

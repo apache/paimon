@@ -194,6 +194,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public ConsumerManager consumerManager() {
+        return wrapped.consumerManager();
+    }
+
+    @Override
     public SchemaManager schemaManager() {
         return wrapped.schemaManager();
     }

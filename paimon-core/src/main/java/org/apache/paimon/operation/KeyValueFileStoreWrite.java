@@ -81,8 +81,8 @@ import javax.annotation.Nullable;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -90,6 +90,7 @@ import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
 import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
+import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStoreWrite} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
@@ -124,7 +125,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             Supplier<RecordEqualiser> logDedupEqualSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
-            Map<String, FileStorePathFactory> format2PathFactory,
+            BiFunction<CoreOptions, String, FileStorePathFactory> formatPathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
@@ -166,7 +167,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         keyType,
                         valueType,
                         options.fileFormat(),
-                        format2PathFactory,
+                        createFormatPathFactories(options, formatPathFactory),
                         options.targetFileSize(true));
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.logDedupEqualSupplier = logDedupEqualSupplier;
@@ -241,11 +242,17 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             }
         }
 
-        return new UniversalCompaction(
-                options.maxSizeAmplificationPercent(),
-                options.sortedRunSizeRatio(),
-                options.numSortedRunCompactionTrigger(),
-                options.optimizedCompactionInterval());
+        UniversalCompaction universal =
+                new UniversalCompaction(
+                        options.maxSizeAmplificationPercent(),
+                        options.sortedRunSizeRatio(),
+                        options.numSortedRunCompactionTrigger(),
+                        options.optimizedCompactionInterval());
+        if (options.compactionForceUpLevel0()) {
+            return new ForceUpLevel0Compaction(universal);
+        } else {
+            return universal;
+        }
     }
 
     private CompactManager createCompactManager(

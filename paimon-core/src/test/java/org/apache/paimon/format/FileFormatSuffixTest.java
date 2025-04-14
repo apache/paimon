@@ -87,7 +87,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         SCHEMA,
                         0,
                         new BucketedAppendCompactManager(
-                                null, toCompact, null, 4, 10, 10, null, null), // not used
+                                null, toCompact, null, 4, 10, null, null), // not used
                         null,
                         false,
                         dataFilePathFactory,
@@ -97,7 +97,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         CompressOptions.defaultOptions(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, SCHEMA.getFieldNames()),
+                                "truncate(16)", options, SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,

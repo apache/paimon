@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : Common</name>
 
     <properties>
-        <flink.version>1.20.1</flink.version>
+        <flink.version>${paimon-flink-common.flink.version}</flink.version>
     </properties>
 
     <dependencies>
@@ -79,6 +79,20 @@ under the License.
           <version>${flink.version}</version>
           <type>test-jar</type>
           <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>${paimon-flinkx-common}</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>${paimon-flinkx-common}</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
         </dependency>
 
         <!-- lookup service -->
@@ -218,6 +232,7 @@ under the License.
                                     <include>org.apache.paimon:paimon-service-client</include>
                                     <include>org.apache.paimon:paimon-service-runtime</include>
                                     <include>org.apache.paimon:paimon-shade-netty-4</include>
+                                    <include>org.apache.paimon:${paimon-flinkx-common}</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

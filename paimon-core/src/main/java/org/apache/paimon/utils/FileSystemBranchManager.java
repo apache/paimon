@@ -138,7 +138,7 @@ public class FileSystemBranchManager implements BranchManager {
 
     @Override
     public void fastForward(String branchName) {
-        BranchManager.fastForwardValidate(branchName);
+        BranchManager.fastForwardValidate(branchName, snapshotManager.branch());
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
 
         Long earliestSnapshotId = snapshotManager.copyWithBranch(branchName).earliestSnapshotId();

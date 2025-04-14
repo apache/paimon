@@ -481,6 +481,11 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsListObjectsPaged() {
+        return false;
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return false;
     }

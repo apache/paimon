@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -136,6 +137,11 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     @Override
     public ChangelogManager changelogManager() {
         return wrapped.changelogManager();
+    }
+
+    @Override
+    public ConsumerManager consumerManager() {
+        return wrapped.consumerManager();
     }
 
     @Override

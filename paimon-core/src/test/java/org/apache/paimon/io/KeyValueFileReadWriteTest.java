@@ -53,7 +53,6 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
@@ -244,22 +243,24 @@ public class KeyValueFileReadWriteTest {
         Options options = new Options();
         options.set(CoreOptions.METADATA_STATS_MODE, "FULL");
 
-        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put(format, pathFactory);
-        pathFactoryMap.put(
-                CoreOptions.FILE_FORMAT.defaultValue().toString(),
-                new FileStorePathFactory(
-                        path,
-                        RowType.of(),
-                        CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
-                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
-                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
-                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
-                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
-                        CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        null,
-                        null));
+        Function<String, FileStorePathFactory> pathFactoryMap =
+                new Function<String, FileStorePathFactory>() {
+                    @Override
+                    public FileStorePathFactory apply(String format) {
+                        return new FileStorePathFactory(
+                                path,
+                                RowType.of(),
+                                CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+                                format,
+                                CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                                CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
+                                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                                null,
+                                null);
+                    }
+                };
 
         return KeyValueFileWriterFactory.builder(
                         fileIO,

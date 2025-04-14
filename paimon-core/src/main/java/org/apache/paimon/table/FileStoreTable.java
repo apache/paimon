@@ -20,20 +20,28 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.operation.LocalOrphanFilesClean;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SegmentsCache;
+import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -120,4 +128,43 @@ public interface FileStoreTable extends DataTable {
      */
     @Override
     FileStoreTable switchToBranch(String branchName);
+
+    /** Purge all files in this table. */
+    default void purgeFiles() throws Exception {
+        // clear branches
+        BranchManager branchManager = branchManager();
+        branchManager.branches().forEach(branchManager::dropBranch);
+
+        // clear tags
+        TagManager tagManager = tagManager();
+        tagManager.allTagNames().forEach(this::deleteTag);
+
+        // clear consumers
+        ConsumerManager consumerManager = this.consumerManager();
+        consumerManager.consumers().keySet().forEach(consumerManager::deleteConsumer);
+
+        // truncate table
+        try (BatchTableCommit commit = this.newBatchWriteBuilder().newCommit()) {
+            commit.truncateTable();
+        }
+
+        // clear changelogs
+        ChangelogManager changelogManager = this.changelogManager();
+        this.fileIO().delete(changelogManager.changelogDirectory(), true);
+
+        // clear snapshots, keep only latest snapshot
+        this.newExpireSnapshots()
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotMaxDeletes(Integer.MAX_VALUE)
+                                .snapshotRetainMax(1)
+                                .snapshotRetainMin(1)
+                                .snapshotTimeRetain(Duration.ZERO)
+                                .build())
+                .expire();
+
+        // clear orphan files
+        LocalOrphanFilesClean clean = new LocalOrphanFilesClean(this, System.currentTimeMillis());
+        clean.clean();
+    }
 }

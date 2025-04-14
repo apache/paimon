@@ -65,20 +65,7 @@ public class KeyValueFileStoreWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.LOOKUP_COMPACT.key(), "radical");
-
-        KeyValueFileStoreWrite write = createWriteWithOptions(options);
-        write.withIOManager(ioManager);
-        TestKeyValueGenerator gen = new TestKeyValueGenerator();
-
-        KeyValue keyValue = gen.next();
-        AbstractFileStoreWrite.WriterContainer<KeyValue> writerContainer =
-                write.createWriterContainer(gen.getPartition(keyValue), 1, false);
-        MergeTreeWriter writer = (MergeTreeWriter) writerContainer.writer;
-        try (MergeTreeCompactManager compactManager =
-                (MergeTreeCompactManager) writer.compactManager()) {
-            CompactStrategy compactStrategy = compactManager.getStrategy();
-            assertThat(compactStrategy).isInstanceOf(ForceUpLevel0Compaction.class);
-        }
+        assertCompactStrategy(options, ForceUpLevel0Compaction.class);
     }
 
     @Test
@@ -86,7 +73,19 @@ public class KeyValueFileStoreWriteTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.LOOKUP_COMPACT.key(), "gentle");
+        assertCompactStrategy(options, UniversalCompaction.class);
+    }
 
+    @Test
+    public void testForceUpLevel0CompactStrategy() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMPACTION_FORCE_UP_LEVEL_0.key(), "true");
+        assertCompactStrategy(options, ForceUpLevel0Compaction.class);
+    }
+
+    private void assertCompactStrategy(
+            Map<String, String> options, Class<? extends CompactStrategy> expected)
+            throws Exception {
         KeyValueFileStoreWrite write = createWriteWithOptions(options);
         write.withIOManager(ioManager);
         TestKeyValueGenerator gen = new TestKeyValueGenerator();
@@ -98,7 +97,7 @@ public class KeyValueFileStoreWriteTest {
         try (MergeTreeCompactManager compactManager =
                 (MergeTreeCompactManager) writer.compactManager()) {
             CompactStrategy compactStrategy = compactManager.getStrategy();
-            assertThat(compactStrategy).isInstanceOf(UniversalCompaction.class);
+            assertThat(compactStrategy).isInstanceOf(expected);
         }
     }
 

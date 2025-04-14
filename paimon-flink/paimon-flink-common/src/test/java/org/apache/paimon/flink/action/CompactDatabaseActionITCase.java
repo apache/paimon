@@ -118,7 +118,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 if (tableName.endsWith("unaware_bucket")) {
                     option.put("bucket", "-1");
                     option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
                     keys = Lists.newArrayList();
                     FileStoreTable table =
                             createTable(dbName, tableName, Arrays.asList("dt", "hh"), keys, option);
@@ -223,7 +222,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 if (tableName.endsWith("unaware_bucket")) {
                     option.put("bucket", "-1");
                     option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
                     keys = Lists.newArrayList();
                 } else {
                     option.put("bucket", "1");
@@ -566,7 +564,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 if (tableName.endsWith("unaware_bucket")) {
                     option.put("bucket", "-1");
                     option.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-                    option.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
                     keys = Lists.newArrayList();
                 } else {
                     option.put("bucket", "1");
@@ -872,7 +869,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         // test that dedicated compact job will expire snapshots
         options.put(CoreOptions.BUCKET.key(), "-1");
         options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        options.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         List<FileStoreTable> tables = new ArrayList<>();
         for (String tableName : TABLE_NAMES) {
@@ -946,7 +942,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         // test that dedicated compact job will expire snapshots
         options.put(CoreOptions.BUCKET.key(), "-1");
         options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        options.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
 
         List<FileStoreTable> tables = new ArrayList<>();
         for (String tableName : TABLE_NAMES) {
@@ -1013,7 +1008,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         } else {
             options.put(CoreOptions.BUCKET.key(), "-1");
             options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-            options.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
             keys = Collections.emptyList();
         }
 

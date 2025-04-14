@@ -125,14 +125,19 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testTravelToNonExistedTimestamp() {
-        Dataset<Row> dataset =
-                spark.read()
-                        .format("paimon")
-                        .option("path", tablePath1.toString())
-                        .option(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), 0)
-                        .load();
-        assertThat(dataset.collectAsList().toString()).isEqualTo("[[1,2,1], [5,6,3]]");
+    public void testTravelToTimestampBeforeTheEarliestSnapshot() {
+        assertThatThrownBy(
+                        () ->
+                                spark.read()
+                                        .format("paimon")
+                                        .option("path", tablePath1.toString())
+                                        .option(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), 0)
+                                        .load()
+                                        .collectAsList())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "There is currently no snapshot earlier than or equal to timestamp [0]"));
     }
 
     @Test

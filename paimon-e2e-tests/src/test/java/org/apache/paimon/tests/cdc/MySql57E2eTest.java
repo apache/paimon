@@ -20,10 +20,13 @@ package org.apache.paimon.tests.cdc;
 
 import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
 
+import org.junit.jupiter.api.condition.EnabledIf;
+
 /**
  * E2e tests for {@link org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction} with MySQL
  * 5.7.
  */
+@EnabledIf("runTest")
 public class MySql57E2eTest extends MySqlCdcE2eTestBase {
 
     public MySql57E2eTest() {

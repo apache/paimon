@@ -55,7 +55,9 @@ public class FileStoreSourceReader
         super(
                 () ->
                         new FileStoreSourceSplitReader(
-                                tableRead, RecordLimiter.create(limit), metrics),
+                                tableRead.withIOManager(ioManager),
+                                RecordLimiter.create(limit),
+                                metrics),
                 (element, output, state) ->
                         FlinkRecordsWithSplitIds.emitRecord(
                                 readerContext, element, output, state, metrics, rowData),

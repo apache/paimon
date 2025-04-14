@@ -137,6 +137,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsListObjectsPaged() {
+        return wrapped.supportsListObjectsPaged();
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return wrapped.supportsVersionManagement();
     }

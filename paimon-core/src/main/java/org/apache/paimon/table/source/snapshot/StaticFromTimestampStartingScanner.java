@@ -43,19 +43,21 @@ public class StaticFromTimestampStartingScanner extends ReadPlanStartingScanner 
         super(snapshotManager);
         this.startupMillis = startupMillis;
         Snapshot snapshot = timeTravelToTimestamp(snapshotManager, startupMillis);
-        if (snapshot != null) {
-            this.startingSnapshotId = snapshot.id();
+        if (snapshot == null) {
+            Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
+            throw new IllegalArgumentException(
+                    String.format(
+                            "There is currently no snapshot earlier than or equal to timestamp [%s], the earliest snapshot's timestamp is [%s]",
+                            startupMillis,
+                            earliestSnapshot == null
+                                    ? "null"
+                                    : String.valueOf(earliestSnapshot.timeMillis())));
         }
+        this.startingSnapshotId = snapshot.id();
     }
 
     @Override
     public SnapshotReader configure(SnapshotReader snapshotReader) {
-        if (startingSnapshotId == null) {
-            LOG.debug(
-                    "There is currently no snapshot earlier than or equal to timestamp[{}]",
-                    startupMillis);
-            return null;
-        }
         return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
     }
 

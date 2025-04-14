@@ -67,7 +67,6 @@ public class UnawareBucketNewFilesCompactionITCase extends AbstractTestBase {
                         + ") PARTITIONED BY (pt) WITH (\n"
                         + "  'write-only' = 'true',\n"
                         + "  'compaction.min.file-num' = '3',\n"
-                        + "  'compaction.max.file-num' = '3',\n"
                         + "  'precommit-compact' = 'true',\n"
                         + "  'sink.parallelism' = '2'\n"
                         + ")");

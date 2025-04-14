@@ -20,7 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.responses.ErrorResponse;
 
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /** Error handler for REST client. */
-public abstract class ErrorHandler implements Consumer<ErrorResponse> {}
+public abstract class ErrorHandler implements BiConsumer<ErrorResponse, String> {}

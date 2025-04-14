@@ -176,19 +176,17 @@ public class SnapshotManagerTest {
         }
 
         if (isRaceCondition) {
-            // The earliest snapshot has expired, so always return the second snapshot
-            assertThat(snapshotManager.earlierOrEqualTimeMills(millis - 1L).timeMillis())
-                    .isEqualTo(millis + 1000L);
-            assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
-                    .isEqualTo(millis + 1000L);
+            // The earliest snapshot has expired, so always return the second snapshot, smaller than
+            // the second snapshot return null
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis - 1L)).isEqualTo(null);
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999)).isEqualTo(null);
             assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1000).timeMillis())
                     .isEqualTo(millis + 1000L);
             assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
                     .isEqualTo(millis + 1000L);
         } else {
-            // there is no snapshot smaller than "millis - 1L" return the earliest snapshot
-            assertThat(snapshotManager.earlierOrEqualTimeMills(millis - 1L).timeMillis())
-                    .isEqualTo(millis);
+            // there is no snapshot smaller than "millis - 1L" return null
+            assertThat(snapshotManager.earlierOrEqualTimeMills(millis - 1L)).isEqualTo(null);
 
             // smaller than the second snapshot return the first snapshot
             assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
