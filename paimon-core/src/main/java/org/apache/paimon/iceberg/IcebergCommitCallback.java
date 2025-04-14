@@ -108,18 +108,7 @@ public class IcebergCommitCallback implements CommitCallback {
 
         IcebergOptions.StorageType storageType =
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
-        switch (storageType) {
-            case TABLE_LOCATION:
-                this.pathFactory = new IcebergPathFactory(new Path(table.location(), "metadata"));
-                break;
-            case HADOOP_CATALOG:
-            case HIVE_CATALOG:
-                this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
-                break;
-            default:
-                throw new UnsupportedOperationException(
-                        "Unknown storage type " + storageType.name());
-        }
+        this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
 
         IcebergMetadataCommitterFactory metadataCommitterFactory;
         try {
@@ -147,13 +136,48 @@ public class IcebergCommitCallback implements CommitCallback {
     public static Path catalogDatabasePath(FileStoreTable table) {
         Path dbPath = table.location().getParent();
         final String dbSuffix = ".db";
-        if (dbPath.getName().endsWith(dbSuffix)) {
-            String dbName =
-                    dbPath.getName().substring(0, dbPath.getName().length() - dbSuffix.length());
-            return new Path(dbPath.getParent(), String.format("iceberg/%s/", dbName));
-        } else {
+
+        IcebergOptions.StorageType storageType =
+                table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+
+        if (!dbPath.getName().endsWith(dbSuffix)) {
             throw new UnsupportedOperationException(
-                    "Storage type ICEBERG_WAREHOUSE can only be used on Paimon tables in a Paimon warehouse.");
+                    String.format(
+                            "Storage type %s can only be used on Paimon tables in a Paimon warehouse.",
+                            storageType.name()));
+        }
+
+        IcebergOptions.StorageLocation storageLocation =
+                table.coreOptions()
+                        .toConfiguration()
+                        .getOptional(IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION)
+                        .orElse(inferDefaultMetadataLocation(storageType));
+
+        switch (storageLocation) {
+            case TABLE_LOCATION:
+                return dbPath;
+            case CATALOG_STORAGE:
+                String dbName =
+                        dbPath.getName()
+                                .substring(0, dbPath.getName().length() - dbSuffix.length());
+                return new Path(dbPath.getParent(), String.format("iceberg/%s/", dbName));
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown storage location " + storageLocation.name());
+        }
+    }
+
+    private static IcebergOptions.StorageLocation inferDefaultMetadataLocation(
+            IcebergOptions.StorageType storageType) {
+        switch (storageType) {
+            case TABLE_LOCATION:
+                return IcebergOptions.StorageLocation.TABLE_LOCATION;
+            case HIVE_CATALOG:
+            case HADOOP_CATALOG:
+                return IcebergOptions.StorageLocation.CATALOG_STORAGE;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown storage type: " + storageType.name());
         }
     }
 
