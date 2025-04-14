@@ -27,6 +27,9 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -361,7 +364,6 @@ public class IncrementalTableTest extends TableTestBase {
 
         TableWriteImpl<?> write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
-        TagManager tagManager = table.tagManager();
 
         write.write(GenericRow.of(1, BinaryString.fromString("a")));
         List<CommitMessage> commitMessages = write.prepareCommit(false, 0);
@@ -390,6 +392,51 @@ public class IncrementalTableTest extends TableTestBase {
                         Collections.emptyMap(),
                         commitMessages));
 
+        assertIncrementalToAutoTag(table);
+    }
+
+    @Test
+    public void testIncrementalToAutoTagWithManualTag() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.STRING())
+                        .primaryKey("a")
+                        .option("bucket", "1")
+                        .option("tag.creation-period", "daily")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("a")));
+            commit.commit(write.prepareCommit());
+            table.createTag("2024-12-01");
+        }
+
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(2, BinaryString.fromString("b")));
+            commit.commit(write.prepareCommit());
+            table.createTag("2024-12-02");
+        }
+
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(3, BinaryString.fromString("c")));
+            commit.commit(write.prepareCommit());
+            table.createTag("2024-12-04");
+        }
+
+        assertIncrementalToAutoTag(table);
+    }
+
+    private void assertIncrementalToAutoTag(FileStoreTable table) throws Exception {
+        TagManager tagManager = table.tagManager();
         assertThat(tagManager.allTagNames()).containsOnly("2024-12-01", "2024-12-02", "2024-12-04");
 
         assertThat(read(table, Pair.of(INCREMENTAL_TO_AUTO_TAG, "2024-12-01"))).isEmpty();
