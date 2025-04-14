@@ -1147,7 +1147,8 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. "
-                                    + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. ");
+                                    + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. "
+                                    + "This option requires 'tag.creation-period' and 'tag.period-formatter' configured.");
 
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
