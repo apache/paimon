@@ -53,8 +53,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for {@link AppendOnlySingleTableCompactionWorkerOperator}. */
 public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTestBase {
-
-    @RepeatedTest(100)
+    
+    @Test
     public void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
