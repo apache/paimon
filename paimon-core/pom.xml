@@ -210,12 +210,6 @@ under the License.
             <artifactId>iceberg-data</artifactId>
             <version>${iceberg.version}</version>
             <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <artifactId>parquet-hadoop</artifactId>
-                    <groupId>org.apache.parquet</groupId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
@@ -237,12 +231,6 @@ under the License.
             <artifactId>iceberg-parquet</artifactId>
             <version>${iceberg.version}</version>
             <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <artifactId>parquet-hadoop</artifactId>
-                    <groupId>org.apache.parquet</groupId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
