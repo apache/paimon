@@ -45,6 +45,8 @@ import java.util.function.Function;
 import static okhttp3.ConnectionSpec.CLEARTEXT;
 import static okhttp3.ConnectionSpec.COMPATIBLE_TLS;
 import static okhttp3.ConnectionSpec.MODERN_TLS;
+import static org.apache.paimon.rest.LoggingInterceptor.DEFAULT_REQUEST_ID;
+import static org.apache.paimon.rest.LoggingInterceptor.REQUEST_ID_KEY;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** HTTP client for REST catalog. */
@@ -199,7 +201,8 @@ public class HttpClient implements RESTClient {
                                             : "response body is null",
                                     response.code());
                 }
-                errorHandler.accept(error);
+                String requestId = response.header(REQUEST_ID_KEY, DEFAULT_REQUEST_ID);
+                errorHandler.accept(error, requestId);
             }
             if (responseType != null && responseBodyStr != null) {
                 return OBJECT_MAPPER.readValue(responseBodyStr, responseType);

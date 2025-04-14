@@ -18,9 +18,6 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -31,26 +28,18 @@ import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-
-import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** A procedure to purge files for a table. */
 public class PurgeFilesProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
-            new ProcedureParameter[] {
-                ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("dry_run", BooleanType)
-            };
+            new ProcedureParameter[] {ProcedureParameter.required("table", StringType)};
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("purged_file_path", StringType, true, Metadata.empty())
+                        new StructField("result", StringType, true, Metadata.empty())
                     });
 
     private PurgeFilesProcedure(TableCatalog tableCatalog) {
@@ -70,44 +59,16 @@ public class PurgeFilesProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        boolean dryRun = !args.isNullAt(1) && args.getBoolean(1);
-
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    FileStoreTable fileStoreTable = (FileStoreTable) table;
-                    FileIO fileIO = fileStoreTable.fileIO();
-                    Path tablePath = fileStoreTable.snapshotManager().tablePath();
-                    ArrayList<String> deleteDir;
                     try {
-                        FileStatus[] fileStatuses = fileIO.listStatus(tablePath);
-                        deleteDir = new ArrayList<>(fileStatuses.length);
-                        Arrays.stream(fileStatuses)
-                                .filter(f -> !f.getPath().getName().contains("schema"))
-                                .forEach(
-                                        fileStatus -> {
-                                            try {
-                                                deleteDir.add(fileStatus.getPath().getName());
-                                                if (!dryRun) {
-                                                    fileIO.delete(fileStatus.getPath(), true);
-                                                }
-                                            } catch (IOException e) {
-                                                throw new RuntimeException(e);
-                                            }
-                                        });
-                        spark().catalog().refreshTable(table.fullName());
-                    } catch (IOException e) {
+                        ((FileStoreTable) table).purgeFiles();
+                    } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
 
-                    return deleteDir.isEmpty()
-                            ? new InternalRow[] {
-                                newInternalRow(
-                                        UTF8String.fromString("There are no dir to be deleted."))
-                            }
-                            : deleteDir.stream()
-                                    .map(x -> newInternalRow(UTF8String.fromString(x)))
-                                    .toArray(InternalRow[]::new);
+                    return new InternalRow[] {newInternalRow(UTF8String.fromString("Success"))};
                 });
     }
 

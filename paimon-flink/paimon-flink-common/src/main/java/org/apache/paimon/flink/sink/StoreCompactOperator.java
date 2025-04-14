@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.io.DataFileMeta;
@@ -63,7 +64,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private transient DataFileMetaSerializer dataFileMetaSerializer;
     private transient Set<Pair<BinaryRow, Integer>> waitToCompact;
 
-    private StoreCompactOperator(
+    public StoreCompactOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
@@ -166,6 +167,11 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     public void close() throws Exception {
         super.close();
         write.close();
+    }
+
+    @VisibleForTesting
+    public Set<Pair<BinaryRow, Integer>> compactionWaitingSet() {
+        return waitToCompact;
     }
 
     /** {@link StreamOperatorFactory} of {@link StoreCompactOperator}. */

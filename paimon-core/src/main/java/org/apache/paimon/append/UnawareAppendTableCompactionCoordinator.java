@@ -78,8 +78,8 @@ public class UnawareAppendTableCompactionCoordinator {
     private final SnapshotManager snapshotManager;
     private final long targetFileSize;
     private final long compactionFileSize;
+    private final long openFileCost;
     private final int minFileNum;
-    private final int maxFileNum;
     private final DvMaintainerCache dvMaintainerCache;
     private final FilesIterator filesIterator;
 
@@ -101,9 +101,8 @@ public class UnawareAppendTableCompactionCoordinator {
         CoreOptions options = table.coreOptions();
         this.targetFileSize = options.targetFileSize(false);
         this.compactionFileSize = options.compactionFileSize(false);
+        this.openFileCost = options.splitOpenFileCost();
         this.minFileNum = options.compactionMinFileNum();
-        // this is global compaction, avoid too many compaction tasks
-        this.maxFileNum = options.compactionMaxFileNum().orElse(50);
         this.dvMaintainerCache =
                 options.deletionVectorsEnabled()
                         ? new DvMaintainerCache(table.store().newIndexFileHandler())
@@ -275,11 +274,15 @@ public class UnawareAppendTableCompactionCoordinator {
             FileBin fileBin = new FileBin();
             for (DataFileMeta fileMeta : files) {
                 fileBin.addFile(fileMeta);
-                if (fileBin.binReady()) {
+                if (fileBin.binFull()) {
                     result.add(new ArrayList<>(fileBin.bin));
                     // remove it from coordinator memory, won't join in compaction again
                     fileBin.reset();
                 }
+            }
+            if (fileBin.fileNum >= minFileNum) {
+                result.add(new ArrayList<>(fileBin.bin));
+                fileBin.reset();
             }
             return result;
         }
@@ -321,14 +324,13 @@ public class UnawareAppendTableCompactionCoordinator {
             }
 
             public void addFile(DataFileMeta file) {
-                totalFileSize += file.fileSize();
+                totalFileSize += file.fileSize() + openFileCost;
                 fileNum++;
                 bin.add(file);
             }
 
-            public boolean binReady() {
-                return (totalFileSize >= targetFileSize && fileNum >= minFileNum)
-                        || fileNum >= maxFileNum;
+            public boolean binFull() {
+                return totalFileSize >= targetFileSize * 50 && fileNum >= minFileNum;
             }
         }
     }

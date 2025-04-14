@@ -18,6 +18,7 @@
 
 package org.apache.paimon.migrate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryWriter;
@@ -103,15 +104,13 @@ public class FileMetaUtils {
             Map<Path, Path> rollback) {
 
         try {
+            CoreOptions options = ((FileStoreTable) table).coreOptions();
             SimpleColStatsCollector.Factory[] factories =
                     StatsCollectorFactories.createStatsFactories(
-                            ((FileStoreTable) table).coreOptions(),
-                            table.rowType().getFieldNames());
+                            options.statsMode(), options, table.rowType().getFieldNames());
 
             SimpleStatsExtractor simpleStatsExtractor =
-                    FileFormat.fromIdentifier(
-                                    format,
-                                    ((FileStoreTable) table).coreOptions().toConfiguration())
+                    FileFormat.fromIdentifier(format, options.toConfiguration())
                             .createStatsExtractor(table.rowType(), factories)
                             .orElseThrow(
                                     () ->
@@ -143,15 +142,13 @@ public class FileMetaUtils {
         try {
             RowType rowTypeWithSchemaId =
                     ((FileStoreTable) table).schemaManager().schema(schemaId).logicalRowType();
+            CoreOptions options = ((FileStoreTable) table).coreOptions();
             SimpleColStatsCollector.Factory[] factories =
                     StatsCollectorFactories.createStatsFactories(
-                            ((FileStoreTable) table).coreOptions(),
-                            rowTypeWithSchemaId.getFieldNames());
+                            options.statsMode(), options, rowTypeWithSchemaId.getFieldNames());
 
             SimpleStatsExtractor simpleStatsExtractor =
-                    FileFormat.fromIdentifier(
-                                    format,
-                                    ((FileStoreTable) table).coreOptions().toConfiguration())
+                    FileFormat.fromIdentifier(format, options.toConfiguration())
                             .createStatsExtractor(rowTypeWithSchemaId, factories)
                             .orElseThrow(
                                     () ->

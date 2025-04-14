@@ -24,9 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
@@ -34,7 +32,6 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,31 +77,19 @@ public abstract class KeyValueDataFileWriter
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
-            FormatWriterFactory factory,
+            FileWriterContext context,
             Path path,
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
             RowType writeRowType,
-            @Nullable SimpleStatsExtractor simpleStatsExtractor,
             long schemaId,
             int level,
-            String compression,
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
             boolean isExternalPath) {
-        super(
-                fileIO,
-                factory,
-                path,
-                converter,
-                writeRowType,
-                simpleStatsExtractor,
-                compression,
-                StatsCollectorFactories.createStatsFactories(
-                        options, writeRowType.getFieldNames(), keyType.getFieldNames()),
-                options.asyncFileWrite());
+        super(fileIO, context, path, converter, writeRowType, options.asyncFileWrite());
 
         this.keyType = keyType;
         this.valueType = valueType;

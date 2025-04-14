@@ -34,6 +34,7 @@ import org.junit.Test;
 
 import java.io.IOException;
 
+import static org.apache.paimon.rest.LoggingInterceptor.DEFAULT_REQUEST_ID;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link DefaultErrorHandler}. */
@@ -49,34 +50,37 @@ public class DefaultErrorHandlerTest {
     public void testHandleErrorResponse() {
         assertThrows(
                 BadRequestException.class,
-                () -> defaultErrorHandler.accept(generateErrorResponse(400)));
+                () -> defaultErrorHandler.accept(generateErrorResponse(400), DEFAULT_REQUEST_ID));
         assertThrows(
                 NotAuthorizedException.class,
-                () -> defaultErrorHandler.accept(generateErrorResponse(401)));
+                () -> defaultErrorHandler.accept(generateErrorResponse(401), DEFAULT_REQUEST_ID));
         assertThrows(
                 ForbiddenException.class,
-                () -> defaultErrorHandler.accept(generateErrorResponse(403)));
+                () -> defaultErrorHandler.accept(generateErrorResponse(403), DEFAULT_REQUEST_ID));
         assertThrows(
                 NoSuchResourceException.class,
-                () -> defaultErrorHandler.accept(generateErrorResponse(404)));
+                () -> defaultErrorHandler.accept(generateErrorResponse(404), DEFAULT_REQUEST_ID));
         assertThrows(
-                RESTException.class, () -> defaultErrorHandler.accept(generateErrorResponse(405)));
+                RESTException.class,
+                () -> defaultErrorHandler.accept(generateErrorResponse(405), DEFAULT_REQUEST_ID));
         assertThrows(
-                RESTException.class, () -> defaultErrorHandler.accept(generateErrorResponse(406)));
+                RESTException.class,
+                () -> defaultErrorHandler.accept(generateErrorResponse(406), DEFAULT_REQUEST_ID));
         assertThrows(
                 AlreadyExistsException.class,
-                () -> defaultErrorHandler.accept(generateErrorResponse(409)));
+                () -> defaultErrorHandler.accept(generateErrorResponse(409), DEFAULT_REQUEST_ID));
         assertThrows(
                 ServiceFailureException.class,
-                () -> defaultErrorHandler.accept(generateErrorResponse(500)));
+                () -> defaultErrorHandler.accept(generateErrorResponse(500), DEFAULT_REQUEST_ID));
         assertThrows(
                 NotImplementedException.class,
-                () -> defaultErrorHandler.accept(generateErrorResponse(501)));
+                () -> defaultErrorHandler.accept(generateErrorResponse(501), DEFAULT_REQUEST_ID));
         assertThrows(
-                RESTException.class, () -> defaultErrorHandler.accept(generateErrorResponse(502)));
+                RESTException.class,
+                () -> defaultErrorHandler.accept(generateErrorResponse(502), DEFAULT_REQUEST_ID));
         assertThrows(
                 ServiceUnavailableException.class,
-                () -> defaultErrorHandler.accept(generateErrorResponse(503)));
+                () -> defaultErrorHandler.accept(generateErrorResponse(503), DEFAULT_REQUEST_ID));
     }
 
     private ErrorResponse generateErrorResponse(int code) {

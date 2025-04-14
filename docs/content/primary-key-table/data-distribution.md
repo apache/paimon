@@ -93,8 +93,6 @@ Postpone bucket mode is configured by `'bucket' = '-2'`.
 This mode aims to solve the difficulty to determine a fixed number of buckets
 and support different buckets for different partitions.
 
-Currently, only Flink supports this mode.
-
 When writing records into the table,
 all records will first be stored in the `bucket-postpone` directory of each partition
 and are not available to readers.

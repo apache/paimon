@@ -24,11 +24,13 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 
 import java.sql.Connection;
 import java.sql.Statement;
 
 /** E2e test for MySql CDC type convert tinyint(1) to tinyint. */
+@EnabledIf("runTest")
 public class MySqlTinyIntConvertE2ETest extends MySqlCdcE2eTestBase {
 
     protected MySqlTinyIntConvertE2ETest() {

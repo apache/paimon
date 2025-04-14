@@ -171,11 +171,12 @@ public class FlinkCatalogTest {
         // TODO support change schema, modify it to createAnotherSchema
         ResolvedSchema resolvedSchema = this.createSchema();
         CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
-                        "test comment",
-                        Collections.emptyList(),
-                        options);
+                CatalogTable.newBuilder()
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .comment("test comment")
+                        .partitionKeys(Collections.emptyList())
+                        .options(options)
+                        .build();
         return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 
@@ -183,33 +184,36 @@ public class FlinkCatalogTest {
         // TODO support change schema, modify it to createAnotherSchema
         ResolvedSchema resolvedSchema = this.createSchema();
         CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
-                        "test comment",
-                        this.createPartitionKeys(),
-                        options);
+                CatalogTable.newBuilder()
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .comment("test comment")
+                        .partitionKeys(this.createPartitionKeys())
+                        .options(options)
+                        .build();
         return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 
     private CatalogTable createTable(Map<String, String> options) {
         ResolvedSchema resolvedSchema = this.createSchema();
         CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
-                        "test comment",
-                        Collections.emptyList(),
-                        options);
+                CatalogTable.newBuilder()
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .comment("test comment")
+                        .partitionKeys(Collections.emptyList())
+                        .options(options)
+                        .build();
         return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 
     private CatalogTable createPartitionedTable(Map<String, String> options) {
         ResolvedSchema resolvedSchema = this.createSchema();
         CatalogTable origin =
-                CatalogTable.of(
-                        Schema.newBuilder().fromResolvedSchema(resolvedSchema).build(),
-                        "test comment",
-                        this.createPartitionKeys(),
-                        options);
+                CatalogTable.newBuilder()
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .comment("test comment")
+                        .partitionKeys(this.createPartitionKeys())
+                        .options(options)
+                        .build();
         return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 
@@ -694,7 +698,12 @@ public class FlinkCatalogTest {
 
         CatalogTable catalogTable =
                 new ResolvedCatalogTable(
-                        CatalogTable.of(schema, "", Collections.emptyList(), new HashMap<>()),
+                        CatalogTable.newBuilder()
+                                .schema(schema)
+                                .comment("")
+                                .partitionKeys(Collections.emptyList())
+                                .options(new HashMap<>())
+                                .build(),
                         resolvedSchema);
 
         catalog.createDatabase(path1.getDatabaseName(), null, false);
@@ -740,7 +749,12 @@ public class FlinkCatalogTest {
         Map<String, String> options = new HashMap<>();
         CatalogTable catalogTable1 =
                 new ResolvedCatalogTable(
-                        CatalogTable.of(schema, "", Collections.emptyList(), options),
+                        CatalogTable.newBuilder()
+                                .schema(schema)
+                                .comment("")
+                                .partitionKeys(Collections.emptyList())
+                                .options(options)
+                                .build(),
                         resolvedSchema);
         catalog.createTable(path1, catalogTable1, false);
         CatalogBaseTable storedTable1 = catalog.getTable(path1);
@@ -749,7 +763,12 @@ public class FlinkCatalogTest {
         options.put(LOG_SYSTEM.key(), TESTING_LOG_STORE);
         CatalogTable catalogTable2 =
                 new ResolvedCatalogTable(
-                        CatalogTable.of(schema, "", Collections.emptyList(), options),
+                        CatalogTable.newBuilder()
+                                .schema(schema)
+                                .comment("")
+                                .partitionKeys(Collections.emptyList())
+                                .options(options)
+                                .build(),
                         resolvedSchema);
         catalog.createTable(path3, catalogTable2, false);
 

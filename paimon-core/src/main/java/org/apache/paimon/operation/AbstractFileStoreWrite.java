@@ -99,10 +99,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName,
             CoreOptions options,
-            int numBuckets,
-            RowType partitionType,
-            int writerNumberMax,
-            boolean legacyPartitionName) {
+            RowType partitionType) {
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         // Statistic is useless in writer
@@ -113,12 +110,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
         this.indexFactory = indexFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
-        this.numBuckets = numBuckets;
+        this.numBuckets = options.bucket();
         this.partitionType = partitionType;
         this.writers = new HashMap<>();
         this.tableName = tableName;
-        this.writerNumberMax = writerNumberMax;
-        this.legacyPartitionName = legacyPartitionName;
+        this.writerNumberMax = options.writeMaxWritersToSpill();
+        this.legacyPartitionName = options.legacyPartitionName();
     }
 
     @Override

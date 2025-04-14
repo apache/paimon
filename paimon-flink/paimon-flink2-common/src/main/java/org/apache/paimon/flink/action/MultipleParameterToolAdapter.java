@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
+import org.apache.flink.util.MultipleParameterTool;
 
 import java.util.Collection;
 
@@ -27,8 +27,8 @@ public class MultipleParameterToolAdapter {
 
     private final MultipleParameterTool params;
 
-    public MultipleParameterToolAdapter(MultipleParameterTool params) {
-        this.params = params;
+    public MultipleParameterToolAdapter(String[] args) {
+        this.params = MultipleParameterTool.fromArgs(args);
     }
 
     public boolean has(String key) {

@@ -233,7 +233,9 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         writeWithoutBucket(data)
 
       case HASH_FIXED =>
-        if (!paimonExtensionEnabled) {
+        if (table.bucketSpec().getNumBuckets == -2) {
+          writeWithoutBucket(data)
+        } else if (!paimonExtensionEnabled) {
           // Topology: input -> bucket-assigner -> shuffle by partition & bucket
           writeWithBucketProcessor(
             withInitBucketCol,

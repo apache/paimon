@@ -90,7 +90,6 @@ public class AppendOnlyFixedBucketFileStoreWrite extends AppendOnlyFileStoreWrit
                     restoredFiles,
                     dvMaintainer,
                     options.compactionMinFileNum(),
-                    options.compactionMaxFileNum().orElse(5),
                     options.targetFileSize(false),
                     files -> compactRewrite(partition, bucket, dvFactory, files),
                     compactionMetrics == null

@@ -77,7 +77,10 @@ public class HiveCatalogTest extends CatalogTestBase {
         String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
         String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
-        catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse);
+        Options catalogOptions = new Options();
+        catalogOptions.set(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "false");
+        catalog =
+                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse);
     }
 
     @Test

@@ -211,7 +211,6 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         schemaBuilder.column("f1", DataTypes.BIGINT());
         schemaBuilder.column("f2", DataTypes.STRING());
         schemaBuilder.option(CoreOptions.BUCKET.key(), "-1");
-        schemaBuilder.option(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "5");
         return schemaBuilder.build();
     }
 

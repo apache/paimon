@@ -280,6 +280,12 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder("+I[1, 10, hunter]", "+I[2, 10, hunterX]");
 
         checkSnapshots(snapshotManager, 1, 2);
+
+        sql("alter table T set ('branch'='test')");
+
+        assertThatThrownBy(() -> sql("CALL sys.fast_forward('default.T', 'test')"))
+                .hasMessageContaining(
+                        "Fast-forward from the current branch 'test' is not allowed.");
     }
 
     @Test

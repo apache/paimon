@@ -198,13 +198,11 @@ This section introduce all available spark procedures about paimon.
     <tr>
       <td>purge_files</td>
       <td>
-         To clear table with purge files directly. Argument:
+         To clear table with purge files. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>dry_run (optional): only check what dirs will be deleted, but not really delete them. Default is false.</li>
       </td>
       <td>
           CALL sys.purge_files(table => 'default.T')<br/>
-          CALL sys.purge_files(table => 'default.T', dry_run => true)
       </td>
     </tr>
     <tr>

@@ -119,7 +119,7 @@ under the License.
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-hive_${flink.scala.binary.version}</artifactId>
-            <version>${test.flink.version}</version>
+            <version>${test.flink.connector.hive.version}</version>
             <scope>test</scope>
         </dependency>
 

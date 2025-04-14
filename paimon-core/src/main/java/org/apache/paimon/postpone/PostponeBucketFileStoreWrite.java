@@ -28,6 +28,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
@@ -39,9 +40,12 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.BiFunction;
 import java.util.function.Function;
+
+import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStoreWrite} for {@code bucket = -2} tables. */
 public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValue> {
@@ -52,36 +56,41 @@ public class PostponeBucketFileStoreWrite extends AbstractFileStoreWrite<KeyValu
     public PostponeBucketFileStoreWrite(
             FileIO fileIO,
             TableSchema schema,
+            String commitUser,
             RowType partitionType,
             RowType keyType,
             RowType valueType,
-            Map<String, FileStorePathFactory> format2PathFactory,
+            BiFunction<CoreOptions, String, FileStorePathFactory> formatPathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
             String tableName) {
-        super(
-                snapshotManager,
-                scan,
-                null,
-                null,
-                tableName,
-                options,
-                options.bucket(),
-                partitionType,
-                options.writeMaxWritersToSpill(),
-                options.legacyPartitionName());
+        super(snapshotManager, scan, null, null, tableName, options, partitionType);
 
-        this.options = options;
+        Options newOptions = new Options(options.toMap());
+        // use avro for postpone bucket
+        newOptions.set(CoreOptions.FILE_FORMAT, "avro");
+        newOptions.set(CoreOptions.METADATA_STATS_MODE, "none");
+        // each writer should have its unique prefix, so files from the same writer can be consumed
+        // by the same compaction reader to keep the input order
+        newOptions.set(
+                CoreOptions.DATA_FILE_PREFIX,
+                String.format(
+                        "%s-u-%s-s-%d-w-",
+                        options.dataFilePrefix(),
+                        commitUser,
+                        ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE)));
+        this.options = new CoreOptions(newOptions);
+
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,
                         schema.id(),
                         keyType,
                         valueType,
-                        options.fileFormat(),
-                        format2PathFactory,
-                        options.targetFileSize(true));
+                        this.options.fileFormat(),
+                        createFormatPathFactories(this.options, formatPathFactory),
+                        this.options.targetFileSize(true));
 
         // Ignoring previous files saves scanning time.
         //

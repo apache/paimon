@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.DataTableScan;
@@ -41,6 +42,8 @@ public interface DataTable extends InnerTable {
     SnapshotManager snapshotManager();
 
     ChangelogManager changelogManager();
+
+    ConsumerManager consumerManager();
 
     SchemaManager schemaManager();
 

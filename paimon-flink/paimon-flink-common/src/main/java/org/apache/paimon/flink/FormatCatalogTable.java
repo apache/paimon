@@ -134,6 +134,7 @@ public class FormatCatalogTable implements CatalogTable {
                 null,
                 context.getObjectIdentifier(),
                 context.getCatalogTable(),
+                new HashMap<>(),
                 context.getConfiguration(),
                 context.getClassLoader(),
                 context.isTemporary());
@@ -144,6 +145,7 @@ public class FormatCatalogTable implements CatalogTable {
                 null,
                 context.getObjectIdentifier(),
                 context.getCatalogTable(),
+                new HashMap<>(),
                 context.getConfiguration(),
                 context.getClassLoader(),
                 context.isTemporary());

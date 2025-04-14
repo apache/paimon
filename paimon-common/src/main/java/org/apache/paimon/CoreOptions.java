@@ -226,6 +226,26 @@ public class CoreOptions implements Serializable {
                     .defaultValue("changelog-")
                     .withDescription("Specify the file name prefix of changelog files.");
 
+    public static final ConfigOption<String> CHANGELOG_FILE_FORMAT =
+            key("changelog-file.format")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify the message format of changelog files, currently parquet, avro and orc are supported.");
+
+    public static final ConfigOption<String> CHANGELOG_FILE_COMPRESSION =
+            key("changelog-file.compression")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Changelog file compression.");
+
+    public static final ConfigOption<String> CHANGELOG_FILE_STATS_MODE =
+            key("changelog-file.stats-mode")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Changelog file metadata stats collection. none, counts, truncate(16), full is available.");
+
     public static final ConfigOption<Boolean> FILE_SUFFIX_INCLUDE_COMPRESSION =
             key("file.suffix.include.compression")
                     .booleanType()
@@ -583,6 +603,13 @@ public class CoreOptions implements Serializable {
                             "The size amplification is defined as the amount (in percentage) of additional storage "
                                     + "needed to store a single byte of data in the merge tree for changelog mode table.");
 
+    public static final ConfigOption<Boolean> COMPACTION_FORCE_UP_LEVEL_0 =
+            key("compaction.force-up-level-0")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If set to true, compaction strategy will always include all level 0 files in candidates.");
+
     public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
             key("compaction.size-ratio")
                     .intType()
@@ -605,26 +632,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(5)
                     .withDescription(
-                            "For file set [f_0,...,f_N], the minimum file number which satisfies "
-                                    + "sum(size(f_i)) >= targetFileSize to trigger a compaction for "
-                                    + "append-only table. This value avoids almost-full-file to be compacted, "
-                                    + "which is not cost-effective.");
-
-    public static final ConfigOption<Integer> COMPACTION_MAX_FILE_NUM =
-            key("compaction.max.file-num")
-                    .intType()
-                    .noDefaultValue()
-                    .withFallbackKeys("compaction.early-max.file-num")
-                    .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
-                                                    + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
-                                                    + "avoids pending too much small files.")
-                                    .list(
-                                            text("Default value of Append Table is '50'."),
-                                            text("Default value of Bucketed Append Table is '5'."))
-                                    .build());
+                            "For file set [f_0,...,f_N], the minimum file number to trigger a compaction for "
+                                    + "append-only table.");
 
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
@@ -1176,6 +1185,17 @@ public class CoreOptions implements Serializable {
                                                             + "{field_name}."
                                                             + STATS_MODE_SUFFIX))
                                     .build());
+
+    public static final ConfigOption<Map<String, String>> METADATA_STATS_MODE_PER_LEVEL =
+            key("metadata.stats-mode.per.level")
+                    .mapType()
+                    .defaultValue(new HashMap<>())
+                    .withDescription(
+                            "Define different 'metadata.stats-mode' for different level, you can add the conf like this:"
+                                    + " 'metadata.stats-mode.per.level' = '0:none', if the metadata.stats-mode for level is not provided, "
+                                    + "the default mode which set by `"
+                                    + METADATA_STATS_MODE.key()
+                                    + "` will be used.");
 
     public static final ConfigOption<Boolean> METADATA_STATS_DENSE_STORE =
             key("metadata.stats-dense-store")
@@ -1803,6 +1823,16 @@ public class CoreOptions implements Serializable {
                                 e -> normalizeFileFormat(e.getValue())));
     }
 
+    public String statsMode() {
+        return options.get(METADATA_STATS_MODE);
+    }
+
+    public Map<Integer, String> statsModePerLevel() {
+        Map<String, String> statsPerLevel = options.get(METADATA_STATS_MODE_PER_LEVEL);
+        return statsPerLevel.entrySet().stream()
+                .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
+    }
+
     private static String normalizeFileFormat(String fileFormat) {
         return fileFormat.toLowerCase();
     }
@@ -1818,6 +1848,21 @@ public class CoreOptions implements Serializable {
 
     public String changelogFilePrefix() {
         return options.get(CHANGELOG_FILE_PREFIX);
+    }
+
+    @Nullable
+    public String changelogFileFormat() {
+        return options.get(CHANGELOG_FILE_FORMAT);
+    }
+
+    @Nullable
+    public String changelogFileCompression() {
+        return options.get(CHANGELOG_FILE_COMPRESSION);
+    }
+
+    @Nullable
+    public String changelogFileStatsMode() {
+        return options.get(CHANGELOG_FILE_STATS_MODE);
     }
 
     public boolean fileSuffixIncludeCompression() {
@@ -2136,16 +2181,16 @@ public class CoreOptions implements Serializable {
         return options.get(COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT);
     }
 
+    public boolean compactionForceUpLevel0() {
+        return options.get(COMPACTION_FORCE_UP_LEVEL_0);
+    }
+
     public int sortedRunSizeRatio() {
         return options.get(COMPACTION_SIZE_RATIO);
     }
 
     public int compactionMinFileNum() {
         return options.get(COMPACTION_MIN_FILE_NUM);
-    }
-
-    public Optional<Integer> compactionMaxFileNum() {
-        return options.getOptional(COMPACTION_MAX_FILE_NUM);
     }
 
     public long dynamicBucketTargetRowNum() {

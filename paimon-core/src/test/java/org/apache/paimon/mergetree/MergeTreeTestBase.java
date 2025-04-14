@@ -86,6 +86,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
@@ -175,8 +176,7 @@ public abstract class MergeTreeTestBase {
         compactReaderFactory =
                 readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
 
-        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put(identifier, pathFactory);
+        Function<String, FileStorePathFactory> pathFactoryMap = k -> pathFactory;
         KeyValueFileWriterFactory.Builder writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         LocalFileIO.create(),

@@ -20,12 +20,9 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
-import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
@@ -56,29 +53,17 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
 
     public RowDataFileWriter(
             FileIO fileIO,
-            FormatWriterFactory factory,
+            FileWriterContext context,
             Path path,
             RowType writeSchema,
-            @Nullable SimpleStatsExtractor simpleStatsExtractor,
             long schemaId,
             LongCounter seqNumCounter,
-            String fileCompression,
-            SimpleColStatsCollector.Factory[] statsCollectors,
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
             boolean isExternalPath) {
-        super(
-                fileIO,
-                factory,
-                path,
-                Function.identity(),
-                writeSchema,
-                simpleStatsExtractor,
-                fileCompression,
-                statsCollectors,
-                asyncFileWrite);
+        super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.isExternalPath = isExternalPath;

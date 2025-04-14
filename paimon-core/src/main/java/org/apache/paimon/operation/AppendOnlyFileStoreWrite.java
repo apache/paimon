@@ -96,7 +96,8 @@ public abstract class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.pathFactory = pathFactory;
 
         this.statsCollectors =
-                StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
+                StatsCollectorFactories.createStatsFactories(
+                        options.statsMode(), options, rowType.getFieldNames());
         this.fileIndexOptions = options.indexColumnsOptions();
     }
 

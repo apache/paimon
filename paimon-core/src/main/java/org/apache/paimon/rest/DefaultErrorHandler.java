@@ -29,6 +29,8 @@ import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
+import static org.apache.paimon.rest.LoggingInterceptor.DEFAULT_REQUEST_ID;
+
 /** Default error handler. */
 public class DefaultErrorHandler extends ErrorHandler {
 
@@ -39,9 +41,15 @@ public class DefaultErrorHandler extends ErrorHandler {
     }
 
     @Override
-    public void accept(ErrorResponse error) {
+    public void accept(ErrorResponse error, String requestId) {
         int code = error.getCode();
-        String message = error.getMessage();
+        String message;
+        if (DEFAULT_REQUEST_ID.equals(requestId)) {
+            message = error.getMessage();
+        } else {
+            // if we have a requestId, append it to the message
+            message = String.format("%s requestId:%s", error.getMessage(), requestId);
+        }
         switch (code) {
             case 400:
                 throw new BadRequestException(String.format("%s", message));
