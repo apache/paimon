@@ -61,15 +61,7 @@ public class SpillChannelManager implements Closeable {
         channels.remove(id);
     }
 
-    @Override
-    public synchronized void close() {
-
-        if (this.closed) {
-            return;
-        }
-
-        this.closed = true;
-
+    public synchronized void reset() {
         for (Iterator<FileIOChannel> channels = this.openChannels.iterator();
                 channels.hasNext(); ) {
             final FileIOChannel channel = channels.next();
@@ -91,5 +83,14 @@ public class SpillChannelManager implements Closeable {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    @Override
+    public synchronized void close() {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
+        reset();
     }
 }
