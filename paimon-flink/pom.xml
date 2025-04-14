@@ -34,7 +34,6 @@ under the License.
     <packaging>pom</packaging>
 
     <modules>
-        <module>${paimon-flinkx-common}</module>
         <module>paimon-flink-common</module>
         <module>paimon-flink-action</module>
     </modules>
