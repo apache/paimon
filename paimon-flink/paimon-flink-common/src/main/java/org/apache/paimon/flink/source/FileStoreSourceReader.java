@@ -41,6 +41,7 @@ public class FileStoreSourceReader
                 RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
     private final IOManager ioManager;
+    private final FileStoreSourceReaderMetrics metrics;
 
     private long lastConsumeSnapshotId = Long.MIN_VALUE;
 
@@ -64,6 +65,7 @@ public class FileStoreSourceReader
                 readerContext.getConfiguration(),
                 readerContext);
         this.ioManager = ioManager;
+        this.metrics = metrics;
     }
 
     @Override
@@ -72,6 +74,7 @@ public class FileStoreSourceReader
         if (getNumberOfCurrentlyAssignedSplits() == 0) {
             context.sendSplitRequest();
         }
+        metrics.idlingStarted();
     }
 
     @Override

@@ -30,8 +30,10 @@ public class FileStoreSourceReaderMetrics {
 
     public static final long UNDEFINED = -1L;
     public static final long ACTIVE = Long.MAX_VALUE;
+    private transient long idleStartTime = FileStoreSourceReaderMetrics.ACTIVE;
 
     public FileStoreSourceReaderMetrics(MetricGroup sourceReaderMetricGroup) {
+        sourceReaderMetricGroup.gauge(MetricNames.SOURCE_IDLE_TIME, this::getIdleTime);
         sourceReaderMetricGroup.gauge(
                 MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
     }
@@ -40,12 +42,15 @@ public class FileStoreSourceReaderMetrics {
     public void recordSnapshotUpdate(long fileCreationTime) {
         this.latestFileCreationTime = fileCreationTime;
         lastSplitUpdateTime = System.currentTimeMillis();
+        idleStartTime = ACTIVE;
     }
 
     @VisibleForTesting
     long getFetchTimeLag() {
         if (latestFileCreationTime != UNDEFINED) {
-            return lastSplitUpdateTime - latestFileCreationTime;
+            return isIdling()
+                    ? System.currentTimeMillis() - latestFileCreationTime
+                    : lastSplitUpdateTime - latestFileCreationTime;
         }
         return UNDEFINED;
     }
@@ -57,5 +62,20 @@ public class FileStoreSourceReaderMetrics {
     @VisibleForTesting
     long getLastSplitUpdateTime() {
         return lastSplitUpdateTime;
+    }
+
+    @VisibleForTesting
+    public void idlingStarted() {
+        if (!isIdling()) {
+            idleStartTime = System.currentTimeMillis();
+        }
+    }
+
+    private boolean isIdling() {
+        return idleStartTime != FileStoreSourceReaderMetrics.ACTIVE;
+    }
+
+    private long getIdleTime() {
+        return isIdling() ? System.currentTimeMillis() - idleStartTime : 0;
     }
 }

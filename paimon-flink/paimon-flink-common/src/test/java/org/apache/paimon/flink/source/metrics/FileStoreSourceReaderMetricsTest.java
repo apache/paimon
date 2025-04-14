@@ -21,6 +21,9 @@ package org.apache.paimon.flink.source.metrics;
 import org.apache.flink.metrics.testutils.MetricListener;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class FileStoreSourceReaderMetricsTest {
@@ -51,5 +54,26 @@ class FileStoreSourceReaderMetricsTest {
         sourceReaderMetrics.recordSnapshotUpdate(123);
         assertThat(sourceReaderMetrics.getFetchTimeLag())
                 .isNotEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
+    }
+
+    @Test
+    public void testFetchLagWhenIdling() throws InterruptedException {
+        MetricListener metricListener = new MetricListener();
+
+        final FileStoreSourceReaderMetrics sourceReaderMetrics =
+                new FileStoreSourceReaderMetrics(metricListener.getMetricGroup());
+        assertThat(sourceReaderMetrics.getFetchTimeLag())
+                .isEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
+        sourceReaderMetrics.recordSnapshotUpdate(123);
+
+        long fetchTimeLag = sourceReaderMetrics.getFetchTimeLag();
+        assertThat(fetchTimeLag).isGreaterThan(0L);
+
+        TimeUnit.MILLISECONDS.sleep(ThreadLocalRandom.current().nextLong(5000L));
+        assertThat(sourceReaderMetrics.getFetchTimeLag()).isEqualTo(fetchTimeLag);
+
+        sourceReaderMetrics.idlingStarted();
+        TimeUnit.MILLISECONDS.sleep(ThreadLocalRandom.current().nextLong(5000L));
+        assertThat(sourceReaderMetrics.getFetchTimeLag()).isGreaterThan(fetchTimeLag);
     }
 }
