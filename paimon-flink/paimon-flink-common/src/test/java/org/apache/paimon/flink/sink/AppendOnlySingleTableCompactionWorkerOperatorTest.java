@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for {@link AppendOnlySingleTableCompactionWorkerOperator}. */
 public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTestBase {
-    
+
     @Test
     public void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
