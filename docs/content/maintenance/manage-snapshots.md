@@ -224,7 +224,9 @@ Please note that too short retain time or too small retain number may result in:
 By default, paimon will delete expired snapshots synchronously. When there are too 
 many files that need to be deleted, they may not be deleted quickly and back-pressured 
 to the upstream operator. To avoid this situation, users can use asynchronous expiration 
-mode by setting `snapshot.expire.execution-mode` to `async`.
+mode by setting `snapshot.expire.execution-mode` to `async`. However, if your job runs in 
+batch mode, it is not recommended to use asynchronous expiration mode, as the expire task 
+may fail to complete successfully.
 
 ## Rollback to Snapshot
 
