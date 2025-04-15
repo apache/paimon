@@ -57,7 +57,8 @@ case class FixedBucketExpression(_children: Seq[Expression])
   }
 
   private lazy val hashFunction = HashFunction.create(
-    BucketHashType.valueOf(_children(1).asInstanceOf[Literal].value.asInstanceOf[UTF8String].toString),
+    BucketHashType.valueOf(
+      _children(1).asInstanceOf[Literal].value.asInstanceOf[UTF8String].toString),
     bucketKeyRowType)
 
   private lazy val numberBuckets = _children.head.asInstanceOf[Literal].value.asInstanceOf[Int]
