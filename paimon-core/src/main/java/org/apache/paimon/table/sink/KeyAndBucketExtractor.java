@@ -50,6 +50,7 @@ public interface KeyAndBucketExtractor<T> {
     }
 
     static int bucket(int hashcode, int numBuckets) {
+        assert numBuckets > 0;
         return Math.abs(hashcode % numBuckets);
     }
 }
