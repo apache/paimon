@@ -52,7 +52,6 @@ public interface KeyAndBucketExtractor<T> {
     }
 
     static int bucket(int hashcode, int numBuckets) {
-        checkArgument(numBuckets > 0, "Num bucket is illegal: " + numBuckets);
         return Math.abs(hashcode % numBuckets);
     }
 }
