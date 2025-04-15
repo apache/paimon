@@ -160,10 +160,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                         .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0);
         int i = 0;
         for (Future<CommitMessage> f : workerOperator.result()) {
-            try {
-                // Wait for task to be completed
-                f.get(10, TimeUnit.SECONDS);
-            } catch (Exception e) {
+            if (!f.isDone()) {
                 break;
             }
             CommitMessage commitMessage = f.get();
