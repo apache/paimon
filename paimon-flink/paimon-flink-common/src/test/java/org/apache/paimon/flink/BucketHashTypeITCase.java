@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.CoreOptions.HashType;
+import org.apache.paimon.CoreOptions.BucketHashType;
 
 import org.apache.flink.types.Row;
 import org.assertj.core.api.Assertions;
@@ -28,16 +28,16 @@ import org.junit.jupiter.params.provider.EnumSource;
 import java.util.List;
 
 /** Hash type ITCase. */
-public class HashTypeITCase extends CatalogITCaseBase {
+public class BucketHashTypeITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
-    @EnumSource(HashType.class)
-    public void testInsertAndSelect(HashType hashType) throws Exception {
+    @EnumSource(BucketHashType.class)
+    public void testInsertAndSelect(BucketHashType bucketHashType) {
         sql(
                 "CREATE TABLE T (a INT, b STRING, c INT) with "
                         + "('bucket.hash-type' = '%s', 'bucket-key' = 'a', 'bucket' = '4', "
                         + "'metadata.stats-mode' = 'none')",
-                hashType);
+                bucketHashType);
         // disable filter by manifest and let bucket filter work
         for (int i = 0; i < 10; i++) {
             sql("INSERT INTO T (a, b, c) VALUES (%s, '%s', %s)", i, i, i);

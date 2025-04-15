@@ -18,7 +18,7 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions.HashType;
+import org.apache.paimon.CoreOptions.BucketHashType;
 import org.apache.paimon.operation.BucketSelectConverter.Selector;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -152,6 +152,6 @@ public class BucketSelectConverterTest {
     }
 
     private Optional<Selector> newSelector(Predicate predicate) {
-        return (Optional) BucketSelectConverter.create(predicate, rowType, HashType.PAIMON);
+        return (Optional) BucketSelectConverter.create(predicate, rowType, BucketHashType.PAIMON);
     }
 }

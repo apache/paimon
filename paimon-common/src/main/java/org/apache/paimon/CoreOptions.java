@@ -128,14 +128,14 @@ public class CoreOptions implements Serializable {
                                     .build());
 
     @Immutable
-    public static final ConfigOption<HashType> BUCKET_HASH_TYPE =
+    public static final ConfigOption<BucketHashType> BUCKET_HASH_TYPE =
             key("bucket.hash-type")
-                    .enumType(HashType.class)
-                    .defaultValue(HashType.PAIMON)
+                    .enumType(BucketHashType.class)
+                    .defaultValue(BucketHashType.PAIMON)
                     .withDescription("The hash mode for paimon bucket");
 
     /** Paimon bucket hash type. */
-    public enum HashType {
+    public enum BucketHashType {
         PAIMON,
     }
 
@@ -1733,7 +1733,7 @@ public class CoreOptions implements Serializable {
         return options.get(BUCKET);
     }
 
-    public HashType bucketHashType() {
+    public BucketHashType bucketHashType() {
         return options.get(BUCKET_HASH_TYPE);
     }
 

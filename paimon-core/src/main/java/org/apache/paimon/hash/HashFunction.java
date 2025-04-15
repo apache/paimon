@@ -28,16 +28,16 @@ public interface HashFunction {
     int hash(BinaryRow row);
 
     static HashFunction create(CoreOptions options, RowType bucketKeyType) {
-        CoreOptions.HashType type = options.bucketHashType();
+        CoreOptions.BucketHashType type = options.bucketHashType();
         return create(type, bucketKeyType);
     }
 
-    static HashFunction create(CoreOptions.HashType hashType, RowType bucketKeyType) {
-        switch (hashType) {
+    static HashFunction create(CoreOptions.BucketHashType bucketHashType, RowType bucketKeyType) {
+        switch (bucketHashType) {
             case PAIMON:
                 return new PaimonHashFunction();
             default:
-                throw new IllegalArgumentException("Unsupported hash type: " + hashType);
+                throw new IllegalArgumentException("Unsupported hash type: " + bucketHashType);
         }
     }
 }

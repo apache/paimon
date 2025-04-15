@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions.HashType
+import org.apache.paimon.CoreOptions.BucketHashType
 import org.apache.paimon.data.serializer.InternalRowSerializer
 import org.apache.paimon.hash.HashFunction
 import org.apache.paimon.spark.SparkInternalRowWrapper
@@ -57,7 +57,7 @@ case class FixedBucketExpression(_children: Seq[Expression])
   }
 
   private lazy val hashFunction = HashFunction.create(
-    HashType.valueOf(_children(1).asInstanceOf[Literal].value.asInstanceOf[UTF8String].toString),
+    BucketHashType.valueOf(_children(1).asInstanceOf[Literal].value.asInstanceOf[UTF8String].toString),
     bucketKeyRowType)
 
   private lazy val numberBuckets = _children.head.asInstanceOf[Literal].value.asInstanceOf[Int]

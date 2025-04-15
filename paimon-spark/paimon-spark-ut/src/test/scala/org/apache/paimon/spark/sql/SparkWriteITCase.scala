@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.CoreOptions.HashType
+import org.apache.paimon.CoreOptions.BucketHashType
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.SparkConf
@@ -261,7 +261,7 @@ class SparkWriteITCase extends PaimonSparkTestBase {
     }
   }
 
-  HashType
+  BucketHashType
     .values()
     .foreach(
       hashType => {

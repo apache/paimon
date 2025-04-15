@@ -18,7 +18,7 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions.HashType;
+import org.apache.paimon.CoreOptions.BucketHashType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
@@ -57,11 +57,11 @@ public interface BucketSelectConverter {
     Optional<BiFilter<Integer, Integer>> convert(Predicate predicate);
 
     static Optional<BiFilter<Integer, Integer>> create(
-            Predicate bucketPredicate, RowType bucketKeyType, HashType hashType) {
+            Predicate bucketPredicate, RowType bucketKeyType, BucketHashType bucketHashType) {
         @SuppressWarnings("unchecked")
         List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
 
-        HashFunction hashFunction = HashFunction.create(hashType, bucketKeyType);
+        HashFunction hashFunction = HashFunction.create(bucketHashType, bucketKeyType);
 
         nextAnd:
         for (Predicate andPredicate : splitAnd(bucketPredicate)) {
