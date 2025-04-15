@@ -57,6 +57,6 @@ jobs:
           test_modules+="org.apache.paimon:paimon-flink-${suffix},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 1C -B clean install -Pflink1,spark3 -pl "${test_modules}" -Duser.timezone=$jvm_timezone
+          mvn -T 1C -B test verify -Pflink1,spark3 -pl "${test_modules}" -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m
