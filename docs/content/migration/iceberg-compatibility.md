@@ -55,6 +55,18 @@ Set the following table options, so that Paimon tables can generate Iceberg comp
         </ul>
       </td>
     </tr>
+    <tr>
+      <td><h5>metadata.iceberg.storage-location</h5></td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>Enum</td>
+      <td>
+        Specifies where to store Iceberg metadata files. If not set, the storage location will default based on the selected metadata.iceberg.storage type.
+        <ul>
+          <li><code>table-location</code>: Store Iceberg metadata in each table's directory. Useful for standalone Iceberg tables or Iceberg Java API access. Can also be used with Hive Catalog.</li>
+          <li><code>catalog-location</code>: Store Iceberg metadata in a separate directory. This is the default behavior when using Hive Catalog or Hadoop Catalog.</li>
+        </ul>
+      </td>
+    </tr>
     </tbody>
 </table>
 
@@ -63,7 +75,9 @@ or `'metadata.iceberg.storage' = 'hive-catalog'`,
 so that all tables can be visited as an Iceberg warehouse.
 For Iceberg Java API users, you might consider setting `'metadata.iceberg.storage' = 'table-location'`,
 so you can visit each table with its table path.
-
+When using `metadata.iceberg.storage = hadoop-catalog` or `hive-catalog`,
+you can optionally configure `metadata.iceberg.storage-location` to control where the metadata is stored. 
+If not set, the default behavior depends on the storage type.
 ## Append Tables
 
 Let's walk through a simple example, where we query Paimon tables with Iceberg connectors in Flink and Spark.

@@ -99,6 +99,12 @@ under the License.
             <td>When set, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw data files.<br /><br />Possible values:<ul><li>"disabled": Disable Iceberg compatibility support.</li><li>"table-location": Store Iceberg metadata in each table's directory.</li><li>"hadoop-catalog": Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li><li>"hive-catalog": Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>metadata.iceberg.storage-location</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td><p>Enum</p></td>
+            <td>To store Iceberg metadata in a separate directory or under table location<br /><br />Possible values:<ul><li>"table-location": Store Iceberg metadata in each table's directory. Useful for standalone Iceberg tables or Java API access. Can also be used with Hive Catalog</li><li>"catalog-location": Store Iceberg metadata in a separate directory. Allows integration with Hive Catalog or Hadoop Catalog.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>metadata.iceberg.table</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
