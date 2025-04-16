@@ -106,6 +106,113 @@ public class CloneAndMigrateActionITCase extends ActionITCaseBase {
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
+    @Test
+    public void testMigrateOnePartitionedTable() throws Exception {
+        String format = randomFormat();
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql(
+                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
+        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE test");
+
+        createAction(
+                        CloneAndMigrateAction.class,
+                        "clone_migrate",
+                        "--database",
+                        "default",
+                        "--table",
+                        "hivetable",
+                        "--catalog_conf",
+                        "metastore=hive",
+                        "--catalog_conf",
+                        "uri=thrift://localhost:" + PORT,
+                        "--catalog_conf",
+                        "warehouse="
+                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                        "--target_database",
+                        "test",
+                        "--target_table",
+                        "test_table",
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse)
+                .run();
+
+        List<Row> r2 =
+                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.test_table").collect());
+
+        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
+    @Test
+    public void testMigrateWholeDatabase() throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE hivedb");
+        tEnv.executeSql(
+                "CREATE TABLE hivedb.hivetable1 (id string, id2 int, id3 int) STORED AS "
+                        + randomFormat());
+        tEnv.executeSql("INSERT INTO hivedb.hivetable1 VALUES" + data(100)).await();
+        tEnv.executeSql(
+                "CREATE TABLE hivedb.hivetable2 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + randomFormat());
+        tEnv.executeSql("INSERT INTO hivedb.hivetable2 VALUES" + data(100)).await();
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+        List<Row> r1 =
+                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivedb.hivetable1").collect());
+        List<Row> r2 =
+                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivedb.hivetable2").collect());
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE test");
+
+        createAction(
+                        CloneAndMigrateAction.class,
+                        "clone_migrate",
+                        "--database",
+                        "hivedb",
+                        "--catalog_conf",
+                        "metastore=hive",
+                        "--catalog_conf",
+                        "uri=thrift://localhost:" + PORT,
+                        "--catalog_conf",
+                        "warehouse="
+                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                        "--target_database",
+                        "test",
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse)
+                .run();
+
+        List<Row> actualR1 =
+                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.hivetable1").collect());
+        List<Row> actualR2 =
+                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.hivetable2").collect());
+
+        Assertions.assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
+        Assertions.assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
     private static String data(int i) {
         Random random = new Random();
         StringBuilder stringBuilder = new StringBuilder();
