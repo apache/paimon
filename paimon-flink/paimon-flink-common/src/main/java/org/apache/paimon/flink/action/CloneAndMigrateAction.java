@@ -97,7 +97,7 @@ public class CloneAndMigrateAction extends ActionBase {
         DataStream<List<CloneAndMigrateUtils.MigrateFilesInfo>> files =
                 partitionedSource
                         .process(
-                                CloneAndMigrateUtils.CreateTargetTableAndListFilesFunction(
+                                CloneAndMigrateUtils.createTargetTableAndListFilesFunction(
                                         sourceCatalogConfig, targetCatalogConfig))
                         .name("List Files")
                         .setParallelism(parallelism);

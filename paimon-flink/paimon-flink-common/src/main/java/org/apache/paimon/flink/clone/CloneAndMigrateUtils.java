@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.action.CloneAndMigrateAction;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -73,6 +74,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
+/** Utils for build {@link CloneAndMigrateAction}. */
 public class CloneAndMigrateUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(CloneAndMigrateUtils.class);
@@ -138,7 +140,7 @@ public class CloneAndMigrateUtils {
     }
 
     public static ProcessFunction<Tuple2<Identifier, Identifier>, List<MigrateFilesInfo>>
-            CreateTargetTableAndListFilesFunction(
+            createTargetTableAndListFilesFunction(
                     Map<String, String> sourceCatalogConfig,
                     Map<String, String> targetCatalogConfig) {
         return new ProcessFunction<Tuple2<Identifier, Identifier>, List<MigrateFilesInfo>>() {
@@ -189,6 +191,7 @@ public class CloneAndMigrateUtils {
                                         MigrateFilesInfo.fromHive(tuple.f1, partitionFiles, 0));
                             }
                             collector.collect(migrateFilesInfos);
+                            return;
                         default:
                             throw new UnsupportedOperationException(
                                     "Unsupported source type: " + sourceType);
