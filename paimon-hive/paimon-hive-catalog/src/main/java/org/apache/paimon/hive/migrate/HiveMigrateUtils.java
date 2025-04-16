@@ -34,7 +34,6 @@ import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +57,7 @@ public class HiveMigrateUtils {
     private static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
 
-    public static List<Identifier> listTables(HiveCatalog hiveCatalog) throws TException {
+    public static List<Identifier> listTables(HiveCatalog hiveCatalog) throws Exception {
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         List<Identifier> results = new ArrayList<>();
         for (String database : client.getAllDatabases()) {
@@ -70,7 +69,7 @@ public class HiveMigrateUtils {
     }
 
     public static List<Identifier> listTables(HiveCatalog hiveCatalog, String database)
-            throws TException {
+            throws Exception {
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         List<Identifier> results = new ArrayList<>();
         for (String table : client.getAllTables(database)) {
@@ -80,7 +79,7 @@ public class HiveMigrateUtils {
     }
 
     public static Schema hiveTableToPaimonSchema(HiveCatalog hiveCatalog, Identifier identifier)
-            throws TException {
+            throws Exception {
         String database = identifier.getDatabaseName();
         String table = identifier.getObjectName();
 
