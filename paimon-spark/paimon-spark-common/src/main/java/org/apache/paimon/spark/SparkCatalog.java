@@ -280,7 +280,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
     public org.apache.spark.sql.connector.catalog.Table alterTable(
             Identifier ident, TableChange... changes) throws NoSuchTableException {
         List<SchemaChange> schemaChanges =
-                Arrays.stream(changes).map(this::toSchemaChange).filter(Objects::nonNull).collect(Collectors.toList());
+                Arrays.stream(changes)
+                        .map(this::toSchemaChange)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
         List<SchemaChange> schemaChangesWithDefaultValue =
                 Arrays.stream(changes)
                         .map(this::toSchemaChangeWithDefaultValue)
@@ -373,7 +376,10 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
             TableChange.UpdateColumnPosition update = (TableChange.UpdateColumnPosition) change;
             SchemaChange.Move move = getMove(update.position(), update.fieldNames());
             return SchemaChange.updateColumnPosition(move);
-        } else if (change.getClass().getName().equals("org.apache.spark.sql.connector.catalog.TableChange$UpdateColumnDefaultValue")) {
+        } else if (change.getClass()
+                .getName()
+                .equals(
+                        "org.apache.spark.sql.connector.catalog.TableChange$UpdateColumnDefaultValue")) {
             return null;
         } else {
             throw new UnsupportedOperationException(
