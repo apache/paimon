@@ -60,7 +60,7 @@ public class OptimizedRoaringBitmap64 {
     }
 
     public static OptimizedRoaringBitmap64 fromRoaringBitmap32(RoaringBitmap32 roaringBitmap32) {
-        RoaringBitmap roaringBitmap = roaringBitmap32.get();
+        RoaringBitmap roaringBitmap = roaringBitmap32.clone().get();
         return new OptimizedRoaringBitmap64(new RoaringBitmap[] {roaringBitmap});
     }
 

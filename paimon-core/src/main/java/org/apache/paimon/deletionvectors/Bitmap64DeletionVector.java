@@ -29,6 +29,8 @@ import java.util.zip.CRC32;
 /**
  * A {@link DeletionVector} based on {@link OptimizedRoaringBitmap64}, it only supports files with
  * row count not exceeding {@link OptimizedRoaringBitmap64#MAX_VALUE}.
+ *
+ * <p>Mostly copied from iceberg.
  */
 public class Bitmap64DeletionVector implements DeletionVector {
 

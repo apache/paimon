@@ -49,7 +49,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
     public static final byte VERSION_ID_V1 = 1;
     public static final byte VERSION_ID_V2 = 2;
 
-    private final byte versionID;
+    private final byte writeVersionID;
     private final MemorySize targetSizePerIndexFile;
 
     public DeletionVectorsIndexFile(
@@ -61,10 +61,10 @@ public class DeletionVectorsIndexFile extends IndexFile {
             FileIO fileIO,
             PathFactory pathFactory,
             MemorySize targetSizePerIndexFile,
-            byte versionID) {
+            byte writeVersionID) {
         super(fileIO, pathFactory);
         this.targetSizePerIndexFile = targetSizePerIndexFile;
-        this.versionID = versionID;
+        this.writeVersionID = writeVersionID;
     }
 
     /**
@@ -161,7 +161,10 @@ public class DeletionVectorsIndexFile extends IndexFile {
         try {
             DeletionVectorIndexFileWriter writer =
                     new DeletionVectorIndexFileWriter(
-                            this.fileIO, this.pathFactory, this.targetSizePerIndexFile, versionID);
+                            this.fileIO,
+                            this.pathFactory,
+                            this.targetSizePerIndexFile,
+                            writeVersionID);
             return writer.write(input);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write deletion vectors.", e);
@@ -170,22 +173,24 @@ public class DeletionVectorsIndexFile extends IndexFile {
 
     private void checkVersion(InputStream in) throws IOException {
         int version = in.read();
-        if (version != versionID) {
+        if (version != VERSION_ID_V1 && version != VERSION_ID_V2) {
             throw new RuntimeException(
                     "Version not match, actual version: "
                             + version
-                            + ", expert version: "
-                            + versionID);
+                            + ", expected version: "
+                            + VERSION_ID_V1
+                            + " or "
+                            + VERSION_ID_V2);
         }
     }
 
     private DeletionVector readDeletionVector(DataInputStream inputStream, int size) {
-        if (versionID == VERSION_ID_V1) {
+        if (writeVersionID == VERSION_ID_V1) {
             return readV1DeletionVector(inputStream, size);
-        } else if (versionID == VERSION_ID_V2) {
+        } else if (writeVersionID == VERSION_ID_V2) {
             return readV2DeletionVector(inputStream, size);
         } else {
-            throw new RuntimeException("Unsupported DeletionVector version: " + versionID);
+            throw new RuntimeException("Unsupported DeletionVector version: " + writeVersionID);
         }
     }
 
