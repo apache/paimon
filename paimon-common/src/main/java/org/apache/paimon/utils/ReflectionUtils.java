@@ -86,7 +86,9 @@ public class ReflectionUtils {
     public static boolean existsMethod(Class<?> clz, String methodName) {
         Method[] methods = clz.getMethods();
         for (Method m : methods) {
-            if (m.getName().equals(methodName)) return true;
+            if (m.getName().equals(methodName)) {
+                return true;
+            }
         }
         return false;
     }
