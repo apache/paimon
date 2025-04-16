@@ -19,14 +19,30 @@
 package org.apache.paimon.flink.utils;
 
 import org.apache.flink.api.common.functions.RuntimeContext;
+import org.apache.flink.table.connector.source.LookupTableSource;
+import org.apache.flink.table.functions.FunctionContext;
+
+import javax.annotation.Nullable;
 
 /** Utility methods about Flink runtime context to resolve compatibility issues. */
 public class RuntimeContextUtils {
     public static int getNumberOfParallelSubtasks(RuntimeContext context) {
-        return context.getTaskInfo().getNumberOfParallelSubtasks();
+        return context.getNumberOfParallelSubtasks();
     }
 
     public static int getIndexOfThisSubtask(RuntimeContext context) {
-        return context.getTaskInfo().getIndexOfThisSubtask();
+        return context.getIndexOfThisSubtask();
+    }
+
+    public static @Nullable Integer getNumberOfParallelSubtasks(FunctionContext context) {
+        return null;
+    }
+
+    public static @Nullable Integer getIndexOfThisSubtask(FunctionContext context) {
+        return null;
+    }
+
+    public static boolean preferCustomShuffle(LookupTableSource.LookupContext context) {
+        return false;
     }
 }
