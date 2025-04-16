@@ -81,4 +81,13 @@ public class ReflectionUtils {
         }
         throw new NoSuchFieldException(fieldName);
     }
+
+    @SuppressWarnings("unchecked")
+    public static boolean existsMethod(Class<?> clz, String methodName) {
+        Method[] methods = clz.getMethods();
+        for (Method m : methods) {
+            if (m.getName().equals(methodName)) return true;
+        }
+        return false;
+    }
 }
