@@ -43,7 +43,7 @@ public class CloneAndMigrateActionITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9084;
+    private static final int PORT = 9088;
 
     @BeforeEach
     public void beforeEach() throws IOException {
