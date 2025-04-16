@@ -21,7 +21,6 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.clone.CloneAndMigrateUtils;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
-import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.options.CatalogOptions;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -86,7 +85,7 @@ public class CloneAndMigrateAction extends ActionBase {
                         sourceTableName,
                         targetDatabase,
                         targetTableName,
-                        (HiveCatalog) catalog,
+                        catalog,
                         env);
 
         DataStream<Tuple2<Identifier, Identifier>> partitionedSource =

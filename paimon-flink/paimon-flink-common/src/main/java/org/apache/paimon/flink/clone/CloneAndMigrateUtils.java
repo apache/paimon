@@ -21,6 +21,7 @@ package org.apache.paimon.flink.clone;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
@@ -84,11 +85,11 @@ public class CloneAndMigrateUtils {
             String sourceTableName,
             String targetDatabase,
             String targetTableName,
-            HiveCatalog sourceCatalog,
+            Catalog sourceCatalog,
             StreamExecutionEnvironment env)
             throws Exception {
         List<Tuple2<Identifier, Identifier>> result = new ArrayList<>();
-
+        HiveCatalog hiveCatalog = checkAndGetHiveCatalog(sourceCatalog);
         if (StringUtils.isNullOrWhitespaceOnly(sourceDatabase)) {
             checkArgument(
                     StringUtils.isNullOrWhitespaceOnly(sourceTableName),
@@ -100,7 +101,7 @@ public class CloneAndMigrateUtils {
                     StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
 
-            for (Identifier identifier : HiveMigrateUtils.listTables(sourceCatalog)) {
+            for (Identifier identifier : HiveMigrateUtils.listTables(hiveCatalog)) {
                 result.add(new Tuple2<>(identifier, identifier));
             }
         } else if (StringUtils.isNullOrWhitespaceOnly(sourceTableName)) {
@@ -111,8 +112,7 @@ public class CloneAndMigrateUtils {
                     StringUtils.isNullOrWhitespaceOnly(targetTableName),
                     "targetTableName must be blank when clone all tables in a catalog.");
 
-            for (Identifier identifier :
-                    HiveMigrateUtils.listTables(sourceCatalog, sourceDatabase)) {
+            for (Identifier identifier : HiveMigrateUtils.listTables(hiveCatalog, sourceDatabase)) {
                 result.add(
                         new Tuple2<>(
                                 identifier,
@@ -161,11 +161,12 @@ public class CloneAndMigrateUtils {
                                 FlinkCatalogFactory.createPaimonCatalog(
                                         Options.fromMap(targetCatalogConfig))) {
 
+                    HiveCatalog hiveCatalog = checkAndGetHiveCatalog(sourceCatalog);
+
                     switch (sourceType) {
                         case "hive":
                             Schema schema =
-                                    HiveMigrateUtils.hiveTableToPaimonSchema(
-                                            (HiveCatalog) sourceCatalog, tuple.f0);
+                                    HiveMigrateUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0);
                             Map<String, String> options = schema.options();
                             // only support Hive to unaware-bucket table now
                             options.put(CoreOptions.BUCKET.key(), "-1");
@@ -181,7 +182,7 @@ public class CloneAndMigrateUtils {
                                     (FileStoreTable) targetCatalog.getTable(tuple.f1);
                             List<HivePartitionFiles> allPartitions =
                                     HiveMigrateUtils.listHiveFiles(
-                                            (HiveCatalog) sourceCatalog,
+                                            hiveCatalog,
                                             tuple.f0,
                                             table.schema().logicalPartitionType(),
                                             table.coreOptions().partitionDefaultName());
@@ -414,5 +415,14 @@ public class CloneAndMigrateUtils {
         public String toString() {
             return "shuffle by identifier hash";
         }
+    }
+
+    private static HiveCatalog checkAndGetHiveCatalog(Catalog catalog) {
+        Catalog rootCatalog = DelegateCatalog.rootCatalog(catalog);
+        checkArgument(
+                rootCatalog instanceof HiveCatalog,
+                "Only support HiveCatalog now but found %s.",
+                rootCatalog.getClass().getName());
+        return (HiveCatalog) rootCatalog;
     }
 }
