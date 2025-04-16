@@ -49,6 +49,10 @@ Paimon also supports reading some hidden metadata columns, currently supporting 
 SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
 
+{{< hint info >}}
+Note: only append table or deletion vector table support querying metadata columns.
+{{< /hint >}}
+
 ### Batch Time Travel
 
 Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.
