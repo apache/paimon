@@ -41,7 +41,7 @@ public class ProcedureTest {
         // Can be covered by `DELETE FROM` syntax. No procedure needed.
         expectedExclusions.add("delete");
         // TODO: implement later
-        expectedExclusions.add("clone_migrate");
+        expectedExclusions.add("clone_hive");
         List<String> actionIdentifiers =
                 FactoryUtil.discoverIdentifiers(
                         ActionFactory.class.getClassLoader(), ActionFactory.class);
