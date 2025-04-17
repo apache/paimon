@@ -46,7 +46,7 @@ org.apache.paimon.flink.action.ExpireChangelogsActionFactory
 org.apache.paimon.flink.action.RemoveUnexistingFilesActionFactory
 org.apache.paimon.flink.action.ClearConsumerActionFactory
 org.apache.paimon.flink.action.RescaleActionFactory
-org.apache.paimon.flink.action.CloneAndMigrateActionFactory
+org.apache.paimon.flink.action.CloneHiveActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure

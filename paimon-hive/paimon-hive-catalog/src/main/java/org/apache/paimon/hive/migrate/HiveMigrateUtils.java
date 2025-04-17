@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
-/** Utils for migrate Hive table to Paimon table. */
+/** Utils for migrating Hive table to Paimon table. */
 public class HiveMigrateUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveMigrateUtils.class);
@@ -125,7 +125,7 @@ public class HiveMigrateUtils {
         return schemaBuilder.build();
     }
 
-    public static List<HivePartitionFiles> listHiveFiles(
+    public static List<HivePartitionFiles> listFiles(
             HiveCatalog hiveCatalog,
             Identifier identifier,
             RowType partitionRowType,

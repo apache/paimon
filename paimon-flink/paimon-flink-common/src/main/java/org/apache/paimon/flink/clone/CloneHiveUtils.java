@@ -25,7 +25,7 @@ import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
-import org.apache.paimon.flink.action.CloneAndMigrateAction;
+import org.apache.paimon.flink.action.CloneHiveAction;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -75,10 +75,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Utils for build {@link CloneAndMigrateAction}. */
-public class CloneAndMigrateUtils {
+/** Utils for building {@link CloneHiveAction}. */
+public class CloneHiveUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CloneAndMigrateUtils.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CloneHiveUtils.class);
 
     public static DataStream<Tuple2<Identifier, Identifier>> buildSource(
             String sourceDatabase,
@@ -139,19 +139,18 @@ public class CloneAndMigrateUtils {
         return env.fromCollection(result).forceNonParallel();
     }
 
-    public static ProcessFunction<Tuple2<Identifier, Identifier>, List<MigrateFilesInfo>>
+    public static ProcessFunction<Tuple2<Identifier, Identifier>, List<CloneFilesInfo>>
             createTargetTableAndListFilesFunction(
                     Map<String, String> sourceCatalogConfig,
                     Map<String, String> targetCatalogConfig) {
-        return new ProcessFunction<Tuple2<Identifier, Identifier>, List<MigrateFilesInfo>>() {
+        return new ProcessFunction<Tuple2<Identifier, Identifier>, List<CloneFilesInfo>>() {
             @Override
             public void processElement(
                     Tuple2<Identifier, Identifier> tuple,
-                    ProcessFunction<Tuple2<Identifier, Identifier>, List<MigrateFilesInfo>>.Context
+                    ProcessFunction<Tuple2<Identifier, Identifier>, List<CloneFilesInfo>>.Context
                             context,
-                    Collector<List<MigrateFilesInfo>> collector)
+                    Collector<List<CloneFilesInfo>> collector)
                     throws Exception {
-                // TODO: use metastore temporarily
                 String sourceType = sourceCatalogConfig.get(CatalogOptions.METASTORE.key());
                 checkNotNull(sourceType);
                 try (Catalog sourceCatalog =
@@ -163,53 +162,43 @@ public class CloneAndMigrateUtils {
 
                     HiveCatalog hiveCatalog = checkAndGetHiveCatalog(sourceCatalog);
 
-                    switch (sourceType) {
-                        case "hive":
-                            Schema schema =
-                                    HiveMigrateUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0);
-                            Map<String, String> options = schema.options();
-                            // only support Hive to unaware-bucket table now
-                            options.put(CoreOptions.BUCKET.key(), "-1");
-                            schema =
-                                    new Schema(
-                                            schema.fields(),
-                                            schema.partitionKeys(),
-                                            schema.primaryKeys(),
-                                            options,
-                                            schema.comment());
-                            targetCatalog.createTable(tuple.f1, schema, false);
-                            FileStoreTable table =
-                                    (FileStoreTable) targetCatalog.getTable(tuple.f1);
-                            List<HivePartitionFiles> allPartitions =
-                                    HiveMigrateUtils.listHiveFiles(
-                                            hiveCatalog,
-                                            tuple.f0,
-                                            table.schema().logicalPartitionType(),
-                                            table.coreOptions().partitionDefaultName());
-                            List<MigrateFilesInfo> migrateFilesInfos = new ArrayList<>();
-                            for (HivePartitionFiles partitionFiles : allPartitions) {
-                                migrateFilesInfos.add(
-                                        MigrateFilesInfo.fromHive(tuple.f1, partitionFiles, 0));
-                            }
-                            collector.collect(migrateFilesInfos);
-                            return;
-                        default:
-                            throw new UnsupportedOperationException(
-                                    "Unsupported source type: " + sourceType);
+                    Schema schema = HiveMigrateUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0);
+                    Map<String, String> options = schema.options();
+                    // only support Hive to unaware-bucket table now
+                    options.put(CoreOptions.BUCKET.key(), "-1");
+                    schema =
+                            new Schema(
+                                    schema.fields(),
+                                    schema.partitionKeys(),
+                                    schema.primaryKeys(),
+                                    options,
+                                    schema.comment());
+                    targetCatalog.createTable(tuple.f1, schema, false);
+                    FileStoreTable table = (FileStoreTable) targetCatalog.getTable(tuple.f1);
+                    List<HivePartitionFiles> allPartitions =
+                            HiveMigrateUtils.listFiles(
+                                    hiveCatalog,
+                                    tuple.f0,
+                                    table.schema().logicalPartitionType(),
+                                    table.coreOptions().partitionDefaultName());
+                    List<CloneFilesInfo> cloneFilesInfos = new ArrayList<>();
+                    for (HivePartitionFiles partitionFiles : allPartitions) {
+                        cloneFilesInfos.add(CloneFilesInfo.fromHive(tuple.f1, partitionFiles, 0));
                     }
+                    collector.collect(cloneFilesInfos);
                 }
             }
         };
     }
 
-    public static ProcessFunction<List<MigrateFilesInfo>, Void> copyAndCommitFunction(
+    public static ProcessFunction<List<CloneFilesInfo>, Void> copyAndCommitFunction(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
-        return new ProcessFunction<List<MigrateFilesInfo>, Void>() {
+        return new ProcessFunction<List<CloneFilesInfo>, Void>() {
 
             @Override
             public void processElement(
-                    List<MigrateFilesInfo> migrateFilesInfos,
-                    ProcessFunction<List<MigrateFilesInfo>, Void>.Context context,
+                    List<CloneFilesInfo> cloneFilesInfos,
+                    ProcessFunction<List<CloneFilesInfo>, Void>.Context context,
                     Collector<Void> collector)
                     throws Exception {
                 try (Catalog targetCatalog =
@@ -223,14 +212,14 @@ public class CloneAndMigrateUtils {
                     FileIO sourceFileIO = FileIO.get(new Path(warehouse), sourceContext);
 
                     // group by table
-                    Map<Identifier, List<MigrateFilesInfo>> groupedFiles = new HashMap<>();
-                    for (MigrateFilesInfo files : migrateFilesInfos) {
+                    Map<Identifier, List<CloneFilesInfo>> groupedFiles = new HashMap<>();
+                    for (CloneFilesInfo files : cloneFilesInfos) {
                         groupedFiles
                                 .computeIfAbsent(files.identifier(), k -> new ArrayList<>())
                                 .add(files);
                     }
 
-                    for (Map.Entry<Identifier, List<MigrateFilesInfo>> entry :
+                    for (Map.Entry<Identifier, List<CloneFilesInfo>> entry :
                             groupedFiles.entrySet()) {
                         FileStoreTable targetTable =
                                 (FileStoreTable) targetCatalog.getTable(entry.getKey());
@@ -242,12 +231,10 @@ public class CloneAndMigrateUtils {
     }
 
     private static void commit(
-            List<MigrateFilesInfo> migrateFilesInfos,
-            FileIO sourceFileIO,
-            FileStoreTable targetTable)
+            List<CloneFilesInfo> cloneFilesInfos, FileIO sourceFileIO, FileStoreTable targetTable)
             throws Exception {
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (MigrateFilesInfo onePartitionFiles : migrateFilesInfos) {
+        for (CloneFilesInfo onePartitionFiles : cloneFilesInfos) {
             commitMessages.add(
                     copyFileAndGetCommitMessage(onePartitionFiles, sourceFileIO, targetTable));
         }
@@ -257,7 +244,7 @@ public class CloneAndMigrateUtils {
     }
 
     private static CommitMessage copyFileAndGetCommitMessage(
-            MigrateFilesInfo migrateFilesInfo, FileIO sourceFileIO, FileStoreTable targetTable)
+            CloneFilesInfo cloneFilesInfo, FileIO sourceFileIO, FileStoreTable targetTable)
             throws IOException {
         // util for collecting stats
         CoreOptions options = targetTable.coreOptions();
@@ -266,20 +253,20 @@ public class CloneAndMigrateUtils {
                         options.statsMode(), options, targetTable.rowType().getFieldNames());
 
         SimpleStatsExtractor simpleStatsExtractor =
-                FileFormat.fromIdentifier(migrateFilesInfo.format(), options.toConfiguration())
+                FileFormat.fromIdentifier(cloneFilesInfo.format(), options.toConfiguration())
                         .createStatsExtractor(targetTable.rowType(), factories)
                         .orElseThrow(
                                 () ->
                                         new RuntimeException(
                                                 "Can't get table stats extractor for format "
-                                                        + migrateFilesInfo.format()));
+                                                        + cloneFilesInfo.format()));
         RowType rowTypeWithSchemaId =
                 targetTable.schemaManager().schema(targetTable.schema().id()).logicalRowType();
 
         SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(rowTypeWithSchemaId);
 
-        List<Path> paths = migrateFilesInfo.paths();
-        List<Long> fileSizes = migrateFilesInfo.fileSizes();
+        List<Path> paths = cloneFilesInfo.paths();
+        List<Long> fileSizes = cloneFilesInfo.fileSizes();
         List<DataFileMeta> dataFileMetas = new ArrayList<>();
         for (int i = 0; i < paths.size(); i++) {
             Path path = paths.get(i);
@@ -291,7 +278,7 @@ public class CloneAndMigrateUtils {
             SimpleStats stats = statsArraySerializer.toBinaryAllMode(fileInfo.getLeft());
 
             // new file name
-            String suffix = "." + migrateFilesInfo.format();
+            String suffix = "." + cloneFilesInfo.format();
             String fileName = path.getName();
             String newFileName = fileName.endsWith(suffix) ? fileName : fileName + suffix;
 
@@ -300,7 +287,7 @@ public class CloneAndMigrateUtils {
                     targetTable
                             .store()
                             .pathFactory()
-                            .bucketPath(migrateFilesInfo.partition(), migrateFilesInfo.bucket());
+                            .bucketPath(cloneFilesInfo.partition(), cloneFilesInfo.bucket());
             IOUtils.copyBytes(
                     sourceFileIO.newInputStream(path),
                     targetTable
@@ -325,11 +312,11 @@ public class CloneAndMigrateUtils {
             dataFileMetas.add(dataFileMeta);
         }
         return FileMetaUtils.commitFile(
-                migrateFilesInfo.partition(), targetTable.coreOptions().bucket(), dataFileMetas);
+                cloneFilesInfo.partition(), targetTable.coreOptions().bucket(), dataFileMetas);
     }
 
     /** Files grouped by (table, partition, bucket) with necessary information. */
-    public static class MigrateFilesInfo implements Serializable {
+    public static class CloneFilesInfo implements Serializable {
 
         private static final long serialVersionUID = 1L;
 
@@ -340,7 +327,7 @@ public class CloneAndMigrateUtils {
         private final List<Long> fileSizes;
         private final String format;
 
-        public MigrateFilesInfo(
+        public CloneFilesInfo(
                 Identifier identifier,
                 BinaryRow partition,
                 int bucket,
@@ -379,15 +366,15 @@ public class CloneAndMigrateUtils {
             return format;
         }
 
-        public static MigrateFilesInfo fromHive(
-                Identifier identifier, HivePartitionFiles hivePartitionedFiles, int bucket) {
-            return new MigrateFilesInfo(
+        public static CloneFilesInfo fromHive(
+                Identifier identifier, HivePartitionFiles hivePartitionFiles, int bucket) {
+            return new CloneFilesInfo(
                     identifier,
-                    hivePartitionedFiles.partition(),
+                    hivePartitionFiles.partition(),
                     bucket,
-                    hivePartitionedFiles.paths(),
-                    hivePartitionedFiles.fileSizes(),
-                    hivePartitionedFiles.format());
+                    hivePartitionFiles.paths(),
+                    hivePartitionFiles.fileSizes(),
+                    hivePartitionFiles.format());
         }
     }
 

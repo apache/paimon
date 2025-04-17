@@ -22,10 +22,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link CloneAndMigrateAction}. */
-public class CloneAndMigrateActionFactory implements ActionFactory {
+/** Factory to create {@link CloneHiveAction}. */
+public class CloneHiveActionFactory implements ActionFactory {
 
-    private static final String IDENTIFIER = "clone_migrate";
+    private static final String IDENTIFIER = "clone_hive";
     private static final String PARALLELISM = "parallelism";
     private static final String TARGET_WAREHOUSE = "target_warehouse";
     private static final String TARGET_DATABASE = "target_database";
@@ -50,8 +50,8 @@ public class CloneAndMigrateActionFactory implements ActionFactory {
 
         String parallelism = params.get(PARALLELISM);
 
-        CloneAndMigrateAction cloneAndMigrateAction =
-                new CloneAndMigrateAction(
+        CloneHiveAction cloneHiveAction =
+                new CloneHiveAction(
                         params.get(DATABASE),
                         params.get(TABLE),
                         catalogConfig,
@@ -60,13 +60,13 @@ public class CloneAndMigrateActionFactory implements ActionFactory {
                         targetCatalogConfig,
                         parallelism == null ? null : Integer.parseInt(parallelism));
 
-        return Optional.of(cloneAndMigrateAction);
+        return Optional.of(cloneHiveAction);
     }
 
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"clone_migrate\" clones the source files and migrate them to paimon table.");
+                "Action \"clone_hive\" clones the source files and migrate them to paimon table.");
         System.out.println();
     }
 }

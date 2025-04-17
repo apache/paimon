@@ -18,9 +18,13 @@
 
 package org.apache.paimon.hive.procedure;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.action.ActionITCaseBase;
-import org.apache.paimon.flink.action.CloneAndMigrateAction;
+import org.apache.paimon.flink.action.CloneHiveAction;
 import org.apache.paimon.hive.TestHiveMetastore;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -38,8 +42,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
-/** Tests for {@link CloneAndMigrateAction}. */
-public class CloneAndMigrateActionITCase extends ActionITCaseBase {
+/** Tests for {@link CloneHiveAction}. */
+public class CloneHiveActionITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
@@ -79,7 +83,7 @@ public class CloneAndMigrateActionITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE DATABASE test");
 
         createAction(
-                        CloneAndMigrateAction.class,
+                        CloneHiveAction.class,
                         "clone_migrate",
                         "--database",
                         "default",
@@ -130,7 +134,7 @@ public class CloneAndMigrateActionITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE DATABASE test");
 
         createAction(
-                        CloneAndMigrateAction.class,
+                        CloneHiveAction.class,
                         "clone_migrate",
                         "--database",
                         "default",
@@ -150,6 +154,11 @@ public class CloneAndMigrateActionITCase extends ActionITCaseBase {
                         "--target_catalog_conf",
                         "warehouse=" + warehouse)
                 .run();
+
+        FileStoreTable paimonTable =
+                paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
+
+        Assertions.assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
 
         List<Row> r2 =
                 ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.test_table").collect());
@@ -187,7 +196,7 @@ public class CloneAndMigrateActionITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE DATABASE test");
 
         createAction(
-                        CloneAndMigrateAction.class,
+                        CloneHiveAction.class,
                         "clone_migrate",
                         "--database",
                         "hivedb",
@@ -242,5 +251,13 @@ public class CloneAndMigrateActionITCase extends ActionITCaseBase {
         } else {
             return "avro";
         }
+    }
+
+    protected FileStoreTable paimonTable(
+            TableEnvironment tEnv, String catalogName, Identifier table)
+            throws org.apache.paimon.catalog.Catalog.TableNotExistException {
+        FlinkCatalog flinkCatalog = (FlinkCatalog) tEnv.getCatalog(catalogName).get();
+        Catalog catalog = flinkCatalog.catalog();
+        return (FileStoreTable) catalog.getTable(table);
     }
 }

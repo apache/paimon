@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.clone.CloneAndMigrateUtils;
+import org.apache.paimon.flink.clone.CloneHiveUtils;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.options.CatalogOptions;
 
@@ -32,12 +32,8 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Clone External source files and commit metas to construct Paimon table. Currently, supports:
- *
- * <p>Hive table to paimon table.
- */
-public class CloneAndMigrateAction extends ActionBase {
+/** Clone source files managed by HiveMetaStore and commit metas to construct Paimon table. */
+public class CloneHiveAction extends ActionBase {
 
     private final Map<String, String> sourceCatalogConfig;
     private final String sourceDatabase;
@@ -49,7 +45,7 @@ public class CloneAndMigrateAction extends ActionBase {
 
     private final int parallelism;
 
-    public CloneAndMigrateAction(
+    public CloneHiveAction(
             String sourceDatabase,
             String sourceTableName,
             Map<String, String> sourceCatalogConfig,
@@ -58,11 +54,10 @@ public class CloneAndMigrateAction extends ActionBase {
             Map<String, String> targetCatalogConfig,
             @Nullable Integer parallelism) {
         super(sourceCatalogConfig);
-        // TODO: Currently, only hive table is supported, and we check 'metastore'
         String metastore = sourceCatalogConfig.get(CatalogOptions.METASTORE.key());
         if (!"hive".equals(metastore)) {
             throw new UnsupportedOperationException(
-                    "Only support clone hive table now. Maybe forget to set 'metastore' = 'hive'?");
+                    "Only support clone hive table. Maybe you forget to set --catalog_conf metastore=hive ?");
         }
 
         this.sourceDatabase = sourceDatabase;
@@ -80,7 +75,7 @@ public class CloneAndMigrateAction extends ActionBase {
     public void build() throws Exception {
         // list source tables
         DataStream<Tuple2<Identifier, Identifier>> source =
-                CloneAndMigrateUtils.buildSource(
+                CloneHiveUtils.buildSource(
                         sourceDatabase,
                         sourceTableName,
                         targetDatabase,
@@ -90,13 +85,13 @@ public class CloneAndMigrateAction extends ActionBase {
 
         DataStream<Tuple2<Identifier, Identifier>> partitionedSource =
                 FlinkStreamPartitioner.partition(
-                        source, new CloneAndMigrateUtils.TableChannelComputer(), parallelism);
+                        source, new CloneHiveUtils.TableChannelComputer(), parallelism);
 
         // create target table, list files and group by <table, partition>
-        DataStream<List<CloneAndMigrateUtils.MigrateFilesInfo>> files =
+        DataStream<List<CloneHiveUtils.CloneFilesInfo>> files =
                 partitionedSource
                         .process(
-                                CloneAndMigrateUtils.createTargetTableAndListFilesFunction(
+                                CloneHiveUtils.createTargetTableAndListFilesFunction(
                                         sourceCatalogConfig, targetCatalogConfig))
                         .name("List Files")
                         .setParallelism(parallelism);
@@ -105,7 +100,7 @@ public class CloneAndMigrateAction extends ActionBase {
         DataStream<Void> committed =
                 files.forward()
                         .process(
-                                CloneAndMigrateUtils.copyAndCommitFunction(
+                                CloneHiveUtils.copyAndCommitFunction(
                                         sourceCatalogConfig, targetCatalogConfig))
                         .name("Copy and Commit")
                         .setParallelism(parallelism);
@@ -117,6 +112,6 @@ public class CloneAndMigrateAction extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        execute("Clone And Migrate job");
+        execute("Clone Hive job");
     }
 }
