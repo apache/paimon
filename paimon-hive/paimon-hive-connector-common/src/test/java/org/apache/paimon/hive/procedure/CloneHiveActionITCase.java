@@ -186,6 +186,58 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testMigrateOnePartitionedTableAndFilterNoPartition() throws Exception {
+        String format = randomFormat();
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql(
+                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
+        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE test");
+
+        List<String> args =
+                Arrays.asList(
+                        "clone_migrate",
+                        "--database",
+                        "default",
+                        "--table",
+                        "hivetable",
+                        "--catalog_conf",
+                        "metastore=hive",
+                        "--catalog_conf",
+                        "uri=thrift://localhost:" + PORT,
+                        "--catalog_conf",
+                        "warehouse="
+                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                        "--target_database",
+                        "test",
+                        "--target_table",
+                        "test_table",
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse,
+                        "--where",
+                        // the data won't < 0
+                        "id2 < 0");
+
+        createAction(CloneHiveAction.class, args).run();
+
+        // table exists but no data
+        FileStoreTable paimonTable =
+                paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
+        Assertions.assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
+        Assertions.assertThat(paimonTable.snapshotManager().earliestSnapshot()).isNull();
+    }
+
+    @Test
     public void testMigrateWholeDatabase() throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");

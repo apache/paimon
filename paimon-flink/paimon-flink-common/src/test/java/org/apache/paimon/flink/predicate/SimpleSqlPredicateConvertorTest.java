@@ -263,7 +263,7 @@ class SimpleSqlPredicateConvertorTest {
                         () ->
                                 simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
                                         "`a=1", Collections.singletonList("pt")))
-                .satisfies(PaimonAssertions.anyCauseMatches(ArrayIndexOutOfBoundsException.class));
+                .satisfies(PaimonAssertions.anyCauseMatches(IndexOutOfBoundsException.class));
 
         // sql doesn't only filter partition fields
         Assertions.assertThatThrownBy(
