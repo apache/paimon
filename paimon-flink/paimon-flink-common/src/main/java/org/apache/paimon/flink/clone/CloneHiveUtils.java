@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.action.CloneHiveAction;
+import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -39,6 +40,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.stats.SimpleStats;
@@ -60,6 +62,8 @@ import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -142,7 +146,8 @@ public class CloneHiveUtils {
     public static ProcessFunction<Tuple2<Identifier, Identifier>, List<CloneFilesInfo>>
             createTargetTableAndListFilesFunction(
                     Map<String, String> sourceCatalogConfig,
-                    Map<String, String> targetCatalogConfig) {
+                    Map<String, String> targetCatalogConfig,
+                    @Nullable String whereSql) {
         return new ProcessFunction<Tuple2<Identifier, Identifier>, List<CloneFilesInfo>>() {
             @Override
             public void processElement(
@@ -175,12 +180,32 @@ public class CloneHiveUtils {
                                     schema.comment());
                     targetCatalog.createTable(tuple.f1, schema, false);
                     FileStoreTable table = (FileStoreTable) targetCatalog.getTable(tuple.f1);
+
+                    PartitionPredicate predicate = null;
+                    if (whereSql != null) {
+                        SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
+                                new SimpleSqlPredicateConvertor(table.rowType());
+                        try {
+                            predicate =
+                                    simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
+                                            whereSql, table.partitionKeys());
+                        } catch (Exception e) {
+                            throw new RuntimeException(
+                                    "Failed to parse partition filter sql '"
+                                            + whereSql
+                                            + "' for table "
+                                            + tuple.f0,
+                                    e);
+                        }
+                    }
+
                     List<HivePartitionFiles> allPartitions =
                             HiveMigrateUtils.listFiles(
                                     hiveCatalog,
                                     tuple.f0,
                                     table.schema().logicalPartitionType(),
-                                    table.coreOptions().partitionDefaultName());
+                                    table.coreOptions().partitionDefaultName(),
+                                    predicate);
                     List<CloneFilesInfo> cloneFilesInfos = new ArrayList<>();
                     for (HivePartitionFiles partitionFiles : allPartitions) {
                         cloneFilesInfos.add(CloneFilesInfo.fromHive(tuple.f1, partitionFiles, 0));
@@ -315,6 +340,43 @@ public class CloneHiveUtils {
                 cloneFilesInfo.partition(), targetTable.coreOptions().bucket(), dataFileMetas);
     }
 
+    private static HiveCatalog checkAndGetHiveCatalog(Catalog catalog) {
+        Catalog rootCatalog = DelegateCatalog.rootCatalog(catalog);
+        checkArgument(
+                rootCatalog instanceof HiveCatalog,
+                "Only support HiveCatalog now but found %s.",
+                rootCatalog.getClass().getName());
+        return (HiveCatalog) rootCatalog;
+    }
+
+    // ---------------------------------- Classes ----------------------------------
+
+    /** Shuffle tables. */
+    public static class TableChannelComputer
+            implements ChannelComputer<Tuple2<Identifier, Identifier>> {
+
+        private static final long serialVersionUID = 1L;
+
+        private transient int numChannels;
+
+        @Override
+        public void setup(int numChannels) {
+            this.numChannels = numChannels;
+        }
+
+        @Override
+        public int channel(Tuple2<Identifier, Identifier> record) {
+            return Math.floorMod(
+                    Objects.hash(record.f1.getDatabaseName(), record.f1.getTableName()),
+                    numChannels);
+        }
+
+        @Override
+        public String toString() {
+            return "shuffle by identifier hash";
+        }
+    }
+
     /** Files grouped by (table, partition, bucket) with necessary information. */
     public static class CloneFilesInfo implements Serializable {
 
@@ -376,40 +438,5 @@ public class CloneHiveUtils {
                     hivePartitionFiles.fileSizes(),
                     hivePartitionFiles.format());
         }
-    }
-
-    /** Shuffle tables. */
-    public static class TableChannelComputer
-            implements ChannelComputer<Tuple2<Identifier, Identifier>> {
-
-        private static final long serialVersionUID = 1L;
-
-        private transient int numChannels;
-
-        @Override
-        public void setup(int numChannels) {
-            this.numChannels = numChannels;
-        }
-
-        @Override
-        public int channel(Tuple2<Identifier, Identifier> record) {
-            return Math.floorMod(
-                    Objects.hash(record.f1.getDatabaseName(), record.f1.getTableName()),
-                    numChannels);
-        }
-
-        @Override
-        public String toString() {
-            return "shuffle by identifier hash";
-        }
-    }
-
-    private static HiveCatalog checkAndGetHiveCatalog(Catalog catalog) {
-        Catalog rootCatalog = DelegateCatalog.rootCatalog(catalog);
-        checkArgument(
-                rootCatalog instanceof HiveCatalog,
-                "Only support HiveCatalog now but found %s.",
-                rootCatalog.getClass().getName());
-        return (HiveCatalog) rootCatalog;
     }
 }

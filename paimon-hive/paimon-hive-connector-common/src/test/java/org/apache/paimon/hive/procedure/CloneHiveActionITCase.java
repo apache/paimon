@@ -37,7 +37,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
@@ -112,6 +115,15 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
     @Test
     public void testMigrateOnePartitionedTable() throws Exception {
+        testMigrateOnePartitionedTableImpl(null);
+    }
+
+    @Test
+    public void testMigrateOnePartitionedTableWithFilter() throws Exception {
+        testMigrateOnePartitionedTableImpl("id2 = 1 || id3 = 1");
+    }
+
+    public void testMigrateOnePartitionedTableImpl(@Nullable String whereSql) throws Exception {
         String format = randomFormat();
 
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
@@ -126,15 +138,17 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+
+        String query = "SELECT * FROM hivetable " + (whereSql == null ? "" : "WHERE " + whereSql);
+        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql(query).collect());
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql("CREATE DATABASE test");
 
-        createAction(
-                        CloneHiveAction.class,
+        List<String> args =
+                Arrays.asList(
                         "clone_migrate",
                         "--database",
                         "default",
@@ -152,8 +166,13 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                         "--target_table",
                         "test_table",
                         "--target_catalog_conf",
-                        "warehouse=" + warehouse)
-                .run();
+                        "warehouse=" + warehouse);
+        if (whereSql != null) {
+            args.add("--where");
+            args.add(whereSql);
+        }
+
+        createAction(CloneHiveAction.class, args).run();
 
         FileStoreTable paimonTable =
                 paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
@@ -217,6 +236,73 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                 ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.hivetable1").collect());
         List<Row> actualR2 =
                 ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.hivetable2").collect());
+
+        Assertions.assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
+        Assertions.assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
+    @Test
+    public void testMigrateWholeDatabaseWithFilter() throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE hivedb");
+        tEnv.executeSql(
+                "CREATE TABLE hivedb.hivetable1 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + randomFormat());
+        tEnv.executeSql("INSERT INTO hivedb.hivetable1 VALUES" + data(100)).await();
+        tEnv.executeSql(
+                "CREATE TABLE hivedb.hivetable2 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + randomFormat());
+        tEnv.executeSql("INSERT INTO hivedb.hivetable2 VALUES" + data(100)).await();
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+
+        List<Row> r1 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM hivedb.hivetable1 WHERE id2=1 OR id3=1")
+                                .collect());
+        List<Row> r2 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM hivedb.hivetable2 WHERE id2=1 OR id3=1")
+                                .collect());
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE test");
+
+        createAction(
+                        CloneHiveAction.class,
+                        "clone_migrate",
+                        "--database",
+                        "hivedb",
+                        "--catalog_conf",
+                        "metastore=hive",
+                        "--catalog_conf",
+                        "uri=thrift://localhost:" + PORT,
+                        "--catalog_conf",
+                        "warehouse="
+                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                        "--target_database",
+                        "test",
+                        "--target_catalog_conf",
+                        "warehouse=" + warehouse,
+                        "where",
+                        "id2=1 OR id3=1")
+                .run();
+
+        List<Row> actualR1 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM test.hivetable1 WHERE id2=1 OR id3=1")
+                                .collect());
+        List<Row> actualR2 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM test.hivetable2 WHERE id2=1 OR id3=1")
+                                .collect());
 
         Assertions.assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
         Assertions.assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);

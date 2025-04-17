@@ -44,6 +44,7 @@ public class CloneHiveAction extends ActionBase {
     private final String targetTableName;
 
     private final int parallelism;
+    @Nullable private final String whereSql;
 
     public CloneHiveAction(
             String sourceDatabase,
@@ -52,7 +53,8 @@ public class CloneHiveAction extends ActionBase {
             String targetDatabase,
             String targetTableName,
             Map<String, String> targetCatalogConfig,
-            @Nullable Integer parallelism) {
+            @Nullable Integer parallelism,
+            @Nullable String whereSql) {
         super(sourceCatalogConfig);
         String metastore = sourceCatalogConfig.get(CatalogOptions.METASTORE.key());
         if (!"hive".equals(metastore)) {
@@ -69,6 +71,7 @@ public class CloneHiveAction extends ActionBase {
         this.targetCatalogConfig = targetCatalogConfig;
 
         this.parallelism = parallelism == null ? env.getParallelism() : parallelism;
+        this.whereSql = whereSql;
     }
 
     @Override
@@ -92,7 +95,7 @@ public class CloneHiveAction extends ActionBase {
                 partitionedSource
                         .process(
                                 CloneHiveUtils.createTargetTableAndListFilesFunction(
-                                        sourceCatalogConfig, targetCatalogConfig))
+                                        sourceCatalogConfig, targetCatalogConfig, whereSql))
                         .name("List Files")
                         .setParallelism(parallelism);
 

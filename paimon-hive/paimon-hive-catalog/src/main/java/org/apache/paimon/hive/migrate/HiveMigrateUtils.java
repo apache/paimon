@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.migrate.FileMetaUtils;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowType;
 
@@ -36,6 +37,8 @@ import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -129,7 +132,8 @@ public class HiveMigrateUtils {
             HiveCatalog hiveCatalog,
             Identifier identifier,
             RowType partitionRowType,
-            String defaultPartitionName)
+            String defaultPartitionName,
+            @Nullable PartitionPredicate predicate)
             throws Exception {
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         Table sourceTable =
@@ -158,7 +162,9 @@ public class HiveMigrateUtils {
                                 partitionValues,
                                 valueSetters,
                                 defaultPartitionName);
-                results.add(listFiles(hiveCatalog.fileIO(), location, partitionRow, format));
+                if (predicate == null || predicate.test(partitionRow)) {
+                    results.add(listFiles(hiveCatalog.fileIO(), location, partitionRow, format));
+                }
             }
             return results;
         }

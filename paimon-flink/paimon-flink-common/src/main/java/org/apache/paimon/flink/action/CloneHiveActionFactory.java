@@ -26,11 +26,12 @@ import java.util.Optional;
 public class CloneHiveActionFactory implements ActionFactory {
 
     private static final String IDENTIFIER = "clone_hive";
-    private static final String PARALLELISM = "parallelism";
     private static final String TARGET_WAREHOUSE = "target_warehouse";
     private static final String TARGET_DATABASE = "target_database";
     private static final String TARGET_TABLE = "target_table";
     private static final String TARGET_CATALOG_CONF = "target_catalog_conf";
+    private static final String PARALLELISM = "parallelism";
+    private static final String WHERE = "where";
 
     @Override
     public String identifier() {
@@ -58,7 +59,8 @@ public class CloneHiveActionFactory implements ActionFactory {
                         params.get(TARGET_DATABASE),
                         params.get(TARGET_TABLE),
                         targetCatalogConfig,
-                        parallelism == null ? null : Integer.parseInt(parallelism));
+                        parallelism == null ? null : Integer.parseInt(parallelism),
+                        params.get(WHERE));
 
         return Optional.of(cloneHiveAction);
     }
