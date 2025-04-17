@@ -120,7 +120,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
     @Test
     public void testMigrateOnePartitionedTableWithFilter() throws Exception {
-        testMigrateOnePartitionedTableImpl("id2 = 1 || id3 = 1");
+        testMigrateOnePartitionedTableImpl("id2 = 1 OR id3 = 1");
     }
 
     public void testMigrateOnePartitionedTableImpl(@Nullable String whereSql) throws Exception {
@@ -348,13 +348,9 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                 .run();
 
         List<Row> actualR1 =
-                ImmutableList.copyOf(
-                        tEnv.executeSql("SELECT * FROM test.hivetable1 WHERE id2=1 OR id3=1")
-                                .collect());
+                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.hivetable1").collect());
         List<Row> actualR2 =
-                ImmutableList.copyOf(
-                        tEnv.executeSql("SELECT * FROM test.hivetable2 WHERE id2=1 OR id3=1")
-                                .collect());
+                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.hivetable2").collect());
 
         Assertions.assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
         Assertions.assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);

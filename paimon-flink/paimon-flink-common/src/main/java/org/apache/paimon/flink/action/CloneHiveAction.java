@@ -108,7 +108,6 @@ public class CloneHiveAction extends ActionBase {
                         .name("Copy and Commit")
                         .setParallelism(parallelism);
 
-        // commit
         committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
