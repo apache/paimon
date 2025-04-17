@@ -343,7 +343,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                         "test",
                         "--target_catalog_conf",
                         "warehouse=" + warehouse,
-                        "where",
+                        "--where",
                         "id2=1 OR id3=1")
                 .run();
 
