@@ -87,7 +87,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
         createAction(
                         CloneHiveAction.class,
-                        "clone_migrate",
+                        "clone_hive",
                         "--database",
                         "default",
                         "--table",
@@ -149,7 +149,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
         List<String> args =
                 Arrays.asList(
-                        "clone_migrate",
+                        "clone_hive",
                         "--database",
                         "default",
                         "--table",
@@ -206,7 +206,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
         List<String> args =
                 Arrays.asList(
-                        "clone_migrate",
+                        "clone_hive",
                         "--database",
                         "default",
                         "--table",
@@ -268,7 +268,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
         createAction(
                         CloneHiveAction.class,
-                        "clone_migrate",
+                        "clone_hive",
                         "--database",
                         "hivedb",
                         "--catalog_conf",
@@ -329,7 +329,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
         createAction(
                         CloneHiveAction.class,
-                        "clone_migrate",
+                        "clone_hive",
                         "--database",
                         "hivedb",
                         "--catalog_conf",
