@@ -18,12 +18,17 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,9 +37,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -70,6 +77,30 @@ public class FixedBucketRowKeyExtractorTest {
         assertThatThrownBy(() -> bucket(extractor("", "", "a", -1), row));
     }
 
+    @Test
+    public void testUnCompactDecimalAndTimestampNullValueBucketNumber() {
+        GenericRow row = GenericRow.of(null, null, null, 1);
+        int bucketNum = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
+
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "d", new DecimalType(38, 18)),
+                                new DataField(1, "ltz", new LocalZonedTimestampType()),
+                                new DataField(2, "ntz", new TimestampType()),
+                                new DataField(3, "k", new IntType())));
+
+        String[] bucketColsToTest = {"d", "ltz", "ntz"};
+        for (String bucketCol : bucketColsToTest) {
+            FixedBucketRowKeyExtractor extractor = extractor(rowType, "", bucketCol, "", bucketNum);
+            BinaryRow binaryRow =
+                    new InternalRowSerializer(rowType.project(bucketCol)).toBinaryRow(row);
+            assertThat(bucket(extractor, row))
+                    .isEqualTo(
+                            KeyAndBucketExtractor.bucket(bucketKeyHashCode(binaryRow), bucketNum));
+        }
+    }
+
     private int bucket(FixedBucketRowKeyExtractor extractor, InternalRow row) {
         extractor.setRecord(row);
         return extractor.bucket();
@@ -91,6 +122,11 @@ public class FixedBucketRowKeyExtractorTest {
                                 new DataField(0, "a", new IntType()),
                                 new DataField(1, "b", new IntType()),
                                 new DataField(2, "c", new IntType())));
+        return extractor(rowType, partK, bk, pk, numBucket);
+    }
+
+    private FixedBucketRowKeyExtractor extractor(
+            RowType rowType, String partK, String bk, String pk, int numBucket) {
         List<DataField> fields = TableSchema.newFields(rowType);
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET_KEY.key(), bk);
