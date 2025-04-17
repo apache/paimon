@@ -41,6 +41,7 @@ import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.stats.SimpleStats;
@@ -180,24 +181,9 @@ public class CloneHiveUtils {
                                     schema.comment());
                     targetCatalog.createTable(tuple.f1, schema, false);
                     FileStoreTable table = (FileStoreTable) targetCatalog.getTable(tuple.f1);
-
-                    PartitionPredicate predicate = null;
-                    if (whereSql != null) {
-                        SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
-                                new SimpleSqlPredicateConvertor(table.rowType());
-                        try {
-                            predicate =
-                                    simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
-                                            whereSql, table.partitionKeys());
-                        } catch (Exception e) {
-                            throw new RuntimeException(
-                                    "Failed to parse partition filter sql '"
-                                            + whereSql
-                                            + "' for table "
-                                            + tuple.f0,
-                                    e);
-                        }
-                    }
+                    PartitionPredicate predicate =
+                            getPartitionPredicate(
+                                    whereSql, tuple.f0, table.schema().logicalPartitionType());
 
                     List<HivePartitionFiles> allPartitions =
                             HiveMigrateUtils.listFiles(
@@ -347,6 +333,27 @@ public class CloneHiveUtils {
                 "Only support HiveCatalog now but found %s.",
                 rootCatalog.getClass().getName());
         return (HiveCatalog) rootCatalog;
+    }
+
+    // TODO: test
+    @Nullable
+    private static PartitionPredicate getPartitionPredicate(
+            @Nullable String whereSql, Identifier tableId, RowType partitionRowType)
+            throws Exception {
+        if (whereSql == null) {
+            return null;
+        }
+
+        SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
+                new SimpleSqlPredicateConvertor(partitionRowType);
+        try {
+            Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate(whereSql);
+            return PartitionPredicate.fromPredicate(partitionRowType, predicate);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to parse partition filter sql '" + whereSql + "' for table " + tableId,
+                    e);
+        }
     }
 
     // ---------------------------------- Classes ----------------------------------

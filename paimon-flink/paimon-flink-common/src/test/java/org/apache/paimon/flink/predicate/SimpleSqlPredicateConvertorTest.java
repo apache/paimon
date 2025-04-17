@@ -18,13 +18,9 @@
 
 package org.apache.paimon.flink.predicate;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.testutils.assertj.PaimonAssertions;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -34,8 +30,6 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 /** test for {@link SimpleSqlPredicateConvertor} . */
@@ -230,56 +224,5 @@ class SimpleSqlPredicateConvertorTest {
         Assertions.assertThatThrownBy(
                         () -> simpleSqlPredicateConvertor.convertSqlToPredicate("b like 'x'"))
                 .hasMessage("LIKE not been supported.");
-    }
-
-    @Test
-    public void testConvertSqlToPartitionPredicate() throws Exception {
-        PartitionPredicate predicate =
-                simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
-                        "a=1", Collections.singletonList("a"));
-        Assertions.assertThat(predicate.test(BinaryRow.singleColumn(1))).isTrue();
-        Assertions.assertThat(predicate.test(BinaryRow.singleColumn(2))).isFalse();
-
-        predicate =
-                simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
-                        "a=1", Arrays.asList("a", "b"));
-        Assertions.assertThat(predicate.test(twoColumnsPartition(1, "2"))).isTrue();
-        Assertions.assertThat(predicate.test(twoColumnsPartition(2, "1"))).isFalse();
-
-        predicate =
-                simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
-                        "a=1 AND b='2'", Arrays.asList("a", "b"));
-        Assertions.assertThat(predicate.test(twoColumnsPartition(1, "2"))).isTrue();
-        Assertions.assertThat(predicate.test(twoColumnsPartition(2, "2"))).isFalse();
-
-        Assertions.assertThatThrownBy(
-                        () ->
-                                simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
-                                        "a=1", Collections.emptyList()))
-                .hasMessage("No partition keys.");
-
-        // pt isn't in row type
-        Assertions.assertThatThrownBy(
-                        () ->
-                                simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
-                                        "`a=1", Collections.singletonList("pt")))
-                .satisfies(PaimonAssertions.anyCauseMatches(IndexOutOfBoundsException.class));
-
-        // sql doesn't only filter partition fields
-        Assertions.assertThatThrownBy(
-                        () ->
-                                simpleSqlPredicateConvertor.convertSqlToPartitionPredicate(
-                                        "a=1 AND b='2'", Collections.singletonList("a")))
-                .hasMessage("Partition filter fields [a, b] are not all in partition fields [a].");
-    }
-
-    private static BinaryRow twoColumnsPartition(int a, String b) {
-        BinaryRow row = new BinaryRow(2);
-        BinaryRowWriter writer = new BinaryRowWriter(row);
-        writer.reset();
-        writer.writeInt(0, a);
-        writer.writeString(1, BinaryString.fromString(b));
-        writer.complete();
-        return row;
     }
 }

@@ -19,23 +19,15 @@
 package org.apache.paimon.flink.predicate;
 
 import org.apache.paimon.flink.utils.FlinkCalciteClasses;
-import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.function.BiFunction;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** convert sql to predicate. */
 public class SimpleSqlPredicateConvertor {
@@ -61,21 +53,6 @@ public class SimpleSqlPredicateConvertor {
         Object sqlParser = calciteClasses.sqlParserDelegate().create(whereSql, config);
         Object sqlBasicCall = calciteClasses.sqlParserDelegate().parseExpression(sqlParser);
         return convert(sqlBasicCall);
-    }
-
-    public PartitionPredicate convertSqlToPartitionPredicate(
-            String whereSql, List<String> partitionKeys) throws Exception {
-        checkArgument(!partitionKeys.isEmpty(), "No partition keys.");
-        RowType partitionType = rowType.project(partitionKeys);
-        Predicate predicate = convertSqlToPredicate(whereSql);
-        Set<String> fieldNames = predicate.visit(FieldNameCollector.INSTANCE);
-        if (!new HashSet<>(partitionKeys).containsAll(fieldNames)) {
-            throw new RuntimeException(
-                    String.format(
-                            "Partition filter fields %s are not all in partition fields %s.",
-                            fieldNames, partitionKeys));
-        }
-        return PartitionPredicate.fromPredicate(partitionType, predicate);
     }
 
     public Predicate convert(Object sqlBasicCall) throws Exception {
@@ -174,27 +151,5 @@ public class SimpleSqlPredicateConvertor {
             throw new RuntimeException(String.format("Field `%s` not found", field));
         }
         return index;
-    }
-
-    /** Collect filed names in predicate for validation. */
-    private static class FieldNameCollector implements PredicateVisitor<Set<String>> {
-
-        public static final FieldNameCollector INSTANCE = new FieldNameCollector();
-
-        @Override
-        public Set<String> visit(LeafPredicate predicate) {
-            Set<String> names = new HashSet<>();
-            names.add(predicate.fieldName());
-            return names;
-        }
-
-        @Override
-        public Set<String> visit(CompoundPredicate predicate) {
-            Set<String> names = new HashSet<>();
-            for (Predicate child : predicate.children()) {
-                names.addAll(child.visit(this));
-            }
-            return names;
-        }
     }
 }
