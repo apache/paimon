@@ -70,8 +70,8 @@ public class DeletionVectorTest {
         for (int i = 0; i < 10000; i++) {
             toDelete.add(ThreadLocalRandom.current().nextLong(Integer.MAX_VALUE * 2L));
         }
-        HashSet<Integer> notDelete = new HashSet<>();
-        for (int i = 0; i < 10000; i++) {
+        HashSet<Long> notDelete = new HashSet<>();
+        for (long i = 0; i < 10000; i++) {
             if (!toDelete.contains(i)) {
                 notDelete.add(i);
             }
@@ -93,7 +93,7 @@ public class DeletionVectorTest {
             assertThat(deletionVector.isDeleted(i)).isTrue();
             assertThat(deserializedDeletionVector.isDeleted(i)).isTrue();
         }
-        for (Integer i : notDelete) {
+        for (Long i : notDelete) {
             assertThat(deletionVector.isDeleted(i)).isFalse();
             assertThat(deserializedDeletionVector.isDeleted(i)).isFalse();
         }
