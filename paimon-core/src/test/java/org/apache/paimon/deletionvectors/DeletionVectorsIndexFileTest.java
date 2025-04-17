@@ -24,6 +24,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.PathFactory;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -33,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -196,6 +199,60 @@ public class DeletionVectorsIndexFileTest {
         for (String file : dvs.keySet()) {
             assertThat(dvs.get(file).getCardinality()).isEqualTo(fileToCardinality.get(file));
         }
+    }
+
+    @Test
+    public void testReadV1AndV2() {
+        PathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile v1DeletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, false);
+        DeletionVectorsIndexFile v2DeletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, true);
+
+        // write v1 dv
+        Random random = new Random();
+        HashMap<String, Integer> deleteInteger = new HashMap<>();
+
+        HashMap<String, DeletionVector> deleteMap1 = new HashMap<>();
+        for (int i = 0; i < 50000; i++) {
+            DeletionVector index = createEmptyDV(false);
+            int num = random.nextInt(1000000);
+            index.delete(num);
+            deleteMap1.put(String.format("file%s.parquet", i), index);
+            deleteInteger.put(String.format("file%s.parquet", i), num);
+        }
+        List<IndexFileMeta> indexFiles1 = v1DeletionVectorsIndexFile.write(deleteMap1);
+        assertThat(indexFiles1.size()).isEqualTo(1);
+
+        // write v2 dv
+        HashMap<String, DeletionVector> deleteMap2 = new HashMap<>();
+        for (int i = 50000; i < 100000; i++) {
+            DeletionVector index = createEmptyDV(true);
+            int num = random.nextInt(1000000);
+            index.delete(num);
+            deleteMap2.put(String.format("file%s.parquet", i), index);
+            deleteInteger.put(String.format("file%s.parquet", i), num);
+        }
+        List<IndexFileMeta> indexFiles2 = v2DeletionVectorsIndexFile.write(deleteMap2);
+        assertThat(indexFiles2.size()).isEqualTo(1);
+
+        List<IndexFileMeta> totalIndexFiles =
+                Stream.concat(indexFiles1.stream(), indexFiles2.stream())
+                        .collect(Collectors.toList());
+        // read when writeVersionID is V1
+        Map<String, DeletionVector> dvs1 =
+                v1DeletionVectorsIndexFile.readAllDeletionVectors(totalIndexFiles);
+        assertThat(dvs1.size()).isEqualTo(100000);
+        for (String file : dvs1.keySet()) {
+            int delete = deleteInteger.get(file);
+            assertThat(dvs1.get(file).isDeleted(delete)).isTrue();
+            assertThat(dvs1.get(file).isDeleted(delete + 1)).isFalse();
+        }
+
+        // read when writeVersionID is V2
+        Map<String, DeletionVector> dvs2 =
+                v2DeletionVectorsIndexFile.readAllDeletionVectors(totalIndexFiles);
+        assertThat(dvs2.size()).isEqualTo(100000);
     }
 
     private DeletionVector createEmptyDV(boolean isV2) {
