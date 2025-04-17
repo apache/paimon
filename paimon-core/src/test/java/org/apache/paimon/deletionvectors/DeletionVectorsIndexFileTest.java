@@ -24,6 +24,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.PathFactory;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
