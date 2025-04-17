@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.clone;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.DelegateCatalog;
@@ -183,7 +184,7 @@ public class CloneHiveUtils {
                     FileStoreTable table = (FileStoreTable) targetCatalog.getTable(tuple.f1);
                     PartitionPredicate predicate =
                             getPartitionPredicate(
-                                    whereSql, tuple.f0, table.schema().logicalPartitionType());
+                                    whereSql, table.schema().logicalPartitionType(), tuple.f0);
 
                     List<HivePartitionFiles> allPartitions =
                             HiveMigrateUtils.listFiles(
@@ -335,23 +336,25 @@ public class CloneHiveUtils {
         return (HiveCatalog) rootCatalog;
     }
 
-    // TODO: test
+    @VisibleForTesting
     @Nullable
-    private static PartitionPredicate getPartitionPredicate(
-            @Nullable String whereSql, Identifier tableId, RowType partitionRowType)
-            throws Exception {
+    static PartitionPredicate getPartitionPredicate(
+            @Nullable String whereSql, RowType partitionType, Identifier tableId) throws Exception {
         if (whereSql == null) {
             return null;
         }
 
         SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
-                new SimpleSqlPredicateConvertor(partitionRowType);
+                new SimpleSqlPredicateConvertor(partitionType);
         try {
             Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate(whereSql);
-            return PartitionPredicate.fromPredicate(partitionRowType, predicate);
+            return PartitionPredicate.fromPredicate(partitionType, predicate);
         } catch (Exception e) {
             throw new RuntimeException(
-                    "Failed to parse partition filter sql '" + whereSql + "' for table " + tableId,
+                    "Failed to parse partition filter sql '"
+                            + whereSql
+                            + "' for table "
+                            + tableId.getFullName(),
                     e);
         }
     }
