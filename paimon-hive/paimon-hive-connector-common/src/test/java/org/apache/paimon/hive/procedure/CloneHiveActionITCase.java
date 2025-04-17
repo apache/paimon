@@ -40,6 +40,7 @@ import org.junit.jupiter.api.Test;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
@@ -148,25 +149,27 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE DATABASE test");
 
         List<String> args =
-                Arrays.asList(
-                        "clone_hive",
-                        "--database",
-                        "default",
-                        "--table",
-                        "hivetable",
-                        "--catalog_conf",
-                        "metastore=hive",
-                        "--catalog_conf",
-                        "uri=thrift://localhost:" + PORT,
-                        "--catalog_conf",
-                        "warehouse="
-                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
-                        "--target_database",
-                        "test",
-                        "--target_table",
-                        "test_table",
-                        "--target_catalog_conf",
-                        "warehouse=" + warehouse);
+                new ArrayList<>(
+                        Arrays.asList(
+                                "clone_hive",
+                                "--database",
+                                "default",
+                                "--table",
+                                "hivetable",
+                                "--catalog_conf",
+                                "metastore=hive",
+                                "--catalog_conf",
+                                "uri=thrift://localhost:" + PORT,
+                                "--catalog_conf",
+                                "warehouse="
+                                        + System.getProperty(
+                                                HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
+                                "--target_database",
+                                "test",
+                                "--target_table",
+                                "test_table",
+                                "--target_catalog_conf",
+                                "warehouse=" + warehouse));
         if (whereSql != null) {
             args.add("--where");
             args.add(whereSql);
