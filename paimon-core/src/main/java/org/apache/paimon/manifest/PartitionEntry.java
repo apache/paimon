@@ -43,18 +43,21 @@ public class PartitionEntry {
     private final long fileSizeInBytes;
     private final long fileCount;
     private final long lastFileCreationTime;
+    private final long deletedRecordCount;
 
     public PartitionEntry(
             BinaryRow partition,
             long recordCount,
             long fileSizeInBytes,
             long fileCount,
-            long lastFileCreationTime) {
+            long lastFileCreationTime,
+            long deletedRecordCount) {
         this.partition = partition;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
         this.fileCount = fileCount;
         this.lastFileCreationTime = lastFileCreationTime;
+        this.deletedRecordCount = deletedRecordCount;
     }
 
     public BinaryRow partition() {
@@ -83,7 +86,8 @@ public class PartitionEntry {
                 recordCount + entry.recordCount,
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
-                Math.max(lastFileCreationTime, entry.lastFileCreationTime));
+                Math.max(lastFileCreationTime, entry.lastFileCreationTime),
+                deletedRecordCount + entry.deletedRecordCount);
     }
 
     public Partition toPartition(InternalRowPartitionComputer computer) {
@@ -93,6 +97,7 @@ public class PartitionEntry {
                 fileSizeInBytes,
                 fileCount,
                 lastFileCreationTime,
+                deletedRecordCount,
                 false);
     }
 
@@ -102,7 +107,8 @@ public class PartitionEntry {
                 recordCount,
                 fileSizeInBytes,
                 fileCount,
-                lastFileCreationTime);
+                lastFileCreationTime,
+                deletedRecordCount);
     }
 
     public static PartitionEntry fromManifestEntry(ManifestEntry entry) {
@@ -120,7 +126,12 @@ public class PartitionEntry {
             fileCount = -fileCount;
         }
         return new PartitionEntry(
-                partition, recordCount, fileSizeInBytes, fileCount, file.creationTimeEpochMillis());
+                partition,
+                recordCount,
+                fileSizeInBytes,
+                fileCount,
+                file.creationTimeEpochMillis(),
+                file.deleteRowCount().orElse(0L));
     }
 
     public static Collection<PartitionEntry> merge(Collection<ManifestEntry> fileEntries) {

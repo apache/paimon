@@ -652,6 +652,7 @@ public interface Catalog extends AutoCloseable {
     String NUM_FILES_PROP = "numFiles";
     String TOTAL_SIZE_PROP = "totalSize";
     String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
+    String DELETED_RECORD_COUNT_PROP = "deletedRecordCount";
 
     // ======================= Exceptions ===============================
 

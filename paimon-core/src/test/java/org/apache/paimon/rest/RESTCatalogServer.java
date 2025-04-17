@@ -1538,6 +1538,7 @@ public class RESTCatalogServer {
                                                             stats.fileSizeInBytes(),
                                                             stats.fileCount(),
                                                             stats.lastFileCreationTime(),
+                                                            stats.deletedRecordCount(),
                                                             false))
                                     .collect(Collectors.toList());
                     tablePartitionsStore.put(identifier.getFullName(), newPartitions);
@@ -1579,6 +1580,9 @@ public class RESTCatalogServer {
                                                                                 .lastFileCreationTime(),
                                                                         stats
                                                                                 .lastFileCreationTime()),
+                                                                oldPartition.deletedRecordCount()
+                                                                        + stats
+                                                                                .deletedRecordCount(),
                                                                 oldPartition.done());
                                                     })
                                             .collect(Collectors.toList());

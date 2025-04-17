@@ -555,6 +555,10 @@ public class HiveCatalog extends AbstractCatalog {
                                                     parameters.getOrDefault(
                                                             LAST_UPDATE_TIME_PROP,
                                                             System.currentTimeMillis() + ""));
+                                    long deletedRecordCount =
+                                            Long.parseLong(
+                                                    parameters.getOrDefault(
+                                                            DELETED_RECORD_COUNT_PROP, "0"));
                                     return new org.apache.paimon.partition.Partition(
                                             Collections.singletonMap(
                                                     tagToPartitionField, part.getValues().get(0)),
@@ -562,6 +566,7 @@ public class HiveCatalog extends AbstractCatalog {
                                             fileSizeInBytes,
                                             fileCount,
                                             lastFileCreationTime,
+                                            deletedRecordCount,
                                             false);
                                 })
                         .collect(Collectors.toList());

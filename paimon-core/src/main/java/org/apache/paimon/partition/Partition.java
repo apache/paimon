@@ -47,8 +47,15 @@ public class Partition extends PartitionStatistics {
             @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) long fileSizeInBytes,
             @JsonProperty(FIELD_FILE_COUNT) long fileCount,
             @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime,
+            @JsonProperty(FIELD_DELETED_RECORD_COUNT) long deletedRecordCount,
             @JsonProperty(FIELD_DONE) boolean done) {
-        super(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+        super(
+                spec,
+                recordCount,
+                fileSizeInBytes,
+                fileCount,
+                lastFileCreationTime,
+                deletedRecordCount);
         this.done = done;
     }
 

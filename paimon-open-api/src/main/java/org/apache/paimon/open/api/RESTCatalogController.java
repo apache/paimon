@@ -587,7 +587,7 @@ public class RESTCatalogController {
         // paged list partitions in this table with provided maxResults and pageToken
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
-        Partition partition = new Partition(spec, 1, 2, 3, 4, false);
+        Partition partition = new Partition(spec, 1, 2, 3, 4, 0, false);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 

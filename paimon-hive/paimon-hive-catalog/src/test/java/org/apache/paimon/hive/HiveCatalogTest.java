@@ -508,7 +508,7 @@ public class HiveCatalogTest extends CatalogTestBase {
         long fileCreationTime = System.currentTimeMillis();
         PartitionStatistics partition =
                 new PartitionStatistics(
-                        Collections.singletonMap("dt", "20250101"), 1, 2, 3, fileCreationTime);
+                        Collections.singletonMap("dt", "20250101"), 1, 2, 3, fileCreationTime, 0);
         catalog.alterPartitions(alterIdentifier, Collections.singletonList(partition));
         Partition partitionFromServer = catalog.listPartitions(alterIdentifier).get(0);
         checkPartition(
@@ -518,6 +518,7 @@ public class HiveCatalogTest extends CatalogTestBase {
                         2,
                         3,
                         fileCreationTime,
+                        0,
                         false),
                 partitionFromServer);
 

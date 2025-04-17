@@ -139,6 +139,18 @@ public class DataSplit implements Split {
         return rowCount;
     }
 
+    public long deletedRecordCount() {
+        long deletedRecordCount = 0;
+        if (dataDeletionFiles != null) {
+            for (DeletionFile file : dataDeletionFiles) {
+                if (file != null) {
+                    deletedRecordCount += file.cardinality() == null ? 0 : file.cardinality();
+                }
+            }
+        }
+        return deletedRecordCount;
+    }
+
     /** Whether it is possible to calculate the merged row count. */
     public boolean mergedRowCountAvailable() {
         return rawConvertible
