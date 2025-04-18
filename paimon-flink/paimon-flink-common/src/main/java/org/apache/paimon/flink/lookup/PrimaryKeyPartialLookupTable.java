@@ -47,7 +47,7 @@ import java.util.List;
 import java.util.Set;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
-public class PrimaryKeyPartialLookupTable implements LookupTable {
+public class PrimaryKeyPartialLookupTable extends AsyncRefreshLookupTable {
 
     private final QueryExecutorFactory executorFactory;
     private final FixedBucketFromPkExtractor extractor;
@@ -60,6 +60,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private PrimaryKeyPartialLookupTable(
             QueryExecutorFactory executorFactory, FileStoreTable table, List<String> joinKey) {
+        super(table);
         this.executorFactory = executorFactory;
 
         if (table.bucketMode() != BucketMode.HASH_FIXED) {
@@ -105,8 +106,13 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     @Override
     public void open() throws Exception {
+        init();
+        doRefresh(false);
+    }
+
+    protected void init() throws Exception {
+        super.init();
         this.queryExecutor = executorFactory.create(specificPartition, cacheRowFilter);
-        refresh();
     }
 
     @Override
@@ -133,8 +139,8 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     }
 
     @Override
-    public void refresh() {
-        queryExecutor.refresh();
+    public void doRefresh(boolean refreshCache) {
+        queryExecutor.refresh(refreshCache);
     }
 
     @Override
@@ -142,10 +148,18 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         this.cacheRowFilter = filter;
     }
 
+    public Long nextSnapshotId() {
+        return queryExecutor.nextSnapshotId();
+    }
+
     @Override
     public void close() throws IOException {
-        if (queryExecutor != null) {
-            queryExecutor.close();
+        try {
+            super.close();
+        } finally {
+            if (queryExecutor != null) {
+                queryExecutor.close();
+            }
         }
     }
 
@@ -184,7 +198,9 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
         InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;
 
-        void refresh();
+        void refresh(boolean refreshCache);
+
+        Long nextSnapshotId();
     }
 
     static class LocalQueryExecutor implements QueryExecutor {
@@ -231,7 +247,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         }
 
         @Override
-        public void refresh() {
+        public void refresh(boolean refreshCache) {
             while (true) {
                 List<Split> splits = scan.plan().splits();
                 log(splits);
@@ -245,10 +261,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                     int bucket = ((DataSplit) split).bucket();
                     List<DataFileMeta> before = ((DataSplit) split).beforeFiles();
                     List<DataFileMeta> after = ((DataSplit) split).dataFiles();
-
-                    tableQuery.refreshFiles(partition, bucket, before, after);
+                    tableQuery.refreshFiles(partition, bucket, before, after, refreshCache);
                 }
             }
+        }
+
+        @Override
+        public Long nextSnapshotId() {
+            return scan.checkpoint();
         }
 
         @Override
@@ -285,7 +305,12 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         }
 
         @Override
-        public void refresh() {}
+        public void refresh(boolean refreshCache) {}
+
+        @Override
+        public Long nextSnapshotId() {
+            return null;
+        }
 
         @Override
         public void close() throws IOException {
