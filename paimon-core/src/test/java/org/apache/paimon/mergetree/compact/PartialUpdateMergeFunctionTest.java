@@ -703,7 +703,7 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, 1, 2, 3, 4, 3, 1, 1, 4, 3);
         add(func, RowKind.UPDATE_BEFORE, 1, 2, 3, 2, 1, 2, 1, 4, 3);
         validate(func, 1, 2, 3, 2, 3, null, 1, 4, 3);
-        add(func, RowKind.DELETE, 1, 3, 2, 3, 1, 1, 4, 3);
+        add(func, RowKind.DELETE, 1, 3, 2, 3, 1, 1, 1, 4, 3);
         validate(func, 1, 3, 2, -1, 3, null, 1, 4, 3);
         // retract for old sequence
         add(func, RowKind.DELETE, 1, 2, 2, 2, 1, 1, 1, 1, 3);
