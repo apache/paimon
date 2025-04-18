@@ -364,13 +364,13 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
     private String randomFormat() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
-        //        if (i == 0) {
-        //            return "orc";
-        //        } else if (i == 1) {
-        //            return "parquet";
-        //        } else {
-        return "avro";
-        //        }
+        if (i == 0) {
+            return "orc";
+        } else if (i == 1) {
+            return "parquet";
+        } else {
+            return "avro";
+        }
     }
 
     protected FileStoreTable paimonTable(
