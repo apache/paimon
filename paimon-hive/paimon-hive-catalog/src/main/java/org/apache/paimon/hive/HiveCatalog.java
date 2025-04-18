@@ -1308,7 +1308,8 @@ public class HiveCatalog extends AbstractCatalog {
                 fileIO, new SerializableHiveConf(hiveConf), clientClassName, options, warehouse);
     }
 
-    public Table getHmsTable(Identifier identifier) throws TableNotExistException {
+    public Table getHmsTable(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
         try {
             return clients.run(
                     client ->
@@ -1317,6 +1318,9 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (NoSuchObjectException e) {
             throw new TableNotExistException(identifier);
         } catch (TException e) {
+            if (e.getMessage().contains("Permission.NotAllow")) {
+                throw new TableNoPermissionException(identifier, e);
+            }
             throw new RuntimeException(
                     "Cannot determine if table " + identifier.getFullName() + " is a paimon table.",
                     e);
