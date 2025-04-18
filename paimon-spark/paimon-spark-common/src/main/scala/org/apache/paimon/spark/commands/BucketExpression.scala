@@ -21,49 +21,55 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.data.serializer.InternalRowSerializer
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonType
+import org.apache.paimon.spark.catalog.functions.PaimonFunctions
+import org.apache.paimon.spark.catalog.functions.PaimonFunctions.BUCKET
 import org.apache.paimon.table.sink.KeyAndBucketExtractor.{bucket, bucketKeyHashCode}
 import org.apache.paimon.types.{RowKind, RowType}
 
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow => SparkInternalRow}
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry.FunctionBuilder
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
-import org.apache.spark.sql.catalyst.expressions.{Expression, ExpressionInfo, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Expression, ExpressionInfo, Literal, SpecificInternalRow}
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
+import org.apache.spark.sql.connector.catalog.functions.ScalarFunction
 import org.apache.spark.sql.types.{DataType, DataTypes, StructField, StructType}
 
-/** @param _children arg0: bucket number, arg1..argn bucket key */
+/**
+ * The reason for adding it is that the current spark_catalog cannot access v2 functions, which
+ * results in the inability to recognize the `bucket()` function in write, see
+ * https://github.com/apache/spark/pull/50495, once it is fixed, remove this function.
+ *
+ * @param _children
+ *   arg0: bucket number, arg1..argn bucket key
+ */
 case class FixedBucketExpression(_children: Seq[Expression])
   extends Expression
   with CodegenFallback {
 
-  private lazy val (bucketKeyRowType: RowType, bucketKeyStructType: StructType) = {
-    val (originalTypes, paimonTypes) = _children.tail.map {
-      expr =>
-        (StructField(expr.prettyName, expr.dataType, nullable = true), toPaimonType(expr.dataType))
-    }.unzip
+  val function: ScalarFunction[Int] = {
+    val inputType = StructType(_children.zipWithIndex.map {
+      case (exp, pos) => StructField(s"_$pos", exp.dataType, exp.nullable)
+    })
 
-    (
-      RowType.of(paimonTypes: _*),
-      StructType(originalTypes)
-    )
+    PaimonFunctions.load(BUCKET).bind(inputType).asInstanceOf[ScalarFunction[Int]]
   }
 
-  private lazy val numberBuckets = _children.head.asInstanceOf[Literal].value.asInstanceOf[Int]
-  private lazy val serializer = new InternalRowSerializer(bucketKeyRowType)
-  private lazy val wrapper =
-    new SparkInternalRowWrapper(-1, bucketKeyStructType, bucketKeyStructType.fields.length)
+  private lazy val reusedRow = new SpecificInternalRow(function.inputTypes())
 
-  override def nullable: Boolean = false
+  override def nullable: Boolean = function.isResultNullable
 
   override def eval(input: SparkInternalRow): Int = {
-    val bucketKeyValues = _children.tail.map(_.eval(input))
-    bucket(
-      bucketKeyHashCode(
-        serializer.toBinaryRow(wrapper.replace(SparkInternalRow.fromSeq(bucketKeyValues)))),
-      numberBuckets)
+    var i = 0
+    while (i < children.length) {
+      val expr = children(i)
+      reusedRow.update(i, expr.eval(input))
+      i += 1
+    }
+
+    function.produceResult(reusedRow)
   }
 
-  override def dataType: DataType = DataTypes.IntegerType
+  override def dataType: DataType = function.resultType()
 
   override def children: Seq[Expression] = _children
 
