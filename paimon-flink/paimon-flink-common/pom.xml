@@ -232,7 +232,6 @@ under the License.
                                     <include>org.apache.paimon:paimon-service-client</include>
                                     <include>org.apache.paimon:paimon-service-runtime</include>
                                     <include>org.apache.paimon:paimon-shade-netty-4</include>
-                                    <include>org.apache.paimon:${paimon-flinkx-common}</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
