@@ -22,12 +22,14 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.flink.clone.hive.CloneHiveUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.flink.clone.hive.ListHiveFilesFunction.getPartitionPredicate;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -43,25 +45,22 @@ public class CloneHiveUtilsTest {
                         .field("b", DataTypes.STRING())
                         .build();
 
-        PartitionPredicate p = CloneHiveUtils.getPartitionPredicate("a=1", partitionType, tableId);
+        PartitionPredicate p = getPartitionPredicate("a=1", partitionType, tableId);
         assertThat(p.test(twoColumnsPartition(1, "2"))).isTrue();
         assertThat(p.test(twoColumnsPartition(2, "1"))).isFalse();
 
-        p = CloneHiveUtils.getPartitionPredicate("a=1 OR b='2'", partitionType, tableId);
+        p = getPartitionPredicate("a=1 OR b='2'", partitionType, tableId);
         assertThat(p.test(twoColumnsPartition(1, "1"))).isTrue();
         assertThat(p.test(twoColumnsPartition(2, "2"))).isTrue();
         assertThat(p.test(twoColumnsPartition(2, "1"))).isFalse();
 
         // c not in partition fields
-        assertThatThrownBy(
-                        () ->
-                                CloneHiveUtils.getPartitionPredicate(
-                                        "a=1 OR c=1", partitionType, tableId))
+        assertThatThrownBy(() -> getPartitionPredicate("a=1 OR c=1", partitionType, tableId))
                 .hasMessage(
                         "Failed to parse partition filter sql 'a=1 OR c=1' for table test_db.test_table");
 
         // no partition keys
-        assertThatThrownBy(() -> CloneHiveUtils.getPartitionPredicate("a=1", RowType.of(), tableId))
+        assertThatThrownBy(() -> getPartitionPredicate("a=1", RowType.of(), tableId))
                 .hasMessage(
                         "Failed to parse partition filter sql 'a=1' for table test_db.test_table");
     }
