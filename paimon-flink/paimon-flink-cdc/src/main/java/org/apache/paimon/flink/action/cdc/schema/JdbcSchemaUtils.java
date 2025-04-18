@@ -24,6 +24,7 @@ import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +50,8 @@ public class JdbcSchemaUtils {
             String tableName,
             String tableComment,
             TypeMapping typeMapping,
-            JdbcToPaimonTypeVisitor jdbcToPaimonTypeVisitor)
+            JdbcToPaimonTypeVisitor jdbcToPaimonTypeVisitor,
+            String compositePrimaryKey)
             throws SQLException {
         return buildSchema(
                 metaData,
@@ -58,7 +60,8 @@ public class JdbcSchemaUtils {
                 tableName,
                 tableComment,
                 typeMapping,
-                jdbcToPaimonTypeVisitor);
+                jdbcToPaimonTypeVisitor,
+                compositePrimaryKey);
     }
 
     public static Schema buildSchema(
@@ -68,7 +71,8 @@ public class JdbcSchemaUtils {
             String tableName,
             String tableComment,
             TypeMapping typeMapping,
-            JdbcToPaimonTypeVisitor jdbcToPaimonTypeVisitor)
+            JdbcToPaimonTypeVisitor jdbcToPaimonTypeVisitor,
+            String compositePrimaryKey)
             throws SQLException {
         Schema.Builder builder = Schema.newBuilder();
         try (ResultSet rs = metaData.getColumns(databaseName, schemaName, tableName, null)) {
@@ -90,9 +94,11 @@ public class JdbcSchemaUtils {
                         typeMapping.containsMode(TO_NULLABLE)
                                 || isNullableColumn(rs.getString("IS_NULLABLE"));
                 DataType paimonType =
-                        jdbcToPaimonTypeVisitor
-                                .visit(fieldType, precision, scale, typeMapping)
-                                .copy(isNullable);
+                        fieldName.equals(compositePrimaryKey)
+                                ? DataTypes.STRING()
+                                : jdbcToPaimonTypeVisitor
+                                        .visit(fieldType, precision, scale, typeMapping)
+                                        .copy(isNullable);
 
                 builder.column(fieldName, paimonType, fieldComment);
             }
