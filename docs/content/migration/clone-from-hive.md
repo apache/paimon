@@ -24,10 +24,10 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Hive Table Clone
+# Clone Hive Table
 
-Apache Hive supports Parquet, ORC file formats that could be cloned to Paimon. The cloned table will be
-[append table]({{< ref "append-table/overview" >}}). Supports file format of hive "orc" and "parquet" and "avro".
+Clone Hive Table supports cloning hive tables with parquet, orc and avro formats. The cloned table will be
+[append table]({{< ref "append-table/overview" >}}).
 
 ## Clone Hive Table
 
