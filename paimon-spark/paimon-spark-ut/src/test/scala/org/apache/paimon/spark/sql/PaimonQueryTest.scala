@@ -21,7 +21,9 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.source.DataSplit
 
+import org.apache.spark.SparkException
 import org.apache.spark.sql.{Row, SparkSession}
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions
 
 import java.util
@@ -385,6 +387,24 @@ class PaimonQueryTest extends PaimonSparkTestBase {
             |""".stripMargin),
       Seq(Row(1, 1, 1, "parquet", Row(1, 1), 0), Row(2, 1, 2, "parquet", Row(1, 2), 0))
     )
+  }
+
+  test("Paimon Query: not support querying metadata columns for pk table") {
+    spark.sql("""
+                |CREATE TABLE T (id INT, name STRING)
+                |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')
+                |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES(1,'a')")
+    assertThat(spark.sql("SELECT *,__paimon_file_path FROM T").collect()).hasSize(1)
+
+    // query failed if more than one file in a bucket
+    spark.sql("INSERT INTO T VALUES(2,'b')")
+    assert(
+      intercept[SparkException] {
+        spark.sql("SELECT *,__paimon_file_path FROM T").collect()
+      }.getMessage
+        .contains("Only append table or deletion vector table support querying metadata columns."))
   }
 
   private def getAllFiles(
