@@ -41,7 +41,7 @@ pygmentsUseClasses = true
   VersionTitle = "1.1"
 
   # The branch for this version of Apache Paimon
-  Branch = "release-1.1"
+  Branch = "1.1"
 
   # The most recent supported Apache Flink version
   FlinkVersion = "1.20"
@@ -64,7 +64,7 @@ pygmentsUseClasses = true
   # of the menu
   MenuLinks = [
     ["Project Homepage", "//paimon.apache.org"],
-    ["JavaDocs", "//paimon.apache.org/docs/release-1.1/api/java/"],
+    ["JavaDocs", "//paimon.apache.org/docs/master/api/java/"],
   ]
 
   StableDocs = "https://paimon.apache.org/docs/1.1"
