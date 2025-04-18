@@ -32,6 +32,7 @@ import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.hash.PaimonHashFunction;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
@@ -1031,7 +1032,10 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         serializer
                                 .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();
-                int bucket = bucket(bucketKeyHashCode(row(data.getInt(1))), numOfBucket);
+                int bucket =
+                        bucket(
+                                bucketKeyHashCode(row(data.getInt(1)), new PaimonHashFunction()),
+                                numOfBucket);
                 dataPerBucket.compute(
                         bucket,
                         (k, v) -> {

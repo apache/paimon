@@ -23,6 +23,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.hash.HashFunction;
 import org.apache.paimon.schema.TableSchema;
 
 /** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
@@ -34,10 +35,14 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
 
     private BinaryRow reuseBucketKey;
     private Integer reuseBucket;
+    private final HashFunction hashFunction;
 
     public FixedBucketRowKeyExtractor(TableSchema schema) {
         super(schema);
         numBuckets = new CoreOptions(schema.options()).bucket();
+        hashFunction =
+                HashFunction.create(
+                        new CoreOptions(schema.options()), schema.logicalBucketKeyType());
         sameBucketKeyAndTrimmedPrimaryKey = schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
         bucketKeyProjection =
                 CodeGenUtils.newProjection(
@@ -68,7 +73,8 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
         if (reuseBucket == null) {
             reuseBucket =
                     KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey, hashFunction),
+                            numBuckets);
         }
         return reuseBucket;
     }

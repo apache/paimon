@@ -18,11 +18,13 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions.BucketHashType
 import org.apache.paimon.data.serializer.InternalRowSerializer
+import org.apache.paimon.hash.HashFunction
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonType
 import org.apache.paimon.table.sink.KeyAndBucketExtractor.{bucket, bucketKeyHashCode}
-import org.apache.paimon.types.{RowKind, RowType}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, InternalRow => SparkInternalRow}
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry.FunctionBuilder
@@ -30,23 +32,34 @@ import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.expressions.{Expression, ExpressionInfo, Literal}
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.types.{DataType, DataTypes, StructField, StructType}
+import org.apache.spark.unsafe.types.UTF8String
 
-/** @param _children arg0: bucket number, arg1..argn bucket key */
+/** @param _children arg0: bucket number, hash_type, arg1..argn bucket key */
 case class FixedBucketExpression(_children: Seq[Expression])
   extends Expression
   with CodegenFallback {
 
   private lazy val (bucketKeyRowType: RowType, bucketKeyStructType: StructType) = {
-    val (originalTypes, paimonTypes) = _children.tail.map {
-      expr =>
-        (StructField(expr.prettyName, expr.dataType, nullable = true), toPaimonType(expr.dataType))
-    }.unzip
+    val (originalTypes, paimonTypes) = _children
+      .drop(2)
+      .map {
+        expr =>
+          (
+            StructField(expr.prettyName, expr.dataType, nullable = true),
+            toPaimonType(expr.dataType))
+      }
+      .unzip
 
     (
       RowType.of(paimonTypes: _*),
       StructType(originalTypes)
     )
   }
+
+  private lazy val hashFunction = HashFunction.create(
+    BucketHashType.valueOf(
+      _children(1).asInstanceOf[Literal].value.asInstanceOf[UTF8String].toString),
+    bucketKeyRowType)
 
   private lazy val numberBuckets = _children.head.asInstanceOf[Literal].value.asInstanceOf[Int]
   private lazy val serializer = new InternalRowSerializer(bucketKeyRowType)
@@ -56,10 +69,11 @@ case class FixedBucketExpression(_children: Seq[Expression])
   override def nullable: Boolean = false
 
   override def eval(input: SparkInternalRow): Int = {
-    val bucketKeyValues = _children.tail.map(_.eval(input))
+    val bucketKeyValues = _children.drop(2).map(_.eval(input))
     bucket(
       bucketKeyHashCode(
-        serializer.toBinaryRow(wrapper.replace(SparkInternalRow.fromSeq(bucketKeyValues)))),
+        serializer.toBinaryRow(wrapper.replace(SparkInternalRow.fromSeq(bucketKeyValues))),
+        hashFunction),
       numberBuckets)
   }
 

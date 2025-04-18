@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.hash.HashFunction;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.types.DataField;
@@ -43,6 +44,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     private final Projection bucketKeyProjection;
     private final List<DataField> trimmedPKFields;
     private final Projection trimmedPKProjection;
+    private final HashFunction hashFunction;
 
     private CdcRecord record;
 
@@ -71,6 +73,9 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
                 CodeGenUtils.newProjection(
                         new RowType(trimmedPKFields),
                         IntStream.range(0, trimmedPKFields.size()).toArray());
+        this.hashFunction =
+                HashFunction.create(
+                        new CoreOptions(schema.options()), schema.logicalBucketKeyType());
     }
 
     @Override
@@ -99,7 +104,8 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
         if (bucket == null) {
             bucket =
                     KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey, hashFunction),
+                            numBuckets);
         }
         return bucket;
     }

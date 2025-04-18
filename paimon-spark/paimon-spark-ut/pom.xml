@@ -39,6 +39,12 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
             <artifactId>${paimon-sparkx-common}</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
