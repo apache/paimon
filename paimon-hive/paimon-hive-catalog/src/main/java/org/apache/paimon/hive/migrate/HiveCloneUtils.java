@@ -52,10 +52,10 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
-/** Utils for migrating Hive table to Paimon table. */
-public class HiveMigrateUtils {
+/** Utils for cloning Hive table to Paimon table. */
+public class HiveCloneUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(HiveMigrateUtils.class);
+    private static final Logger LOG = LoggerFactory.getLogger(HiveCloneUtils.class);
 
     private static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");

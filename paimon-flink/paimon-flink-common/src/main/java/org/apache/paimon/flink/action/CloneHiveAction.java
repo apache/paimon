@@ -19,17 +19,22 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.clone.CloneHiveUtils;
+import org.apache.paimon.flink.clone.hive.CloneFileInfo;
+import org.apache.paimon.flink.clone.hive.CloneHiveUtils;
+import org.apache.paimon.flink.clone.hive.CommitTableOperator;
+import org.apache.paimon.flink.clone.hive.CopyHiveFilesFunction;
+import org.apache.paimon.flink.clone.hive.DataFileInfo;
+import org.apache.paimon.flink.clone.hive.ListHiveFilesFunction;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.options.CatalogOptions;
 
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
 import java.util.Map;
 
 /** Clone source files managed by HiveMetaStore and commit metas to construct Paimon table. */
@@ -91,23 +96,33 @@ public class CloneHiveAction extends ActionBase {
                         source, new CloneHiveUtils.TableChannelComputer(), parallelism);
 
         // create target table, list files and group by <table, partition>
-        DataStream<List<CloneHiveUtils.CloneFilesInfo>> files =
+        DataStream<CloneFileInfo> files =
                 partitionedSource
                         .process(
-                                CloneHiveUtils.createTargetTableAndListFilesFunction(
+                                new ListHiveFilesFunction(
                                         sourceCatalogConfig, targetCatalogConfig, whereSql))
                         .name("List Files")
                         .setParallelism(parallelism);
 
         // copy files and commit
-        DataStream<Void> committed =
-                files.forward()
+        DataStream<DataFileInfo> dataFile =
+                files.rebalance()
                         .process(
-                                CloneHiveUtils.copyAndCommitFunction(
-                                        sourceCatalogConfig, targetCatalogConfig))
-                        .name("Copy and Commit")
+                                new CopyHiveFilesFunction(sourceCatalogConfig, targetCatalogConfig))
+                        .name("Copy Files")
                         .setParallelism(parallelism);
 
+        DataStream<DataFileInfo> partitionedDataFile =
+                FlinkStreamPartitioner.partition(
+                        dataFile, new CloneHiveUtils.DataFileChannelComputer(), parallelism);
+
+        DataStream<Long> committed =
+                partitionedDataFile
+                        .transform(
+                                "Commit table",
+                                BasicTypeInfo.LONG_TYPE_INFO,
+                                new CommitTableOperator(targetCatalogConfig))
+                        .setParallelism(parallelism);
         committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 

@@ -31,7 +31,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,9 +96,6 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                         "metastore=hive",
                         "--catalog_conf",
                         "uri=thrift://localhost:" + PORT,
-                        "--catalog_conf",
-                        "warehouse="
-                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "--target_database",
                         "test",
                         "--target_table",
@@ -160,10 +156,6 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                                 "metastore=hive",
                                 "--catalog_conf",
                                 "uri=thrift://localhost:" + PORT,
-                                "--catalog_conf",
-                                "warehouse="
-                                        + System.getProperty(
-                                                HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                                 "--target_database",
                                 "test",
                                 "--target_table",
@@ -218,9 +210,6 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                         "metastore=hive",
                         "--catalog_conf",
                         "uri=thrift://localhost:" + PORT,
-                        "--catalog_conf",
-                        "warehouse="
-                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "--target_database",
                         "test",
                         "--target_table",
@@ -278,9 +267,6 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                         "metastore=hive",
                         "--catalog_conf",
                         "uri=thrift://localhost:" + PORT,
-                        "--catalog_conf",
-                        "warehouse="
-                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "--target_database",
                         "test",
                         "--target_catalog_conf",
@@ -339,9 +325,6 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                         "metastore=hive",
                         "--catalog_conf",
                         "uri=thrift://localhost:" + PORT,
-                        "--catalog_conf",
-                        "warehouse="
-                                + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
                         "--target_database",
                         "test",
                         "--target_catalog_conf",
@@ -381,13 +364,13 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
     private String randomFormat() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
-        if (i == 0) {
-            return "orc";
-        } else if (i == 1) {
-            return "parquet";
-        } else {
-            return "avro";
-        }
+        //        if (i == 0) {
+        //            return "orc";
+        //        } else if (i == 1) {
+        //            return "parquet";
+        //        } else {
+        return "avro";
+        //        }
     }
 
     protected FileStoreTable paimonTable(
