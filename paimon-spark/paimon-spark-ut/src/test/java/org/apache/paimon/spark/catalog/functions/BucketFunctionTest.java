@@ -302,9 +302,7 @@ public class BucketFunctionTest {
 
     @Test
     public void testMultipleTypes() {
-
         List<String> allColumns = ROW_TYPE.getFieldNames();
-        // the order of columns matters
         String[] bucketColumns = null;
         while (bucketColumns == null || bucketColumns.length < 2) {
             bucketColumns =
