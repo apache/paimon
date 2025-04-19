@@ -62,7 +62,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
     @Test
     public void testForCompactPlan() {
         List<DataFileMeta> files = generateNewFiles(200, 0);
-        assertTasks(files, 1);
+        assertTasks(files, 2);
     }
 
     @Test
@@ -76,7 +76,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
         List<DataFileMeta> files =
                 generateNewFiles(
                         100, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 3 + 1);
-        assertTasks(files, 1);
+        assertTasks(files, 17);
     }
 
     @Test
@@ -94,14 +94,14 @@ public class UnawareAppendTableCompactionCoordinatorTest {
                         1000, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 10);
         compactionCoordinator.notifyNewFiles(partition, files);
 
-        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(3);
+        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(56);
         files.clear();
 
         files =
                 generateNewFiles(
                         1050, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 5);
         compactionCoordinator.notifyNewFiles(partition, files);
-        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(5);
+        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(105);
     }
 
     @Test
@@ -110,7 +110,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
                 generateNewFiles(
                         1089, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 5);
         compactionCoordinator.notifyNewFiles(partition, files);
-        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(5);
+        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(109);
     }
 
     @Test

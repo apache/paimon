@@ -327,7 +327,7 @@ public class UnawareAppendTableCompactionCoordinator {
             }
 
             private boolean enoughContent() {
-                return bin.size() > 1 && totalFileSize >= targetFileSize * 50;
+                return bin.size() > 1 && totalFileSize >= targetFileSize * 2;
             }
 
             private boolean enoughInputFiles() {
