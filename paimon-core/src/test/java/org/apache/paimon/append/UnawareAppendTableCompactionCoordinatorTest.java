@@ -18,8 +18,8 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.append.UnawareAppendDeletionFileMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -29,6 +29,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.types.DataTypes;
 
@@ -42,6 +43,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.COMPACTION_MIN_FILE_NUM;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -172,6 +175,18 @@ public class UnawareAppendTableCompactionCoordinatorTest {
                 .satisfies(anyCauseMatches(EndOfScanException.class));
     }
 
+    @Test
+    public void testDeleteRatio() {
+        List<DataFileMeta> files =
+                generateNewFiles(
+                        2, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 3 + 1);
+        UnawareAppendDeletionFileMaintainer dvMaintainer =
+                compactionCoordinator.dvMaintainer(partition);
+        DeletionFile deletionFile = new DeletionFile("", 0, 0, 11L);
+        dvMaintainer.putDeletionFile(files.get(0).fileName(), deletionFile);
+        assertTasks(files, 1);
+    }
+
     private void assertTasks(List<DataFileMeta> files, int taskNum) {
         compactionCoordinator.notifyNewFiles(partition, files);
         List<UnawareAppendCompactionTask> tasks = compactionCoordinator.compactPlan();
@@ -184,7 +199,8 @@ public class UnawareAppendTableCompactionCoordinatorTest {
         schemaBuilder.column("f1", DataTypes.STRING());
         schemaBuilder.column("f2", DataTypes.STRING());
         schemaBuilder.column("f3", DataTypes.STRING());
-        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "3");
+        schemaBuilder.option(COMPACTION_MIN_FILE_NUM.key(), "3");
+        schemaBuilder.option(DELETION_VECTORS_ENABLED.key(), "true");
         return schemaBuilder.build();
     }
 
@@ -199,7 +215,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
                 FileStoreTableFactory.create(
                         fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
         compactionCoordinator =
-                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable);
+                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable, true);
         partition = BinaryRow.EMPTY_ROW;
     }
 
@@ -215,7 +231,7 @@ public class UnawareAppendTableCompactionCoordinatorTest {
         return new DataFileMeta(
                 UUID.randomUUID().toString(),
                 fileSize,
-                1,
+                100,
                 row(0),
                 row(0),
                 newSimpleStats(0, 1),

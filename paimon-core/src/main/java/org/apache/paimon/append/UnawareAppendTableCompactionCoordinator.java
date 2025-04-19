@@ -25,12 +25,12 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer;
 import org.apache.paimon.deletionvectors.append.UnawareAppendDeletionFileMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -78,6 +78,7 @@ public class UnawareAppendTableCompactionCoordinator {
     private final SnapshotManager snapshotManager;
     private final long targetFileSize;
     private final long compactionFileSize;
+    private final double deleteThreshold;
     private final long openFileCost;
     private final int minFileNum;
     private final DvMaintainerCache dvMaintainerCache;
@@ -85,10 +86,6 @@ public class UnawareAppendTableCompactionCoordinator {
 
     final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
             new HashMap<>();
-
-    public UnawareAppendTableCompactionCoordinator(FileStoreTable table) {
-        this(table, true);
-    }
 
     public UnawareAppendTableCompactionCoordinator(FileStoreTable table, boolean isStreaming) {
         this(table, isStreaming, null);
@@ -101,6 +98,7 @@ public class UnawareAppendTableCompactionCoordinator {
         CoreOptions options = table.coreOptions();
         this.targetFileSize = options.targetFileSize(false);
         this.compactionFileSize = options.compactionFileSize(false);
+        this.deleteThreshold = options.compactionDeleteRatioThreshold();
         this.openFileCost = options.splitOpenFileCost();
         this.minFileNum = options.compactionMinFileNum();
         this.dvMaintainerCache =
@@ -274,13 +272,13 @@ public class UnawareAppendTableCompactionCoordinator {
             FileBin fileBin = new FileBin();
             for (DataFileMeta fileMeta : files) {
                 fileBin.addFile(fileMeta);
-                if (fileBin.binFull()) {
+                if (fileBin.enoughContent()) {
                     result.add(new ArrayList<>(fileBin.bin));
-                    // remove it from coordinator memory, won't join in compaction again
                     fileBin.reset();
                 }
             }
-            if (fileBin.fileNum >= minFileNum) {
+
+            if (fileBin.enoughInputFiles() || fileBin.containsTooHighDeleteFile()) {
                 result.add(new ArrayList<>(fileBin.bin));
                 fileBin.reset();
             }
@@ -289,11 +287,13 @@ public class UnawareAppendTableCompactionCoordinator {
 
         private List<List<DataFileMeta>> packInDeletionVectorVMode(Set<DataFileMeta> toCompact) {
             // we group the data files by their related index files.
-            Map<IndexFileMeta, List<DataFileMeta>> filesWithDV = new HashMap<>();
+            Map<String, List<DataFileMeta>> filesWithDV = new HashMap<>();
             Set<DataFileMeta> rest = new HashSet<>();
             for (DataFileMeta dataFile : toCompact) {
-                IndexFileMeta indexFile =
-                        dvMaintainerCache.dvMaintainer(partition).getIndexFile(dataFile.fileName());
+                String indexFile =
+                        dvMaintainerCache
+                                .dvMaintainer(partition)
+                                .getIndexFilePath(dataFile.fileName());
                 if (indexFile == null) {
                     rest.add(dataFile);
                 } else {
@@ -314,23 +314,28 @@ public class UnawareAppendTableCompactionCoordinator {
         private class FileBin {
             List<DataFileMeta> bin = new ArrayList<>();
             long totalFileSize = 0;
-            int fileNum = 0;
 
             public void reset() {
                 bin.forEach(toCompact::remove);
                 bin.clear();
                 totalFileSize = 0;
-                fileNum = 0;
             }
 
             public void addFile(DataFileMeta file) {
                 totalFileSize += file.fileSize() + openFileCost;
-                fileNum++;
                 bin.add(file);
             }
 
-            public boolean binFull() {
-                return totalFileSize >= targetFileSize * 50 && fileNum >= minFileNum;
+            private boolean enoughContent() {
+                return bin.size() > 1 && totalFileSize >= targetFileSize * 50;
+            }
+
+            private boolean enoughInputFiles() {
+                return bin.size() >= minFileNum;
+            }
+
+            private boolean containsTooHighDeleteFile() {
+                return bin.stream().anyMatch(file -> tooHighDeleteRatio(partition, file));
             }
         }
     }
@@ -421,12 +426,7 @@ public class UnawareAppendTableCompactionCoordinator {
                             return true;
                         }
 
-                        if (dvMaintainerCache != null) {
-                            return dvMaintainerCache
-                                    .dvMaintainer(entry.partition())
-                                    .hasDeletionFile(entry.fileName());
-                        }
-                        return false;
+                        return tooHighDeleteRatio(entry.partition(), entry.file());
                     };
             currentIterator =
                     snapshotReader
@@ -456,5 +456,23 @@ public class UnawareAppendTableCompactionCoordinator {
                 currentIterator = null;
             }
         }
+    }
+
+    private boolean tooHighDeleteRatio(BinaryRow partition, DataFileMeta file) {
+        if (dvMaintainerCache != null) {
+            DeletionFile deletionFile =
+                    dvMaintainerCache.dvMaintainer(partition).getDeletionFile(file.fileName());
+            if (deletionFile != null) {
+                Long cardinality = deletionFile.cardinality();
+                long rowCount = file.rowCount();
+                return cardinality == null || cardinality > rowCount * deleteThreshold;
+            }
+        }
+        return false;
+    }
+
+    @VisibleForTesting
+    UnawareAppendDeletionFileMaintainer dvMaintainer(BinaryRow partition) {
+        return dvMaintainerCache.dvMaintainer(partition);
     }
 }

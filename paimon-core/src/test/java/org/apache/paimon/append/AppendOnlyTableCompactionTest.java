@@ -81,7 +81,7 @@ public class AppendOnlyTableCompactionTest {
                         new org.apache.paimon.fs.Path(tempDir.toString()),
                         tableSchema);
         compactionCoordinator =
-                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable);
+                new UnawareAppendTableCompactionCoordinator(appendOnlyFileStoreTable, true);
         write = (AppendOnlyFileStoreWrite) appendOnlyFileStoreTable.store().newWrite(commitUser);
     }
 

@@ -636,6 +636,14 @@ public class CoreOptions implements Serializable {
                             "For file set [f_0,...,f_N], the minimum file number to trigger a compaction for "
                                     + "append-only table.");
 
+    public static final ConfigOption<Double> COMPACTION_DELETE_RATIO_THRESHOLD =
+            key("compaction.delete-ratio-threshold")
+                    .doubleType()
+                    .defaultValue(0.1)
+                    .withDescription(
+                            "Ratio of the deleted rows in a data file to be forced compacted for "
+                                    + "append-only table.");
+
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
                     .enumType(ChangelogProducer.class)
@@ -2193,6 +2201,10 @@ public class CoreOptions implements Serializable {
 
     public int compactionMinFileNum() {
         return options.get(COMPACTION_MIN_FILE_NUM);
+    }
+
+    public double compactionDeleteRatioThreshold() {
+        return options.get(COMPACTION_DELETE_RATIO_THRESHOLD);
     }
 
     public long dynamicBucketTargetRowNum() {

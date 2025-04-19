@@ -62,7 +62,7 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
             Map<String, DeletionFile> deletionFiles) {
         this.indexFileHandler = indexFileHandler;
         this.partition = partition;
-        this.dataFileToDeletionFile = deletionFiles;
+        this.dataFileToDeletionFile = new HashMap<>(deletionFiles);
         // the deletion of data files is independent
         // just create an empty maintainer
         this.maintainer = new DeletionVectorsMaintainer.Factory(indexFileHandler).create();
@@ -100,12 +100,12 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
         return UNAWARE_BUCKET;
     }
 
-    public boolean hasDeletionFile(String dataFile) {
-        return this.dataFileToDeletionFile.containsKey(dataFile);
-    }
-
     public DeletionFile getDeletionFile(String dataFile) {
         return this.dataFileToDeletionFile.get(dataFile);
+    }
+
+    public void putDeletionFile(String dataFile, DeletionFile deletionFile) {
+        this.dataFileToDeletionFile.put(dataFile, deletionFile);
     }
 
     public DeletionVector getDeletionVector(String dataFile) {
@@ -151,15 +151,9 @@ public class UnawareAppendDeletionFileMaintainer implements AppendDeletionFileMa
         return result;
     }
 
-    public IndexFileMeta getIndexFile(String dataFile) {
+    public String getIndexFilePath(String dataFile) {
         DeletionFile deletionFile = getDeletionFile(dataFile);
-        if (deletionFile == null) {
-            return null;
-        } else {
-            IndexManifestEntry entry =
-                    this.indexNameToEntry.get(new Path(deletionFile.path()).getName());
-            return entry == null ? null : entry.indexFile();
-        }
+        return deletionFile == null ? null : deletionFile.path();
     }
 
     @VisibleForTesting
