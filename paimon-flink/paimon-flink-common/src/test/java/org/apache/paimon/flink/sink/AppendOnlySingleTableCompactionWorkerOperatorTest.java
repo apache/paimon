@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -70,14 +70,14 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 20);
 
-        List<UnawareAppendCompactionTask> tasks = packTask(commitMessages, 5);
-        List<StreamRecord<UnawareAppendCompactionTask>> records =
+        List<AppendCompactTask> tasks = packTask(commitMessages, 5);
+        List<StreamRecord<AppendCompactTask>> records =
                 tasks.stream().map(StreamRecord::new).collect(Collectors.toList());
         Assertions.assertThat(tasks.size()).isEqualTo(4);
 
         workerOperator.open();
 
-        for (StreamRecord<UnawareAppendCompactionTask> record : records) {
+        for (StreamRecord<AppendCompactTask> record : records) {
             workerOperator.processElement(record);
         }
 
@@ -137,14 +137,14 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 40);
 
-        List<UnawareAppendCompactionTask> tasks = packTask(commitMessages, 5);
-        List<StreamRecord<UnawareAppendCompactionTask>> records =
+        List<AppendCompactTask> tasks = packTask(commitMessages, 5);
+        List<StreamRecord<AppendCompactTask>> records =
                 tasks.stream().map(StreamRecord::new).collect(Collectors.toList());
         Assertions.assertThat(tasks.size()).isEqualTo(8);
 
         workerOperator.open();
 
-        for (StreamRecord<UnawareAppendCompactionTask> record : records) {
+        for (StreamRecord<AppendCompactTask> record : records) {
             workerOperator.processElement(record);
         }
 
@@ -217,9 +217,8 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         return GenericRow.of(RANDOM.nextInt(), RANDOM.nextLong(), randomString());
     }
 
-    public static List<UnawareAppendCompactionTask> packTask(
-            List<CommitMessage> messages, int fileSize) {
-        List<UnawareAppendCompactionTask> result = new ArrayList<>();
+    public static List<AppendCompactTask> packTask(List<CommitMessage> messages, int fileSize) {
+        List<AppendCompactTask> result = new ArrayList<>();
         List<DataFileMeta> metas =
                 messages.stream()
                         .flatMap(
@@ -230,12 +229,10 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         for (int i = 0; i < metas.size(); i += fileSize) {
             if (i < metas.size() - fileSize) {
                 result.add(
-                        new UnawareAppendCompactionTask(
-                                BinaryRow.EMPTY_ROW, metas.subList(i, i + fileSize)));
+                        new AppendCompactTask(BinaryRow.EMPTY_ROW, metas.subList(i, i + fileSize)));
             } else {
                 result.add(
-                        new UnawareAppendCompactionTask(
-                                BinaryRow.EMPTY_ROW, metas.subList(i, metas.size())));
+                        new AppendCompactTask(BinaryRow.EMPTY_ROW, metas.subList(i, metas.size())));
             }
         }
         return result;

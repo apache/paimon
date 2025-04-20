@@ -20,8 +20,8 @@ package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainerHelper;
-import org.apache.paimon.deletionvectors.append.UnawareAppendDeletionFileMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -120,7 +120,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         return fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
     }
 
-    public UnawareAppendDeletionFileMaintainer createDVIFMaintainer(
+    public AppendDeleteFileMaintainer createDVIFMaintainer(
             BinaryRow partition, Map<String, DeletionFile> dataFileToDeletionFiles) {
         return AppendDeletionFileMaintainerHelper.fromDeletionFiles(
                 fileHandler, partition, dataFileToDeletionFiles);

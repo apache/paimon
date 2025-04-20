@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.StreamOperator;
@@ -29,7 +29,7 @@ import org.apache.flink.types.Either;
 
 /** A {@link AppendCompactWorkerOperator} to bypass Committable inputs. */
 public class AppendBypassCompactWorkerOperator
-        extends AppendCompactWorkerOperator<Either<Committable, UnawareAppendCompactionTask>> {
+        extends AppendCompactWorkerOperator<Either<Committable, AppendCompactTask>> {
 
     private AppendBypassCompactWorkerOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -44,8 +44,7 @@ public class AppendBypassCompactWorkerOperator
     }
 
     @Override
-    public void processElement(
-            StreamRecord<Either<Committable, UnawareAppendCompactionTask>> element)
+    public void processElement(StreamRecord<Either<Committable, AppendCompactTask>> element)
             throws Exception {
         if (element.getValue().isLeft()) {
             output.collect(new StreamRecord<>(element.getValue().left()));
@@ -56,8 +55,7 @@ public class AppendBypassCompactWorkerOperator
 
     /** {@link StreamOperatorFactory} of {@link AppendBypassCompactWorkerOperator}. */
     public static class Factory
-            extends AppendCompactWorkerOperator.Factory<
-                    Either<Committable, UnawareAppendCompactionTask>> {
+            extends AppendCompactWorkerOperator.Factory<Either<Committable, AppendCompactTask>> {
 
         public Factory(FileStoreTable table, String initialCommitUser) {
             super(table, initialCommitUser);

@@ -639,7 +639,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Double> COMPACTION_DELETE_RATIO_THRESHOLD =
             key("compaction.delete-ratio-threshold")
                     .doubleType()
-                    .defaultValue(0.1)
+                    .defaultValue(0.2)
                     .withDescription(
                             "Ratio of the deleted rows in a data file to be forced compacted for "
                                     + "append-only table.");

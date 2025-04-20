@@ -24,13 +24,13 @@ import org.apache.paimon.table.source.DeletionFile;
 
 import java.util.Map;
 
-/** Helper for {@link AppendDeletionFileMaintainer}. */
+/** Helper for {@link BaseAppendDeleteFileMaintainer}. */
 public class AppendDeletionFileMaintainerHelper {
 
-    public static UnawareAppendDeletionFileMaintainer fromDeletionFiles(
+    public static AppendDeleteFileMaintainer fromDeletionFiles(
             IndexFileHandler indexFileHandler,
             BinaryRow partition,
             Map<String, DeletionFile> deletionFiles) {
-        return new UnawareAppendDeletionFileMaintainer(indexFileHandler, partition, deletionFiles);
+        return new AppendDeleteFileMaintainer(indexFileHandler, partition, deletionFiles);
     }
 }

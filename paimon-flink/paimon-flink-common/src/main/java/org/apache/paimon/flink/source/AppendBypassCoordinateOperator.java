@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.append.UnawareAppendCompactionTask;
-import org.apache.paimon.append.UnawareAppendTableCompactionCoordinator;
+import org.apache.paimon.append.AppendCompactCoordinator;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ExecutorUtils;
@@ -46,8 +46,8 @@ import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
  * compact task to downstream operators.
  */
 public class AppendBypassCoordinateOperator<CommitT>
-        extends AbstractStreamOperator<Either<CommitT, UnawareAppendCompactionTask>>
-        implements OneInputStreamOperator<CommitT, Either<CommitT, UnawareAppendCompactionTask>>,
+        extends AbstractStreamOperator<Either<CommitT, AppendCompactTask>>
+        implements OneInputStreamOperator<CommitT, Either<CommitT, AppendCompactTask>>,
                 ProcessingTimeCallback {
 
     private static final long MAX_PENDING_TASKS = 5000;
@@ -55,10 +55,10 @@ public class AppendBypassCoordinateOperator<CommitT>
     private final FileStoreTable table;
 
     private transient ScheduledExecutorService executorService;
-    private transient LinkedBlockingQueue<UnawareAppendCompactionTask> compactTasks;
+    private transient LinkedBlockingQueue<AppendCompactTask> compactTasks;
 
     public AppendBypassCoordinateOperator(
-            StreamOperatorParameters<Either<CommitT, UnawareAppendCompactionTask>> parameters,
+            StreamOperatorParameters<Either<CommitT, AppendCompactTask>> parameters,
             FileStoreTable table,
             ProcessingTimeService processingTimeService) {
         this.table = table;
@@ -74,8 +74,7 @@ public class AppendBypassCoordinateOperator<CommitT>
                 "Compaction Coordinator parallelism in paimon MUST be one.");
         long intervalMs = table.coreOptions().continuousDiscoveryInterval().toMillis();
         this.compactTasks = new LinkedBlockingQueue<>();
-        UnawareAppendTableCompactionCoordinator coordinator =
-                new UnawareAppendTableCompactionCoordinator(table, true, null);
+        AppendCompactCoordinator coordinator = new AppendCompactCoordinator(table, true, null);
         this.executorService =
                 Executors.newSingleThreadScheduledExecutor(
                         newDaemonThreadFactory("Compaction Coordinator"));
@@ -84,9 +83,9 @@ public class AppendBypassCoordinateOperator<CommitT>
         this.getProcessingTimeService().scheduleWithFixedDelay(this, 0, intervalMs);
     }
 
-    private void asyncPlan(UnawareAppendTableCompactionCoordinator coordinator) {
+    private void asyncPlan(AppendCompactCoordinator coordinator) {
         while (compactTasks.size() < MAX_PENDING_TASKS) {
-            List<UnawareAppendCompactionTask> tasks = coordinator.run();
+            List<AppendCompactTask> tasks = coordinator.run();
             compactTasks.addAll(tasks);
             if (tasks.isEmpty()) {
                 break;
@@ -97,7 +96,7 @@ public class AppendBypassCoordinateOperator<CommitT>
     @Override
     public void onProcessingTime(long time) {
         while (true) {
-            UnawareAppendCompactionTask task = compactTasks.poll();
+            AppendCompactTask task = compactTasks.poll();
             if (task == null) {
                 return;
             }

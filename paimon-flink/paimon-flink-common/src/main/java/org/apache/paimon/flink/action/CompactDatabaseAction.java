@@ -19,11 +19,11 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
+import org.apache.paimon.append.MultiTableAppendCompactTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
+import org.apache.paimon.flink.compact.AppendTableCompactBuilder;
 import org.apache.paimon.flink.sink.BucketsRowChannelComputer;
 import org.apache.paimon.flink.sink.CombinedTableCompactorSink;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
@@ -234,7 +234,7 @@ public class CompactDatabaseAction extends ActionBase {
                         parallelism);
 
         // unaware bucket table
-        DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource =
+        DataStream<MultiTableAppendCompactTask> unawareBucketTableSource =
                 rebalance(
                         sourceBuilder
                                 .withEnv(env)
@@ -278,8 +278,8 @@ public class CompactDatabaseAction extends ActionBase {
 
     private void buildForUnawareBucketCompaction(
             StreamExecutionEnvironment env, String fullName, FileStoreTable table) {
-        UnawareBucketCompactionTopoBuilder unawareBucketCompactionTopoBuilder =
-                new UnawareBucketCompactionTopoBuilder(env, fullName, table);
+        AppendTableCompactBuilder unawareBucketCompactionTopoBuilder =
+                new AppendTableCompactBuilder(env, fullName, table);
 
         unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
         unawareBucketCompactionTopoBuilder.withPartitionIdleTime(partitionIdleTime);

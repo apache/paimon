@@ -70,7 +70,7 @@ class AppendDeletionFileMaintainerTest {
                 createDeletionFileMapFromIndexFileMetas(
                         indexPathFactory, commitMessage2.indexIncrement().newIndexFiles()));
 
-        UnawareAppendDeletionFileMaintainer dvIFMaintainer =
+        AppendDeleteFileMaintainer dvIFMaintainer =
                 store.createDVIFMaintainer(BinaryRow.EMPTY_ROW, dataFileToDeletionFiles);
 
         // no dv should be rewritten, because nothing is changed.
