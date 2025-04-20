@@ -59,7 +59,7 @@ public class AppendOnlyTableCompactionTest {
     @TempDir private Path tempDir;
     private FileStoreTable appendOnlyFileStoreTable;
     private SnapshotManager snapshotManager;
-    private AppendCompactCoordinator compactionCoordinator;
+    private AppendCompactCoordinator coordinator;
     private BaseAppendFileStoreWrite write;
     private org.apache.paimon.fs.Path path;
     private TableSchema tableSchema;
@@ -80,7 +80,7 @@ public class AppendOnlyTableCompactionTest {
                         LocalFileIO.create(),
                         new org.apache.paimon.fs.Path(tempDir.toString()),
                         tableSchema);
-        compactionCoordinator = new AppendCompactCoordinator(appendOnlyFileStoreTable, true);
+        coordinator = new AppendCompactCoordinator(appendOnlyFileStoreTable, true);
         write = (BaseAppendFileStoreWrite) appendOnlyFileStoreTable.store().newWrite(commitUser);
     }
 
@@ -102,29 +102,29 @@ public class AppendOnlyTableCompactionTest {
 
         // first compact, six files left after commit compact and update restored files
         // test run method invoke scan and compactPlan
-        List<AppendCompactTask> tasks = compactionCoordinator.run();
+        List<AppendCompactTask> tasks = coordinator.run();
         assertThat(tasks.size()).isEqualTo(1);
         AppendCompactTask task = tasks.get(0);
         assertThat(task.compactBefore().size()).isEqualTo(11);
         List<CommitMessage> result = doCompact(tasks);
         assertThat(result.size()).isEqualTo(1);
         commit(result);
-        compactionCoordinator.scan();
-        assertThat(compactionCoordinator.listRestoredFiles().size()).isEqualTo(1);
+        coordinator.scan();
+        assertThat(coordinator.listRestoredFiles().size()).isEqualTo(1);
         messages = writeCommit(11);
         commit(messages);
 
         // second compact, only one file left after updateRestored
-        compactionCoordinator.scan();
-        assertThat(compactionCoordinator.listRestoredFiles().size()).isEqualTo(12);
-        tasks = compactionCoordinator.compactPlan();
+        coordinator.scan();
+        assertThat(coordinator.listRestoredFiles().size()).isEqualTo(12);
+        tasks = coordinator.compactPlan();
         assertThat(tasks.size()).isEqualTo(1);
         // before update, zero file left
-        assertThat(compactionCoordinator.listRestoredFiles().size()).isEqualTo(0);
+        assertThat(coordinator.listRestoredFiles().size()).isEqualTo(0);
         commit(doCompact(tasks));
-        compactionCoordinator.scan();
+        coordinator.scan();
         // one file is loaded from delta
-        List<DataFileMeta> last = new ArrayList<>(compactionCoordinator.listRestoredFiles());
+        List<DataFileMeta> last = new ArrayList<>(coordinator.listRestoredFiles());
         assertThat(last.size()).isEqualTo(1);
         assertThat(last.get(0).rowCount()).isEqualTo(22);
     }
@@ -135,7 +135,7 @@ public class AppendOnlyTableCompactionTest {
         commit(messages);
         tableSchema = tableSchema.copy(singletonMap("target-file-size", "1 b"));
         recreate();
-        assertThat(compactionCoordinator.filesIterator().next()).isNull();
+        assertThat(coordinator.filesIterator().next()).isNull();
     }
 
     @Test
@@ -147,13 +147,13 @@ public class AppendOnlyTableCompactionTest {
         for (int i = 90; i < 100; i++) {
             count += i;
             commit(writeCommit(i));
-            List<AppendCompactTask> tasks = compactionCoordinator.run();
+            List<AppendCompactTask> tasks = coordinator.run();
             assertThat(tasks).hasSizeGreaterThan(0);
             commit(doCompact(tasks));
             // scan the file generated itself
-            assertThat(compactionCoordinator.scan()).isTrue();
+            assertThat(coordinator.scan()).isTrue();
             assertThat(
-                            compactionCoordinator.listRestoredFiles().stream()
+                            coordinator.listRestoredFiles().stream()
                                     .map(DataFileMeta::rowCount)
                                     .reduce(Long::sum)
                                     .get())
@@ -161,18 +161,16 @@ public class AppendOnlyTableCompactionTest {
         }
 
         assertThat(appendOnlyFileStoreTable.store().newScan().plan().files().size())
-                .isEqualTo(compactionCoordinator.listRestoredFiles().size());
+                .isEqualTo(coordinator.listRestoredFiles().size());
 
-        List<AppendCompactTask> tasks = compactionCoordinator.run();
+        List<AppendCompactTask> tasks = coordinator.run();
         while (tasks.size() != 0) {
             commit(doCompact(tasks));
-            tasks = compactionCoordinator.run();
+            tasks = coordinator.run();
         }
 
         int remainedSize = appendOnlyFileStoreTable.store().newScan().plan().files().size();
-        assertThat(remainedSize)
-                .isEqualTo(compactionCoordinator.listRestoredFiles().size())
-                .isEqualTo(1);
+        assertThat(remainedSize).isEqualTo(coordinator.listRestoredFiles().size()).isEqualTo(1);
     }
 
     private static Schema schema() {

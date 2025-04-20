@@ -83,8 +83,7 @@ public class AppendCompactCoordinator {
     private final DvMaintainerCache dvMaintainerCache;
     private final FilesIterator filesIterator;
 
-    final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
-            new HashMap<>();
+    final Map<BinaryRow, SubCoordinator> subCoordinators = new HashMap<>();
 
     public AppendCompactCoordinator(FileStoreTable table, boolean isStreaming) {
         this(table, isStreaming, null);
@@ -157,8 +156,8 @@ public class AppendCompactCoordinator {
                 files.stream()
                         .filter(file -> shouldCompact(partition, file))
                         .collect(Collectors.toList());
-        partitionCompactCoordinators
-                .computeIfAbsent(partition, pp -> new PartitionCompactCoordinator(partition))
+        subCoordinators
+                .computeIfAbsent(partition, pp -> new SubCoordinator(partition))
                 .addFiles(toCompact);
     }
 
@@ -167,39 +166,35 @@ public class AppendCompactCoordinator {
     List<AppendCompactTask> compactPlan() {
         // first loop to found compaction tasks
         List<AppendCompactTask> tasks =
-                partitionCompactCoordinators.values().stream()
+                subCoordinators.values().stream()
                         .flatMap(s -> s.plan().stream())
                         .collect(Collectors.toList());
 
         // second loop to eliminate empty or old(with only one file) coordinator
-        new ArrayList<>(partitionCompactCoordinators.values())
+        new ArrayList<>(subCoordinators.values())
                 .stream()
-                        .filter(PartitionCompactCoordinator::readyToRemove)
-                        .map(PartitionCompactCoordinator::partition)
-                        .forEach(partitionCompactCoordinators::remove);
+                        .filter(SubCoordinator::readyToRemove)
+                        .map(SubCoordinator::partition)
+                        .forEach(subCoordinators::remove);
 
         return tasks;
     }
 
     @VisibleForTesting
     HashSet<DataFileMeta> listRestoredFiles() {
-        HashSet<DataFileMeta> sets = new HashSet<>();
-        partitionCompactCoordinators
-                .values()
-                .forEach(
-                        partitionCompactCoordinator ->
-                                sets.addAll(partitionCompactCoordinator.toCompact));
-        return sets;
+        HashSet<DataFileMeta> result = new HashSet<>();
+        subCoordinators.values().stream().map(SubCoordinator::toCompact).forEach(result::addAll);
+        return result;
     }
 
     /** Coordinator for a single partition. */
-    class PartitionCompactCoordinator {
+    class SubCoordinator {
 
         private final BinaryRow partition;
         private final HashSet<DataFileMeta> toCompact = new HashSet<>();
         int age = 0;
 
-        public PartitionCompactCoordinator(BinaryRow partition) {
+        public SubCoordinator(BinaryRow partition) {
             this.partition = partition;
         }
 
@@ -209,6 +204,10 @@ public class AppendCompactCoordinator {
 
         public BinaryRow partition() {
             return partition;
+        }
+
+        public HashSet<DataFileMeta> toCompact() {
+            return toCompact;
         }
 
         private List<AppendCompactTask> pickCompact() {
@@ -260,13 +259,12 @@ public class AppendCompactCoordinator {
             for (DataFileMeta fileMeta : files) {
                 fileBin.addFile(fileMeta);
                 if (fileBin.enoughContent()) {
-                    result.add(new ArrayList<>(fileBin.bin));
-                    fileBin.reset();
+                    result.add(fileBin.drain());
                 }
             }
 
             if (fileBin.enoughInputFiles()) {
-                result.add(new ArrayList<>(fileBin.bin));
+                result.add(fileBin.drain());
             }
             // else skip these small files that are too few
 
@@ -301,14 +299,13 @@ public class AppendCompactCoordinator {
             for (List<DataFileMeta> dvGroup : dvGroups) {
                 fileBin.addFiles(dvGroup);
                 if (fileBin.enoughContent()) {
-                    result.add(new ArrayList<>(fileBin.bin));
-                    fileBin.reset();
+                    result.add(fileBin.drain());
                 }
             }
 
             // for file with deletion vectors, must do compaction
             if (!fileBin.bin.isEmpty()) {
-                result.add(new ArrayList<>(fileBin.bin));
+                result.add(fileBin.drain());
             }
 
             if (rest.size() > 1) {
@@ -321,17 +318,17 @@ public class AppendCompactCoordinator {
             return list.stream().mapToLong(DataFileMeta::fileSize).sum();
         }
 
-        /**
-         * A file bin for {@link PartitionCompactCoordinator} determine whether ready to compact.
-         */
+        /** A file bin for {@link SubCoordinator} determine whether ready to compact. */
         private class FileBin {
             List<DataFileMeta> bin = new ArrayList<>();
             long totalFileSize = 0;
 
-            public void reset() {
+            public List<DataFileMeta> drain() {
+                List<DataFileMeta> result = new ArrayList<>(bin);
                 bin.forEach(toCompact::remove);
                 bin.clear();
                 totalFileSize = 0;
+                return result;
             }
 
             public void addFiles(List<DataFileMeta> files) {

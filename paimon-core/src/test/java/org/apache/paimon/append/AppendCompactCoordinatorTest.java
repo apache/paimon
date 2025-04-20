@@ -101,7 +101,7 @@ public class AppendCompactCoordinatorTest {
                 generateNewFiles(
                         1050, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 5);
         compactionCoordinator.notifyNewFiles(partition, files);
-        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(105);
+        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(106);
     }
 
     @Test
@@ -120,12 +120,12 @@ public class AppendCompactCoordinatorTest {
 
         for (int i = 0; i < AppendCompactCoordinator.REMOVE_AGE; i++) {
             assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(0);
-            assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
+            assertThat(compactionCoordinator.subCoordinators.size()).isEqualTo(1);
         }
 
         // age enough, eliminate partitionCoordinator
         assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(0);
-        assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(0);
+        assertThat(compactionCoordinator.subCoordinators.size()).isEqualTo(0);
     }
 
     @Test
@@ -135,7 +135,7 @@ public class AppendCompactCoordinatorTest {
 
         for (int i = 0; i < AppendCompactCoordinator.COMPACT_AGE; i++) {
             assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(0);
-            assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
+            assertThat(compactionCoordinator.subCoordinators.size()).isEqualTo(1);
         }
 
         // age enough, generate less file compaction
@@ -143,7 +143,7 @@ public class AppendCompactCoordinatorTest {
         assertThat(tasks.size()).isEqualTo(1);
         assertThat(new HashSet<>(files))
                 .containsExactlyInAnyOrderElementsOf(tasks.get(0).compactBefore());
-        assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(0);
+        assertThat(compactionCoordinator.subCoordinators.size()).isEqualTo(0);
     }
 
     @Test
@@ -153,18 +153,16 @@ public class AppendCompactCoordinatorTest {
 
         for (int i = 0; i < AppendCompactCoordinator.REMOVE_AGE; i++) {
             compactionCoordinator.compactPlan();
-            assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
-            assertThat(compactionCoordinator.partitionCompactCoordinators.get(partition).age)
-                    .isEqualTo(i + 1);
+            assertThat(compactionCoordinator.subCoordinators.size()).isEqualTo(1);
+            assertThat(compactionCoordinator.subCoordinators.get(partition).age).isEqualTo(i + 1);
         }
 
         // clear age
         compactionCoordinator.notifyNewFiles(partition, generateNewFiles(1, 0));
-        assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
+        assertThat(compactionCoordinator.subCoordinators.size()).isEqualTo(1);
 
         // check whether age goes to zero again
-        assertThat(compactionCoordinator.partitionCompactCoordinators.get(partition).age)
-                .isEqualTo(0);
+        assertThat(compactionCoordinator.subCoordinators.get(partition).age).isEqualTo(0);
     }
 
     @Test
