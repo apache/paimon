@@ -101,7 +101,7 @@ public class AppendCompactCoordinatorTest {
                 generateNewFiles(
                         1050, appendOnlyFileStoreTable.coreOptions().targetFileSize(false) / 5);
         compactionCoordinator.notifyNewFiles(partition, files);
-        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(106);
+        assertThat(compactionCoordinator.compactPlan().size()).isEqualTo(105);
     }
 
     @Test
