@@ -34,14 +34,17 @@ Clone Hive Table supports cloning hive tables with parquet, orc and avro formats
 ```bash
 <FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar \
 clone_hive \
---database default
---table hivetable
---catalog_conf metastore=hive
---catalog_conf uri=thrift://localhost:9088
---target_database test
---target_table test_table
---target_catalog_conf warehouse=my_warehouse
+--database default \
+--table hivetable \
+--catalog_conf metastore=hive \
+--catalog_conf uri=thrift://localhost:9088 \
+--target_database test \
+--target_table test_table \
+--target_catalog_conf warehouse=my_warehouse \
+--where <filter_spec>
 ```
+
+You can use filter spec to specify the filtering condition for the partition.
 
 ## Clone Hive Database
 
