@@ -1467,7 +1467,11 @@ public class HiveCatalog extends AbstractCatalog {
         sd.setSerdeInfo(serDeInfo);
 
         CoreOptions options = new CoreOptions(schema.options());
-        if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
+        boolean partitioned = !schema.partitionKeys().isEmpty();
+        if (provider == null && !options.partitionedTableInMetastore()) {
+            partitioned = false;
+        }
+        if (partitioned) {
             Map<String, DataField> fieldMap =
                     schema.fields().stream()
                             .collect(Collectors.toMap(DataField::name, Function.identity()));
