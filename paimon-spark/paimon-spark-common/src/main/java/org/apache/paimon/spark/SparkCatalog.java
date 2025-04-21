@@ -47,6 +47,7 @@ import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.execution.PartitionedCSVTable;
+import org.apache.spark.sql.execution.PartitionedJsonTable;
 import org.apache.spark.sql.execution.PartitionedOrcTable;
 import org.apache.spark.sql.execution.PartitionedParquetTable;
 import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
@@ -54,7 +55,6 @@ import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
 import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
 import org.apache.spark.sql.execution.datasources.v2.FileTable;
-import org.apache.spark.sql.execution.datasources.v2.json.JsonTable;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -502,13 +502,14 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
                     ParquetFileFormat.class,
                     partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.JSON) {
-            return new JsonTable(
+            return new PartitionedJsonTable(
                     ident.name(),
                     SparkSession.active(),
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
-                    JsonFileFormat.class);
+                    JsonFileFormat.class,
+                    partitionSchema);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported format table "
