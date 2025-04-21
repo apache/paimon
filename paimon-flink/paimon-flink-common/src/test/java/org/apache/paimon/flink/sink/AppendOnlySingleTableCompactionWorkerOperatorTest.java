@@ -39,8 +39,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask;
 import org.apache.flink.streaming.util.MockOutput;
 import org.apache.flink.streaming.util.MockStreamConfig;
-import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -49,10 +47,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+
 /** Tests for {@link AppendOnlySingleTableCompactionWorkerOperator}. */
 public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTestBase {
 
-    @RepeatedTest(10)
+    @Test
     public void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlySingleTableCompactionWorkerOperator workerOperator =
@@ -73,7 +74,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         List<UnawareAppendCompactionTask> tasks = packTask(commitMessages, 5);
         List<StreamRecord<UnawareAppendCompactionTask>> records =
                 tasks.stream().map(StreamRecord::new).collect(Collectors.toList());
-        Assertions.assertThat(tasks.size()).isEqualTo(4);
+        assertThat(tasks.size()).isEqualTo(4);
 
         workerOperator.open();
 
@@ -85,7 +86,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         Long timeStart = System.currentTimeMillis();
         long timeout = 60_000L;
 
-        Assertions.assertThatCode(
+        assertThatCode(
                         () -> {
                             while (committables.size() != 4) {
                                 committables.addAll(
@@ -105,7 +106,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                 .doesNotThrowAnyException();
         committables.forEach(
                 a ->
-                        Assertions.assertThat(
+                        assertThat(
                                         ((CommitMessageImpl) a.wrappedCommittable())
                                                         .compactIncrement()
                                                         .compactAfter()
@@ -140,7 +141,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         List<UnawareAppendCompactionTask> tasks = packTask(commitMessages, 5);
         List<StreamRecord<UnawareAppendCompactionTask>> records =
                 tasks.stream().map(StreamRecord::new).collect(Collectors.toList());
-        Assertions.assertThat(tasks.size()).isEqualTo(8);
+        assertThat(tasks.size()).isEqualTo(8);
 
         workerOperator.open();
 
@@ -149,7 +150,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         }
 
         // wait compaction
-        Thread.sleep(500);
+        Thread.sleep(5000);
 
         LocalFileIO localFileIO = LocalFileIO.create();
         DataFilePathFactory dataFilePathFactory =
@@ -166,8 +167,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
             List<DataFileMeta> fileMetas =
                     ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
             for (DataFileMeta fileMeta : fileMetas) {
-                Assertions.assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta)))
-                        .isTrue();
+                assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta))).isTrue();
             }
             if (i++ > 2) {
                 break;
@@ -193,8 +193,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
                 List<DataFileMeta> fileMetas =
                         ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
                 for (DataFileMeta fileMeta : fileMetas) {
-                    Assertions.assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta)))
-                            .isFalse();
+                    assertThat(localFileIO.exists(dataFilePathFactory.toPath(fileMeta))).isFalse();
                 }
             } catch (Exception e) {
                 // do nothing

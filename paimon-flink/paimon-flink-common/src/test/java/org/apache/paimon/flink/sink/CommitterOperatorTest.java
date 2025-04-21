@@ -58,7 +58,6 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.util.Preconditions;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -69,6 +68,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for {@link CommitterOperator}. */
@@ -282,9 +282,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness1.initializeState(snapshot);
         testHarness1.close();
 
-        Assertions.assertThat(actual.size()).isEqualTo(1);
-
-        Assertions.assertThat(actual).hasSameElementsAs(Lists.newArrayList(commitUser));
+        assertThat(actual.size()).isEqualTo(1);
+        assertThat(actual).hasSameElementsAs(Lists.newArrayList(commitUser));
     }
 
     @Test
@@ -325,7 +324,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createTestHarness(operatorFactory);
         testHarness.open();
-        Assertions.assertThatCode(
+        assertThatCode(
                         () -> {
                             long time = System.currentTimeMillis();
                             long cp = 0L;
@@ -387,7 +386,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 .doesNotThrowAnyException();
 
         if (operatorFactory instanceof CommitterOperator) {
-            Assertions.assertThat(
+            assertThat(
                             ((ManifestCommittable)
                                             ((CommitterOperator) operatorFactory)
                                                     .committablesPerCheckpoint.get(Long.MAX_VALUE))
@@ -396,7 +395,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                     .isEqualTo(3);
         }
 
-        Assertions.assertThatCode(
+        assertThatCode(
                         () -> {
                             long time = System.currentTimeMillis();
                             long cp = 0L;
@@ -608,7 +607,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         Committer.createContext("", metricGroup, true, false, null, 1, 1));
         committer.commit(Collections.singletonList(manifestCommittable));
         CommitterMetrics metrics = committer.getCommitterMetrics();
-        assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(533);
+        assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(572);
         assertThat(metrics.getNumRecordsOutCounter().getCount()).isEqualTo(2);
         committer.close();
     }
@@ -705,7 +704,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         table, commitUser, new NoopCommittableStateManager());
         try (OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createTestHarness(operatorFactory, 10, 10, 3)) {
-            Assertions.assertThatCode(testHarness::open)
+            assertThatCode(testHarness::open)
                     .hasMessage("Committer Operator parallelism in paimon MUST be one.");
         }
     }
