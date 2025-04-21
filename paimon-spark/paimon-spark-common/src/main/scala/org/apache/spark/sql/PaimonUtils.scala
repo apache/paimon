@@ -30,7 +30,7 @@ import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy.translateFilterV2WithMapping
 import org.apache.spark.sql.internal.connector.PredicateUtils
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{DataType, StructType}
+import org.apache.spark.sql.types.{DataType, Metadata, StructType}
 import org.apache.spark.sql.util.PartitioningUtils
 import org.apache.spark.util.{Utils => SparkUtils}
 
@@ -124,5 +124,19 @@ object PaimonUtils {
 
   def sameType(left: DataType, right: DataType): Boolean = {
     left.sameType(right)
+  }
+
+  def toMetadata(jsonStr: String): Metadata = Metadata.fromJson(jsonStr)
+
+  def structTypeWithMetadata(structType: StructType, options: Map[String, String]): StructType = {
+    val newFields = structType.fields.map {
+      f =>
+        if (options.contains("fields." + f.name + ".metadataJson")) {
+          f.copy(metadata = toMetadata(options("fields." + f.name + ".metadataJson")))
+        } else {
+          f
+        }
+    }
+    StructType(newFields)
   }
 }
