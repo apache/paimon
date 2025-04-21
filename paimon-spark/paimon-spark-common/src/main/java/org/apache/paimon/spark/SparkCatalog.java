@@ -31,6 +31,7 @@ import org.apache.paimon.spark.catalog.SupportFunction;
 import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.FormatTableOptions;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
@@ -45,15 +46,15 @@ import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.execution.PartitionedCSVTable;
+import org.apache.spark.sql.execution.PartitionedOrcTable;
+import org.apache.spark.sql.execution.PartitionedParquetTable;
 import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
 import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
 import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
 import org.apache.spark.sql.execution.datasources.v2.FileTable;
-import org.apache.spark.sql.execution.datasources.v2.csv.CSVTable;
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable;
-import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable;
-import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -464,6 +465,9 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
 
     private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
         StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
+        StructType partitionSchema =
+                SparkTypeUtils.fromPaimonRowType(
+                        TypeUtils.project(formatTable.rowType(), formatTable.partitionKeys()));
         List<String> pathList = new ArrayList<>();
         pathList.add(formatTable.location());
         Options options = Options.fromMap(formatTable.options());
@@ -471,29 +475,32 @@ public class SparkCatalog extends SparkBaseCatalog implements SupportFunction, S
         if (formatTable.format() == FormatTable.Format.CSV) {
             options.set("sep", options.get(FormatTableOptions.FIELD_DELIMITER));
             dsOptions = new CaseInsensitiveStringMap(options.toMap());
-            return new CSVTable(
+            return new PartitionedCSVTable(
                     ident.name(),
                     SparkSession.active(),
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
-                    CSVFileFormat.class);
+                    CSVFileFormat.class,
+                    partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.ORC) {
-            return new OrcTable(
+            return new PartitionedOrcTable(
                     ident.name(),
                     SparkSession.active(),
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
-                    OrcFileFormat.class);
+                    OrcFileFormat.class,
+                    partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.PARQUET) {
-            return new ParquetTable(
+            return new PartitionedParquetTable(
                     ident.name(),
                     SparkSession.active(),
                     dsOptions,
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
-                    ParquetFileFormat.class);
+                    ParquetFileFormat.class,
+                    partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.JSON) {
             return new JsonTable(
                     ident.name(),
