@@ -27,7 +27,6 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -171,27 +170,6 @@ public class SparkCatalogWithHiveTest {
                                                 String.format(
                                                         "%s.db/%s", "test_db", "external_table"))))
                 .doesNotThrowAnyException();
-
-        spark.close();
-    }
-
-    @Disabled
-    @Test
-    public void testPartitionedFormatTable() {
-        SparkSession spark = createSessionBuilder().getOrCreate();
-        spark.sql("CREATE DATABASE IF NOT EXISTS test_db");
-        spark.sql("USE spark_catalog.test_db");
-
-        spark.sql(
-                "CREATE TABLE part_format_table (a INT, b INT, dt STRING) USING CSV PARTITIONED BY (dt)");
-        spark.sql("INSERT INTO TABLE part_format_table VALUES (1, 1, '1'), (2, 2, '2')");
-        assertThat(
-                        spark.sql("SELECT * FROM part_format_table").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
-                .containsExactlyInAnyOrder("[1,1,1]", "[2,2,2]");
-
-        // TODO assert partition paths, it should be true partitioned table
 
         spark.close();
     }

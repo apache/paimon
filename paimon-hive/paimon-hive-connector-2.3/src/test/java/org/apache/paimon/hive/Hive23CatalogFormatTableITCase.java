@@ -49,4 +49,10 @@ public class Hive23CatalogFormatTableITCase extends HiveCatalogFormatTableITCase
     public void testPartitionTable() {
         // Need to specify partition columns because the destination table is partitioned.
     }
+
+    @Override
+    @Test
+    public void testFlinkCreatePartitionTable() {
+        // Need to specify partition columns because the destination table is partitioned.
+    }
 }
