@@ -18,29 +18,19 @@
 
 package org.apache.paimon.flink.clone.hive;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.statistics.SimpleColStatsCollector;
-import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 
-import java.util.Collections;
 import java.util.Map;
 
 /** Copy files for table. */
@@ -60,36 +50,12 @@ public class CopyHiveFilesFunction extends CopyProcessFunction<CloneFileInfo, Da
             Collector<DataFileInfo> collector)
             throws Exception {
         Identifier identifier = cloneFileInfo.identifier();
-        long fileSize = cloneFileInfo.fileSize();
         String format = cloneFileInfo.format();
         Path path = cloneFileInfo.path();
         BinaryRow partition = cloneFileInfo.partition();
 
         FileIO sourceFileIO = hiveCatalog.fileIO();
         FileStoreTable targetTable = (FileStoreTable) getTable(identifier);
-        // util for collecting stats
-        CoreOptions options = targetTable.coreOptions();
-        SimpleColStatsCollector.Factory[] factories =
-                StatsCollectorFactories.createStatsFactories(
-                        options.statsMode(), options, targetTable.rowType().getFieldNames());
-
-        SimpleStatsExtractor simpleStatsExtractor =
-                FileFormat.fromIdentifier(format, options.toConfiguration())
-                        .createStatsExtractor(targetTable.rowType(), factories)
-                        .orElseThrow(
-                                () ->
-                                        new RuntimeException(
-                                                "Can't get table stats extractor for format "
-                                                        + format));
-        RowType rowTypeWithSchemaId =
-                targetTable.schemaManager().schema(targetTable.schema().id()).logicalRowType();
-
-        SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(rowTypeWithSchemaId);
-
-        // extract stats
-        Pair<SimpleColStats[], SimpleStatsExtractor.FileInfo> fileInfo =
-                simpleStatsExtractor.extractWithFileInfo(sourceFileIO, path, fileSize);
-        SimpleStats stats = statsArraySerializer.toBinaryAllMode(fileInfo.getLeft());
 
         // new file name
         String suffix = "." + format;
@@ -103,20 +69,16 @@ public class CopyHiveFilesFunction extends CopyProcessFunction<CloneFileInfo, Da
                 targetTable.fileIO().newOutputStream(new Path(targetFilePath, newFileName), false));
 
         // to DataFileMeta
+        SimpleStatsExtractor simpleStatsExtractor =
+                FileMetaUtils.createSimpleStatsExtractor(targetTable, format);
         DataFileMeta dataFileMeta =
-                DataFileMeta.forAppend(
+                FileMetaUtils.constructFileMeta(
                         newFileName,
-                        fileSize,
-                        fileInfo.getRight().getRowCount(),
-                        stats,
-                        0,
-                        0,
-                        targetTable.schema().id(),
-                        Collections.emptyList(),
-                        null,
-                        FileSource.APPEND,
-                        null,
-                        null);
+                        cloneFileInfo.fileSize(),
+                        path,
+                        simpleStatsExtractor,
+                        sourceFileIO,
+                        targetTable);
 
         collector.collect(
                 new DataFileInfo(

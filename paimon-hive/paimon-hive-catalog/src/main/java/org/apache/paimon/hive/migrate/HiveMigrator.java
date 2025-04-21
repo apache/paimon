@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.io.DataFileMeta;
@@ -56,10 +55,11 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
+import static org.apache.paimon.hive.migrate.HiveCloneUtils.HIDDEN_PATH_FILTER;
+import static org.apache.paimon.hive.migrate.HiveCloneUtils.parseFormat;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
@@ -68,9 +68,6 @@ public class HiveMigrator implements Migrator {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveMigrator.class);
     private ThreadPoolExecutor executor;
-
-    private static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
-            p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
 
     private static final String PAIMON_SUFFIX = "_paimon_";
 
@@ -359,18 +356,6 @@ public class HiveMigrator implements Migrator {
                 throw new RuntimeException(
                         "Source table partition keys not match target table partition keys, please checkCompatible.");
             }
-        }
-    }
-
-    private String parseFormat(String serder) {
-        if (serder.contains("avro")) {
-            return "avro";
-        } else if (serder.contains("parquet")) {
-            return "parquet";
-        } else if (serder.contains("orc")) {
-            return "orc";
-        } else {
-            throw new UnsupportedOperationException("Unknown partition format: " + serder);
         }
     }
 
