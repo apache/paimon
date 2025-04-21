@@ -97,7 +97,7 @@ public class ListHiveFilesFunction
 
     @VisibleForTesting
     @Nullable
-    public static PartitionPredicate getPartitionPredicate(
+    static PartitionPredicate getPartitionPredicate(
             @Nullable String whereSql, RowType partitionType, Identifier tableId) throws Exception {
         if (whereSql == null) {
             return null;

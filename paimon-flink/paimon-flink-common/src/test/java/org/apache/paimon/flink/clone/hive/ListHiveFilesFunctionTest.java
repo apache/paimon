@@ -16,13 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.clone.hive;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.flink.clone.hive.CloneHiveUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -33,8 +32,8 @@ import static org.apache.paimon.flink.clone.hive.ListHiveFilesFunction.getPartit
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link CloneHiveUtils}. */
-public class CloneHiveUtilsTest {
+/** Test for {@link ListHiveFilesFunction}. */
+public class ListHiveFilesFunctionTest {
 
     @Test
     public void testConvertSqlToPartitionPredicate() throws Exception {
