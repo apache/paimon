@@ -184,6 +184,7 @@ class PartitionedJsonTable(
     fallbackFileFormat: Class[_ <: FileFormat],
     partitionSchema: StructType)
   extends JsonTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat) {
+
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     PaimonFormatTable.createFileIndex(
       options,
