@@ -330,7 +330,7 @@ public class UnawareAppendTableCompactionCoordinator {
             }
 
             public boolean binFull() {
-                return totalFileSize >= targetFileSize * 50 && fileNum >= minFileNum;
+                return totalFileSize >= targetFileSize * 2 && fileNum >= minFileNum;
             }
         }
     }
