@@ -104,19 +104,7 @@ public class FileMetaUtils {
             Map<Path, Path> rollback) {
 
         try {
-            CoreOptions options = ((FileStoreTable) table).coreOptions();
-            SimpleColStatsCollector.Factory[] factories =
-                    StatsCollectorFactories.createStatsFactories(
-                            options.statsMode(), options, table.rowType().getFieldNames());
-
-            SimpleStatsExtractor simpleStatsExtractor =
-                    FileFormat.fromIdentifier(format, options.toConfiguration())
-                            .createStatsExtractor(table.rowType(), factories)
-                            .orElseThrow(
-                                    () ->
-                                            new RuntimeException(
-                                                    "Can't get table stats extractor for format "
-                                                            + format));
+            SimpleStatsExtractor simpleStatsExtractor = createSimpleStatsExtractor(table, format);
             Path newPath = renameFile(fileIO, fileStatus.getPath(), dir, format, rollback);
             return constructFileMeta(
                     newPath.getName(),
@@ -169,8 +157,6 @@ public class FileMetaUtils {
         }
     }
 
-    // -----------------------------private method---------------------------------------------
-
     private static Path renameFile(
             FileIO fileIO, Path originPath, Path newDir, String format, Map<Path, Path> rollback)
             throws IOException {
@@ -184,7 +170,7 @@ public class FileMetaUtils {
         return newPath;
     }
 
-    private static DataFileMeta constructFileMeta(
+    public static DataFileMeta constructFileMeta(
             String fileName,
             long fileSize,
             Path path,
@@ -257,5 +243,19 @@ public class FileMetaUtils {
         }
         binaryRowWriter.complete();
         return binaryRow;
+    }
+
+    public static SimpleStatsExtractor createSimpleStatsExtractor(Table table, String format) {
+        CoreOptions options = ((FileStoreTable) table).coreOptions();
+        SimpleColStatsCollector.Factory[] factories =
+                StatsCollectorFactories.createStatsFactories(
+                        options.statsMode(), options, table.rowType().getFieldNames());
+
+        return FileFormat.fromIdentifier(format, options.toConfiguration())
+                .createStatsExtractor(table.rowType(), factories)
+                .orElseThrow(
+                        () ->
+                                new RuntimeException(
+                                        "Can't get table stats extractor for format " + format));
     }
 }

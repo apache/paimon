@@ -57,7 +57,7 @@ public class HiveCloneUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveCloneUtils.class);
 
-    private static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
+    public static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
 
     public static List<Identifier> listTables(HiveCatalog hiveCatalog) throws Exception {
@@ -186,7 +186,7 @@ public class HiveCloneUtils {
         return new HivePartitionFiles(partition, paths, fileSizes, format);
     }
 
-    private static String parseFormat(String serder) {
+    public static String parseFormat(String serder) {
         if (serder.contains("avro")) {
             return "avro";
         } else if (serder.contains("parquet")) {
