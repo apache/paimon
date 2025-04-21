@@ -248,7 +248,7 @@ val stream = df
   .outputMode("append")
   .option("checkpointLocation", "/path/to/checkpoint")
   .format("paimon")
-  .start("/path/to/paimon/sink/table")
+  .toTable("${database}.${table}")
 ```
 
 ## Schema Evolution
