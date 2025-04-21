@@ -51,9 +51,9 @@ You can use filter spec to specify the filtering condition for the partition.
 ```bash
 <FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar \
 clone_hive \
---database default
---catalog_conf metastore=hive
---catalog_conf uri=thrift://localhost:9088
---target_database test
+--database default \
+--catalog_conf metastore=hive \
+--catalog_conf uri=thrift://localhost:9088 \
+--target_database test \
 --target_catalog_conf warehouse=my_warehouse
 ```
