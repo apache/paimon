@@ -30,6 +30,8 @@ import org.apache.parquet.schema.MessageType;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Write records to a Parquet file.
@@ -67,7 +69,6 @@ public class ParquetWriter<T> implements Closeable {
             int maxPaddingSize,
             ParquetProperties encodingProps)
             throws IOException {
-
         WriteSupport.WriteContext writeContext = writeSupport.init(conf);
         MessageType schema = writeContext.getSchema();
 
@@ -86,12 +87,40 @@ public class ParquetWriter<T> implements Closeable {
 
         this.codecFactory = new CodecFactory(conf, encodingProps.getPageSizeThreshold());
         CodecFactory.BytesCompressor compressor = codecFactory.getCompressor(compressionCodecName);
+
+        final Map<String, String> extraMetadata;
+        if (encodingProps.getExtraMetaData() == null
+                || encodingProps.getExtraMetaData().isEmpty()) {
+            extraMetadata = writeContext.getExtraMetaData();
+        } else {
+            extraMetadata = new HashMap<>(writeContext.getExtraMetaData());
+
+            encodingProps
+                    .getExtraMetaData()
+                    .forEach(
+                            (metadataKey, metadataValue) -> {
+                                if (metadataKey.equals(OBJECT_MODEL_NAME_PROP)) {
+                                    throw new IllegalArgumentException(
+                                            "Cannot overwrite metadata key "
+                                                    + OBJECT_MODEL_NAME_PROP
+                                                    + ". Please use another key name.");
+                                }
+
+                                if (extraMetadata.put(metadataKey, metadataValue) != null) {
+                                    throw new IllegalArgumentException(
+                                            "Duplicate metadata key "
+                                                    + metadataKey
+                                                    + ". Please use another key name.");
+                                }
+                            });
+        }
+
         this.writer =
                 new InternalParquetRecordWriter<T>(
                         fileWriter,
                         writeSupport,
                         schema,
-                        writeContext.getExtraMetaData(),
+                        extraMetadata,
                         rowGroupSize,
                         compressor,
                         validating,
