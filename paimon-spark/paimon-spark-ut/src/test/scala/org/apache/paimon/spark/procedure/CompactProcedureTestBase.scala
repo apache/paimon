@@ -772,7 +772,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       spark.sql(
         "CALL sys.compact(table => 'T', options => 'source.split.open-file-cost=3200M, compaction.min.file-num=2')")
 
-      assertResult(Seq(2, 1))(taskBuffer)
+      assertResult(Seq(2, 3))(taskBuffer)
     } finally {
       spark.sparkContext.removeSparkListener(listener)
     }

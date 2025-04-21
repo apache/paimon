@@ -18,13 +18,13 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
+import org.apache.paimon.append.MultiTableAppendCompactTask;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.flink.source.operator.CombinedAppendCompactSource;
+import org.apache.paimon.flink.source.operator.CombinedAppendCompactStreamSource;
 import org.apache.paimon.flink.source.operator.CombinedAwareBatchSource;
 import org.apache.paimon.flink.source.operator.CombinedAwareStreamingSource;
-import org.apache.paimon.flink.source.operator.CombinedUnawareBatchSource;
-import org.apache.paimon.flink.source.operator.CombinedUnawareStreamingSource;
 import org.apache.paimon.table.system.CompactBucketsTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -120,10 +120,10 @@ public class CombinedTableCompactorSourceBuilder {
         }
     }
 
-    public DataStream<MultiTableUnawareAppendCompactionTask> buildForUnawareBucketsTableSource() {
+    public DataStream<MultiTableAppendCompactTask> buildForUnawareBucketsTableSource() {
         Preconditions.checkArgument(env != null, "StreamExecutionEnvironment should not be null.");
         if (isContinuous) {
-            return CombinedUnawareStreamingSource.buildSource(
+            return CombinedAppendCompactStreamSource.buildSource(
                     env,
                     "Combined-UnawareBucketTables-StreamingCompactorSource",
                     catalogLoader,
@@ -133,7 +133,7 @@ public class CombinedTableCompactorSourceBuilder {
                     tableOptions,
                     monitorInterval);
         } else {
-            return CombinedUnawareBatchSource.buildSource(
+            return CombinedAppendCompactSource.buildSource(
                     env,
                     "Combined-UnawareBucketTables-BatchCompactorSource",
                     catalogLoader,

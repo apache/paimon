@@ -19,9 +19,9 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.UnawareAppendCompactionTask;
-import org.apache.paimon.flink.compact.UnawareBucketCompactor;
-import org.apache.paimon.flink.source.BucketUnawareCompactSource;
+import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.flink.compact.AppendTableCompactor;
+import org.apache.paimon.flink.source.AppendTableCompactSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -40,8 +40,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * An abstract Operator to execute {@link UnawareAppendCompactionTask} passed from {@link
- * BucketUnawareCompactSource} for compacting table. This operator is always in async mode.
+ * An abstract Operator to execute {@link AppendCompactTask} passed from {@link
+ * AppendTableCompactSource} for compacting table. This operator is always in async mode.
  */
 public abstract class AppendCompactWorkerOperator<IN>
         extends PrepareCommitOperator<IN, Committable> {
@@ -51,7 +51,7 @@ public abstract class AppendCompactWorkerOperator<IN>
     private final FileStoreTable table;
     private final String commitUser;
 
-    protected transient UnawareBucketCompactor unawareBucketCompactor;
+    protected transient AppendTableCompactor unawareBucketCompactor;
 
     private transient ExecutorService lazyCompactExecutor;
 
@@ -73,8 +73,7 @@ public abstract class AppendCompactWorkerOperator<IN>
     public void open() throws Exception {
         LOG.debug("Opened a append-only table compaction worker.");
         this.unawareBucketCompactor =
-                new UnawareBucketCompactor(
-                        table, commitUser, this::workerExecutor, getMetricGroup());
+                new AppendTableCompactor(table, commitUser, this::workerExecutor, getMetricGroup());
     }
 
     @Override

@@ -318,7 +318,7 @@ public class FlinkSinkBuilder {
                             parallelism);
         }
 
-        return new RowUnawareBucketSink(table, overwritePartition, logSinkFunction, parallelism)
+        return new RowAppendTableSink(table, overwritePartition, logSinkFunction, parallelism)
                 .sinkFrom(input);
     }
 

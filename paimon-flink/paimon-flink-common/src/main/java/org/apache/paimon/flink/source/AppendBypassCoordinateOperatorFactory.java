@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
@@ -29,9 +29,8 @@ import org.apache.flink.types.Either;
 
 /** Factory of {@link AppendBypassCoordinateOperator}. */
 public class AppendBypassCoordinateOperatorFactory<CommitT>
-        extends AbstractStreamOperatorFactory<Either<CommitT, UnawareAppendCompactionTask>>
-        implements OneInputStreamOperatorFactory<
-                CommitT, Either<CommitT, UnawareAppendCompactionTask>> {
+        extends AbstractStreamOperatorFactory<Either<CommitT, AppendCompactTask>>
+        implements OneInputStreamOperatorFactory<CommitT, Either<CommitT, AppendCompactTask>> {
 
     private final FileStoreTable table;
 
@@ -40,10 +39,8 @@ public class AppendBypassCoordinateOperatorFactory<CommitT>
     }
 
     @Override
-    public <T extends StreamOperator<Either<CommitT, UnawareAppendCompactionTask>>>
-            T createStreamOperator(
-                    StreamOperatorParameters<Either<CommitT, UnawareAppendCompactionTask>>
-                            parameters) {
+    public <T extends StreamOperator<Either<CommitT, AppendCompactTask>>> T createStreamOperator(
+            StreamOperatorParameters<Either<CommitT, AppendCompactTask>> parameters) {
         AppendBypassCoordinateOperator<CommitT> operator =
                 new AppendBypassCoordinateOperator<>(parameters, table, processingTimeService);
         return (T) operator;

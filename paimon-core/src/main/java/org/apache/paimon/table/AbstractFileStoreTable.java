@@ -36,13 +36,13 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.sink.AppendTableRowKeyExtractor;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketWriteSelector;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
@@ -239,7 +239,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             case CROSS_PARTITION:
                 return new DynamicBucketRowKeyExtractor(schema());
             case BUCKET_UNAWARE:
-                return new UnawareBucketRowKeyExtractor(schema());
+                return new AppendTableRowKeyExtractor(schema());
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }
