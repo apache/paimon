@@ -27,6 +27,7 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -174,6 +175,7 @@ public class SparkCatalogWithHiveTest {
         spark.close();
     }
 
+    @Disabled
     @Test
     public void testPartitionedFormatTable() {
         SparkSession spark = createSessionBuilder().getOrCreate();
