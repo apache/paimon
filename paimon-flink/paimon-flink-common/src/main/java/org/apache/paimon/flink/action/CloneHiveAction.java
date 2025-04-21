@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.catalog.CachingCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.clone.hive.CloneFileInfo;
 import org.apache.paimon.flink.clone.hive.CloneHiveUtils;
@@ -26,7 +28,7 @@ import org.apache.paimon.flink.clone.hive.CopyHiveFilesFunction;
 import org.apache.paimon.flink.clone.hive.DataFileInfo;
 import org.apache.paimon.flink.clone.hive.ListHiveFilesFunction;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
-import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.hive.HiveCatalog;
 
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -61,10 +63,15 @@ public class CloneHiveAction extends ActionBase {
             @Nullable Integer parallelism,
             @Nullable String whereSql) {
         super(sourceCatalogConfig);
-        String metastore = sourceCatalogConfig.get(CatalogOptions.METASTORE.key());
-        if (!"hive".equals(metastore)) {
+
+        Catalog sourceCatalog = catalog;
+        if (sourceCatalog instanceof CachingCatalog) {
+            sourceCatalog = ((CachingCatalog) sourceCatalog).wrapped();
+        }
+        if (!(sourceCatalog instanceof HiveCatalog)) {
             throw new UnsupportedOperationException(
-                    "Only support clone hive table. Maybe you forget to set --catalog_conf metastore=hive ?");
+                    "Only support clone hive tables using HiveCatalog, but current source catalog is "
+                            + sourceCatalog.getClass().getName());
         }
 
         this.sourceDatabase = sourceDatabase;
