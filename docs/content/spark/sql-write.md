@@ -249,6 +249,7 @@ val stream = df
   .option("checkpointLocation", "/path/to/checkpoint")
   .format("paimon")
   .toTable("${database}.${table}")
+  //  .start("/path/to/paimon/sink/table")
 ```
 
 ## Schema Evolution
@@ -262,7 +263,8 @@ data.write
   .format("paimon")
   .mode("append")
   .option("write.merge-schema", "true")
-  .save(location)
+  .saveAsTable("${database}.${table}")
+  // .save(location)
 ```
 
 When enable `write.merge-schema`, Paimon can allow users to perform the following actions on table schema by default:
@@ -283,7 +285,8 @@ inputData
   .option("checkpointLocation", "/path/to/checkpoint")
   .option("write.merge-schema", "true")
   .option("write.merge-schema.explicit-cast", "true")
-  .start(location)
+  .toTable("${database}.${table}")
+  // .start(location)
 ```
 
 Here list the configurations.
