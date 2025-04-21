@@ -26,6 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.functions.OpenContext;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 
 import java.util.HashMap;
@@ -52,9 +53,17 @@ public abstract class CopyProcessFunction<I, O> extends ProcessFunction<I, O> {
         this.targetCatalogConfig = targetCatalogConfig;
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
+     */
     public void open(OpenContext openContext) throws Exception {
-        super.open(openContext);
+        open(new Configuration());
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
+     */
+    public void open(Configuration conf) throws Exception {
         this.hiveCatalog =
                 getRootHiveCatalog(createPaimonCatalog(Options.fromMap(sourceCatalogConfig)));
         this.targetCatalog = createPaimonCatalog(Options.fromMap(targetCatalogConfig));
@@ -77,7 +86,11 @@ public abstract class CopyProcessFunction<I, O> extends ProcessFunction<I, O> {
     @Override
     public void close() throws Exception {
         super.close();
-        this.hiveCatalog.close();
-        this.targetCatalog.close();
+        if (hiveCatalog != null) {
+            this.hiveCatalog.close();
+        }
+        if (targetCatalog != null) {
+            this.targetCatalog.close();
+        }
     }
 }
