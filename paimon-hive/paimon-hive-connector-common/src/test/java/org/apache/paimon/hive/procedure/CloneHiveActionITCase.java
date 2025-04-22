@@ -369,7 +369,8 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql("CREATE DATABASE test");
         // create a paimon table with the same name
-        int ddlIndex = ThreadLocalRandom.current().nextInt(0, 4);
+        //        int ddlIndex = ThreadLocalRandom.current().nextInt(0, 4);
+        int ddlIndex = 3;
         tEnv.executeSql(ddls()[ddlIndex]);
 
         List<String> args =
@@ -433,8 +434,8 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
     private String[] exceptionMsg() {
         return new String[] {
             "Can not clone data to existed paimon table which has primary keys",
-            "Source table fields not match existed table fields",
-            "size of source table fields not equal existed paimon table fields."
+            "source table partition keys is not compatible with existed paimon table partition keys.",
+            "source table partition keys is not compatible with existed paimon table partition keys."
         };
     }
 

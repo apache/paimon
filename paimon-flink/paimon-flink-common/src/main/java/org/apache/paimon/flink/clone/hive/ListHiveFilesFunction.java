@@ -29,7 +29,6 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
@@ -41,8 +40,7 @@ import org.apache.flink.util.Collector;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -122,65 +120,34 @@ public class ListHiveFilesFunction
         Schema existedSchema = existedTable.schema().toSchema();
 
         // check primary keys
-        if (!existedSchema.primaryKeys().isEmpty()) {
-            throw new IllegalStateException(
-                    "Can not clone data to existed paimon table which has primary keys. Existed paimon table is "
-                            + existedTable.name());
-        }
+        checkState(
+                existedSchema.primaryKeys().isEmpty(),
+                "Can not clone data to existed paimon table which has primary keys. Existed paimon table is "
+                        + existedTable.name());
 
         // check bucket
-        if (existedTable.coreOptions().bucket() != -1) {
-            throw new IllegalStateException(
-                    "Can not clone data to existed paimon table which bucket is not -1. Existed paimon table is "
-                            + existedTable.name());
-        }
+        checkState(
+                existedTable.coreOptions().bucket() == -1,
+                "Can not clone data to existed paimon table which bucket is not -1. Existed paimon table is "
+                        + existedTable.name());
 
         // check partition keys
-        List<DataField> sourcePartitionFields =
-                new ArrayList<>(
-                        TableSchema.create(0, sourceSchema)
-                                .projectedLogicalRowType(sourceSchema.partitionKeys())
-                                .getFields());
+        List<String> sourcePartitionFields = sourceSchema.partitionKeys();
+        List<String> existedPartitionFields = existedSchema.partitionKeys();
 
-        List<DataField> existedPartitionFields =
-                new ArrayList<>(
-                        existedTable
-                                .schema()
-                                .projectedLogicalRowType(existedTable.partitionKeys())
-                                .getFields());
-
-        if (sourcePartitionFields.size() != existedPartitionFields.size()) {
-            throw new IllegalStateException(
-                    "size of source table partition keys not equal existed paimon table partition keys.");
-        }
-        checkCompatible(sourcePartitionFields, existedPartitionFields);
+        checkState(
+                sourcePartitionFields.size() == existedPartitionFields.size()
+                        && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
+                "source table partition keys is not compatible with existed paimon table partition keys.");
 
         // check all fields
-        List<DataField> sourceFields = new ArrayList<>(sourceSchema.fields());
-        List<DataField> existedFields = new ArrayList<>(existedSchema.fields());
+        List<DataField> sourceFields = sourceSchema.fields();
+        List<DataField> existedFields = existedSchema.fields();
 
-        if (sourceFields.size() != existedFields.size()) {
-            throw new IllegalStateException(
-                    "size of source table fields not equal existed paimon table fields.");
-        }
-        checkCompatible(sourceFields, existedFields);
-    }
-
-    private void checkCompatible(List<DataField> sourceFields, List<DataField> existedFields) {
-
-        sourceFields.sort(Comparator.comparing(DataField::name));
-        existedFields.sort(Comparator.comparing(DataField::name));
-
-        for (int i = 0; i < sourceFields.size(); i++) {
-            DataField s = sourceFields.get(i);
-            DataField e = existedFields.get(i);
-
-            if (!s.name().equals(e.name())
-                    || !s.type().asSQLString().equalsIgnoreCase(e.type().asSQLString())) {
-                throw new RuntimeException(
-                        "Source table fields not match existed table fields, please checkCompatible.");
-            }
-        }
+        checkState(
+                existedFields.size() >= sourceFields.size()
+                        && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
+                "source table partition keys is not compatible with existed paimon table partition keys.");
     }
 
     @VisibleForTesting
