@@ -18,12 +18,12 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
-import org.apache.paimon.append.UnawareAppendCompactionTask;
+import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.append.MultiTableAppendCompactTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.compact.UnawareBucketCompactor;
+import org.apache.paimon.flink.compact.AppendTableCompactor;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -46,12 +46,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Operator to execute {@link UnawareAppendCompactionTask} passed for support compacting multi
- * unaware bucket tables in combined mode.
+ * Operator to execute {@link AppendCompactTask} passed for support compacting multi unaware bucket
+ * tables in combined mode.
  */
 public class AppendOnlyMultiTableCompactionWorkerOperator
-        extends PrepareCommitOperator<
-                MultiTableUnawareAppendCompactionTask, MultiTableCommittable> {
+        extends PrepareCommitOperator<MultiTableAppendCompactTask, MultiTableCommittable> {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(AppendOnlyMultiTableCompactionWorkerOperator.class);
@@ -60,7 +59,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     private final CatalogLoader catalogLoader;
 
     // support multi table compaction
-    private transient Map<Identifier, UnawareBucketCompactor> compactorContainer;
+    private transient Map<Identifier, AppendTableCompactor> compactorContainer;
 
     private transient ExecutorService lazyCompactExecutor;
 
@@ -87,10 +86,10 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     protected List<MultiTableCommittable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         List<MultiTableCommittable> result = new ArrayList<>();
-        for (Map.Entry<Identifier, UnawareBucketCompactor> compactorWithTable :
+        for (Map.Entry<Identifier, AppendTableCompactor> compactorWithTable :
                 compactorContainer.entrySet()) {
             Identifier tableId = compactorWithTable.getKey();
-            UnawareBucketCompactor compactor = compactorWithTable.getValue();
+            AppendTableCompactor compactor = compactorWithTable.getValue();
 
             for (Committable committable : compactor.prepareCommit(waitCompaction, checkpointId)) {
                 result.add(
@@ -107,17 +106,16 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     }
 
     @Override
-    public void processElement(StreamRecord<MultiTableUnawareAppendCompactionTask> element)
-            throws Exception {
+    public void processElement(StreamRecord<MultiTableAppendCompactTask> element) throws Exception {
         Identifier identifier = element.getValue().tableIdentifier();
         compactorContainer
                 .computeIfAbsent(identifier, this::compactor)
                 .processElement(element.getValue());
     }
 
-    private UnawareBucketCompactor compactor(Identifier tableId) {
+    private AppendTableCompactor compactor(Identifier tableId) {
         try {
-            return new UnawareBucketCompactor(
+            return new AppendTableCompactor(
                     (FileStoreTable) catalog.getTable(tableId).copy(options.toMap()),
                     commitUser,
                     this::workerExecutor,
@@ -158,10 +156,10 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                 exceptions.add(e);
             }
 
-            for (Map.Entry<Identifier, UnawareBucketCompactor> compactorEntry :
+            for (Map.Entry<Identifier, AppendTableCompactor> compactorEntry :
                     compactorContainer.entrySet()) {
                 try {
-                    UnawareBucketCompactor compactor = compactorEntry.getValue();
+                    AppendTableCompactor compactor = compactorEntry.getValue();
                     compactor.close();
                 } catch (Exception e) {
                     Identifier id = compactorEntry.getKey();
@@ -186,7 +184,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     /** {@link StreamOperatorFactory} of {@link AppendOnlyMultiTableCompactionWorkerOperator}. */
     public static class Factory
             extends PrepareCommitOperator.Factory<
-                    MultiTableUnawareAppendCompactionTask, MultiTableCommittable> {
+                    MultiTableAppendCompactTask, MultiTableCommittable> {
 
         private final String commitUser;
         private final CatalogLoader catalogLoader;

@@ -446,7 +446,7 @@ public class IcebergMigrator implements Migrator {
             }
             List<DataFileMeta> fileMetas =
                     construct(icebergDataFileMetas, fileIO, paimonTable, newDir, rollback);
-            return FileMetaUtils.commitFile(
+            return FileMetaUtils.createCommitMessage(
                     partitionRow, paimonTable.coreOptions().bucket(), fileMetas);
         }
     }

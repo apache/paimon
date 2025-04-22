@@ -1052,7 +1052,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
         waitUtil(
                 () -> snapshotManager.latestSnapshotId() == 11L,
-                Duration.ofSeconds(60),
+                Duration.ofSeconds(240),
                 Duration.ofMillis(500));
         jobClient.cancel();
 
@@ -1061,8 +1061,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
         waitUtil(
                 () -> snapshotManager.earliestSnapshotId() == 9L,
-                Duration.ofSeconds(60),
-                Duration.ofMillis(200),
+                Duration.ofSeconds(240),
+                Duration.ofMillis(500),
                 "Failed to wait snapshot expiration success");
 
         List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();

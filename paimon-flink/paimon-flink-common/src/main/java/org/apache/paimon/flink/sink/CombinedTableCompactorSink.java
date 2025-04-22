@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.MultiTableUnawareAppendCompactionTask;
+import org.apache.paimon.append.MultiTableAppendCompactTask;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
@@ -72,7 +72,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStreamSink<?> sinkFrom(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource) {
+            DataStream<MultiTableAppendCompactTask> unawareBucketTableSource) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
         // commit operators.
@@ -84,7 +84,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStreamSink<?> sinkFrom(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource,
+            DataStream<MultiTableAppendCompactTask> unawareBucketTableSource,
             String initialCommitUser) {
         // do the actually writing action, no snapshot generated in this stage
         DataStream<MultiTableCommittable> written =
@@ -96,7 +96,7 @@ public class CombinedTableCompactorSink implements Serializable {
 
     public DataStream<MultiTableCommittable> doWrite(
             DataStream<RowData> awareBucketTableSource,
-            DataStream<MultiTableUnawareAppendCompactionTask> unawareBucketTableSource,
+            DataStream<MultiTableAppendCompactTask> unawareBucketTableSource,
             String commitUser) {
         StreamExecutionEnvironment env = awareBucketTableSource.getExecutionEnvironment();
         boolean isStreaming =

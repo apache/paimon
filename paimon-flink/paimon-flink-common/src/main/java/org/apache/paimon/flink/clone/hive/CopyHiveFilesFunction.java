@@ -1,0 +1,87 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.flink.clone.hive;
+
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.migrate.FileMetaUtils;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.IOUtils;
+
+import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.util.Collector;
+
+import java.util.Map;
+
+/** Copy files for table. */
+public class CopyHiveFilesFunction extends CopyProcessFunction<CloneFileInfo, DataFileInfo> {
+
+    private static final long serialVersionUID = 1L;
+
+    public CopyHiveFilesFunction(
+            Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
+        super(sourceCatalogConfig, targetCatalogConfig);
+    }
+
+    @Override
+    public void processElement(
+            CloneFileInfo cloneFileInfo,
+            ProcessFunction<CloneFileInfo, DataFileInfo>.Context context,
+            Collector<DataFileInfo> collector)
+            throws Exception {
+        Identifier identifier = cloneFileInfo.identifier();
+        String format = cloneFileInfo.format();
+        Path path = cloneFileInfo.path();
+        BinaryRow partition = cloneFileInfo.partition();
+
+        FileIO sourceFileIO = hiveCatalog.fileIO();
+        FileStoreTable targetTable = (FileStoreTable) getTable(identifier);
+
+        // new file name
+        String suffix = "." + format;
+        String fileName = path.getName();
+        String newFileName = fileName.endsWith(suffix) ? fileName : fileName + suffix;
+
+        // copy files
+        Path targetFilePath = targetTable.store().pathFactory().bucketPath(partition, 0);
+        IOUtils.copyBytes(
+                sourceFileIO.newInputStream(path),
+                targetTable.fileIO().newOutputStream(new Path(targetFilePath, newFileName), false));
+
+        // to DataFileMeta
+        SimpleStatsExtractor simpleStatsExtractor =
+                FileMetaUtils.createSimpleStatsExtractor(targetTable, format);
+        DataFileMeta dataFileMeta =
+                FileMetaUtils.constructFileMeta(
+                        newFileName,
+                        cloneFileInfo.fileSize(),
+                        path,
+                        simpleStatsExtractor,
+                        sourceFileIO,
+                        targetTable);
+
+        collector.collect(
+                new DataFileInfo(
+                        identifier, partition, dataFileSerializer.serializeToBytes(dataFileMeta)));
+    }
+}

@@ -45,12 +45,6 @@ under the License.
             <td>Whether to create underlying storage when reading and writing the table.</td>
         </tr>
         <tr>
-            <td><h5>branch</h5></td>
-            <td style="word-wrap: break-word;">"main"</td>
-            <td>String</td>
-            <td>Specify branch name.</td>
-        </tr>
-        <tr>
             <td><h5>bucket</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
@@ -169,6 +163,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specifies the commit user prefix.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.delete-ratio-threshold</h5></td>
+            <td style="word-wrap: break-word;">0.2</td>
+            <td>Double</td>
+            <td>Ratio of the deleted rows in a data file to be forced compacted for append-only table.</td>
         </tr>
         <tr>
             <td><h5>compaction.force-up-level-0</h5></td>
@@ -444,7 +444,7 @@ under the License.
             <td><h5>incremental-to-auto-tag</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. </td>
+            <td>Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. This option requires 'tag.creation-period' and 'tag.period-formatter' configured.</td>
         </tr>
         <tr>
             <td><h5>local-merge-buffer-size</h5></td>

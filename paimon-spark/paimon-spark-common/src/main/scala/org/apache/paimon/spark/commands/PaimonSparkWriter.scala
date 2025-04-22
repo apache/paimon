@@ -24,7 +24,7 @@ import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
-import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer
+import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
@@ -280,15 +280,15 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       .mapGroups {
         (_, iter: Iterator[SparkDeletionVectors]) =>
           val indexHandler = table.store().newIndexFileHandler()
-          var dvIndexFileMaintainer: AppendDeletionFileMaintainer = null
+          var dvIndexFileMaintainer: BaseAppendDeleteFileMaintainer = null
           while (iter.hasNext) {
             val sdv: SparkDeletionVectors = iter.next()
             if (dvIndexFileMaintainer == null) {
               val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
               dvIndexFileMaintainer = if (bucketMode == BUCKET_UNAWARE) {
-                AppendDeletionFileMaintainer.forUnawareAppend(indexHandler, snapshot, partition)
+                BaseAppendDeleteFileMaintainer.forUnawareAppend(indexHandler, snapshot, partition)
               } else {
-                AppendDeletionFileMaintainer.forBucketedAppend(
+                BaseAppendDeleteFileMaintainer.forBucketedAppend(
                   indexHandler,
                   snapshot,
                   partition,

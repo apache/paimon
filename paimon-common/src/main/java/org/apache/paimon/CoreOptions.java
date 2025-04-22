@@ -160,6 +160,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
+    @ExcludeFromDocumentation("Avoid using deprecated options")
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
 
@@ -633,6 +634,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(5)
                     .withDescription(
                             "For file set [f_0,...,f_N], the minimum file number to trigger a compaction for "
+                                    + "append-only table.");
+
+    public static final ConfigOption<Double> COMPACTION_DELETE_RATIO_THRESHOLD =
+            key("compaction.delete-ratio-threshold")
+                    .doubleType()
+                    .defaultValue(0.2)
+                    .withDescription(
+                            "Ratio of the deleted rows in a data file to be forced compacted for "
                                     + "append-only table.");
 
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
@@ -1147,7 +1156,8 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. "
-                                    + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. ");
+                                    + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. "
+                                    + "This option requires 'tag.creation-period' and 'tag.period-formatter' configured.");
 
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
@@ -2191,6 +2201,10 @@ public class CoreOptions implements Serializable {
 
     public int compactionMinFileNum() {
         return options.get(COMPACTION_MIN_FILE_NUM);
+    }
+
+    public double compactionDeleteRatioThreshold() {
+        return options.get(COMPACTION_DELETE_RATIO_THRESHOLD);
     }
 
     public long dynamicBucketTargetRowNum() {

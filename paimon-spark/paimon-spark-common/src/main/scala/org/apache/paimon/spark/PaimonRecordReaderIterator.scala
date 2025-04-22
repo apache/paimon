@@ -50,7 +50,8 @@ case class PaimonRecordReaderIterator(
     if (needMetadata) {
       if (!isFileRecordIterator || !split.isInstanceOf[DataSplit]) {
         throw new RuntimeException(
-          "There need be FileRecordIterator when metadata columns are required.")
+          "There need be FileRecordIterator when metadata columns are required. " +
+            "Only append table or deletion vector table support querying metadata columns.")
       }
     }
   }

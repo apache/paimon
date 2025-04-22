@@ -23,11 +23,11 @@ import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
-import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
-import org.apache.paimon.operation.AppendOnlyFixedBucketFileStoreWrite;
-import org.apache.paimon.operation.AppendOnlyUnawareBucketFileStoreWrite;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.BucketSelectConverter;
+import org.apache.paimon.operation.BucketedAppendFileStoreWrite;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -88,19 +88,19 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     @Override
-    public AppendOnlyFileStoreWrite newWrite(String commitUser) {
+    public BaseAppendFileStoreWrite newWrite(String commitUser) {
         return newWrite(commitUser, null);
     }
 
     @Override
-    public AppendOnlyFileStoreWrite newWrite(
+    public BaseAppendFileStoreWrite newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
         DeletionVectorsMaintainer.Factory dvMaintainerFactory =
                 options.deletionVectorsEnabled()
                         ? DeletionVectorsMaintainer.factory(newIndexFileHandler())
                         : null;
         if (bucketMode() == BucketMode.BUCKET_UNAWARE) {
-            return new AppendOnlyUnawareBucketFileStoreWrite(
+            return new AppendFileStoreWrite(
                     fileIO,
                     newRead(),
                     schema.id(),
@@ -113,7 +113,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     dvMaintainerFactory,
                     tableName);
         } else {
-            return new AppendOnlyFixedBucketFileStoreWrite(
+            return new BucketedAppendFileStoreWrite(
                     fileIO,
                     newRead(),
                     schema.id(),

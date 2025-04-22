@@ -42,11 +42,15 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FailingFileIO;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -63,11 +67,13 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link SchemaManager}. */
 public class SchemaManagerTest {
@@ -312,145 +318,64 @@ public class SchemaManagerTest {
         assertThat(manager.latest().get().toString()).isEqualTo(schemaContent);
     }
 
-    @Test
-    public void testApplyMoveFirstAndLast() {
-        // Create the initial list of fields
-        List<DataField> fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("provideMoveOperations")
+    void testApplyMoveOperations(
+            String testDisplayName,
+            List<DataField> initialFields,
+            SchemaChange.Move moveOperation,
+            List<String> expectedOrder) {
+        List<DataField> fields = new LinkedList<>(initialFields);
 
-        // Use factory methods to create Move objects
-        SchemaChange.Move moveFirst = SchemaChange.Move.first("f2");
-        SchemaChange.Move moveLast = SchemaChange.Move.last("f0");
+        manager.applyMove(fields, moveOperation);
 
-        // Test FIRST operation
-        manager.applyMove(fields, moveFirst);
-        Assertions.assertEquals(
-                2,
-                fields.get(0).id(),
-                "The field id should remain as 2 after moving f2 to the first position");
-        Assertions.assertEquals(
-                fields.get(0).name(), "f2", "f2 should be moved to the first position");
-
-        // Reset fields to initial state
-        fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
-
-        // Test LAST operation
-        manager.applyMove(fields, moveLast);
-        Assertions.assertEquals(
-                0,
-                fields.get(fields.size() - 1).id(),
-                "The field id should remain as 0 after moving f0 to the last position");
-        Assertions.assertEquals(
-                "f0",
-                fields.get(fields.size() - 1).name(),
-                "f0 should be moved to the last position");
+        for (int i = 0; i < expectedOrder.size(); i++) {
+            assertEquals(
+                    expectedOrder.get(i),
+                    fields.get(i).name(),
+                    "Field name mismatch at position: " + i);
+        }
     }
 
-    @Test
-    public void testMoveAfter() {
-        // Create the initial list of fields
-        List<DataField> fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
+    private static Stream<Arguments> provideMoveOperations() {
+        List<DataField> originalFields =
+                ImmutableList.of(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.BIGINT()),
+                        new DataField(2, "f2", DataTypes.STRING()),
+                        new DataField(3, "f3", DataTypes.SMALLINT()));
 
-        // Test AFTER operation
-        SchemaChange.Move moveAfter = SchemaChange.Move.after("f1", "f2");
-        manager.applyMove(fields, moveAfter);
-        Assertions.assertEquals(
-                1, fields.get(2).id(), "The field id should remain as 1 after moving f1 after f2");
-        Assertions.assertEquals("f1", fields.get(2).name(), "f1 should be after f2");
-
-        // Reset fields to initial state
-        fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
-
-        moveAfter = SchemaChange.Move.after("f3", "f1");
-        // Test AFTER operation
-        manager.applyMove(fields, moveAfter);
-        Assertions.assertEquals(
-                3, fields.get(2).id(), "The field id should remain as 3 after moving f3 after f1");
-        Assertions.assertEquals("f3", fields.get(2).name(), "f3 should be after f1");
-
-        // Reset fields to initial state
-        fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
-
-        moveAfter = SchemaChange.Move.after("f0", "f2");
-        // Test move column after last column
-        manager.applyMove(fields, moveAfter);
-        Assertions.assertEquals(
-                0, fields.get(2).id(), "The field id should remain as 0 after moving f0 after f2");
-        Assertions.assertEquals("f0", fields.get(2).name(), "f0 should be after f2");
-
-        // Reset fields to initial state
-        fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
-
-        moveAfter = SchemaChange.Move.after("f0", "f3");
-        // Test move column after last column
-        manager.applyMove(fields, moveAfter);
-        Assertions.assertEquals(
-                0, fields.get(3).id(), "The field id should remain as 0 after moving f0 after f3");
-        Assertions.assertEquals("f0", fields.get(3).name(), "f0 should be after f3");
-    }
-
-    @Test
-    public void testMoveBefore() {
-        // Create the initial list of fields
-        List<DataField> fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
-
-        SchemaChange.Move moveBefore = SchemaChange.Move.before("f2", "f1");
-        manager.applyMove(fields, moveBefore);
-        Assertions.assertEquals(
-                2, fields.get(1).id(), "The field id should remain as 2 after moving f2 before f1");
-        Assertions.assertEquals("f2", fields.get(1).name(), "f2 should be before f1");
-
-        // Reset fields to initial state
-        fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
-
-        moveBefore = SchemaChange.Move.before("f1", "f3");
-        manager.applyMove(fields, moveBefore);
-        Assertions.assertEquals(
-                1, fields.get(2).id(), "The field id should remain as 1 after moving f1 before f3");
-        Assertions.assertEquals("f1", fields.get(2).name(), "f1 should be before f3");
-
-        // Reset fields to initial state
-        fields = new LinkedList<>();
-        fields.add(new DataField(0, "f0", DataTypes.INT()));
-        fields.add(new DataField(1, "f1", DataTypes.BIGINT()));
-        fields.add(new DataField(2, "f2", DataTypes.STRING()));
-        fields.add(new DataField(3, "f3", DataTypes.SMALLINT()));
-
-        moveBefore = SchemaChange.Move.before("f2", "f0");
-        manager.applyMove(fields, moveBefore);
-        Assertions.assertEquals(
-                2, fields.get(0).id(), "The field id should remain as 2 after moving f2 before f0");
+        return Stream.of(
+                Arguments.of(
+                        "move f2 to FIRST",
+                        originalFields,
+                        SchemaChange.Move.first("f2"),
+                        ImmutableList.of("f2", "f0", "f1", "f3")),
+                Arguments.of(
+                        "move f0 to LAST",
+                        originalFields,
+                        SchemaChange.Move.last("f0"),
+                        ImmutableList.of("f1", "f2", "f3", "f0")),
+                Arguments.of(
+                        "move f1 AFTER f2",
+                        originalFields,
+                        SchemaChange.Move.after("f1", "f2"),
+                        ImmutableList.of("f0", "f2", "f1", "f3")),
+                Arguments.of(
+                        "move f3 AFTER f1",
+                        originalFields,
+                        SchemaChange.Move.after("f3", "f1"),
+                        ImmutableList.of("f0", "f1", "f3", "f2")),
+                Arguments.of(
+                        "move f2 BEFORE f1",
+                        originalFields,
+                        SchemaChange.Move.before("f2", "f1"),
+                        ImmutableList.of("f0", "f2", "f1", "f3")),
+                Arguments.of(
+                        "move f2 BEFORE f0",
+                        originalFields,
+                        SchemaChange.Move.before("f2", "f0"),
+                        ImmutableList.of("f2", "f0", "f1", "f3")));
     }
 
     @Test

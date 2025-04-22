@@ -24,8 +24,6 @@ import org.apache.paimon.types.RowKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /**
  * Utility interface to extract partition keys, bucket id, primary keys for file store ({@code
  * trimmedPrimaryKey}) and primary keys for external log system ({@code logPrimaryKey}) from the
@@ -52,7 +50,7 @@ public interface KeyAndBucketExtractor<T> {
     }
 
     static int bucket(int hashcode, int numBuckets) {
-        checkArgument(numBuckets > 0, "Num bucket is illegal: " + numBuckets);
+        assert numBuckets > 0;
         return Math.abs(hashcode % numBuckets);
     }
 }

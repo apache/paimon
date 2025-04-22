@@ -37,7 +37,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -45,6 +44,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link PartitionStatisticsReporter}. */
 public class PartitionStatisticsReporterTest {
@@ -125,11 +126,11 @@ public class PartitionStatisticsReporterTest {
                 new PartitionStatisticsReporter(table, partitionHandler);
         long time = 1729598544974L;
         action.report("c1=a/", time);
-        Assertions.assertThat(partitionParams).containsKey("c1=a/");
-        Assertions.assertThat(partitionParams.get("c1=a/").toString())
+        assertThat(partitionParams).containsKey("c1=a/");
+        assertThat(partitionParams.get("c1=a/").toString())
                 .isEqualTo(
-                        "{spec={c1=a}, recordCount=1, fileSizeInBytes=591, fileCount=1, lastFileCreationTime=1729598544974}");
+                        "{spec={c1=a}, recordCount=1, fileSizeInBytes=662, fileCount=1, lastFileCreationTime=1729598544974}");
         action.close();
-        Assertions.assertThat(closed).isTrue();
+        assertThat(closed).isTrue();
     }
 }

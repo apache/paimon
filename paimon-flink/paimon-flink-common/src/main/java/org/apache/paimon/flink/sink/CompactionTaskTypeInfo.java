@@ -18,16 +18,16 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.append.UnawareAppendCompactionTask;
-import org.apache.paimon.table.sink.CompactionTaskSerializer;
+import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.table.sink.AppendCompactTaskSerializer;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.serialization.SerializerConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 
-/** Type information of {@link UnawareAppendCompactionTask}. */
-public class CompactionTaskTypeInfo extends TypeInformation<UnawareAppendCompactionTask> {
+/** Type information of {@link AppendCompactTask}. */
+public class CompactionTaskTypeInfo extends TypeInformation<AppendCompactTask> {
 
     @Override
     public boolean isBasicType() {
@@ -50,8 +50,8 @@ public class CompactionTaskTypeInfo extends TypeInformation<UnawareAppendCompact
     }
 
     @Override
-    public Class<UnawareAppendCompactionTask> getTypeClass() {
-        return UnawareAppendCompactionTask.class;
+    public Class<AppendCompactTask> getTypeClass() {
+        return AppendCompactTask.class;
     }
 
     @Override
@@ -62,17 +62,17 @@ public class CompactionTaskTypeInfo extends TypeInformation<UnawareAppendCompact
     /**
      * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.18-.
      */
-    public TypeSerializer<UnawareAppendCompactionTask> createSerializer(SerializerConfig config) {
+    public TypeSerializer<AppendCompactTask> createSerializer(SerializerConfig config) {
         return this.createSerializer((ExecutionConfig) null);
     }
 
     /**
      * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 2.0+.
      */
-    public TypeSerializer<UnawareAppendCompactionTask> createSerializer(ExecutionConfig config) {
+    public TypeSerializer<AppendCompactTask> createSerializer(ExecutionConfig config) {
         // we don't need copy for task
-        return new NoneCopyVersionedSerializerTypeSerializerProxy<UnawareAppendCompactionTask>(
-                () -> new CompactionTaskSimpleSerializer(new CompactionTaskSerializer())) {};
+        return new NoneCopyVersionedSerializerTypeSerializerProxy<AppendCompactTask>(
+                () -> new CompactionTaskSimpleSerializer(new AppendCompactTaskSerializer())) {};
     }
 
     @Override

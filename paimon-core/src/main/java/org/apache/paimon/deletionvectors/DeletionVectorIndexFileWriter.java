@@ -38,6 +38,7 @@ import java.util.Map;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.VERSION_ID_V1;
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.VERSION_ID_V2;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.calculateChecksum;
 
 /** Writer for deletion vector index file. */
@@ -47,11 +48,18 @@ public class DeletionVectorIndexFileWriter {
     private final FileIO fileIO;
     private final long targetSizeInBytes;
 
+    private final int versionId;
+
     public DeletionVectorIndexFileWriter(
-            FileIO fileIO, PathFactory pathFactory, MemorySize targetSizePerIndexFile) {
+            FileIO fileIO,
+            PathFactory pathFactory,
+            MemorySize targetSizePerIndexFile,
+            int versionId) {
         this.indexPathFactory = pathFactory;
         this.fileIO = fileIO;
         this.targetSizeInBytes = targetSizePerIndexFile.getBytes();
+
+        this.versionId = versionId;
     }
 
     /**
@@ -109,7 +117,7 @@ public class DeletionVectorIndexFileWriter {
         private SingleIndexFileWriter() throws IOException {
             this.path = indexPathFactory.newPath();
             this.dataOutputStream = new DataOutputStream(fileIO.newOutputStream(path, true));
-            dataOutputStream.writeByte(VERSION_ID_V1);
+            dataOutputStream.writeByte(versionId);
             this.dvMetas = new LinkedHashMap<>();
         }
 
@@ -119,6 +127,14 @@ public class DeletionVectorIndexFileWriter {
 
         private void write(String key, DeletionVector deletionVector) throws IOException {
             Preconditions.checkNotNull(dataOutputStream);
+            if (versionId == VERSION_ID_V1) {
+                writeV1(key, deletionVector);
+            } else if (versionId == VERSION_ID_V2) {
+                writeV2(key, deletionVector);
+            }
+        }
+
+        private void writeV1(String key, DeletionVector deletionVector) throws IOException {
             byte[] data = deletionVector.serializeToBytes();
             int size = data.length;
             dvMetas.put(
@@ -128,6 +144,16 @@ public class DeletionVectorIndexFileWriter {
             dataOutputStream.writeInt(size);
             dataOutputStream.write(data);
             dataOutputStream.writeInt(calculateChecksum(data));
+        }
+
+        private void writeV2(String key, DeletionVector deletionVector) throws IOException {
+            byte[] data = deletionVector.serializeToBytes();
+            int size = data.length;
+            dvMetas.put(
+                    key,
+                    new DeletionVectorMeta(
+                            key, dataOutputStream.size(), size, deletionVector.getCardinality()));
+            dataOutputStream.write(data);
         }
 
         public IndexFileMeta writtenIndexFile() {

@@ -105,7 +105,11 @@ public class FileStoreLookupFunctionTest {
     private FileStoreLookupFunction createLookupFunction(
             FileStoreTable table, boolean joinEqualPk) {
         return new FileStoreLookupFunction(
-                table, new int[] {0, 1}, joinEqualPk ? new int[] {0, 1} : new int[] {1}, null);
+                table,
+                new int[] {0, 1},
+                joinEqualPk ? new int[] {0, 1} : new int[] {1},
+                null,
+                null);
     }
 
     private FileStoreTable createFileStoreTable(

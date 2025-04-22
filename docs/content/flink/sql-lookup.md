@@ -120,6 +120,23 @@ your streaming job may be blocked. You can try to use `audit_log` system table f
 (convert CDC stream to append stream).
 {{< /hint >}}
 
+## Large Scale Lookup (Fixed Bucket)
+
+By default, each Flink subtask would store a whole copy of the lookup table. If the amount of data in `customers` 
+(lookup table) is too large for a single subtask, you can enable the shuffle lookup optimization as follows 
+(For Flink 2.0+ and fixed-bucket Paimon table). This optimization enables sending data of the same bucket to designated 
+subtask(s), so each Flink subtask would only need to store a part of the whole data.
+
+```sql
+-- enrich each order with customer information
+SELECT /*+ LOOKUP('table'='c', 'shuffle'='true') */
+o.order_id, o.total, c.country, c.zip
+FROM orders AS o
+JOIN customers
+FOR SYSTEM_TIME AS OF o.proc_time AS c
+ON o.customer_id = c.id;
+```
+
 ## Dynamic Partition
 
 In traditional data warehouses, each partition often maintains the latest full data, so this partition table only 

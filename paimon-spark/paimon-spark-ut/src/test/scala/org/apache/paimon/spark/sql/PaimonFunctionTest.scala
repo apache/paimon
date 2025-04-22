@@ -38,8 +38,7 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
 
           // test load paimon function
           val identifiers = functionCatalog.listFunctions(Array.empty)
-          PaimonFunctions
-            .names()
+          PaimonFunctions.names
             .forEach(
               name => {
                 val identifier = identifiers.find(x => x.name().equals(name))
