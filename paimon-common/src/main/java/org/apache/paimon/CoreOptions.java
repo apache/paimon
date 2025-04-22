@@ -1631,7 +1631,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
             key("partition.idle-time-to-report-statistic")
                     .durationType()
-                    .defaultValue(Duration.ofHours(1))
+                    .defaultValue(Duration.ofMillis(0))
                     .withDescription(
                             "Set a time duration when a partition has no new data after this time duration, "
                                     + "start to report the partition statistics to hms.");

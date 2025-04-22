@@ -27,8 +27,8 @@ import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainer
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
-import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
-import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkRow, SparkTableWrite, SparkTypeUtils}
+import org.apache.paimon.manifest.FileKind
+import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
@@ -40,10 +40,8 @@ import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
-import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.StructType
 import org.slf4j.LoggerFactory
 
 import java.io.IOException
@@ -58,6 +56,15 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   private lazy val rowType = table.rowType()
 
   private lazy val bucketMode = table.bucketMode
+
+  private lazy val disableReportStats = {
+    val options = table.coreOptions()
+    val config = options.toConfiguration
+    config.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis <= 0 ||
+    table.partitionKeys.isEmpty ||
+    !options.partitionedTableInMetastore ||
+    table.catalogEnvironment.partitionHandler() == null
+  }
 
   private lazy val log = LoggerFactory.getLogger(classOf[PaimonSparkWriter])
 
@@ -326,37 +333,12 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       .map(deserializeCommitMessage(serializer, _))
   }
 
-  def buildCommitMessageFromIndexManifestEntry(
-      indexManifestEntries: Seq[IndexManifestEntry]): Seq[CommitMessage] = {
-    indexManifestEntries
-      .groupBy(entry => (entry.partition(), entry.bucket()))
-      .map {
-        case ((partition, bucket), entries) =>
-          val (added, removed) = entries.partition(_.kind() == FileKind.ADD)
-          new CommitMessageImpl(
-            partition,
-            bucket,
-            null,
-            DataIncrement.emptyIncrement(),
-            CompactIncrement.emptyIncrement(),
-            new IndexIncrement(added.map(_.indexFile()).asJava, removed.map(_.indexFile()).asJava))
-      }
-      .toSeq
-  }
-
   private def reportToHms(messages: Seq[CommitMessage]): Unit = {
-    val options = table.coreOptions()
-    val config = options.toConfiguration
-
-    if (
-      config.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis <= 0 ||
-      table.partitionKeys.isEmpty ||
-      !options.partitionedTableInMetastore ||
-      table.catalogEnvironment.partitionHandler() == null
-    ) {
+    if (disableReportStats) {
       return
     }
 
+    val options = table.coreOptions()
     val partitionComputer = new InternalRowPartitionComputer(
       options.partitionDefaultName,
       table.schema.logicalPartitionType,
