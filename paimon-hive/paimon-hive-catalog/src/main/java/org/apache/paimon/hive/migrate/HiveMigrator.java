@@ -401,7 +401,7 @@ public class HiveMigrator implements Migrator {
                             HIDDEN_PATH_FILTER,
                             newDir,
                             rollback);
-            return FileMetaUtils.commitFile(
+            return FileMetaUtils.createCommitMessage(
                     partitionRow, paimonTable.coreOptions().bucket(), fileMetas);
         }
     }

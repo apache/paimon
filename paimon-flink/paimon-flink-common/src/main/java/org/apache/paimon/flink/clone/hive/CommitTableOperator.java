@@ -83,7 +83,8 @@ public class CommitTableOperator extends AbstractStreamOperator<Long>
                 for (Map.Entry<BinaryRow, List<DataFileMeta>> listEntry :
                         entry.getValue().entrySet()) {
                     commitMessages.add(
-                            FileMetaUtils.commitFile(listEntry.getKey(), 0, listEntry.getValue()));
+                            FileMetaUtils.createCommitMessage(
+                                    listEntry.getKey(), 0, listEntry.getValue()));
                 }
 
                 Table table = catalog.getTable(entry.getKey());

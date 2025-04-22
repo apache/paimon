@@ -84,7 +84,7 @@ public class FileMetaUtils {
                 .collect(Collectors.toList());
     }
 
-    public static CommitMessage commitFile(
+    public static CommitMessage createCommitMessage(
             BinaryRow partition, int totalBuckets, List<DataFileMeta> dataFileMetas) {
         return new CommitMessageImpl(
                 partition,
