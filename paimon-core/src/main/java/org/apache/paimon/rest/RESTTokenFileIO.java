@@ -210,6 +210,10 @@ public class RESTTokenFileIO implements FileIO {
                 throw new RuntimeException(e);
             }
         }
+        LOG.info(
+                "end refresh token for identifier [{}] expiresAtMillis [{}]",
+                identifier,
+                response.getExpiresAtMillis());
 
         token = new RESTToken(response.getToken(), response.getExpiresAtMillis());
     }
