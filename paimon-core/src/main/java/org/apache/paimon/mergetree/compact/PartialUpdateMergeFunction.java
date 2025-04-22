@@ -41,8 +41,10 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -69,9 +71,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     private final InternalRow.FieldGetter[] getters;
     private final boolean ignoreDelete;
-    private final Map<Integer, FieldsComparator> fieldSeqComparators;
+    private final List<WrapperWithFieldIndex<FieldsComparator>> fieldSeqComparators;
     private final boolean fieldSequenceEnabled;
-    private final Map<Integer, FieldAggregator> fieldAggregators;
+    private final List<WrapperWithFieldIndex<FieldAggregator>> fieldAggregators;
     private final boolean removeRecordOnDelete;
     private final Set<Integer> sequenceGroupPartialDelete;
     private final boolean[] nullables;
@@ -100,8 +102,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             boolean[] nullables) {
         this.getters = getters;
         this.ignoreDelete = ignoreDelete;
-        this.fieldSeqComparators = fieldSeqComparators;
-        this.fieldAggregators = fieldAggregators;
+        this.fieldSeqComparators = getKeySortedListFromMap(fieldSeqComparators);
+        this.fieldAggregators = getKeySortedListFromMap(fieldAggregators);
         this.fieldSequenceEnabled = fieldSequenceEnabled;
         this.removeRecordOnDelete = removeRecordOnDelete;
         this.sequenceGroupPartialDelete = sequenceGroupPartialDelete;
@@ -115,7 +117,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
         this.latestSequenceNumber = 0;
-        fieldAggregators.values().forEach(FieldAggregator::reset);
+        fieldAggregators.forEach(w -> w.getValue().reset());
     }
 
     @Override
@@ -188,23 +190,43 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     private void updateWithSequenceGroup(KeyValue kv) {
+
+        Iterator<WrapperWithFieldIndex<FieldsComparator>> comparatorIter =
+                fieldSeqComparators.iterator();
+        WrapperWithFieldIndex<FieldsComparator> curComparator =
+                comparatorIter.hasNext() ? comparatorIter.next() : null;
+        Iterator<WrapperWithFieldIndex<FieldAggregator>> aggIter = fieldAggregators.iterator();
+        WrapperWithFieldIndex<FieldAggregator> curAgg = aggIter.hasNext() ? aggIter.next() : null;
+
+        boolean[] isEmptySequenceGroup = new boolean[getters.length];
         for (int i = 0; i < getters.length; i++) {
-            Object field = getters[i].getFieldOrNull(kv.value());
-            FieldsComparator seqComparator = fieldSeqComparators.get(i);
-            FieldAggregator aggregator = fieldAggregators.get(i);
-            Object accumulator = getters[i].getFieldOrNull(row);
+            FieldsComparator seqComparator = null;
+            if (curComparator != null && curComparator.fieldIndex == i) {
+                seqComparator = curComparator.getValue();
+                curComparator = comparatorIter.hasNext() ? comparatorIter.next() : null;
+            }
+
+            FieldAggregator aggregator = null;
+            if (curAgg != null && curAgg.fieldIndex == i) {
+                aggregator = curAgg.getValue();
+                curAgg = aggIter.hasNext() ? aggIter.next() : null;
+            }
+
+            Object accumulator = row.getField(i);
             if (seqComparator == null) {
+                Object field = getters[i].getFieldOrNull(kv.value());
                 if (aggregator != null) {
                     row.setField(i, aggregator.agg(accumulator, field));
                 } else if (field != null) {
                     row.setField(i, field);
                 }
             } else {
-                if (isEmptySequenceGroup(kv, seqComparator)) {
+                if (isEmptySequenceGroup(kv, seqComparator, isEmptySequenceGroup)) {
                     // skip null sequence group
                     continue;
                 }
 
+                Object field = getters[i].getFieldOrNull(kv.value());
                 if (seqComparator.compare(kv.value(), row) >= 0) {
                     int index = i;
 
@@ -226,11 +248,23 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
     }
 
-    private boolean isEmptySequenceGroup(KeyValue kv, FieldsComparator comparator) {
+    private boolean isEmptySequenceGroup(
+            KeyValue kv, FieldsComparator comparator, boolean[] isEmptySequenceGroup) {
+
+        // If any flag of the sequence fields is set, it means the sequence group is empty.
+        if (isEmptySequenceGroup[comparator.compareFields()[0]]) {
+            return true;
+        }
+
         for (int fieldIndex : comparator.compareFields()) {
             if (getters[fieldIndex].getFieldOrNull(kv.value()) != null) {
                 return false;
             }
+        }
+
+        // Set the flag of all the sequence fields of the sequence group.
+        for (int fieldIndex : comparator.compareFields()) {
+            isEmptySequenceGroup[fieldIndex] = true;
         }
 
         return true;
@@ -238,12 +272,29 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     private void retractWithSequenceGroup(KeyValue kv) {
         Set<Integer> updatedSequenceFields = new HashSet<>();
+        Iterator<WrapperWithFieldIndex<FieldsComparator>> comparatorIter =
+                fieldSeqComparators.iterator();
+        WrapperWithFieldIndex<FieldsComparator> curComparator =
+                comparatorIter.hasNext() ? comparatorIter.next() : null;
+        Iterator<WrapperWithFieldIndex<FieldAggregator>> aggIter = fieldAggregators.iterator();
+        WrapperWithFieldIndex<FieldAggregator> curAgg = aggIter.hasNext() ? aggIter.next() : null;
 
+        boolean[] isEmptySequenceGroup = new boolean[getters.length];
         for (int i = 0; i < getters.length; i++) {
-            FieldsComparator seqComparator = fieldSeqComparators.get(i);
+            FieldsComparator seqComparator = null;
+            if (curComparator != null && curComparator.fieldIndex == i) {
+                seqComparator = curComparator.getValue();
+                curComparator = comparatorIter.hasNext() ? comparatorIter.next() : null;
+            }
+
+            FieldAggregator aggregator = null;
+            if (curAgg != null && curAgg.fieldIndex == i) {
+                aggregator = curAgg.getValue();
+                curAgg = aggIter.hasNext() ? aggIter.next() : null;
+            }
+
             if (seqComparator != null) {
-                FieldAggregator aggregator = fieldAggregators.get(i);
-                if (isEmptySequenceGroup(kv, seqComparator)) {
+                if (isEmptySequenceGroup(kv, seqComparator, isEmptySequenceGroup)) {
                     // skip null sequence group
                     continue;
                 }
@@ -626,6 +677,35 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         private String getAggFuncName(CoreOptions options, String fieldName) {
             String aggFunc = options.fieldAggFunc(fieldName);
             return aggFunc == null ? options.fieldsDefaultFunc() : aggFunc;
+        }
+    }
+
+    private <T> List<WrapperWithFieldIndex<T>> getKeySortedListFromMap(Map<Integer, T> map) {
+        List<WrapperWithFieldIndex<T>> res = new ArrayList<>();
+        map.forEach(
+                (index, value) -> {
+                    res.add(new WrapperWithFieldIndex<>(value, index));
+                });
+        Collections.sort(res);
+        return res;
+    }
+
+    private static class WrapperWithFieldIndex<T> implements Comparable<WrapperWithFieldIndex<T>> {
+        private final T value;
+        private final int fieldIndex;
+
+        WrapperWithFieldIndex(T value, int fieldIndex) {
+            this.value = value;
+            this.fieldIndex = fieldIndex;
+        }
+
+        @Override
+        public int compareTo(PartialUpdateMergeFunction.WrapperWithFieldIndex<T> o) {
+            return this.fieldIndex - o.fieldIndex;
+        }
+
+        public T getValue() {
+            return value;
         }
     }
 }
