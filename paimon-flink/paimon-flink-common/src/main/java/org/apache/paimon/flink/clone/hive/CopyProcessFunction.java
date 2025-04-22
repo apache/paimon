@@ -28,6 +28,8 @@ import org.apache.paimon.table.Table;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -37,6 +39,8 @@ import static org.apache.paimon.flink.clone.hive.CloneHiveUtils.getRootHiveCatal
 
 /** Abstract function for copying tables. */
 public abstract class CopyProcessFunction<I, O> extends ProcessFunction<I, O> {
+
+    protected static final Logger LOG = LoggerFactory.getLogger(CopyProcessFunction.class);
 
     protected final Map<String, String> sourceCatalogConfig;
     protected final Map<String, String> targetCatalogConfig;
