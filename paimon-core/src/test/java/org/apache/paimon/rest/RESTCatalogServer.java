@@ -548,7 +548,7 @@ public class RESTCatalogServer {
     private MockResponse getDataTokenHandle(Identifier tableIdentifier) throws Exception {
         RESTToken dataToken = getDataToken(tableIdentifier);
         if (dataToken == null) {
-            long currentTimeMillis = System.currentTimeMillis() + 60_000;
+            long currentTimeMillis = System.currentTimeMillis() + 4000_000L;
             dataToken =
                     new RESTToken(
                             ImmutableMap.of(
