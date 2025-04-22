@@ -30,19 +30,7 @@ under the License.
     <artifactId>paimon-ext</artifactId>
     <name>Paimon : Extensions</name>
 
-    <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-
     <dependencies>
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-common</artifactId>
-            <version>${project.version}</version>
-            <scope>provided</scope>
-        </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
