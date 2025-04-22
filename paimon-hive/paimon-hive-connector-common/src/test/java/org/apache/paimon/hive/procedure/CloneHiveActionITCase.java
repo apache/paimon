@@ -45,6 +45,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+
 /** Tests for {@link CloneHiveAction}. */
 public class CloneHiveActionITCase extends ActionITCaseBase {
 
@@ -340,6 +342,100 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
         Assertions.assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
         Assertions.assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
+    @Test
+    public void testCloneWithExistedTable() throws Exception {
+        String format = "avro";
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql(
+                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
+        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+
+        String query = "SELECT * FROM hivetable";
+        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql(query).collect());
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE test");
+        // create a paimon table with the same name
+        int ddlIndex = ThreadLocalRandom.current().nextInt(0, 4);
+        tEnv.executeSql(ddls()[ddlIndex]);
+
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "clone_hive",
+                                "--database",
+                                "default",
+                                "--table",
+                                "hivetable",
+                                "--catalog_conf",
+                                "metastore=hive",
+                                "--catalog_conf",
+                                "uri=thrift://localhost:" + PORT,
+                                "--target_database",
+                                "test",
+                                "--target_table",
+                                "test_table",
+                                "--target_catalog_conf",
+                                "warehouse=" + warehouse));
+
+        if (ddlIndex < 3) {
+            assertThatThrownBy(() -> createAction(CloneHiveAction.class, args).run())
+                    .rootCause()
+                    .hasMessageContaining(exceptionMsg()[ddlIndex]);
+        } else {
+            createAction(CloneHiveAction.class, args).run();
+            FileStoreTable paimonTable =
+                    paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
+
+            Assertions.assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
+
+            List<Row> r2 =
+                    ImmutableList.copyOf(
+                            tEnv.executeSql("SELECT * FROM test.test_table").collect());
+
+            Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        }
+    }
+
+    private String[] ddls() {
+        // has primary key
+        String ddl0 =
+                "CREATE TABLE test.test_table (id string, id2 int, id3 int, PRIMARY KEY (id, id2, id3) NOT ENFORCED) "
+                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1');";
+        // has different partition keys
+        String ddl1 =
+                "CREATE TABLE test.test_table (id string, id2 int, id3 int) "
+                        + "PARTITIONED BY (id, id3) with ('bucket' = '-1');";
+        // size of fields is different
+        String ddl2 =
+                "CREATE TABLE test.test_table (id2 int, id3 int) "
+                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1');";
+        // normal
+        String ddl3 =
+                "CREATE TABLE test.test_table (id string, id2 int, id3 int) "
+                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1');";
+        return new String[] {ddl0, ddl1, ddl2, ddl3};
+    }
+
+    private String[] exceptionMsg() {
+        return new String[] {
+            "Can not clone data to existed paimon table which has primary keys",
+            "Source table fields not match existed table fields",
+            "size of source table fields not equal existed paimon table fields."
+        };
     }
 
     private static String data(int i) {
