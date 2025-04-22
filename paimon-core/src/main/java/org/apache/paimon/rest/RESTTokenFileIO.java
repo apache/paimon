@@ -37,6 +37,9 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Scheduler;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.concurrent.Executors;
@@ -67,6 +70,8 @@ public class RESTTokenFileIO implements FileIO {
                                             ThreadUtils.newDaemonThreadFactory(
                                                     "rest-token-file-io-scheduler"))))
                     .build();
+
+    private static final Logger LOG = LoggerFactory.getLogger(RESTTokenFileIO.class);
 
     private final RESTCatalogLoader catalogLoader;
     private final Identifier identifier;
@@ -186,10 +191,11 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     private boolean shouldRefresh() {
-        return token == null || System.currentTimeMillis() > token.expireAtMillis();
+        return token == null || token.expireAtMillis() - System.currentTimeMillis() < 3600_000L;
     }
 
     private void refreshToken() {
+        LOG.info("begin refresh token for identifier [{}]", identifier);
         GetTableTokenResponse response;
         if (catalogInstance != null) {
             try {

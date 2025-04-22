@@ -817,7 +817,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTToken newDataToken =
                 new RESTToken(
                         ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
-                        System.currentTimeMillis() + 100_000);
+                        System.currentTimeMillis());
         setDataTokenToRestServerForMock(identifier, newDataToken);
         RESTToken nextFileDataToken = fileIO.validToken();
         assertEquals(newDataToken, nextFileDataToken);
