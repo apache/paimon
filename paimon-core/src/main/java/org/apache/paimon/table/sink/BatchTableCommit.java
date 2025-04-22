@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.operation.metrics.CommitStats;
 import org.apache.paimon.stats.Statistics;
 
 import java.util.List;
@@ -53,6 +54,9 @@ public interface BatchTableCommit extends TableCommit {
      * @param commitMessages commit messages from table write
      */
     void commit(List<CommitMessage> commitMessages);
+
+    /** Get commit stats. */
+    CommitStats getCommitStats();
 
     /**
      * Truncate table, like normal {@link #commit}, files are not immediately deleted, they are only

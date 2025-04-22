@@ -111,6 +111,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             }
             .start()
 
+          val table = loadTable("T")
           val query = () => spark.sql("SELECT * FROM T")
 
           try {
@@ -134,10 +135,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             }
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
 
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.compact(table => 'T', order_strategy => 'zorder', order_by => 'a,b')"),
-              Row(true) :: Nil)
+            spark.sql(
+              "CALL paimon.sys.compact(table => 'T', order_strategy => 'zorder', order_by => 'a,b')")
+            Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
 
             val result2 = new util.ArrayList[Row]()
             result2.add(0, Row(0, 0))
@@ -164,18 +164,16 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result3.add(7, Row(1, 2))
             result3.add(8, Row(0, 2))
 
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.compact(table => 'T', order_strategy => 'hilbert', order_by => 'a,b')"),
-              Row(true) :: Nil)
+            spark.sql(
+              "CALL paimon.sys.compact(table => 'T', order_strategy => 'hilbert', order_by => 'a,b')")
+            Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
 
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
 
             // test order sort
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.compact(table => 'T', order_strategy => 'order', order_by => 'a,b')"),
-              Row(true) :: Nil)
+            spark.sql(
+              "CALL paimon.sys.compact(table => 'T', order_strategy => 'order', order_by => 'a,b')")
+            Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
           } finally {
             stream.stop()
@@ -206,6 +204,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 batch.write.format("paimon").mode("append").save(location)
             }
             .start()
+
+          val table = loadTable("T")
 
           val query0 = () => spark.sql("SELECT * FROM T WHERE p=0")
           val query1 = () => spark.sql("SELECT * FROM T WHERE p=1")
@@ -248,10 +248,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result0)
             Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
 
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'zorder', order_by => 'a,b')"),
-              Row(true) :: Nil)
+            spark.sql(
+              "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'zorder', order_by => 'a,b')")
+            Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
 
             val result2 = new util.ArrayList[Row]()
             result2.add(0, Row(0, 0, 0))
@@ -279,19 +278,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result3.add(7, Row(0, 1, 2))
             result3.add(8, Row(0, 0, 2))
 
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'hilbert', order_by => 'a,b')"),
-              Row(true) :: Nil)
+            spark.sql(
+              "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'hilbert', order_by => 'a,b')")
+            Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
 
             Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result3)
             Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
 
             // test order sort
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'order', order_by => 'a,b')"),
-              Row(true) :: Nil)
+
+            spark.sql(
+              "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'order', order_by => 'a,b')")
+            Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+
             Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result0)
             Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
           } finally {
@@ -364,6 +363,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             }
             .start()
 
+          val table = loadTable("T")
+
           val query = () => spark.sql("SELECT * FROM T")
 
           try {
@@ -385,7 +386,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
               }
             }
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
-            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
+            spark.sql("CALL paimon.sys.compact(table => 'T')")
+            Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
           } finally {
             stream.stop()
@@ -455,7 +457,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       })
   }
 
-  test("Paimon Procedure: compact unaware bucket append table") {
+  test("Paimon Procedure: compact unaware bucket append table-kwang") {
     spark.sql(s"""
                  |CREATE TABLE T (id INT, value STRING, pt STRING)
                  |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2')
@@ -776,6 +778,67 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     } finally {
       spark.sparkContext.removeSparkListener(listener)
     }
+  }
+
+  test("Paimon Procedure: compact result for unaware bucket compact") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true','file.format'='avro')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    for (i <- 1 to 5) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+    spark.sql("CALL sys.compact(table => 'T')").show(false)
+    val beforeSize = sql("select sum(file_size_in_bytes) from `T$files`").head().getLong(0)
+    val df = spark.sql("CALL sys.compact(table => 'T')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+
+    checkAnswer(
+      df.select("involved_files_num", "involved_files_bytes", "new_files_num"),
+      Row(5, beforeSize, 1) :: Nil)
+
+    val afterSize = sql("select sum(file_size_in_bytes) from `T$files`").head().getLong(0)
+    checkAnswer(df.select("new_files_bytes"), Row(afterSize) :: Nil)
+
+    // empty compact
+    checkAnswer(sql("CALL sys.compact(table => 'T')"), Row(0, 0, 0, 0) :: Nil)
+  }
+
+  test("Paimon Procedure: compact result for aware bucket compact") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING)
+                 |TBLPROPERTIES ('primary-key'='id', 'bucket'='2', 'write-only'='true')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    for (i <- 1 to 5) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+
+    val df = sql("CALL sys.compact(table => 'T')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+
+    checkAnswer(df.select("involved_files_num", "new_files_num"), Row(5, 2) :: Nil)
+
+    // empty compact
+    checkAnswer(sql("CALL sys.compact(table => 'T')"), Row(0, 0, 0, 0) :: Nil)
+  }
+
+  test("Paimon Procedure: compact result for sort compact") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                 |""".stripMargin)
+
+    for (i <- 1 to 5) {
+      sql(s"INSERT INTO T VALUES ($i, '$i')")
+    }
+
+    checkAnswer(
+      sql("CALL paimon.sys.compact(table => 'T', order_strategy => 'zorder', order_by => 'id')"),
+      Row(-1, -1, 1, -1) :: Nil)
   }
 
   def lastSnapshotCommand(table: FileStoreTable): CommitKind = {

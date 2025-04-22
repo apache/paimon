@@ -29,6 +29,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
+import org.apache.paimon.operation.metrics.CommitStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.DataFilePathFactories;
@@ -257,6 +258,10 @@ public class TableCommitImpl implements InnerTableCommit {
             commitMultiple(retryCommittables, checkAppendFiles);
         }
         return retryCommittables.size();
+    }
+
+    public CommitStats getCommitStats() {
+        return commit.getCommitStats();
     }
 
     private void checkFilesExistence(List<ManifestCommittable> committables) {

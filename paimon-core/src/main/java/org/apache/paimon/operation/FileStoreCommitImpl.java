@@ -146,6 +146,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     @Nullable private PartitionExpire partitionExpire;
+    private CommitStats commitStats;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -368,36 +369,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
+            commitStats =
+                    new CommitStats(
+                            appendTableFiles,
+                            appendChangelog,
+                            compactTableFiles,
+                            compactChangelog,
+                            commitDuration,
+                            generatedSnapshot,
+                            attempts);
             if (this.commitMetrics != null) {
-                reportCommit(
-                        appendTableFiles,
-                        appendChangelog,
-                        compactTableFiles,
-                        compactChangelog,
-                        commitDuration,
-                        generatedSnapshot,
-                        attempts);
+                reportCommit(commitStats);
             }
         }
     }
 
-    private void reportCommit(
-            List<ManifestEntry> appendTableFiles,
-            List<ManifestEntry> appendChangelogFiles,
-            List<ManifestEntry> compactTableFiles,
-            List<ManifestEntry> compactChangelogFiles,
-            long commitDuration,
-            int generatedSnapshots,
-            int attempts) {
-        CommitStats commitStats =
-                new CommitStats(
-                        appendTableFiles,
-                        appendChangelogFiles,
-                        compactTableFiles,
-                        compactChangelogFiles,
-                        commitDuration,
-                        generatedSnapshots,
-                        attempts);
+    private void reportCommit(CommitStats commitStats) {
         commitMetrics.reportCommit(commitStats);
     }
 
@@ -513,15 +500,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
+            commitStats =
+                    new CommitStats(
+                            appendTableFiles,
+                            appendChangelog,
+                            compactTableFiles,
+                            compactChangelog,
+                            commitDuration,
+                            generatedSnapshot,
+                            attempts);
             if (this.commitMetrics != null) {
-                reportCommit(
-                        appendTableFiles,
-                        emptyList(),
-                        compactTableFiles,
-                        emptyList(),
-                        commitDuration,
-                        generatedSnapshot,
-                        attempts);
+                reportCommit(commitStats);
             }
         }
     }
@@ -613,6 +602,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Override
     public FileIO fileIO() {
         return fileIO;
+    }
+
+    @Override
+    public CommitStats getCommitStats() {
+        return commitStats;
     }
 
     private void collectChanges(
