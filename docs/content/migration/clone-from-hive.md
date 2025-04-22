@@ -29,6 +29,10 @@ under the License.
 Clone Hive Table supports cloning hive tables with parquet, orc and avro formats. The cloned table will be
 [append table]({{< ref "append-table/overview" >}}).
 
+1. Clone is `OVERWRITE` semantic that will overwrite the partitions of the target table according to the data.
+2. Clone is reentrant, but it requires existing tables to contain all fields from the source table and have the
+   same partition fields.
+
 ## Clone Hive Table
 
 ```bash
