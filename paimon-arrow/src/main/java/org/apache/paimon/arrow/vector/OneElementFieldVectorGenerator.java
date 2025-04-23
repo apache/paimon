@@ -44,7 +44,7 @@ public class OneElementFieldVectorGenerator implements AutoCloseable {
                 dataField
                         .type()
                         .accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
-                        .create(fieldVector);
+                        .create(fieldVector, dataField.type().isNullable());
         this.row = new GenericRow(1);
         this.row.setField(0, value);
     }

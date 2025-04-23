@@ -80,9 +80,12 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
 
     @Override
     public ArrowFieldWriterFactory visit(DecimalType decimalType) {
-        return fieldVector ->
+        return (fieldVector, isNullable) ->
                 new ArrowFieldWriters.DecimalWriter(
-                        fieldVector, decimalType.getPrecision(), decimalType.getScale());
+                        fieldVector,
+                        decimalType.getPrecision(),
+                        decimalType.getScale(),
+                        isNullable);
     }
 
     @Override
@@ -127,16 +130,16 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
 
     @Override
     public ArrowFieldWriterFactory visit(TimestampType timestampType) {
-        return fieldVector ->
+        return (fieldVector, isNullable) ->
                 new ArrowFieldWriters.TimestampWriter(
-                        fieldVector, timestampType.getPrecision(), null);
+                        fieldVector, timestampType.getPrecision(), null, isNullable);
     }
 
     @Override
     public ArrowFieldWriterFactory visit(LocalZonedTimestampType localZonedTimestampType) {
-        return fieldVector ->
+        return (fieldVector, isNullable) ->
                 new ArrowFieldWriters.TimestampWriter(
-                        fieldVector, localZonedTimestampType.getPrecision(), null);
+                        fieldVector, localZonedTimestampType.getPrecision(), null, isNullable);
     }
 
     @Override
@@ -147,10 +150,12 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
     @Override
     public ArrowFieldWriterFactory visit(ArrayType arrayType) {
         ArrowFieldWriterFactory elementWriterFactory = arrayType.getElementType().accept(this);
-        return fieldVector ->
+        return (fieldVector, isNullable) ->
                 new ArrowFieldWriters.ArrayWriter(
                         fieldVector,
-                        elementWriterFactory.create(((ListVector) fieldVector).getDataVector()));
+                        elementWriterFactory.create(
+                                ((ListVector) fieldVector).getDataVector(), isNullable),
+                        isNullable);
     }
 
     @Override
@@ -162,26 +167,28 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
     public ArrowFieldWriterFactory visit(MapType mapType) {
         ArrowFieldWriterFactory keyWriterFactory = mapType.getKeyType().accept(this);
         ArrowFieldWriterFactory valueWriterFactory = mapType.getValueType().accept(this);
-        return fieldVector -> {
+        return (fieldVector, isNullable) -> {
             MapVector mapVector = (MapVector) fieldVector;
             mapVector.reAlloc();
             List<FieldVector> keyValueVectors = mapVector.getDataVector().getChildrenFromFields();
             return new ArrowFieldWriters.MapWriter(
                     fieldVector,
-                    keyWriterFactory.create(keyValueVectors.get(0)),
-                    valueWriterFactory.create(keyValueVectors.get(1)));
+                    keyWriterFactory.create(keyValueVectors.get(0), isNullable),
+                    valueWriterFactory.create(keyValueVectors.get(1), isNullable),
+                    isNullable);
         };
     }
 
     @Override
     public ArrowFieldWriterFactory visit(RowType rowType) {
-        return fieldVector -> {
+        return (fieldVector, isNullable) -> {
             List<FieldVector> children = fieldVector.getChildrenFromFields();
             ArrowFieldWriter[] fieldWriters = new ArrowFieldWriter[children.size()];
             for (int i = 0; i < children.size(); i++) {
-                fieldWriters[i] = rowType.getTypeAt(i).accept(this).create(children.get(i));
+                fieldWriters[i] =
+                        rowType.getTypeAt(i).accept(this).create(children.get(i), isNullable);
             }
-            return new ArrowFieldWriters.RowWriter(fieldVector, fieldWriters);
+            return new ArrowFieldWriters.RowWriter(fieldVector, fieldWriters, isNullable);
         };
     }
 }

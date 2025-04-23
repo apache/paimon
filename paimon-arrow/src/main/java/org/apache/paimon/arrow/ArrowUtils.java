@@ -198,7 +198,7 @@ public class ArrowUtils {
             fieldWriters[i] =
                     rowType.getTypeAt(i)
                             .accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
-                            .create(vectors.get(i));
+                            .create(vectors.get(i), rowType.isNullable());
         }
 
         return fieldWriters;
