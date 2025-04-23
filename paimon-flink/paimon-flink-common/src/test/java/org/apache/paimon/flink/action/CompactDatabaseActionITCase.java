@@ -1045,8 +1045,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         "--table_conf",
                         CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key() + "=3");
 
-        StreamExecutionEnvironment env =
-                streamExecutionEnvironmentBuilder().streamingMode().build();
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
         action.withStreamExecutionEnvironment(env).build();
         JobClient jobClient = env.executeAsync();
 
@@ -1054,7 +1053,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 () -> snapshotManager.latestSnapshotId() == 11L,
                 Duration.ofSeconds(240),
                 Duration.ofMillis(500));
-        jobClient.cancel();
 
         assertThat(snapshotManager.latestSnapshot().commitKind())
                 .isEqualTo(Snapshot.CommitKind.COMPACT);
@@ -1072,6 +1070,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 splits.get(0).dataFiles().stream()
                         .anyMatch(file -> file.fileFormat().equalsIgnoreCase("avro"));
         assertThat(hasAvroFile).isTrue();
+        jobClient.cancel();
     }
 
     private void writeData(
