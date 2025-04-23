@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone.hive;
+package org.apache.paimon.flink.clone;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -36,14 +36,14 @@ import org.apache.flink.util.Collector;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Copy files for table. */
-public class CopyHiveFilesFunction extends CopyProcessFunction<CloneFileInfo, DataFileInfo> {
+/** Clone files for table. */
+public class CloneFilesFunction extends CloneProcessFunction<CloneFileInfo, DataFileInfo> {
 
     private static final long serialVersionUID = 1L;
 
     private transient Map<Identifier, Map<BinaryRow, DataFilePathFactory>> pathFactoryMap;
 
-    public CopyHiveFilesFunction(
+    public CloneFilesFunction(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
         super(sourceCatalogConfig, targetCatalogConfig);
     }
@@ -92,7 +92,16 @@ public class CopyHiveFilesFunction extends CopyProcessFunction<CloneFileInfo, Da
     }
 
     private DataFilePathFactory pathFactory(Identifier identifier, BinaryRow part) {
-        FileStoreTable targetTable = (FileStoreTable) getTable(identifier);
-        return targetTable.store().pathFactory().createDataFilePathFactory(part, 0);
+        return pathFactoryMap
+                .computeIfAbsent(identifier, k -> new HashMap<>())
+                .computeIfAbsent(
+                        part,
+                        k -> {
+                            FileStoreTable targetTable = (FileStoreTable) getTable(identifier);
+                            return targetTable
+                                    .store()
+                                    .pathFactory()
+                                    .createDataFilePathFactory(part, 0);
+                        });
     }
 }

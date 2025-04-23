@@ -23,7 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.action.ActionITCaseBase;
-import org.apache.paimon.flink.action.CloneHiveAction;
+import org.apache.paimon.flink.action.CloneAction;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.TestHiveMetastore;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -49,8 +49,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
-/** Tests for {@link CloneHiveAction}. */
-public class CloneHiveActionITCase extends ActionITCaseBase {
+/** Tests for {@link CloneAction}. */
+public class CloneActionITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
@@ -90,8 +90,8 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE DATABASE test");
 
         createAction(
-                        CloneHiveAction.class,
-                        "clone_hive",
+                        CloneAction.class,
+                        "clone",
                         "--database",
                         "default",
                         "--table",
@@ -159,7 +159,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
         List<String> args =
                 new ArrayList<>(
                         Arrays.asList(
-                                "clone_hive",
+                                "clone",
                                 "--database",
                                 "default",
                                 "--table",
@@ -179,7 +179,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
             args.add(whereSql);
         }
 
-        createAction(CloneHiveAction.class, args).run();
+        createAction(CloneAction.class, args).run();
         FileStoreTable paimonTable =
                 paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
 
@@ -195,7 +195,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
             // drop where
             args = new ArrayList<>(args.subList(0, args.size() - 1));
             args.add("id2 <> 1 AND id3 <> 1");
-            createAction(CloneHiveAction.class, args).run();
+            createAction(CloneAction.class, args).run();
 
             // assert not file deleted
             Snapshot snapshot = paimonTable.latestSnapshot().get();
@@ -213,7 +213,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
             Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
         } else {
             // run again, validate overwrite
-            createAction(CloneHiveAction.class, args).run();
+            createAction(CloneAction.class, args).run();
             r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.test_table").collect());
             Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
         }
@@ -240,7 +240,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
 
         List<String> args =
                 Arrays.asList(
-                        "clone_hive",
+                        "clone",
                         "--database",
                         "default",
                         "--table",
@@ -259,7 +259,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                         // the data won't < 0
                         "id2 < 0");
 
-        createAction(CloneHiveAction.class, args).run();
+        createAction(CloneAction.class, args).run();
 
         // table exists but no data
         FileStoreTable paimonTable =
@@ -298,8 +298,8 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE DATABASE test");
 
         createAction(
-                        CloneHiveAction.class,
-                        "clone_hive",
+                        CloneAction.class,
+                        "clone",
                         "--database",
                         "hivedb",
                         "--catalog_conf",
@@ -356,8 +356,8 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE DATABASE test");
 
         createAction(
-                        CloneHiveAction.class,
-                        "clone_hive",
+                        CloneAction.class,
+                        "clone",
                         "--database",
                         "hivedb",
                         "--catalog_conf",
@@ -412,7 +412,7 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
         List<String> args =
                 new ArrayList<>(
                         Arrays.asList(
-                                "clone_hive",
+                                "clone",
                                 "--database",
                                 "default",
                                 "--table",
@@ -429,11 +429,11 @@ public class CloneHiveActionITCase extends ActionITCaseBase {
                                 "warehouse=" + warehouse));
 
         if (ddlIndex < 3) {
-            assertThatThrownBy(() -> createAction(CloneHiveAction.class, args).run())
+            assertThatThrownBy(() -> createAction(CloneAction.class, args).run())
                     .rootCause()
                     .hasMessageContaining(exceptionMsg()[ddlIndex]);
         } else {
-            createAction(CloneHiveAction.class, args).run();
+            createAction(CloneAction.class, args).run();
             FileStoreTable paimonTable =
                     paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
 
