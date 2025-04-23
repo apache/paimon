@@ -16,18 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.copy;
 
 import javax.annotation.Nullable;
 
 /** The information of copy file. */
-public class CloneFileInfo {
+public class CopyFileInfo {
     @Nullable private final String sourceFilePath;
     @Nullable private final String filePathExcludeTableRoot;
     private final String sourceIdentifier;
     private final String targetIdentifier;
 
-    public CloneFileInfo(
+    public CopyFileInfo(
             @Nullable String sourceFilePath,
             @Nullable String filePathExcludeTableRoot,
             String sourceIdentifier,

@@ -30,12 +30,12 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import java.io.IOException;
 
 /**
- * Special {@link FileIO} for {@link CloneActionITCase}. It will sleep before cloning a file, thus
- * making it slower.
+ * Special {@link FileIO} for {@link CopyFilesActionITCase}. It will sleep before cloning a file,
+ * thus making it slower.
  */
-public class CloneActionSlowFileIO extends LocalFileIO {
+public class CopyFilesActionSlowFileIO extends LocalFileIO {
 
-    public static final String SCHEME = "clone-slow";
+    public static final String SCHEME = "copy-slow";
     private static final int SLEEP_MILLIS = 150;
 
     @Override
@@ -96,7 +96,7 @@ public class CloneActionSlowFileIO extends LocalFileIO {
         }
     }
 
-    /** Loader for {@link CloneActionSlowFileIO}. */
+    /** Loader for {@link CopyFilesActionSlowFileIO}. */
     public static class Loader implements FileIOLoader {
 
         private static final long serialVersionUID = 1L;
@@ -108,7 +108,7 @@ public class CloneActionSlowFileIO extends LocalFileIO {
 
         @Override
         public FileIO load(Path path) {
-            return new CloneActionSlowFileIO();
+            return new CopyFilesActionSlowFileIO();
         }
     }
 }

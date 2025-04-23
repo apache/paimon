@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.flink.action.CloneAction;
+import org.apache.paimon.flink.action.CopyFilesAction;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
@@ -29,9 +29,16 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Clone Procedure. */
-public class CloneProcedure extends ProcedureBase {
-    public static final String IDENTIFIER = "clone";
+/**
+ * Copy files for latest snapshot procedure.
+ *
+ * @deprecated The normal process should commit a snapshot to the catalog, but this procedure does
+ *     not do so. Currently, this procedure can only be applied to the FileSystemCatalog.
+ */
+@Deprecated
+public class CopyFilesProcedure extends ProcedureBase {
+
+    public static final String IDENTIFIER = "copy_files";
 
     @ProcedureHint(
             argument = {
@@ -86,8 +93,8 @@ public class CloneProcedure extends ProcedureBase {
             targetCatalogConfig.put("warehouse", targetWarehouse);
         }
 
-        CloneAction cloneAction =
-                new CloneAction(
+        CopyFilesAction action =
+                new CopyFilesAction(
                         database,
                         tableName,
                         sourceCatalogConfig,
@@ -95,7 +102,7 @@ public class CloneProcedure extends ProcedureBase {
                         targetTableName,
                         targetCatalogConfig,
                         parallelismStr == null ? null : Integer.toString(parallelismStr));
-        return execute(procedureContext, cloneAction, "Clone Job");
+        return execute(procedureContext, action, "Copy Files Job");
     }
 
     @Override

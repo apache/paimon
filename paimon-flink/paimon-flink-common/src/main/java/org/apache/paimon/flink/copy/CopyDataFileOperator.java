@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.copy;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
@@ -36,8 +36,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** A Operator to copy files. */
-public class CopyDataFileOperator extends AbstractStreamOperator<CloneFileInfo>
-        implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo> {
+public class CopyDataFileOperator extends AbstractStreamOperator<CopyFileInfo>
+        implements OneInputStreamOperator<CopyFileInfo, CopyFileInfo> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CopyDataFileOperator.class);
 
@@ -69,21 +69,21 @@ public class CopyDataFileOperator extends AbstractStreamOperator<CloneFileInfo>
     }
 
     @Override
-    public void processElement(StreamRecord<CloneFileInfo> streamRecord) throws Exception {
-        CloneFileInfo cloneFileInfo = streamRecord.getValue();
+    public void processElement(StreamRecord<CopyFileInfo> streamRecord) throws Exception {
+        CopyFileInfo copyFileInfo = streamRecord.getValue();
 
         FileIO sourceTableFileIO =
-                CloneFilesUtil.getFileIO(
-                        srcFileIOs, cloneFileInfo.getSourceIdentifier(), sourceCatalog);
+                CopyFilesUtil.getFileIO(
+                        srcFileIOs, copyFileInfo.getSourceIdentifier(), sourceCatalog);
         FileIO targetTableFileIO =
-                CloneFilesUtil.getFileIO(
-                        targetFileIOs, cloneFileInfo.getTargetIdentifier(), targetCatalog);
+                CopyFilesUtil.getFileIO(
+                        targetFileIOs, copyFileInfo.getTargetIdentifier(), targetCatalog);
         Path targetTableRootPath =
-                CloneFilesUtil.getPath(
-                        targetLocations, cloneFileInfo.getTargetIdentifier(), targetCatalog);
+                CopyFilesUtil.getPath(
+                        targetLocations, copyFileInfo.getTargetIdentifier(), targetCatalog);
 
-        String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
-        Path sourcePath = new Path(cloneFileInfo.getSourceFilePath());
+        String filePathExcludeTableRoot = copyFileInfo.getFilePathExcludeTableRoot();
+        Path sourcePath = new Path(copyFileInfo.getSourceFilePath());
         Path targetPath = new Path(targetTableRootPath + filePathExcludeTableRoot);
 
         try {
@@ -93,13 +93,13 @@ public class CopyDataFileOperator extends AbstractStreamOperator<CloneFileInfo>
 
                 if (LOG.isDebugEnabled()) {
                     LOG.debug(
-                            "Skipping clone target file {} because it already exists and has the same size.",
+                            "Skipping copy target file {} because it already exists and has the same size.",
                             targetPath);
                 }
 
                 // We still send record to SnapshotHintOperator to avoid the following corner case:
                 //
-                // When cloning two tables under a catalog, after clone table A is completed,
+                // When cloning two tables under a catalog, after copy table A is completed,
                 // the job fails due to snapshot expiration when cloning table B.
                 // If we don't re-send file information of table A to SnapshotHintOperator,
                 // the snapshot hint file of A will not be created after the restart.

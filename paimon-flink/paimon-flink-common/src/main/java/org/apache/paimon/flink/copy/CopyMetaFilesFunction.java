@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.copy;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
@@ -55,17 +55,17 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Copy the meta files of a table for clone operation. and output the index files and data manifest
+ * Copy the meta files of a table for copy operation. and output the index files and data manifest
  * files of the table to the next operator.
  */
-public class CopyMetaFilesForCloneOperator extends ProcessFunction<Tuple2<String, String>, Void> {
+public class CopyMetaFilesFunction extends ProcessFunction<Tuple2<String, String>, Void> {
 
-    public static final OutputTag<CloneFileInfo> INDEX_FILES_TAG =
-            new OutputTag<CloneFileInfo>("index-files") {};
-    public static final OutputTag<CloneFileInfo> DATA_MANIFEST_FILES_TAG =
-            new OutputTag<CloneFileInfo>("data-manifest-files") {};
+    public static final OutputTag<CopyFileInfo> INDEX_FILES_TAG =
+            new OutputTag<CopyFileInfo>("index-files") {};
+    public static final OutputTag<CopyFileInfo> DATA_MANIFEST_FILES_TAG =
+            new OutputTag<CopyFileInfo>("data-manifest-files") {};
 
-    private static final Logger LOG = LoggerFactory.getLogger(CopyMetaFilesForCloneOperator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CopyMetaFilesFunction.class);
 
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
@@ -73,7 +73,7 @@ public class CopyMetaFilesForCloneOperator extends ProcessFunction<Tuple2<String
     private Catalog sourceCatalog;
     private Catalog targetCatalog;
 
-    public CopyMetaFilesForCloneOperator(
+    public CopyMetaFilesFunction(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
@@ -166,7 +166,7 @@ public class CopyMetaFilesForCloneOperator extends ProcessFunction<Tuple2<String
         }
 
         // 5. copy index manifest files
-        List<CloneFileInfo> indexFiles = new ArrayList<>();
+        List<CopyFileInfo> indexFiles = new ArrayList<>();
         if (latestSnapshot != null) {
             IndexFileHandler indexFileHandler = sourceStore.newIndexFileHandler();
             String indexManifest = latestSnapshot.indexManifest();
@@ -180,7 +180,7 @@ public class CopyMetaFilesForCloneOperator extends ProcessFunction<Tuple2<String
 
                 // read index files
                 List<IndexManifestEntry> indexManifestEntries =
-                        CloneFilesUtil.retryReadingFiles(
+                        CopyFilesUtil.retryReadingFiles(
                                 () -> indexFileHandler.readManifestWithIOException(indexManifest));
 
                 List<Path> indexFileList = new ArrayList<>();
@@ -192,12 +192,12 @@ public class CopyMetaFilesForCloneOperator extends ProcessFunction<Tuple2<String
                 }
 
                 indexFiles =
-                        CloneFilesUtil.toCloneFileInfos(
+                        CopyFilesUtil.toCopyFileInfos(
                                 indexFileList,
                                 sourceTable.location(),
                                 sourceIdentifierStr,
                                 targetIdentifierStr);
-                for (CloneFileInfo info : indexFiles) {
+                for (CopyFileInfo info : indexFiles) {
                     context.output(INDEX_FILES_TAG, info);
                 }
             }
@@ -218,22 +218,21 @@ public class CopyMetaFilesForCloneOperator extends ProcessFunction<Tuple2<String
         }
 
         // pick manifest files
-        List<CloneFileInfo> dataManifestFiles = new ArrayList<>();
+        List<CopyFileInfo> dataManifestFiles = new ArrayList<>();
         if (latestSnapshot != null) {
             List<Path> list =
-                    CloneFilesUtil.getManifestUsedFilesForSnapshot(
-                            sourceTable, latestSnapshot.id());
+                    CopyFilesUtil.getManifestUsedFilesForSnapshot(sourceTable, latestSnapshot.id());
             dataManifestFiles =
-                    CloneFilesUtil.toCloneFileInfos(
+                    CopyFilesUtil.toCopyFileInfos(
                             list, sourceTable.location(), sourceIdentifierStr, targetIdentifierStr);
         }
 
-        for (CloneFileInfo info : dataManifestFiles) {
+        for (CopyFileInfo info : dataManifestFiles) {
             context.output(DATA_MANIFEST_FILES_TAG, info);
         }
         if (LOG.isDebugEnabled()) {
             LOG.debug(
-                    "The CloneFileInfo of table {} is: indexFiles={}, dataManifestFiles={}",
+                    "The CopyFileInfo of table {} is: indexFiles={}, dataManifestFiles={}",
                     sourceTable.location(),
                     indexFiles,
                     dataManifestFiles);
