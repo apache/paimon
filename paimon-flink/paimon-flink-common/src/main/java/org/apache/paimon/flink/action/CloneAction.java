@@ -21,12 +21,12 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.clone.hive.CloneFileInfo;
-import org.apache.paimon.flink.clone.hive.CloneHiveUtils;
-import org.apache.paimon.flink.clone.hive.CommitTableOperator;
-import org.apache.paimon.flink.clone.hive.CopyHiveFilesFunction;
-import org.apache.paimon.flink.clone.hive.DataFileInfo;
-import org.apache.paimon.flink.clone.hive.ListHiveFilesFunction;
+import org.apache.paimon.flink.clone.CloneFileInfo;
+import org.apache.paimon.flink.clone.CloneFilesFunction;
+import org.apache.paimon.flink.clone.CloneUtils;
+import org.apache.paimon.flink.clone.CommitTableOperator;
+import org.apache.paimon.flink.clone.DataFileInfo;
+import org.apache.paimon.flink.clone.ListCloneFilesFunction;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.hive.HiveCatalog;
 
@@ -39,8 +39,8 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
-/** Clone source files managed by HiveMetaStore and commit metas to construct Paimon table. */
-public class CloneHiveAction extends ActionBase {
+/** Clone source table to target table. */
+public class CloneAction extends ActionBase {
 
     private final Map<String, String> sourceCatalogConfig;
     private final String sourceDatabase;
@@ -53,7 +53,7 @@ public class CloneHiveAction extends ActionBase {
     private final int parallelism;
     @Nullable private final String whereSql;
 
-    public CloneHiveAction(
+    public CloneAction(
             String sourceDatabase,
             String sourceTableName,
             Map<String, String> sourceCatalogConfig,
@@ -90,7 +90,7 @@ public class CloneHiveAction extends ActionBase {
     public void build() throws Exception {
         // list source tables
         DataStream<Tuple2<Identifier, Identifier>> source =
-                CloneHiveUtils.buildSource(
+                CloneUtils.buildSource(
                         sourceDatabase,
                         sourceTableName,
                         targetDatabase,
@@ -100,13 +100,13 @@ public class CloneHiveAction extends ActionBase {
 
         DataStream<Tuple2<Identifier, Identifier>> partitionedSource =
                 FlinkStreamPartitioner.partition(
-                        source, new CloneHiveUtils.TableChannelComputer(), parallelism);
+                        source, new CloneUtils.TableChannelComputer(), parallelism);
 
         // create target table, list files and group by <table, partition>
         DataStream<CloneFileInfo> files =
                 partitionedSource
                         .process(
-                                new ListHiveFilesFunction(
+                                new ListCloneFilesFunction(
                                         sourceCatalogConfig, targetCatalogConfig, whereSql))
                         .name("List Files")
                         .setParallelism(parallelism);
@@ -114,14 +114,13 @@ public class CloneHiveAction extends ActionBase {
         // copy files and commit
         DataStream<DataFileInfo> dataFile =
                 files.rebalance()
-                        .process(
-                                new CopyHiveFilesFunction(sourceCatalogConfig, targetCatalogConfig))
+                        .process(new CloneFilesFunction(sourceCatalogConfig, targetCatalogConfig))
                         .name("Copy Files")
                         .setParallelism(parallelism);
 
         DataStream<DataFileInfo> partitionedDataFile =
                 FlinkStreamPartitioner.partition(
-                        dataFile, new CloneHiveUtils.DataFileChannelComputer(), parallelism);
+                        dataFile, new CloneUtils.DataFileChannelComputer(), parallelism);
 
         DataStream<Long> committed =
                 partitionedDataFile

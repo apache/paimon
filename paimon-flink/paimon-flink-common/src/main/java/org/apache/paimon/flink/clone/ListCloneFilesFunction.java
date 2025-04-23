@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone.hive;
+package org.apache.paimon.flink.clone;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
@@ -48,14 +48,14 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** List files for table. */
-public class ListHiveFilesFunction
-        extends CopyProcessFunction<Tuple2<Identifier, Identifier>, CloneFileInfo> {
+public class ListCloneFilesFunction
+        extends CloneProcessFunction<Tuple2<Identifier, Identifier>, CloneFileInfo> {
 
     private static final long serialVersionUID = 1L;
 
     @Nullable private final String whereSql;
 
-    public ListHiveFilesFunction(
+    public ListCloneFilesFunction(
             Map<String, String> sourceCatalogConfig,
             Map<String, String> targetCatalogConfig,
             @Nullable String whereSql) {
