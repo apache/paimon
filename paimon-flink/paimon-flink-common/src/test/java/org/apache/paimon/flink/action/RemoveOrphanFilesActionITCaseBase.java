@@ -103,7 +103,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     public void testRunWithoutException(boolean isNamedArgument) throws Exception {
         assumeTrue(!isNamedArgument || supportNamedArgument());
 
-        createTableAndWriteData(tableName);
+        FileStoreTable table = createTableAndWriteData(tableName);
 
         List<String> args =
                 new ArrayList<>(
@@ -158,6 +158,23 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
 
         assertThat(actualDeleteFile).containsExactlyInAnyOrder(Row.of("2"), Row.of("2"));
+
+        // test clean empty directories
+        FileIO fileIO = table.fileIO();
+        Path location = table.location();
+        Path bucketDir = new Path(location, "bucket-0");
+
+        // delete snapshots and clean orphan files
+        fileIO.delete(new Path(location, "snapshot"), true);
+        ImmutableList.copyOf(executeSQL(withOlderThan));
+        assertThat(fileIO.exists(bucketDir)).isTrue();
+        assertThat(fileIO.listDirectories(bucketDir)).isEmpty();
+
+        // clean empty directories
+        ImmutableList.copyOf(executeSQL(withOlderThan));
+        assertThat(fileIO.exists(bucketDir)).isFalse();
+        // table should not be deleted
+        assertThat(fileIO.exists(location)).isTrue();
     }
 
     @ParameterizedTest
