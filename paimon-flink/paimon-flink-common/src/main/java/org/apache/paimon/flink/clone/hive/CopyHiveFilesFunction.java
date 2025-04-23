@@ -24,13 +24,16 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.IOUtils;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /** Copy files for table. */
@@ -38,9 +41,17 @@ public class CopyHiveFilesFunction extends CopyProcessFunction<CloneFileInfo, Da
 
     private static final long serialVersionUID = 1L;
 
+    private transient Map<Identifier, Map<BinaryRow, DataFilePathFactory>> pathFactoryMap;
+
     public CopyHiveFilesFunction(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
         super(sourceCatalogConfig, targetCatalogConfig);
+    }
+
+    @Override
+    public void open(Configuration conf) throws Exception {
+        super.open(conf);
+        this.pathFactoryMap = new HashMap<>();
     }
 
     @Override
@@ -57,23 +68,18 @@ public class CopyHiveFilesFunction extends CopyProcessFunction<CloneFileInfo, Da
         FileIO sourceFileIO = hiveCatalog.fileIO();
         FileStoreTable targetTable = (FileStoreTable) getTable(identifier);
 
-        // new file name
-        String suffix = "." + format;
-        String fileName = path.getName();
-        String newFileName = fileName.endsWith(suffix) ? fileName : fileName + suffix;
-
         // copy files
-        Path targetFilePath = targetTable.store().pathFactory().bucketPath(partition, 0);
+        Path targetFilePath = pathFactory(identifier, partition).newPathFromExtension("." + format);
         IOUtils.copyBytes(
                 sourceFileIO.newInputStream(path),
-                targetTable.fileIO().newOutputStream(new Path(targetFilePath, newFileName), false));
+                targetTable.fileIO().newOutputStream(targetFilePath, false));
 
         // to DataFileMeta
         SimpleStatsExtractor simpleStatsExtractor =
                 FileMetaUtils.createSimpleStatsExtractor(targetTable, format);
         DataFileMeta dataFileMeta =
                 FileMetaUtils.constructFileMeta(
-                        newFileName,
+                        targetFilePath.getName(),
                         cloneFileInfo.fileSize(),
                         path,
                         simpleStatsExtractor,
@@ -83,5 +89,10 @@ public class CopyHiveFilesFunction extends CopyProcessFunction<CloneFileInfo, Da
         collector.collect(
                 new DataFileInfo(
                         identifier, partition, dataFileSerializer.serializeToBytes(dataFileMeta)));
+    }
+
+    private DataFilePathFactory pathFactory(Identifier identifier, BinaryRow part) {
+        FileStoreTable targetTable = (FileStoreTable) getTable(identifier);
+        return targetTable.store().pathFactory().createDataFilePathFactory(part, 0);
     }
 }
