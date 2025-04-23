@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.copy;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
@@ -51,7 +51,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /** Util class for get used files' paths of a table's latest snapshot. */
-public class CloneFilesUtil {
+public class CopyFilesUtil {
 
     private static final int READ_FILE_RETRY_NUM = 3;
     private static final int READ_FILE_RETRY_INTERVAL = 5;
@@ -239,32 +239,18 @@ public class CloneFilesUtil {
         throw caught;
     }
 
-    public static List<CloneFileInfo> toCloneFileInfos(
+    public static List<CopyFileInfo> toCopyFileInfos(
             List<Path> fileList,
             Path sourceTableRoot,
             String sourceIdentifier,
             String targetIdentifier) {
-        List<CloneFileInfo> result = new ArrayList<>();
+        List<CopyFileInfo> result = new ArrayList<>();
         for (Path file : fileList) {
             Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
             result.add(
-                    new CloneFileInfo(
+                    new CopyFileInfo(
                             file.toUri().toString(),
                             relativePath.toString(),
-                            sourceIdentifier,
-                            targetIdentifier));
-        }
-        return result;
-    }
-
-    public static List<CloneFileInfo> toCloneFileInfos(
-            List<Pair<Path, Path>> fileList, String sourceIdentifier, String targetIdentifier) {
-        List<CloneFileInfo> result = new ArrayList<>();
-        for (Pair<Path, Path> file : fileList) {
-            result.add(
-                    new CloneFileInfo(
-                            file.getLeft().toUri().toString(),
-                            file.getRight().toString(),
                             sourceIdentifier,
                             targetIdentifier));
         }

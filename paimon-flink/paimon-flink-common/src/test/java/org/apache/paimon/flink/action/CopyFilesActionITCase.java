@@ -25,7 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.clone.CloneFilesUtil;
+import org.apache.paimon.flink.copy.CopyFilesUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
@@ -57,8 +57,8 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** IT cases for {@link CloneAction}. */
-public class CloneActionITCase extends ActionITCaseBase {
+/** IT cases for {@link CopyFilesAction}. */
+public class CopyFilesActionITCase extends ActionITCaseBase {
 
     // ------------------------------------------------------------------------
     //  Constructed Tests
@@ -66,7 +66,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneTable(String invoker) throws Exception {
+    public void testCopyTable(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
@@ -75,7 +75,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "action":
                 String[] args =
                         new String[] {
-                            "clone",
+                            "copy_files",
                             "--warehouse",
                             sourceWarehouse,
                             "--database",
@@ -94,7 +94,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone('%s', 'db1', 't1', '', '%s', 'mydb', 'myt')",
+                                "CALL sys.copy_files('%s', 'db1', 't1', '', '%s', 'mydb', 'myt')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -102,7 +102,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone(warehouse => '%s', database => 'db1', `table` => 't1', target_warehouse => '%s', target_database => 'mydb', target_table => 'myt')",
+                                "CALL sys.copy_files(warehouse => '%s', database => 'db1', `table` => 't1', target_warehouse => '%s', target_database => 'mydb', target_table => 'myt')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -124,12 +124,12 @@ public class CloneActionITCase extends ActionITCaseBase {
         assertThat(actual)
                 .containsExactly(
                         "+I[one, 1, 10]", "+I[one, 2, 21]", "+I[two, 1, 101]", "+I[two, 2, 200]");
-        compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "myt");
+        compareCopyFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "myt");
     }
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneTableWithSourceTableExternalPath(String invoker) throws Exception {
+    public void testCopyTableWithSourceTableExternalPath(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareDataWithExternalPath(sourceWarehouse);
 
@@ -138,7 +138,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "action":
                 String[] args =
                         new String[] {
-                            "clone",
+                            "copy_files",
                             "--warehouse",
                             sourceWarehouse,
                             "--database",
@@ -157,7 +157,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone('%s', 'db1', 't1', '', '%s', 'mydb', 'myt')",
+                                "CALL sys.copy_files('%s', 'db1', 't1', '', '%s', 'mydb', 'myt')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -165,7 +165,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone(warehouse => '%s', database => 'db1', `table` => 't1', target_warehouse => '%s', target_database => 'mydb', target_table => 'myt')",
+                                "CALL sys.copy_files(warehouse => '%s', database => 'db1', `table` => 't1', target_warehouse => '%s', target_database => 'mydb', target_table => 'myt')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -187,12 +187,12 @@ public class CloneActionITCase extends ActionITCaseBase {
         assertThat(actual)
                 .containsExactly(
                         "+I[one, 1, 10]", "+I[one, 2, 21]", "+I[two, 1, 101]", "+I[two, 2, 200]");
-        compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "myt");
+        compareCopyFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "myt");
     }
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneDatabase(String invoker) throws Exception {
+    public void testCopyDatabase(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
@@ -201,7 +201,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "action":
                 String[] args =
                         new String[] {
-                            "clone",
+                            "copy_files",
                             "--warehouse",
                             sourceWarehouse,
                             "--database",
@@ -216,7 +216,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone('%s', 'db1', '', '', '%s', 'mydb')",
+                                "CALL sys.copy_files('%s', 'db1', '', '', '%s', 'mydb')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -224,7 +224,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone(warehouse => '%s', database => 'db1', target_warehouse => '%s', target_database => 'mydb')",
+                                "CALL sys.copy_files(warehouse => '%s', database => 'db1', target_warehouse => '%s', target_database => 'mydb')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -246,17 +246,17 @@ public class CloneActionITCase extends ActionITCaseBase {
         assertThat(actual)
                 .containsExactly(
                         "+I[one, 1, 10]", "+I[one, 2, 21]", "+I[two, 1, 101]", "+I[two, 2, 200]");
-        compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "t1");
+        compareCopyFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "mydb", "t1");
 
         actual = collect(tEnv, "SELECT k, v FROM mydb.t2 ORDER BY k");
         assertThat(actual)
                 .containsExactly("+I[10, 100]", "+I[20, 201]", "+I[100, 1001]", "+I[200, 2000]");
-        compareCloneFiles(sourceWarehouse, "db1", "t2", targetWarehouse, "mydb", "t2");
+        compareCopyFiles(sourceWarehouse, "db1", "t2", targetWarehouse, "mydb", "t2");
     }
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneWarehouse(String invoker) throws Exception {
+    public void testCopyWarehouse(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         prepareData(sourceWarehouse);
 
@@ -265,7 +265,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "action":
                 String[] args =
                         new String[] {
-                            "clone",
+                            "copy_files",
                             "--warehouse",
                             sourceWarehouse,
                             "--target_warehouse",
@@ -276,7 +276,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone('%s', '', '', '', '%s')",
+                                "CALL sys.copy_files('%s', '', '', '', '%s')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -284,7 +284,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone(warehouse => '%s', target_warehouse => '%s')",
+                                "CALL sys.copy_files(warehouse => '%s', target_warehouse => '%s')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -306,12 +306,12 @@ public class CloneActionITCase extends ActionITCaseBase {
         assertThat(actual)
                 .containsExactly(
                         "+I[one, 1, 10]", "+I[one, 2, 21]", "+I[two, 1, 101]", "+I[two, 2, 200]");
-        compareCloneFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "db1", "t1");
+        compareCopyFiles(sourceWarehouse, "db1", "t1", targetWarehouse, "db1", "t1");
 
         actual = collect(tEnv, "SELECT k, v FROM db1.t2 ORDER BY k");
         assertThat(actual)
                 .containsExactly("+I[10, 100]", "+I[20, 201]", "+I[100, 1001]", "+I[200, 2000]");
-        compareCloneFiles(sourceWarehouse, "db1", "t2", targetWarehouse, "db1", "t2");
+        compareCopyFiles(sourceWarehouse, "db1", "t2", targetWarehouse, "db1", "t2");
 
         actual = collect(tEnv, "SELECT pt, k, v FROM db2.t3 ORDER BY pt, k");
         assertThat(actual)
@@ -320,13 +320,13 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "+I[1, 2, twenty]",
                         "+I[2, 1, banana]",
                         "+I[2, 2, orange]");
-        compareCloneFiles(sourceWarehouse, "db2", "t3", targetWarehouse, "db2", "t3");
+        compareCopyFiles(sourceWarehouse, "db2", "t3", targetWarehouse, "db2", "t3");
 
         actual = collect(tEnv, "SELECT k, v FROM db2.t4 ORDER BY k");
         assertThat(actual)
                 .containsExactly(
                         "+I[10, one]", "+I[20, twenty]", "+I[100, banana]", "+I[200, orange]");
-        compareCloneFiles(sourceWarehouse, "db2", "t4", targetWarehouse, "db2", "t4");
+        compareCopyFiles(sourceWarehouse, "db2", "t4", targetWarehouse, "db2", "t4");
     }
 
     private void prepareData(String sourceWarehouse) throws Exception {
@@ -558,7 +558,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
-    public void testCloneWithSchemaEvolution(String invoker) throws Exception {
+    public void testCopyWithSchemaEvolution(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
@@ -596,7 +596,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "action":
                 String[] args =
                         new String[] {
-                            "clone",
+                            "copy_files",
                             "--warehouse",
                             sourceWarehouse,
                             "--target_warehouse",
@@ -607,7 +607,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone('%s', '', '', '', '%s')",
+                                "CALL sys.copy_files('%s', '', '', '', '%s')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -615,7 +615,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_named":
                 executeSQL(
                         String.format(
-                                "CALL sys.clone(warehouse => '%s', target_warehouse => '%s')",
+                                "CALL sys.copy_files(warehouse => '%s', target_warehouse => '%s')",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -639,10 +639,10 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "+I[one, 2, 21, apple]",
                         "+I[two, 1, 101, banana]",
                         "+I[two, 2, 200, orange]");
-        compareCloneFiles(sourceWarehouse, "default", "t", targetWarehouse, "default", "t");
+        compareCopyFiles(sourceWarehouse, "default", "t", targetWarehouse, "default", "t");
     }
 
-    protected void compareCloneFiles(
+    protected void compareCopyFiles(
             String sourceWarehouse,
             String sourceDb,
             String sourceTableName,
@@ -662,7 +662,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
         // 1. check the schema files
         List<Path> targetTableSchemaFiles =
-                CloneFilesUtil.getSchemaUsedFilesForSnapshot(targetTable, snapshotId);
+                CopyFilesUtil.getSchemaUsedFilesForSnapshot(targetTable, snapshotId);
         List<Pair<Path, Path>> filesPathInfoList =
                 targetTableSchemaFiles.stream()
                         .map(
@@ -681,7 +681,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
         // 2. check the manifest files
         List<Path> targetTableManifestFiles =
-                CloneFilesUtil.getManifestUsedFilesForSnapshot(targetTable, snapshotId);
+                CopyFilesUtil.getManifestUsedFilesForSnapshot(targetTable, snapshotId);
         filesPathInfoList =
                 targetTableManifestFiles.stream()
                         .map(
@@ -705,7 +705,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         }
 
         // 3. check the data files
-        filesPathInfoList = CloneFilesUtil.getDataUsedFilesForSnapshot(targetTable, snapshotId);
+        filesPathInfoList = CopyFilesUtil.getDataUsedFilesForSnapshot(targetTable, snapshotId);
         isExternalPath =
                 sourceTable.options().containsKey(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
         String externalPaths = null;
@@ -768,7 +768,7 @@ public class CloneActionITCase extends ActionITCaseBase {
     @ParameterizedTest(name = "invoker = {0}")
     @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
     @Timeout(180)
-    public void testCloneTableWithExpiration(String invoker) throws Exception {
+    public void testCopyTableWithExpiration(String invoker) throws Exception {
         String sourceWarehouse = getTempDirPath("source-ware");
 
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
@@ -828,9 +828,9 @@ public class CloneActionITCase extends ActionITCaseBase {
                             tEnv.executeSql(sql).await();
                             // Sleeping time will become longer and longer, so expiration time will
                             // also become longer.
-                            // Thus, at the beginning of the test, clone job is very likely to fail
+                            // Thus, at the beginning of the test, copy job is very likely to fail
                             // due to FileNotFoundException.
-                            // However, as the test progresses further, clone job should be able to
+                            // However, as the test progresses further, copy job should be able to
                             // complete due to longer expiration time.
                             Thread.sleep(100L << Math.min(rounds, 9));
                         } catch (Exception e) {
@@ -845,7 +845,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         Thread.sleep(ThreadLocalRandom.current().nextInt(2000));
         String targetWarehouse = getTempDirPath("target-ware");
 
-        doCloneJob(invoker, sourceWarehouse, targetWarehouse);
+        doCopyJob(invoker, sourceWarehouse, targetWarehouse);
 
         running.set(false);
         thread.join();
@@ -864,8 +864,8 @@ public class CloneActionITCase extends ActionITCaseBase {
                 result = collect(tEnv, "SELECT pt, COUNT(*) FROM t GROUP BY pt ORDER BY pt");
             } catch (Exception e) {
                 // ignore the exception, as it is expected to fail due to FileNotFoundException
-                // we will retry the clone job, and check the result again until success.
-                doCloneJob(invoker, sourceWarehouse, targetWarehouse);
+                // we will retry the copy job, and check the result again until success.
+                doCopyJob(invoker, sourceWarehouse, targetWarehouse);
                 continue;
             }
             break;
@@ -880,23 +880,23 @@ public class CloneActionITCase extends ActionITCaseBase {
                 .isEqualTo(Collections.singletonList("+I[1]"));
     }
 
-    private void doCloneJob(String invoker, String sourceWarehouse, String targetWarehouse)
+    private void doCopyJob(String invoker, String sourceWarehouse, String targetWarehouse)
             throws Exception {
         switch (invoker) {
             case "action":
                 String[] args =
                         new String[] {
-                            "clone",
+                            "copy_files",
                             "--warehouse",
                             // special file io to make cloning slower, thus more likely to face
-                            // FileNotFoundException, see CloneActionSlowFileIO
-                            "clone-slow://" + sourceWarehouse,
+                            // FileNotFoundException, see CopyFilesActionSlowFileIO
+                            "copy-slow://" + sourceWarehouse,
                             "--target_warehouse",
-                            "clone-slow://" + targetWarehouse,
+                            "copy-slow://" + targetWarehouse,
                             "--parallelism",
                             "1"
                         };
-                CloneAction action = (CloneAction) ActionFactory.createAction(args).get();
+                CopyFilesAction action = (CopyFilesAction) ActionFactory.createAction(args).get();
 
                 StreamExecutionEnvironment env =
                         streamExecutionEnvironmentBuilder().streamingMode().allowRestart().build();
@@ -906,7 +906,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_indexed":
                 callProcedureWithRestartAllowed(
                         String.format(
-                                "CALL sys.clone('clone-slow://%s', '', '', '', 'clone-slow://%s', '', '', '', 1)",
+                                "CALL sys.copy_files('copy-slow://%s', '', '', '', 'copy-slow://%s', '', '', '', 1)",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -914,7 +914,7 @@ public class CloneActionITCase extends ActionITCaseBase {
             case "procedure_named":
                 callProcedureWithRestartAllowed(
                         String.format(
-                                "CALL sys.clone(warehouse => 'clone-slow://%s', target_warehouse => 'clone-slow://%s', parallelism => 1)",
+                                "CALL sys.copy_files(warehouse => 'copy-slow://%s', target_warehouse => 'copy-slow://%s', parallelism => 1)",
                                 sourceWarehouse, targetWarehouse),
                         true,
                         true);
@@ -943,7 +943,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
         String[] args =
                 new String[] {
-                    "clone",
+                    "copy_files",
                     "--warehouse",
                     sourceWarehouse,
                     "--target_warehouse",
@@ -951,7 +951,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                     "--parallelism",
                     "1"
                 };
-        CloneAction action = (CloneAction) ActionFactory.createAction(args).get();
+        CopyFilesAction action = (CopyFilesAction) ActionFactory.createAction(args).get();
 
         StreamExecutionEnvironment env =
                 streamExecutionEnvironmentBuilder().streamingMode().allowRestart().build();

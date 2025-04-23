@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.copy;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
@@ -37,13 +37,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
- * Pick the tables to be cloned based on the user input parameters. The record type of the build
+ * Pick the tables to be copied based on the user input parameters. The record type of the build
  * DataStream is {@link Tuple2}. The left element is the identifier of source table and the right
  * element is the identifier of target table.
  */
-public class CloneSourceBuilder {
+public class CopySourceBuilder {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CloneSourceBuilder.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CopySourceBuilder.class);
 
     private final StreamExecutionEnvironment env;
     private final Map<String, String> sourceCatalogConfig;
@@ -52,7 +52,7 @@ public class CloneSourceBuilder {
     private final String targetDatabase;
     private final String targetTableName;
 
-    public CloneSourceBuilder(
+    public CopySourceBuilder(
             StreamExecutionEnvironment env,
             Map<String, String> sourceCatalogConfig,
             String database,
@@ -83,10 +83,10 @@ public class CloneSourceBuilder {
                     "tableName must be blank when database is null.");
             checkArgument(
                     StringUtils.isNullOrWhitespaceOnly(targetDatabase),
-                    "targetDatabase must be blank when clone all tables in a catalog.");
+                    "targetDatabase must be blank when copy all tables in a catalog.");
             checkArgument(
                     StringUtils.isNullOrWhitespaceOnly(targetTableName),
-                    "targetTableName must be blank when clone all tables in a catalog.");
+                    "targetTableName must be blank when copy all tables in a catalog.");
             for (String db : sourceCatalog.listDatabases()) {
                 for (String table : sourceCatalog.listTables(db)) {
                     String s = db + "." + table;
@@ -96,20 +96,20 @@ public class CloneSourceBuilder {
         } else if (StringUtils.isNullOrWhitespaceOnly(tableName)) {
             checkArgument(
                     !StringUtils.isNullOrWhitespaceOnly(targetDatabase),
-                    "targetDatabase must not be blank when clone all tables in a database.");
+                    "targetDatabase must not be blank when copy all tables in a database.");
             checkArgument(
                     StringUtils.isNullOrWhitespaceOnly(targetTableName),
-                    "targetTableName must be blank when clone all tables in a catalog.");
+                    "targetTableName must be blank when copy all tables in a catalog.");
             for (String table : sourceCatalog.listTables(database)) {
                 result.add(new Tuple2<>(database + "." + table, targetDatabase + "." + table));
             }
         } else {
             checkArgument(
                     !StringUtils.isNullOrWhitespaceOnly(targetDatabase),
-                    "targetDatabase must not be blank when clone a table.");
+                    "targetDatabase must not be blank when copy a table.");
             checkArgument(
                     !StringUtils.isNullOrWhitespaceOnly(targetTableName),
-                    "targetTableName must not be blank when clone a table.");
+                    "targetTableName must not be blank when copy a table.");
             result.add(
                     new Tuple2<>(
                             database + "." + tableName, targetDatabase + "." + targetTableName));
@@ -118,7 +118,7 @@ public class CloneSourceBuilder {
         checkState(!result.isEmpty(), "Didn't find any table in source catalog.");
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("The clone identifiers of source table and target table are: {}", result);
+            LOG.debug("The copy identifiers of source table and target table are: {}", result);
         }
         return env.fromCollection(result).forceNonParallel().forward();
     }

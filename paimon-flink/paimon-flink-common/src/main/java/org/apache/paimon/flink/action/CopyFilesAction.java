@@ -18,13 +18,13 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.flink.clone.CloneFileInfo;
-import org.apache.paimon.flink.clone.CloneSourceBuilder;
-import org.apache.paimon.flink.clone.CopyDataFileOperator;
-import org.apache.paimon.flink.clone.CopyManifestFileOperator;
-import org.apache.paimon.flink.clone.CopyMetaFilesForCloneOperator;
-import org.apache.paimon.flink.clone.SnapshotHintChannelComputer;
-import org.apache.paimon.flink.clone.SnapshotHintOperator;
+import org.apache.paimon.flink.copy.CopyDataFileOperator;
+import org.apache.paimon.flink.copy.CopyFileInfo;
+import org.apache.paimon.flink.copy.CopyManifestFileOperator;
+import org.apache.paimon.flink.copy.CopyMetaFilesFunction;
+import org.apache.paimon.flink.copy.CopySourceBuilder;
+import org.apache.paimon.flink.copy.SnapshotHintChannelComputer;
+import org.apache.paimon.flink.copy.SnapshotHintOperator;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -39,8 +39,14 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
-/** The Latest Snapshot clone action for Flink. */
-public class CloneAction extends ActionBase {
+/**
+ * The Latest Snapshot copy files action for Flink.
+ *
+ * @deprecated The normal process should commit a snapshot to the catalog, but this action does not
+ *     do so. Currently, this action can only be applied to the FileSystemCatalog.
+ */
+@Deprecated
+public class CopyFilesAction extends ActionBase {
 
     private final int parallelism;
 
@@ -52,7 +58,7 @@ public class CloneAction extends ActionBase {
     private final String targetDatabase;
     private final String targetTableName;
 
-    public CloneAction(
+    public CopyFilesAction(
             String database,
             String tableName,
             Map<String, String> sourceCatalogConfig,
@@ -89,15 +95,15 @@ public class CloneAction extends ActionBase {
     @Override
     public void build() {
         try {
-            buildCloneFlinkJob(env);
+            buildCopyFilesFlinkJob(env);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    private void buildCloneFlinkJob(StreamExecutionEnvironment env) throws Exception {
-        DataStream<Tuple2<String, String>> cloneSource =
-                new CloneSourceBuilder(
+    private void buildCopyFilesFlinkJob(StreamExecutionEnvironment env) throws Exception {
+        DataStream<Tuple2<String, String>> source =
+                new CopySourceBuilder(
                                 env,
                                 sourceCatalogConfig,
                                 database,
@@ -107,52 +113,50 @@ public class CloneAction extends ActionBase {
                         .build();
 
         SingleOutputStreamOperator<Void> copyMetaFiles =
-                cloneSource
-                        .forward()
+                source.forward()
                         .process(
-                                new CopyMetaFilesForCloneOperator(
-                                        sourceCatalogConfig, targetCatalogConfig))
+                                new CopyMetaFilesFunction(sourceCatalogConfig, targetCatalogConfig))
                         .name("Side Output")
                         .setParallelism(1);
 
-        DataStream<CloneFileInfo> indexFilesStream =
-                copyMetaFiles.getSideOutput(CopyMetaFilesForCloneOperator.INDEX_FILES_TAG);
-        DataStream<CloneFileInfo> dataManifestFilesStream =
-                copyMetaFiles.getSideOutput(CopyMetaFilesForCloneOperator.DATA_MANIFEST_FILES_TAG);
+        DataStream<CopyFileInfo> indexFilesStream =
+                copyMetaFiles.getSideOutput(CopyMetaFilesFunction.INDEX_FILES_TAG);
+        DataStream<CopyFileInfo> dataManifestFilesStream =
+                copyMetaFiles.getSideOutput(CopyMetaFilesFunction.DATA_MANIFEST_FILES_TAG);
 
-        SingleOutputStreamOperator<CloneFileInfo> copyIndexFiles =
+        SingleOutputStreamOperator<CopyFileInfo> copyIndexFiles =
                 indexFilesStream
                         .transform(
                                 "Copy Index Files",
-                                TypeInformation.of(CloneFileInfo.class),
+                                TypeInformation.of(CopyFileInfo.class),
                                 new CopyDataFileOperator(sourceCatalogConfig, targetCatalogConfig))
                         .setParallelism(parallelism);
 
-        SingleOutputStreamOperator<CloneFileInfo> copyDataManifestFiles =
+        SingleOutputStreamOperator<CopyFileInfo> copyDataManifestFiles =
                 dataManifestFilesStream
                         .transform(
                                 "Copy Data Manifest Files",
-                                TypeInformation.of(CloneFileInfo.class),
+                                TypeInformation.of(CopyFileInfo.class),
                                 new CopyManifestFileOperator(
                                         sourceCatalogConfig, targetCatalogConfig))
                         .setParallelism(parallelism);
 
-        SingleOutputStreamOperator<CloneFileInfo> copyDataFile =
+        SingleOutputStreamOperator<CopyFileInfo> copyDataFile =
                 copyDataManifestFiles
                         .transform(
                                 "Copy Data Files",
-                                TypeInformation.of(CloneFileInfo.class),
+                                TypeInformation.of(CopyFileInfo.class),
                                 new CopyDataFileOperator(sourceCatalogConfig, targetCatalogConfig))
                         .setParallelism(parallelism);
 
-        DataStream<CloneFileInfo> combinedStream = copyDataFile.union(copyIndexFiles);
+        DataStream<CopyFileInfo> combinedStream = copyDataFile.union(copyIndexFiles);
 
-        SingleOutputStreamOperator<CloneFileInfo> snapshotHintOperator =
+        SingleOutputStreamOperator<CopyFileInfo> snapshotHintOperator =
                 FlinkStreamPartitioner.partition(
                                 combinedStream, new SnapshotHintChannelComputer(), parallelism)
                         .transform(
                                 "Recreate Snapshot Hint",
-                                TypeInformation.of(CloneFileInfo.class),
+                                TypeInformation.of(CopyFileInfo.class),
                                 new SnapshotHintOperator(targetCatalogConfig))
                         .setParallelism(parallelism);
 
@@ -162,6 +166,6 @@ public class CloneAction extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        execute("Clone job");
+        execute("Copy Files job");
     }
 }

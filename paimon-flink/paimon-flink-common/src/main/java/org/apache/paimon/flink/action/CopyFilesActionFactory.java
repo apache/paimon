@@ -22,10 +22,16 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link CloneAction}. */
-public class CloneActionFactory implements ActionFactory {
+/**
+ * The Latest Snapshot copy files action factory for Flink.
+ *
+ * @deprecated The normal process should commit a snapshot to the catalog, but this action does not
+ *     do so. Currently, this action can only be applied to the FileSystemCatalog.
+ */
+@Deprecated
+public class CopyFilesActionFactory implements ActionFactory {
 
-    private static final String IDENTIFIER = "clone";
+    private static final String IDENTIFIER = "copy_files";
     private static final String PARALLELISM = "parallelism";
     private static final String TARGET_WAREHOUSE = "target_warehouse";
     private static final String TARGET_DATABASE = "target_database";
@@ -48,8 +54,8 @@ public class CloneActionFactory implements ActionFactory {
             targetCatalogConfig.put(WAREHOUSE, targetWarehouse);
         }
 
-        CloneAction cloneAction =
-                new CloneAction(
+        CopyFilesAction action =
+                new CopyFilesAction(
                         params.get(DATABASE),
                         params.get(TABLE),
                         catalogConfig,
@@ -58,17 +64,18 @@ public class CloneActionFactory implements ActionFactory {
                         targetCatalogConfig,
                         params.get(PARALLELISM));
 
-        return Optional.of(cloneAction);
+        return Optional.of(action);
     }
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"clone\" runs a batch job for clone the latest Snapshot.");
+        System.out.println(
+                "Action \"copy_files\" runs a batch job for copying files the latest Snapshot.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  clone --warehouse <warehouse_path> \\\n"
+                "  copy_files --warehouse <warehouse_path> \\\n"
                         + "[--database <database_name>] \\\n"
                         + "[--table <table_name>] \\\n"
                         + "[--catalog_conf <source-paimon-catalog-conf> [--catalog_conf <source-paimon-catalog-conf> ...]] \\\n"
@@ -82,7 +89,7 @@ public class CloneActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  clone --warehouse s3:///path1/from/warehouse \\\n"
+                "  copy_files --warehouse s3:///path1/from/warehouse \\\n"
                         + "--database test_db \\\n"
                         + "--table test_table \\\n"
                         + "--catalog_conf s3.endpoint=https://****.com \\\n"

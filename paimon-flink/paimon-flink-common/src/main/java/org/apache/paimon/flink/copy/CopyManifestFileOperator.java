@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.copy;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
@@ -45,8 +45,8 @@ import java.util.List;
 import java.util.Map;
 
 /** A Operator to copy files. */
-public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileInfo>
-        implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo> {
+public class CopyManifestFileOperator extends AbstractStreamOperator<CopyFileInfo>
+        implements OneInputStreamOperator<CopyFileInfo, CopyFileInfo> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CopyManifestFileOperator.class);
 
@@ -78,21 +78,21 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
     }
 
     @Override
-    public void processElement(StreamRecord<CloneFileInfo> streamRecord) throws Exception {
-        CloneFileInfo cloneFileInfo = streamRecord.getValue();
+    public void processElement(StreamRecord<CopyFileInfo> streamRecord) throws Exception {
+        CopyFileInfo copyFileInfo = streamRecord.getValue();
 
         FileIO sourceTableFileIO =
-                CloneFilesUtil.getFileIO(
-                        srcFileIOs, cloneFileInfo.getSourceIdentifier(), sourceCatalog);
+                CopyFilesUtil.getFileIO(
+                        srcFileIOs, copyFileInfo.getSourceIdentifier(), sourceCatalog);
         FileIO targetTableFileIO =
-                CloneFilesUtil.getFileIO(
-                        targetFileIOs, cloneFileInfo.getTargetIdentifier(), targetCatalog);
+                CopyFilesUtil.getFileIO(
+                        targetFileIOs, copyFileInfo.getTargetIdentifier(), targetCatalog);
         Path targetTableRootPath =
-                CloneFilesUtil.getPath(
-                        targetLocations, cloneFileInfo.getTargetIdentifier(), targetCatalog);
+                CopyFilesUtil.getPath(
+                        targetLocations, copyFileInfo.getTargetIdentifier(), targetCatalog);
 
-        String filePathExcludeTableRoot = cloneFileInfo.getFilePathExcludeTableRoot();
-        Path sourcePath = new Path(cloneFileInfo.getSourceFilePath());
+        String filePathExcludeTableRoot = copyFileInfo.getFilePathExcludeTableRoot();
+        Path sourcePath = new Path(copyFileInfo.getSourceFilePath());
         Path targetPath = new Path(targetTableRootPath + filePathExcludeTableRoot);
 
         if (targetTableFileIO.exists(targetPath)
@@ -101,7 +101,7 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
-                        "Skipping clone target file {} because it already exists and has the same size.",
+                        "Skipping copy target file {} because it already exists and has the same size.",
                         targetPath);
             }
 
@@ -111,7 +111,7 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
                     targetTableFileIO,
                     sourcePath,
                     targetPath,
-                    cloneFileInfo,
+                    copyFileInfo,
                     false);
             return;
         }
@@ -120,7 +120,7 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
             LOG.debug("Begin copy file from {} to {}.", sourcePath, targetPath);
         }
         copyOrRewriteManifestFile(
-                sourceTableFileIO, targetTableFileIO, sourcePath, targetPath, cloneFileInfo, true);
+                sourceTableFileIO, targetTableFileIO, sourcePath, targetPath, copyFileInfo, true);
         if (LOG.isDebugEnabled()) {
             LOG.debug("End copy file from {} to {}.", sourcePath, targetPath);
         }
@@ -131,10 +131,10 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
             FileIO targetTableFileIO,
             Path sourcePath,
             Path targetPath,
-            CloneFileInfo cloneFileInfo,
+            CopyFileInfo copyFileInfo,
             boolean needCopyManifestFile)
             throws IOException, Catalog.TableNotExistException {
-        Identifier sourceIdentifier = Identifier.fromString(cloneFileInfo.getSourceIdentifier());
+        Identifier sourceIdentifier = Identifier.fromString(copyFileInfo.getSourceIdentifier());
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
         FileStore<?> store = sourceTable.store();
         ManifestFile manifestFile = store.manifestFileFactory().create();
@@ -145,7 +145,7 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
 
         if (needCopyManifestFile) {
             if (containsExternalPath(manifestEntries)) {
-                // rewrite it, clone job will clone the source path to target warehouse path, so the
+                // rewrite it, copy job will clone the source path to target warehouse path, so the
                 // target external
                 // path is null
                 for (ManifestEntry manifestEntry : manifestEntries) {
@@ -170,11 +170,11 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
             }
         }
         // pick data files
-        pickDataFilesForClone(manifestEntries, store, cloneFileInfo);
+        pickDataFilesForCopy(manifestEntries, store, copyFileInfo);
     }
 
-    private void pickDataFilesForClone(
-            List<ManifestEntry> manifestEntries, FileStore<?> store, CloneFileInfo cloneFileInfo) {
+    private void pickDataFilesForCopy(
+            List<ManifestEntry> manifestEntries, FileStore<?> store, CopyFileInfo copyFileInfo) {
         // pick the data files
         for (ManifestEntry manifestEntry : manifestEntries) {
             FileStorePathFactory fileStorePathFactory = store.pathFactory();
@@ -190,11 +190,11 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CloneFileIn
 
             output.collect(
                     new StreamRecord<>(
-                            new CloneFileInfo(
+                            new CopyFileInfo(
                                     dataFilePath.toString(),
                                     relativeTablePath.toString(),
-                                    cloneFileInfo.getSourceIdentifier(),
-                                    cloneFileInfo.getTargetIdentifier())));
+                                    copyFileInfo.getSourceIdentifier(),
+                                    copyFileInfo.getTargetIdentifier())));
         }
     }
 
