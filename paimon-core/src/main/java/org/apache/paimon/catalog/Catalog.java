@@ -789,12 +789,12 @@ public interface Catalog extends AutoCloseable {
     /** Exception for trying to operate on the table that doesn't have permission. */
     class TableNoPermissionException extends RuntimeException {
 
-        private static final String MSG = "Table %s has no permission: %s.";
+        private static final String MSG = "Table %s has no permission.";
 
         private final Identifier identifier;
 
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
-            super(String.format(MSG, identifier.getFullName(), cause.getMessage()), cause);
+            super(String.format(MSG, identifier.getFullName()), cause);
             this.identifier = identifier;
         }
 
