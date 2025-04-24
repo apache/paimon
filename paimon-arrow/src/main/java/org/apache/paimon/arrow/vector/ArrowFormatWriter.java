@@ -62,7 +62,7 @@ public class ArrowFormatWriter implements AutoCloseable {
                             .get(i)
                             .type()
                             .accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
-                            .create(vectorSchemaRoot.getVector(i));
+                            .create(vectorSchemaRoot.getVector(i), rowType.isNullable());
         }
 
         this.batchSize = writeBatchSize;
