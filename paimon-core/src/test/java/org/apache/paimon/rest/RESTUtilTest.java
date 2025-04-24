@@ -78,5 +78,13 @@ public class RESTUtilTest {
             Map<String, String> result = RESTUtil.merge(targets, updates);
             assertEquals(result.size(), 0);
         }
+        {
+            Map<String, String> targets = new HashMap<>();
+            targets.put("key3", null);
+            Map<String, String> updates = new HashMap<>();
+            updates.put("key2", null);
+            Map<String, String> result = RESTUtil.merge(targets, updates);
+            assertEquals(result.size(), 0);
+        }
     }
 }
