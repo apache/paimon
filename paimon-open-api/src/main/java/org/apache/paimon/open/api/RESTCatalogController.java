@@ -261,9 +261,9 @@ public class RESTCatalogController {
     public ListTablesResponse listTables(
             @PathVariable String prefix,
             @PathVariable String database,
-            @RequestParam Integer maxResults,
-            @RequestParam String pageToken,
-            @RequestParam Map<String, String> queryOptions) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) Map<String, String> queryOptions) {
         // paged list tables in this database with provided maxResults and pageToken
         return new ListTablesResponse(ImmutableList.of("user"), null);
     }
@@ -289,9 +289,9 @@ public class RESTCatalogController {
     public ListTableDetailsResponse listTableDetails(
             @PathVariable String prefix,
             @PathVariable String database,
-            @RequestParam Integer maxResults,
-            @RequestParam String pageToken,
-            @RequestParam Map<String, String> queryOptions) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) Map<String, String> queryOptions) {
         // paged list table details in this database with provided maxResults and pageToken
         GetTableResponse singleTable =
                 new GetTableResponse(
@@ -730,9 +730,9 @@ public class RESTCatalogController {
     public ListViewsResponse listViews(
             @PathVariable String prefix,
             @PathVariable String database,
-            @RequestParam Integer maxResults,
-            @RequestParam String pageToken,
-            @RequestParam Map<String, String> queryOptions) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) Map<String, String> queryOptions) {
         // paged list tables in this database with provided maxResults and pageToken
         return new ListViewsResponse(ImmutableList.of("user"), null);
     }
@@ -762,9 +762,9 @@ public class RESTCatalogController {
     public ListViewDetailsResponse listViewDetails(
             @PathVariable String prefix,
             @PathVariable String database,
-            @RequestParam Integer maxResults,
-            @RequestParam String pageToken,
-            @RequestParam Map<String, String> queryOptions) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) Map<String, String> queryOptions) {
         // paged list view details in this database with provided maxResults and pageToken
         List<DataField> fields =
                 Arrays.asList(
