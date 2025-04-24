@@ -70,8 +70,8 @@ public class ArrowFieldWriters {
     /** Writer for CHAR & VARCHAR. */
     public static class StringWriter extends ArrowFieldWriter {
 
-        public StringWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public StringWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -101,8 +101,8 @@ public class ArrowFieldWriters {
     /** Writer for BOOLEAN. */
     public static class BooleanWriter extends ArrowFieldWriter {
 
-        public BooleanWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public BooleanWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -132,8 +132,8 @@ public class ArrowFieldWriters {
     /** Writer for BINARY & VARBINARY. */
     public static class BinaryWriter extends ArrowFieldWriter {
 
-        public BinaryWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public BinaryWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -166,8 +166,9 @@ public class ArrowFieldWriters {
         private final int precision;
         private final int scale;
 
-        public DecimalWriter(FieldVector fieldVector, int precision, int scale) {
-            super(fieldVector);
+        public DecimalWriter(
+                FieldVector fieldVector, int precision, int scale, boolean isNullable) {
+            super(fieldVector, isNullable);
             this.precision = precision;
             this.scale = scale;
         }
@@ -203,8 +204,8 @@ public class ArrowFieldWriters {
     /** Writer for TINYINT. */
     public static class TinyIntWriter extends ArrowFieldWriter {
 
-        public TinyIntWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public TinyIntWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -234,8 +235,8 @@ public class ArrowFieldWriters {
     /** Writer for SMALLINT. */
     public static class SmallIntWriter extends ArrowFieldWriter {
 
-        public SmallIntWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public SmallIntWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -265,8 +266,8 @@ public class ArrowFieldWriters {
     /** Writer for INT. */
     public static class IntWriter extends ArrowFieldWriter {
 
-        public IntWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public IntWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -296,8 +297,8 @@ public class ArrowFieldWriters {
     /** Writer for BIGINT. */
     public static class BigIntWriter extends ArrowFieldWriter {
 
-        public BigIntWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public BigIntWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -324,8 +325,8 @@ public class ArrowFieldWriters {
     /** Writer for FLOAT. */
     public static class FloatWriter extends ArrowFieldWriter {
 
-        public FloatWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public FloatWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -355,8 +356,8 @@ public class ArrowFieldWriters {
     /** Writer for DOUBLE. */
     public static class DoubleWriter extends ArrowFieldWriter {
 
-        public DoubleWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public DoubleWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -386,8 +387,8 @@ public class ArrowFieldWriters {
     /** Writer for DATE. */
     public static class DateWriter extends ArrowFieldWriter {
 
-        public DateWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public DateWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -417,8 +418,8 @@ public class ArrowFieldWriters {
     /** Writer for TIME. */
     public static class TimeWriter extends ArrowFieldWriter {
 
-        public TimeWriter(FieldVector fieldVector) {
-            super(fieldVector);
+        public TimeWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
         }
 
         @Override
@@ -452,8 +453,11 @@ public class ArrowFieldWriters {
         @Nullable private final ZoneId castZoneId;
 
         public TimestampWriter(
-                FieldVector fieldVector, int precision, @Nullable ZoneId castZoneId) {
-            super(fieldVector);
+                FieldVector fieldVector,
+                int precision,
+                @Nullable ZoneId castZoneId,
+                boolean isNullable) {
+            super(fieldVector, isNullable);
             this.precision = precision;
             this.castZoneId = castZoneId;
         }
@@ -494,8 +498,9 @@ public class ArrowFieldWriters {
 
         private int offset;
 
-        public ArrayWriter(FieldVector fieldVector, ArrowFieldWriter elementWriter) {
-            super(fieldVector);
+        public ArrayWriter(
+                FieldVector fieldVector, ArrowFieldWriter elementWriter, boolean isNullable) {
+            super(fieldVector, isNullable);
             this.elementWriter = elementWriter;
         }
 
@@ -577,8 +582,11 @@ public class ArrowFieldWriters {
         private int offset;
 
         public MapWriter(
-                FieldVector fieldVector, ArrowFieldWriter keyWriter, ArrowFieldWriter valueWriter) {
-            super(fieldVector);
+                FieldVector fieldVector,
+                ArrowFieldWriter keyWriter,
+                ArrowFieldWriter valueWriter,
+                boolean isNullable) {
+            super(fieldVector, isNullable);
             this.keyWriter = keyWriter;
             this.valueWriter = valueWriter;
         }
@@ -735,8 +743,9 @@ public class ArrowFieldWriters {
 
         private final ArrowFieldWriter[] fieldWriters;
 
-        public RowWriter(FieldVector fieldVector, ArrowFieldWriter[] fieldWriters) {
-            super(fieldVector);
+        public RowWriter(
+                FieldVector fieldVector, ArrowFieldWriter[] fieldWriters, boolean isNullable) {
+            super(fieldVector, isNullable);
             this.fieldWriters = fieldWriters;
         }
 

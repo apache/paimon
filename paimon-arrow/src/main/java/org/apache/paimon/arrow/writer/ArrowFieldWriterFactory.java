@@ -24,5 +24,5 @@ import org.apache.arrow.vector.FieldVector;
 @FunctionalInterface
 public interface ArrowFieldWriterFactory {
 
-    ArrowFieldWriter create(FieldVector fieldVector);
+    ArrowFieldWriter create(FieldVector fieldVector, boolean isNullable);
 }
