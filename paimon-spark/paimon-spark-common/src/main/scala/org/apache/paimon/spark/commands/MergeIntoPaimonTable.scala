@@ -92,7 +92,6 @@ case class MergeIntoPaimonTable(
   }
 
   private def performMergeForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
-    val targetDS = createDataset(sparkSession, filteredTargetPlan)
     val sourceDS = createDataset(sparkSession, sourceTable)
 
     // Step1: get the candidate data splits which are filtered by Paimon Predicate.
@@ -141,6 +140,14 @@ case class MergeIntoPaimonTable(
         ds.unpersist()
       }
     } else {
+      val targetDSWithFilePathCol = createDataset(
+        sparkSession,
+        targetOnlyCondition
+          // if there is filter, we need to output the __paimon__file_path metadata column explicitly.
+          .map(Filter.apply(_, relation.withMetadataColumns()))
+          .getOrElse(relation)
+      )
+
       val touchedFilePathsSet = mutable.Set.empty[String]
       val intersectionFilePaths = mutable.Set.empty[String]
 
@@ -153,7 +160,7 @@ case class MergeIntoPaimonTable(
 
       def findTouchedFiles0(joinType: String): Array[String] = {
         findTouchedFiles(
-          targetDS.alias("_left").join(sourceDS, toColumn(mergeCondition), joinType),
+          targetDSWithFilePathCol.alias("_left").join(sourceDS, toColumn(mergeCondition), joinType),
           sparkSession,
           "_left." + FILE_PATH_COLUMN)
       }

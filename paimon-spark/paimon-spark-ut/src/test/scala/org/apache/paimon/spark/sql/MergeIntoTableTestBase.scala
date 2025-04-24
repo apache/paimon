@@ -606,6 +606,29 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       )
     }
   }
+
+  test(s"Paimon MergeInto: on clause has filter expression") {
+    withTable("source", "target") {
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      createTable("source", "a INT, b INT, c STRING", Seq("a"))
+
+      spark.sql("INSERT INTO source values (1, 100, 'c11'), (3, 300, 'c11'), (5, 500, 'c55')")
+      spark.sql("INSERT INTO target values (1, 100, 'cc'), (2, 20, 'cc')")
+
+      spark.sql("""
+                  |merge into target tgt
+                  |using ( select
+                  |        a, b
+                  |        from source where c = 'c11'
+                  |       ) as src
+                  |on tgt.a = src.a and tgt.b = src.b and tgt.c = 'cc'
+                  |when matched then delete
+                  |;
+                  |""".stripMargin)
+
+      checkAnswer(spark.sql("SELECT * FROM target ORDER BY a, b"), Row(2, 20, "cc") :: Nil)
+    }
+  }
 }
 
 trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimaryKeyTable {
