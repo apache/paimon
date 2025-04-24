@@ -21,7 +21,7 @@ package org.apache.paimon.bucket;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.types.RowKind;
 
-/** Paimon default hash function. */
+/** Paimon default bucket function. */
 public class PaimonBucketFunction implements BucketFunction {
 
     @Override
