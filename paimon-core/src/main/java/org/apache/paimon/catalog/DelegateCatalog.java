@@ -99,16 +99,22 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName,
+            Integer maxResults,
+            String pageToken,
+            Map<String, String> queryOptions)
             throws DatabaseNotExistException {
-        return wrapped.listTablesPaged(databaseName, maxResults, pageToken);
+        return wrapped.listTablesPaged(databaseName, maxResults, pageToken, queryOptions);
     }
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName,
+            Integer maxResults,
+            String pageToken,
+            Map<String, String> queryOptions)
             throws DatabaseNotExistException {
-        return wrapped.listTableDetailsPaged(databaseName, maxResults, pageToken);
+        return wrapped.listTableDetailsPaged(databaseName, maxResults, pageToken, queryOptions);
     }
 
     @Override
@@ -239,16 +245,22 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<String> listViewsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName,
+            Integer maxResults,
+            String pageToken,
+            Map<String, String> queryOptions)
             throws DatabaseNotExistException {
-        return wrapped.listViewsPaged(databaseName, maxResults, pageToken);
+        return wrapped.listViewsPaged(databaseName, maxResults, pageToken, queryOptions);
     }
 
     @Override
     public PagedList<View> listViewDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName,
+            Integer maxResults,
+            String pageToken,
+            Map<String, String> queryOptions)
             throws DatabaseNotExistException {
-        return wrapped.listViewDetailsPaged(databaseName, maxResults, pageToken);
+        return wrapped.listViewDetailsPaged(databaseName, maxResults, pageToken, queryOptions);
     }
 
     @Override

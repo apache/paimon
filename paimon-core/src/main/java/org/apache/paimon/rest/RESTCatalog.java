@@ -199,7 +199,7 @@ public class RESTCatalog implements Catalog {
         ListDatabasesResponse response =
                 client.get(
                         resourcePaths.databases(),
-                        buildPagedQueryParams(maxResults, pageToken),
+                        buildPagedQueryParams(maxResults, pageToken, new HashMap<>()),
                         ListDatabasesResponse.class,
                         restAuthFunction);
         List<String> databases = response.getDatabases();
@@ -314,13 +314,16 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions)
             throws DatabaseNotExistException {
         try {
             ListTablesResponse response =
                     client.get(
                             resourcePaths.tables(databaseName),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(maxResults, pageToken, queryOptions),
                             ListTablesResponse.class,
                             restAuthFunction);
             List<String> tables = response.getTables();
@@ -335,13 +338,16 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String db, @Nullable Integer maxResults, @Nullable String pageToken)
+            String db,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions)
             throws DatabaseNotExistException {
         try {
             ListTableDetailsResponse response =
                     client.get(
                             resourcePaths.tableDetails(db),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(maxResults, pageToken, queryOptions),
                             ListTableDetailsResponse.class,
                             restAuthFunction);
             List<GetTableResponse> tables = response.getTableDetails();
@@ -657,7 +663,7 @@ public class RESTCatalog implements Catalog {
                     client.get(
                             resourcePaths.partitions(
                                     identifier.getDatabaseName(), identifier.getObjectName()),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(maxResults, pageToken, new HashMap<>()),
                             ListPartitionsResponse.class,
                             restAuthFunction);
             List<Partition> partitions = response.getPartitions();
@@ -848,13 +854,16 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<String> listViewsPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions)
             throws DatabaseNotExistException {
         try {
             ListViewsResponse response =
                     client.get(
                             resourcePaths.views(databaseName),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(maxResults, pageToken, queryOptions),
                             ListViewsResponse.class,
                             restAuthFunction);
             List<String> views = response.getViews();
@@ -869,13 +878,16 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<View> listViewDetailsPaged(
-            String db, @Nullable Integer maxResults, @Nullable String pageToken)
+            String db,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions)
             throws DatabaseNotExistException {
         try {
             ListViewDetailsResponse response =
                     client.get(
                             resourcePaths.viewDetails(db),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(maxResults, pageToken, queryOptions),
                             ListViewDetailsResponse.class,
                             restAuthFunction);
             List<GetViewResponse> views = response.getViewDetails();
@@ -1031,8 +1043,11 @@ public class RESTCatalog implements Catalog {
     }
 
     private Map<String, String> buildPagedQueryParams(
-            @Nullable Integer maxResults, @Nullable String pageToken) {
-        Map<String, String> queryParams = Maps.newHashMap();
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions) {
+        Map<String, String> queryParams =
+                Objects.nonNull(queryOptions) ? new HashMap<>(queryOptions) : Maps.newHashMap();
         if (Objects.nonNull(maxResults) && maxResults > 0) {
             queryParams.put(MAX_RESULTS, maxResults.toString());
         }

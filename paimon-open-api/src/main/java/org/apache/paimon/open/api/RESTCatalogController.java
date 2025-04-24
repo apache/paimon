@@ -261,8 +261,9 @@ public class RESTCatalogController {
     public ListTablesResponse listTables(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
+            @RequestParam Integer maxResults,
+            @RequestParam String pageToken,
+            @RequestParam Map<String, String> queryOptions) {
         // paged list tables in this database with provided maxResults and pageToken
         return new ListTablesResponse(ImmutableList.of("user"), null);
     }
@@ -288,8 +289,9 @@ public class RESTCatalogController {
     public ListTableDetailsResponse listTableDetails(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
+            @RequestParam Integer maxResults,
+            @RequestParam String pageToken,
+            @RequestParam Map<String, String> queryOptions) {
         // paged list table details in this database with provided maxResults and pageToken
         GetTableResponse singleTable =
                 new GetTableResponse(
@@ -710,12 +712,40 @@ public class RESTCatalogController {
             @PathVariable String branch) {}
 
     @Operation(
-            summary = "List view details",
+            summary = "List views",
             tags = {"view"})
     @ApiResponses({
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = ListViewsResponse.class))}),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/views")
+    public ListViewsResponse listViews(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @RequestParam Integer maxResults,
+            @RequestParam String pageToken,
+            @RequestParam Map<String, String> queryOptions) {
+        // paged list tables in this database with provided maxResults and pageToken
+        return new ListViewsResponse(ImmutableList.of("user"), null);
+    }
+
+    @Operation(
+            summary = "List view details",
+            tags = {"view"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = ListViewDetailsResponse.class))
+                }),
         @ApiResponse(
                 responseCode = "401",
                 description = "Unauthorized",
@@ -732,8 +762,9 @@ public class RESTCatalogController {
     public ListViewDetailsResponse listViewDetails(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
+            @RequestParam Integer maxResults,
+            @RequestParam String pageToken,
+            @RequestParam Map<String, String> queryOptions) {
         // paged list view details in this database with provided maxResults and pageToken
         List<DataField> fields =
                 Arrays.asList(

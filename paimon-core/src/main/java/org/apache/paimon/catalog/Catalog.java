@@ -164,13 +164,17 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param queryOptions Optional parameter indicating the query params when listing tables.
      * @return a list of the names of tables with provided page size in this database and next page
      *     token, or a list of the names of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
      */
     PagedList<String> listTablesPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions)
             throws DatabaseNotExistException;
 
     /**
@@ -191,7 +195,10 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     PagedList<Table> listTableDetailsPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions)
             throws DatabaseNotExistException;
 
     /**
@@ -386,7 +393,10 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     default PagedList<String> listViewsPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions)
             throws DatabaseNotExistException {
         return new PagedList<>(listViews(databaseName), null);
     }
@@ -407,7 +417,10 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     default PagedList<View> listViewDetailsPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable Map<String, String> queryOptions)
             throws DatabaseNotExistException {
         return new PagedList<>(Collections.emptyList(), null);
     }

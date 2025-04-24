@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
@@ -88,6 +89,7 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
@@ -121,6 +123,7 @@ public class RESTCatalogServer {
     public static final String MAX_RESULTS = RESTCatalog.MAX_RESULTS;
     public static final String PAGE_TOKEN = RESTCatalog.PAGE_TOKEN;
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
+    public static final String SEARCH = "search";
 
     private final String prefix;
     private final String databaseUri;
@@ -834,7 +837,7 @@ public class RESTCatalogServer {
         if (databaseStore.containsKey(databaseName)) {
             switch (method) {
                 case "GET":
-                    List<String> tables = listTables(databaseName);
+                    List<String> tables = listTables(databaseName, parameters);
                     return generateFinalListTablesResponse(parameters, tables);
                 case "POST":
                     CreateTableRequest requestBody =
@@ -865,11 +868,24 @@ public class RESTCatalogServer {
                 new ErrorResponse(ErrorResponse.RESOURCE_TYPE_DATABASE, null, "", 404), 404);
     }
 
-    private List<String> listTables(String databaseName) {
+    private List<String> listTables(String databaseName, Map<String, String> parameters) {
+        String search = parameters.get(SEARCH);
+        TableType tableType = null;
+        try {
+            tableType = TableType.fromString(parameters.get("tableType"));
+        } catch (Exception e) {
+            LOG.warn(
+                    "parse tableType {} to TableType failed, use null as default value",
+                    parameters.get("tableType"));
+        }
         List<String> tables = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
-            if (databaseName.equals(identifier.getDatabaseName())) {
+            CoreOptions options = CoreOptions.fromMap(entry.getValue().schema().options());
+            if (databaseName.equals(identifier.getDatabaseName())
+                    && (Objects.isNull(search)
+                            || StringUtils.startsWith(identifier.getTableName(), search))
+                    && (Objects.isNull(tableType) || tableType.equals(options.type()))) {
                 tables.add(identifier.getTableName());
             }
         }
@@ -910,7 +926,7 @@ public class RESTCatalogServer {
 
     private MockResponse tableDetailsHandle(Map<String, String> parameters, String databaseName) {
         RESTResponse response;
-        List<GetTableResponse> tableDetails = listTableDetails(databaseName);
+        List<GetTableResponse> tableDetails = listTableDetails(databaseName, parameters);
         if (!tableDetails.isEmpty()) {
             int maxResults;
             try {
@@ -940,11 +956,27 @@ public class RESTCatalogServer {
         return mockResponse(response, 200);
     }
 
-    private List<GetTableResponse> listTableDetails(String databaseName) {
+    private List<GetTableResponse> listTableDetails(
+            String databaseName, Map<String, String> parameters) {
+        String search = parameters.get(SEARCH);
+        TableType tableType = null;
+        try {
+            tableType = TableType.fromString(parameters.get("tableType"));
+        } catch (Exception e) {
+            LOG.warn(
+                    "parse tableType {} to TableType failed, use null as default value",
+                    parameters.get("tableType"));
+        }
         List<GetTableResponse> tableDetails = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
-            if (databaseName.equals(identifier.getDatabaseName())) {
+            if (databaseName.equals(identifier.getDatabaseName())
+                    && (Objects.isNull(search)
+                            || StringUtils.startsWith(identifier.getTableName(), search))
+                    && (Objects.isNull(tableType)
+                            || tableType.equals(
+                                    CoreOptions.fromMap(entry.getValue().schema().options())
+                                            .type()))) {
                 GetTableResponse getTableResponse =
                         new GetTableResponse(
                                 entry.getValue().uuid(),
@@ -1187,7 +1219,7 @@ public class RESTCatalogServer {
             throws Exception {
         switch (method) {
             case "GET":
-                List<String> views = listViews(databaseName);
+                List<String> views = listViews(databaseName, parameters);
                 return generateFinalListViewsResponse(parameters, views);
             case "POST":
                 CreateViewRequest requestBody =
@@ -1212,11 +1244,13 @@ public class RESTCatalogServer {
         }
     }
 
-    private List<String> listViews(String databaseName) {
+    private List<String> listViews(String databaseName, Map<String, String> parameters) {
+        String search = parameters.get(SEARCH);
         return viewStore.keySet().stream()
                 .map(Identifier::fromString)
                 .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
                 .map(Identifier::getTableName)
+                .filter(tableName -> Objects.isNull(search) || tableName.startsWith(search))
                 .collect(Collectors.toList());
     }
 
@@ -1256,7 +1290,7 @@ public class RESTCatalogServer {
         RESTResponse response;
         if ("GET".equals(method)) {
 
-            List<GetViewResponse> viewDetails = listViewDetails(databaseName);
+            List<GetViewResponse> viewDetails = listViewDetails(databaseName, parameters);
             if (!viewDetails.isEmpty()) {
 
                 int maxResults;
@@ -1292,10 +1326,16 @@ public class RESTCatalogServer {
         }
     }
 
-    private List<GetViewResponse> listViewDetails(String databaseName) {
+    private List<GetViewResponse> listViewDetails(
+            String databaseName, Map<String, String> parameters) {
+        String search = parameters.get(SEARCH);
         return viewStore.keySet().stream()
                 .map(Identifier::fromString)
                 .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
+                .filter(
+                        identifier ->
+                                Objects.isNull(search)
+                                        || identifier.getTableName().startsWith(search))
                 .map(
                         identifier -> {
                             View view = viewStore.get(identifier.getFullName());

@@ -242,14 +242,20 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName,
+            Integer maxResults,
+            String pageToken,
+            Map<String, String> queryOptions)
             throws DatabaseNotExistException {
         return new PagedList<>(listTables(databaseName), null);
     }
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName,
+            Integer maxResults,
+            String pageToken,
+            Map<String, String> queryOptions)
             throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
@@ -283,7 +289,8 @@ public abstract class AbstractCatalog implements Catalog {
     protected PagedList<Table> listTableDetailsPagedImpl(
             String databaseName, Integer maxResults, String pageToken)
             throws DatabaseNotExistException {
-        PagedList<String> pagedTableNames = listTablesPaged(databaseName, maxResults, pageToken);
+        PagedList<String> pagedTableNames =
+                listTablesPaged(databaseName, maxResults, pageToken, new HashMap<>());
         return new PagedList<>(
                 pagedTableNames.getElements().stream()
                         .map(

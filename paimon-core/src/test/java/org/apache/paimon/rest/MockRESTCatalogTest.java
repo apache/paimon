@@ -156,9 +156,10 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
         PagedList<String> listTablesPaged =
-                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101");
+                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101", null);
         PagedList<String> listTablesPaged2 =
-                restCatalog.listTablesPaged(databaseName, 1, listTablesPaged.getNextPageToken());
+                restCatalog.listTablesPaged(
+                        databaseName, 1, listTablesPaged.getNextPageToken(), null);
         assertEquals(listTablesPaged.getElements().get(0), "dt=20230102");
         assertEquals(listTablesPaged2.getElements().get(0), "dt=20230103");
     }

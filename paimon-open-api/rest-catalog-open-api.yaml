@@ -232,6 +232,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: queryOptions
+          in: query
+          type: object
+          additionalProperties:
+            type: string
       responses:
         "200":
           description: OK
@@ -304,6 +309,11 @@ paths:
         - name: pageToken
           in: query
           schema:
+            type: string
+        - name: queryOptions
+          in: query
+          type: object
+          additionalProperties:
             type: string
       responses:
         "200":
@@ -896,6 +906,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: queryOptions
+          in: query
+          type: object
+          additionalProperties:
+            type: string
       responses:
         "200":
           description: OK
@@ -968,6 +983,11 @@ paths:
         - name: pageToken
           in: query
           schema:
+            type: string
+        - name: queryOptions
+          in: query
+          type: object
+          additionalProperties:
             type: string
       responses:
         "200":
