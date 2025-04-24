@@ -22,8 +22,12 @@ import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FormatTable
+import org.apache.paimon.utils.{FileIOUtils, FileUtils}
 
 import org.apache.spark.sql.Row
+
+import java.io.{File, FileInputStream, FileOutputStream}
+import java.util.zip.GZIPOutputStream
 
 abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
@@ -53,6 +57,48 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
         checkAnswer(sql("SELECT p1 FROM t"), Row(2))
         checkAnswer(sql("SELECT p2 FROM t"), Row(3))
       }
+    }
+  }
+
+  test("Format table: read compressed files") {
+    for (format <- Seq("csv", "json")) {
+      withTable("compress_t") {
+        sql(s"CREATE TABLE compress_t (a INT, b INT, c INT) USING $format")
+        sql("INSERT INTO compress_t VALUES (1, 2, 3)")
+        val table =
+          paimonCatalog
+            .getTable(Identifier.create("default", "compress_t"))
+            .asInstanceOf[FormatTable]
+        val fileIO = table.fileIO()
+        val file = fileIO
+          .listStatus(new Path(table.location()))
+          .filter(file => !file.getPath.getName.startsWith("."))
+          .head
+          .getPath
+          .toUri
+          .getPath
+        compressGzipFile(file, file + ".gz")
+        fileIO.deleteQuietly(new Path(file))
+        checkAnswer(sql("SELECT * FROM compress_t"), Row(1, 2, 3))
+      }
+    }
+  }
+
+  def compressGzipFile(src: String, dest: String): Unit = {
+    val fis = new FileInputStream(src)
+    val fos = new FileOutputStream(dest)
+    val gzipOs = new GZIPOutputStream(fos)
+    val buffer = new Array[Byte](1024)
+    var bytesRead = 0
+    while (true) {
+      bytesRead = fis.read(buffer)
+      if (bytesRead == -1) {
+        fis.close()
+        gzipOs.close()
+        return
+      }
+
+      gzipOs.write(buffer, 0, bytesRead)
     }
   }
 }
