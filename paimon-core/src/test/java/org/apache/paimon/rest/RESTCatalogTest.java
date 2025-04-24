@@ -33,6 +33,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
+import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -59,6 +60,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.commons.io.FileUtils;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -393,6 +395,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         queryOptions.put("tableType", TableType.FORMAT_TABLE.toString());
         pagedTables = catalog.listTablesPaged(databaseName, null, null, queryOptions);
         assertTrue(pagedTables.getElements().isEmpty());
+
+        queryOptions.put("tableType", "dummyTableType");
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listTablesPaged(databaseName, null, null, queryOptions));
     }
 
     @Test
@@ -472,6 +479,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         queryOptions.put("tableType", TableType.FORMAT_TABLE.toString());
         pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, queryOptions);
         assertThat(pagedTableDetails.getElements()).isEmpty();
+
+        queryOptions.put("tableType", "dummyTableType");
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listTablesPaged(databaseName, null, null, queryOptions));
     }
 
     @Test

@@ -124,6 +124,7 @@ public class RESTCatalogServer {
     public static final String PAGE_TOKEN = RESTCatalog.PAGE_TOKEN;
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
     public static final String SEARCH = "search";
+    public static final String TABLE_TYPE = "tableType";
 
     private final String prefix;
     private final String databaseUri;
@@ -870,14 +871,7 @@ public class RESTCatalogServer {
 
     private List<String> listTables(String databaseName, Map<String, String> parameters) {
         String search = parameters.get(SEARCH);
-        TableType tableType = null;
-        try {
-            tableType = TableType.fromString(parameters.get("tableType"));
-        } catch (Exception e) {
-            LOG.warn(
-                    "parse tableType {} to TableType failed, use null as default value",
-                    parameters.get("tableType"));
-        }
+        TableType tableType = getTableType(parameters);
         List<String> tables = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
@@ -890,6 +884,24 @@ public class RESTCatalogServer {
             }
         }
         return tables;
+    }
+
+    private TableType getTableType(Map<String, String> parameters) {
+        TableType tableType = null;
+        if (Objects.nonNull(parameters.get(TABLE_TYPE))) {
+            try {
+                tableType = TableType.fromString(parameters.get(TABLE_TYPE));
+            } catch (UnsupportedOperationException e) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Unsupported table type: %s, supported table types are: %s",
+                                parameters.get(TABLE_TYPE),
+                                Arrays.stream(TableType.values())
+                                        .map(TableType::name)
+                                        .collect(Collectors.joining(","))));
+            }
+        }
+        return tableType;
     }
 
     private MockResponse generateFinalListTablesResponse(
@@ -959,14 +971,7 @@ public class RESTCatalogServer {
     private List<GetTableResponse> listTableDetails(
             String databaseName, Map<String, String> parameters) {
         String search = parameters.get(SEARCH);
-        TableType tableType = null;
-        try {
-            tableType = TableType.fromString(parameters.get("tableType"));
-        } catch (Exception e) {
-            LOG.warn(
-                    "parse tableType {} to TableType failed, use null as default value",
-                    parameters.get("tableType"));
-        }
+        TableType tableType = getTableType(parameters);
         List<GetTableResponse> tableDetails = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
