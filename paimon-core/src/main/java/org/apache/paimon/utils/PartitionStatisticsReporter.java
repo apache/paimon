@@ -84,7 +84,7 @@ public class PartitionStatisticsReporter implements Closeable {
 
             PartitionStatistics partitionStats =
                     new PartitionStatistics(
-                            partitionSpec, fileCount, totalSize, rowCount, modifyTimeMillis);
+                            partitionSpec, rowCount, totalSize, fileCount, modifyTimeMillis);
             LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
             partitionHandler.alterPartitions(Collections.singletonList(partitionStats));
         }
