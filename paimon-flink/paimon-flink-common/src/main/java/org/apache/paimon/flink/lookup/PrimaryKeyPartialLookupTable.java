@@ -49,6 +49,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
 public class PrimaryKeyPartialLookupTable implements LookupTable {
@@ -209,7 +210,8 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         private final StreamTableScan scan;
         private final String tableName;
 
-        private final Map<BinaryRow, Integer> totalBuckets;
+        private final Integer defaultNumBuckets;
+        private final Map<BinaryRow, Integer> numBuckets;
 
         private LocalQueryExecutor(
                 FileStoreTable table,
@@ -238,13 +240,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                             .newStreamScan();
 
             this.tableName = table.name();
-            this.totalBuckets = new HashMap<>();
+            this.defaultNumBuckets = table.bucketSpec().getNumBuckets();
+            this.numBuckets = new HashMap<>();
         }
 
         @Override
         @Nullable
         public Integer numBuckets(BinaryRow partition) {
-            return totalBuckets.get(partition);
+            return numBuckets.get(partition);
         }
 
         @Override
@@ -264,16 +267,28 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 }
 
                 for (Split split : splits) {
-                    DataSplit dataSplit = (DataSplit) split;
-                    BinaryRow partition = dataSplit.partition();
-                    int bucket = dataSplit.bucket();
-                    List<DataFileMeta> before = dataSplit.beforeFiles();
-                    List<DataFileMeta> after = dataSplit.dataFiles();
-
-                    tableQuery.refreshFiles(partition, bucket, before, after);
-                    totalBuckets.put(partition, dataSplit.totalBuckets());
+                    refreshSplit((DataSplit) split);
                 }
             }
+        }
+
+        @VisibleForTesting
+        void refreshSplit(DataSplit split) {
+            BinaryRow partition = split.partition();
+            int bucket = split.bucket();
+            List<DataFileMeta> before = split.beforeFiles();
+            List<DataFileMeta> after = split.dataFiles();
+
+            tableQuery.refreshFiles(partition, bucket, before, after);
+            Integer totalBuckets = split.totalBuckets();
+            if (totalBuckets == null) {
+                // Just for compatibility with older versions
+                checkArgument(
+                        defaultNumBuckets > 0,
+                        "This is a bug, old version table numBuckets should be greater than 0.");
+                totalBuckets = defaultNumBuckets;
+            }
+            numBuckets.put(partition, totalBuckets);
         }
 
         @Override
