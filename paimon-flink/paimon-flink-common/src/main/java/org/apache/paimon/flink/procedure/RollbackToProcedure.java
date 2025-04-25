@@ -18,15 +18,20 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+import org.apache.flink.types.Row;
 
 /**
  * Rollback procedure. Usage:
@@ -52,16 +57,24 @@ public class RollbackToProcedure extends ProcedureBase {
                         type = @DataTypeHint("BIGINT"),
                         isOptional = true)
             })
-    public String[] call(
+    public @DataTypeHint("ROW<previous_snapshot_id BIGINT, current_snapshot_id BIGINT>") Row[] call(
             ProcedureContext procedureContext, String tableId, String tagName, Long snapshotId)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
+
+        FileStore<?> store = ((FileStoreTable) table).store();
+        Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
+        Preconditions.checkNotNull(latestSnapshot, "Latest snapshot is null, can not rollback.");
+
+        long rollbackSnapshotId;
         if (!StringUtils.isNullOrWhitespaceOnly(tagName)) {
             table.rollbackTo(tagName);
+            rollbackSnapshotId = store.newTagManager().getOrThrow(tagName).trimToSnapshot().id();
         } else {
             table.rollbackTo(snapshotId);
+            rollbackSnapshotId = snapshotId;
         }
-        return new String[] {"Success"};
+        return new Row[] {Row.of(latestSnapshot.id(), rollbackSnapshotId)};
     }
 
     @Override
