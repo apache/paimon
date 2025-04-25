@@ -27,27 +27,25 @@ import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
-import org.apache.paimon.manifest.{FileKind, IndexManifestEntry}
+import org.apache.paimon.manifest.FileKind
 import org.apache.paimon.operation.metrics.CommitStats
-import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
+import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.{RowKind, RowType}
 import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, PartitionStatisticsReporter, SerializationUtils}
-
-import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.{Partitioner, TaskContext}
 import org.slf4j.LoggerFactory
 
 import java.io.IOException
 import java.util.Collections.singletonMap
-
 import scala.collection.JavaConverters._
 
 case class PaimonSparkWriter(table: FileStoreTable) {
