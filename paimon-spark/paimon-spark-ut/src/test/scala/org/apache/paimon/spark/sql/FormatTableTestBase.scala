@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.utils.{FileIOUtils, FileUtils}
+import org.apache.paimon.utils.{CompressUtils, FileIOUtils, FileUtils}
 
 import org.apache.spark.sql.Row
 
@@ -77,28 +77,10 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
           .getPath
           .toUri
           .getPath
-        compressGzipFile(file, file + ".gz")
+        CompressUtils.gzipCompressFile(file, file + ".gz")
         fileIO.deleteQuietly(new Path(file))
         checkAnswer(sql("SELECT * FROM compress_t"), Row(1, 2, 3))
       }
-    }
-  }
-
-  def compressGzipFile(src: String, dest: String): Unit = {
-    val fis = new FileInputStream(src)
-    val fos = new FileOutputStream(dest)
-    val gzipOs = new GZIPOutputStream(fos)
-    val buffer = new Array[Byte](1024)
-    var bytesRead = 0
-    while (true) {
-      bytesRead = fis.read(buffer)
-      if (bytesRead == -1) {
-        fis.close()
-        gzipOs.close()
-        return
-      }
-
-      gzipOs.write(buffer, 0, bytesRead)
     }
   }
 }
