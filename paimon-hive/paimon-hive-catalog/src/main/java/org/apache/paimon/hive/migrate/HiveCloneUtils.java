@@ -31,6 +31,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
@@ -59,6 +60,17 @@ public class HiveCloneUtils {
 
     public static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
+
+    public static Map<String, String> getDatabaseOptions(
+            HiveCatalog hiveCatalog, String databaseName) throws Exception {
+        IMetaStoreClient client = hiveCatalog.getHmsClient();
+        Database database = client.getDatabase(databaseName);
+        Map<String, String> paimonOptions = new HashMap<>();
+        if (database.getDescription() != null) {
+            paimonOptions.put("comment", database.getDescription());
+        }
+        return paimonOptions;
+    }
 
     public static List<Identifier> listTables(HiveCatalog hiveCatalog) throws Exception {
         IMetaStoreClient client = hiveCatalog.getHmsClient();

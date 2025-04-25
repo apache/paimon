@@ -447,6 +447,58 @@ public class CloneActionITCase extends ActionITCaseBase {
         }
     }
 
+    @Test
+    public void testCloneWithNotExistedDatabase() throws Exception {
+        String format = "avro";
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql(
+                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
+        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        String query = "SELECT * FROM hivetable";
+        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql(query).collect());
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "clone_hive",
+                                "--database",
+                                "default",
+                                "--table",
+                                "hivetable",
+                                "--catalog_conf",
+                                "metastore=hive",
+                                "--catalog_conf",
+                                "uri=thrift://localhost:" + PORT,
+                                "--target_database",
+                                "test",
+                                "--target_table",
+                                "test_table",
+                                "--target_catalog_conf",
+                                "warehouse=" + warehouse));
+
+        createAction(CloneHiveAction.class, args).run();
+        FileStoreTable paimonTable =
+                paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
+
+        Assertions.assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
+
+        List<Row> r2 =
+                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM test.test_table").collect());
+
+        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+    }
+
     private String[] ddls() {
         // has primary key
         String ddl0 =

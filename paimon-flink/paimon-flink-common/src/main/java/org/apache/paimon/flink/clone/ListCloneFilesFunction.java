@@ -72,6 +72,11 @@ public class ListCloneFilesFunction
         String sourceType = sourceCatalogConfig.get(CatalogOptions.METASTORE.key());
         checkNotNull(sourceType);
 
+        // create database if not exists
+        Map<String, String> databaseOptions =
+                HiveCloneUtils.getDatabaseOptions(hiveCatalog, tuple.f0.getDatabaseName());
+        targetCatalog.createDatabase(tuple.f1.getDatabaseName(), true, databaseOptions);
+
         Schema schema = HiveCloneUtils.hiveTableToPaimonSchema(hiveCatalog, tuple.f0);
         Map<String, String> options = schema.options();
         // only support Hive to unaware-bucket table now
