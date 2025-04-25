@@ -43,14 +43,17 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+
+import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
 public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private final QueryExecutorFactory executorFactory;
-    private final FixedBucketFromPkExtractor extractor;
     @Nullable private final ProjectedRow keyRearrange;
     @Nullable private final ProjectedRow trimmedKeyRearrange;
 
@@ -58,16 +61,19 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     @Nullable private Filter<InternalRow> cacheRowFilter;
     private QueryExecutor queryExecutor;
 
+    private final PartitionFromPkExtractor partExtractor;
+    private final FixedBucketFromPkExtractor bucketExtractor;
+
     private PrimaryKeyPartialLookupTable(
             QueryExecutorFactory executorFactory, FileStoreTable table, List<String> joinKey) {
         this.executorFactory = executorFactory;
-
         if (table.bucketMode() != BucketMode.HASH_FIXED) {
             throw new UnsupportedOperationException(
                     "Unsupported mode for partial lookup: " + table.bucketMode());
         }
 
-        this.extractor = new FixedBucketFromPkExtractor(table.schema());
+        this.partExtractor = new PartitionFromPkExtractor(table.schema());
+        this.bucketExtractor = new FixedBucketFromPkExtractor(table.schema());
 
         ProjectedRow keyRearrange = null;
         if (!table.primaryKeys().equals(joinKey)) {
@@ -115,9 +121,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         if (keyRearrange != null) {
             adjustedKey = keyRearrange.replaceRow(adjustedKey);
         }
-        extractor.setRecord(adjustedKey);
-        int bucket = extractor.bucket();
-        BinaryRow partition = extractor.partition();
+
+        BinaryRow partition = partExtractor.partition(adjustedKey);
+        Integer numBuckets = queryExecutor.numBuckets(partition);
+        if (numBuckets == null) {
+            // no data, just return none
+            return Collections.emptyList();
+        }
+        int bucket = bucketExtractor.bucket(numBuckets, adjustedKey);
 
         InternalRow trimmedKey = key;
         if (trimmedKeyRearrange != null) {
@@ -182,6 +193,9 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     interface QueryExecutor extends Closeable {
 
+        @Nullable
+        Integer numBuckets(BinaryRow partition);
+
         InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;
 
         void refresh();
@@ -194,6 +208,8 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         private final LocalTableQuery tableQuery;
         private final StreamTableScan scan;
         private final String tableName;
+
+        private final Map<BinaryRow, Integer> totalBuckets;
 
         private LocalQueryExecutor(
                 FileStoreTable table,
@@ -222,6 +238,13 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                             .newStreamScan();
 
             this.tableName = table.name();
+            this.totalBuckets = new HashMap<>();
+        }
+
+        @Override
+        @Nullable
+        public Integer numBuckets(BinaryRow partition) {
+            return totalBuckets.get(partition);
         }
 
         @Override
@@ -241,12 +264,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 }
 
                 for (Split split : splits) {
-                    BinaryRow partition = ((DataSplit) split).partition();
-                    int bucket = ((DataSplit) split).bucket();
-                    List<DataFileMeta> before = ((DataSplit) split).beforeFiles();
-                    List<DataFileMeta> after = ((DataSplit) split).dataFiles();
+                    DataSplit dataSplit = (DataSplit) split;
+                    BinaryRow partition = dataSplit.partition();
+                    int bucket = dataSplit.bucket();
+                    List<DataFileMeta> before = dataSplit.beforeFiles();
+                    List<DataFileMeta> after = dataSplit.dataFiles();
 
                     tableQuery.refreshFiles(partition, bucket, before, after);
+                    totalBuckets.put(partition, dataSplit.totalBuckets());
                 }
             }
         }
@@ -273,9 +298,22 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     static class RemoteQueryExecutor implements QueryExecutor {
 
         private final RemoteTableQuery tableQuery;
+        private final Integer numBuckets;
 
         private RemoteQueryExecutor(FileStoreTable table, int[] projection) {
             this.tableQuery = new RemoteTableQuery(table).withValueProjection(projection);
+            int numBuckets = table.bucketSpec().getNumBuckets();
+            if (numBuckets == POSTPONE_BUCKET) {
+                throw new UnsupportedOperationException(
+                        "Remote query does not support POSTPONE_BUCKET.");
+            }
+            this.numBuckets = numBuckets;
+        }
+
+        @Override
+        @Nullable
+        public Integer numBuckets(BinaryRow partition) {
+            return numBuckets;
         }
 
         @Override

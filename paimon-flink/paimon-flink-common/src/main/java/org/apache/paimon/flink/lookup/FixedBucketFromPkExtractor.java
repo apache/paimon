@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
@@ -26,28 +25,16 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** Extractor to extract bucket from the primary key. */
-public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<InternalRow> {
-
-    private transient InternalRow primaryKey;
+public class FixedBucketFromPkExtractor {
 
     private final boolean sameBucketKeyAndTrimmedPrimaryKey;
-
-    private final int numBuckets;
 
     private final Projection bucketKeyProjection;
 
     private final Projection trimmedPrimaryKeyProjection;
 
-    private final Projection partitionProjection;
-
-    private final Projection logPrimaryKeyProjection;
-
     public FixedBucketFromPkExtractor(TableSchema schema) {
-        this.numBuckets = new CoreOptions(schema.options()).bucket();
-        checkArgument(numBuckets > 0, "Num bucket is illegal: " + numBuckets);
         this.sameBucketKeyAndTrimmedPrimaryKey =
                 schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
         this.bucketKeyProjection =
@@ -62,49 +49,16 @@ public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<Interna
                         schema.trimmedPrimaryKeys().stream()
                                 .mapToInt(schema.primaryKeys()::indexOf)
                                 .toArray());
-        this.partitionProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalPrimaryKeysType(),
-                        schema.partitionKeys().stream()
-                                .mapToInt(schema.primaryKeys()::indexOf)
-                                .toArray());
-        this.logPrimaryKeyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.primaryKeys()));
     }
 
-    @Override
-    public void setRecord(InternalRow record) {
-        this.primaryKey = record;
-    }
-
-    @Override
-    public BinaryRow partition() {
-        return partitionProjection.apply(primaryKey);
-    }
-
-    private BinaryRow bucketKey() {
+    public int bucket(int numBuckets, InternalRow primaryKey) {
+        BinaryRow bucketKey;
         if (sameBucketKeyAndTrimmedPrimaryKey) {
-            return trimmedPrimaryKey();
+            bucketKey = trimmedPrimaryKeyProjection.apply(primaryKey);
+        } else {
+            bucketKey = bucketKeyProjection.apply(primaryKey);
         }
-
-        return bucketKeyProjection.apply(primaryKey);
-    }
-
-    @Override
-    public int bucket() {
-        BinaryRow bucketKey = bucketKey();
         return KeyAndBucketExtractor.bucket(
                 KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
-    }
-
-    @Override
-    public BinaryRow trimmedPrimaryKey() {
-        return trimmedPrimaryKeyProjection.apply(primaryKey);
-    }
-
-    @Override
-    public BinaryRow logPrimaryKey() {
-        return logPrimaryKeyProjection.apply(primaryKey);
     }
 }

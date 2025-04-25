@@ -425,6 +425,131 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                 .containsExactlyInAnyOrder("+I[5]");
     }
 
+    @Timeout(TIMEOUT)
+    @Test
+    public void testLookupPostponeBucketTable() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment bEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        String createCatalogSql =
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")";
+        bEnv.executeSql(createCatalogSql);
+        bEnv.executeSql("USE CATALOG mycat");
+        bEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+        bEnv.executeSql("CREATE TABLE SRC (i INT, `proctime` AS PROCTIME())");
+
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(1)
+                        .checkpointIntervalMs(200)
+                        .build();
+        sEnv.executeSql(createCatalogSql);
+        sEnv.executeSql("USE CATALOG mycat");
+        TableResult streamingSelect =
+                sEnv.executeSql(
+                        "SELECT i, v FROM SRC LEFT JOIN T "
+                                + "FOR SYSTEM_TIME AS OF SRC.proctime AS D ON SRC.i = D.k");
+
+        JobClient client = streamingSelect.getJobClient().get();
+        CloseableIterator<Row> it = streamingSelect.collect();
+
+        bEnv.executeSql("INSERT INTO T VALUES (1, 10), (2, 20), (3, 30)").await();
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        // lookup join
+        bEnv.executeSql("INSERT INTO SRC VALUES (1), (2), (3)").await();
+        assertThat(collect(client, it, 3))
+                .containsExactlyInAnyOrder("+I[1, 10]", "+I[2, 20]", "+I[3, 30]");
+
+        // rescale and re-join
+        bEnv.executeSql("CALL sys.rescale(`table` => 'default.T', `bucket_num` => 5)").await();
+        bEnv.executeSql("INSERT INTO SRC VALUES (1), (2), (3)").await();
+        assertThat(collect(client, it, 3))
+                .containsExactlyInAnyOrder("+I[1, 10]", "+I[2, 20]", "+I[3, 30]");
+
+        it.close();
+    }
+
+    @Timeout(TIMEOUT)
+    @Test
+    public void testLookupPostponeBucketPartitionedTable() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment bEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        String createCatalogSql =
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")";
+        bEnv.executeSql(createCatalogSql);
+        bEnv.executeSql("USE CATALOG mycat");
+        bEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  pt INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k, pt) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+        bEnv.executeSql("CREATE TABLE SRC (i INT, pt INT, `proctime` AS PROCTIME())");
+
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(1)
+                        .checkpointIntervalMs(200)
+                        .build();
+        sEnv.executeSql(createCatalogSql);
+        sEnv.executeSql("USE CATALOG mycat");
+        TableResult streamingSelect =
+                sEnv.executeSql(
+                        "SELECT i, D.pt, v FROM SRC LEFT JOIN T "
+                                + "FOR SYSTEM_TIME AS OF SRC.proctime AS D ON SRC.i = D.k AND SRC.pt = D.pt");
+
+        JobClient client = streamingSelect.getJobClient().get();
+        CloseableIterator<Row> it = streamingSelect.collect();
+
+        bEnv.executeSql("INSERT INTO T VALUES (1, 1, 10), (2, 2, 20), (3, 2, 30)").await();
+        bEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        // rescale for partitions to different num buckets and lookup join
+        bEnv.executeSql(
+                        "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 5, `partition` => 'pt=1')")
+                .await();
+        bEnv.executeSql(
+                        "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 8, `partition` => 'pt=2')")
+                .await();
+        bEnv.executeSql("INSERT INTO SRC VALUES (1, 1), (2, 2), (3, 2)").await();
+        assertThat(collect(client, it, 3))
+                .containsExactlyInAnyOrder("+I[1, 1, 10]", "+I[2, 2, 20]", "+I[3, 2, 30]");
+
+        it.close();
+    }
+
     private List<String> collect(TableResult result) throws Exception {
         List<String> ret = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {
