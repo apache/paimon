@@ -471,7 +471,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         List<String> args =
                 new ArrayList<>(
                         Arrays.asList(
-                                "clone_hive",
+                                "clone",
                                 "--database",
                                 "default",
                                 "--table",
@@ -487,7 +487,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--target_catalog_conf",
                                 "warehouse=" + warehouse));
 
-        createAction(CloneHiveAction.class, args).run();
+        createAction(CloneAction.class, args).run();
         FileStoreTable paimonTable =
                 paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
 
