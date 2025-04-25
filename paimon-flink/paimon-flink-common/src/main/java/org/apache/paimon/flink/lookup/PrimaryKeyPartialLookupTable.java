@@ -19,15 +19,19 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.query.RemoteTableQuery;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -62,8 +66,8 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     @Nullable private Filter<InternalRow> cacheRowFilter;
     private QueryExecutor queryExecutor;
 
-    private final PartitionFromPkExtractor partExtractor;
-    private final FixedBucketFromPkExtractor bucketExtractor;
+    private final Projection partitionFromPk;
+    private final Projection bucketKeyFromPk;
 
     private PrimaryKeyPartialLookupTable(
             QueryExecutorFactory executorFactory, FileStoreTable table, List<String> joinKey) {
@@ -73,8 +77,19 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                     "Unsupported mode for partial lookup: " + table.bucketMode());
         }
 
-        this.partExtractor = new PartitionFromPkExtractor(table.schema());
-        this.bucketExtractor = new FixedBucketFromPkExtractor(table.schema());
+        TableSchema schema = table.schema();
+        this.partitionFromPk =
+                CodeGenUtils.newProjection(
+                        schema.logicalPrimaryKeysType(),
+                        schema.partitionKeys().stream()
+                                .mapToInt(schema.primaryKeys()::indexOf)
+                                .toArray());
+        this.bucketKeyFromPk =
+                CodeGenUtils.newProjection(
+                        schema.logicalPrimaryKeysType(),
+                        schema.bucketKeys().stream()
+                                .mapToInt(schema.primaryKeys()::indexOf)
+                                .toArray());
 
         ProjectedRow keyRearrange = null;
         if (!table.primaryKeys().equals(joinKey)) {
@@ -87,7 +102,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         }
         this.keyRearrange = keyRearrange;
 
-        List<String> trimmedPrimaryKeys = table.schema().trimmedPrimaryKeys();
+        List<String> trimmedPrimaryKeys = schema.trimmedPrimaryKeys();
         ProjectedRow trimmedKeyRearrange = null;
         if (!trimmedPrimaryKeys.equals(joinKey)) {
             trimmedKeyRearrange =
@@ -123,13 +138,13 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             adjustedKey = keyRearrange.replaceRow(adjustedKey);
         }
 
-        BinaryRow partition = partExtractor.partition(adjustedKey);
+        BinaryRow partition = partitionFromPk.apply(adjustedKey);
         Integer numBuckets = queryExecutor.numBuckets(partition);
         if (numBuckets == null) {
             // no data, just return none
             return Collections.emptyList();
         }
-        int bucket = bucketExtractor.bucket(numBuckets, adjustedKey);
+        int bucket = bucket(numBuckets, adjustedKey);
 
         InternalRow trimmedKey = key;
         if (trimmedKeyRearrange != null) {
@@ -142,6 +157,12 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         } else {
             return Collections.singletonList(kv);
         }
+    }
+
+    private int bucket(int numBuckets, InternalRow primaryKey) {
+        BinaryRow bucketKey = bucketKeyFromPk.apply(primaryKey);
+        return KeyAndBucketExtractor.bucket(
+                KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
     }
 
     @Override
