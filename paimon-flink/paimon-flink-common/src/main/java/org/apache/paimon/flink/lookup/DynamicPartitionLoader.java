@@ -56,8 +56,10 @@ public class DynamicPartitionLoader extends PartitionLoader {
     @Override
     public void open() {
         super.open();
+
         RowType partitionType = table.rowType().project(table.partitionKeys());
         this.comparator = CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
+        this.lastRefresh = null;
     }
 
     @Override
