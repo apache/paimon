@@ -37,6 +37,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -49,6 +50,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -62,6 +64,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
 import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -142,6 +145,26 @@ public class FileStoreLookupFunctionTest {
         if (lookupFunction != null) {
             lookupFunction.close();
         }
+    }
+
+    @Test
+    public void testCompatibilityForOldVersion() throws Exception {
+        createLookupFunction(false, true, false, false);
+        commit(writeCommit(1));
+        PrimaryKeyPartialLookupTable lookupTable =
+                (PrimaryKeyPartialLookupTable) lookupFunction.lookupTable();
+        LocalQueryExecutor queryExecutor = (LocalQueryExecutor) lookupTable.queryExecutor();
+
+        // set totalBuckets to null, for testing old version
+        DataSplit split = (DataSplit) table.newReadBuilder().newScan().plan().splits().get(0);
+        Field field = DataSplit.class.getDeclaredField("totalBuckets");
+        field.setAccessible(true);
+        field.set(split, null);
+        assertThat(split.totalBuckets()).isNull();
+
+        // assert num buckets should be 2
+        queryExecutor.refreshSplit(split);
+        assertThat(queryExecutor.numBuckets(EMPTY_ROW)).isEqualTo(2);
     }
 
     @ParameterizedTest
