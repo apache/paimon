@@ -37,7 +37,8 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
                        |CREATE TABLE T (a INT, b STRING)
                        |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
-          val location = loadTable("T").location().toString
+          val table = loadTable("T")
+          val location = table.location().toString
 
           val inputData = MemoryStream[(Int, String)]
           val stream = inputData
@@ -79,13 +80,14 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
             // rollback to snapshot
             checkAnswer(
               spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '2')"),
-              Row(true) :: Nil)
+              Row(table.latestSnapshot().get().id, 2) :: Nil)
             checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
 
             // rollback to tag
+            val taggedSnapshotId = table.tagManager().getOrThrow("test_tag").trimToSnapshot().id
             checkAnswer(
               spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => 'test_tag')"),
-              Row(true) :: Nil)
+              Row(table.latestSnapshot().get().id, taggedSnapshotId) :: Nil)
             checkAnswer(query(), Row(1, "a") :: Nil)
           } finally {
             stream.stop()
@@ -99,6 +101,8 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
                  |CREATE TABLE T (a INT, b STRING)
                  |TBLPROPERTIES ('primary-key'='a', 'bucket'='3', 'file.format'='orc')
                  |""".stripMargin)
+
+    val table = loadTable("T")
 
     val query = () => spark.sql("SELECT * FROM T ORDER BY a")
 
@@ -128,7 +132,7 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
     // rollback to snapshot
     checkAnswer(
       spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '3')"),
-      Row(true) :: Nil)
+      Row(table.latestSnapshot().get().id, 3) :: Nil)
     checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
 
     // version/snapshot/tag can only set one of them
@@ -177,6 +181,8 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
             }
             .start()
 
+          val table = loadTable("T")
+
           val query = () => spark.sql("SELECT * FROM T ORDER BY a")
 
           try {
@@ -201,7 +207,7 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
             checkAnswer(
               spark.sql(
                 s"CALL paimon.sys.rollback_to_timestamp(table => 'test.T', timestamp => $timestamp)"),
-              Row("Success roll back to snapshot: 2 .") :: Nil)
+              Row(table.latestSnapshot().get().id, 2) :: Nil)
             checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
 
           } finally {

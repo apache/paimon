@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone.hive;
+package org.apache.paimon.flink.clone;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -88,7 +88,8 @@ public class CommitTableOperator extends AbstractStreamOperator<Long>
                 }
 
                 Table table = catalog.getTable(entry.getKey());
-                try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+                try (BatchTableCommit commit =
+                        table.newBatchWriteBuilder().withOverwrite().newCommit()) {
                     commit.commit(commitMessages);
                 }
             }

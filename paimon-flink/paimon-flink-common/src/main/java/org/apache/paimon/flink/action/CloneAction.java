@@ -18,150 +18,123 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.catalog.CachingCatalog;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.clone.CloneFileInfo;
-import org.apache.paimon.flink.clone.CloneSourceBuilder;
-import org.apache.paimon.flink.clone.CopyDataFileOperator;
-import org.apache.paimon.flink.clone.CopyManifestFileOperator;
-import org.apache.paimon.flink.clone.CopyMetaFilesForCloneOperator;
-import org.apache.paimon.flink.clone.SnapshotHintChannelComputer;
-import org.apache.paimon.flink.clone.SnapshotHintOperator;
+import org.apache.paimon.flink.clone.CloneFilesFunction;
+import org.apache.paimon.flink.clone.CloneUtils;
+import org.apache.paimon.flink.clone.CommitTableOperator;
+import org.apache.paimon.flink.clone.DataFileInfo;
+import org.apache.paimon.flink.clone.ListCloneFilesFunction;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
+import org.apache.paimon.hive.HiveCatalog;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 
-import java.util.HashMap;
+import javax.annotation.Nullable;
+
 import java.util.Map;
 
-import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
-
-/** The Latest Snapshot clone action for Flink. */
+/** Clone source table to target table. */
 public class CloneAction extends ActionBase {
 
-    private final int parallelism;
+    private final Map<String, String> sourceCatalogConfig;
+    private final String sourceDatabase;
+    private final String sourceTableName;
 
-    private Map<String, String> sourceCatalogConfig;
-    private final String database;
-    private final String tableName;
-
-    private Map<String, String> targetCatalogConfig;
+    private final Map<String, String> targetCatalogConfig;
     private final String targetDatabase;
     private final String targetTableName;
 
+    private final int parallelism;
+    @Nullable private final String whereSql;
+
     public CloneAction(
-            String database,
-            String tableName,
+            String sourceDatabase,
+            String sourceTableName,
             Map<String, String> sourceCatalogConfig,
             String targetDatabase,
             String targetTableName,
             Map<String, String> targetCatalogConfig,
-            String parallelismStr) {
+            @Nullable Integer parallelism,
+            @Nullable String whereSql) {
         super(sourceCatalogConfig);
 
-        this.parallelism =
-                isNullOrWhitespaceOnly(parallelismStr)
-                        ? env.getParallelism()
-                        : Integer.parseInt(parallelismStr);
-
-        this.sourceCatalogConfig = new HashMap<>();
-        if (!sourceCatalogConfig.isEmpty()) {
-            this.sourceCatalogConfig = sourceCatalogConfig;
+        Catalog sourceCatalog = catalog;
+        if (sourceCatalog instanceof CachingCatalog) {
+            sourceCatalog = ((CachingCatalog) sourceCatalog).wrapped();
         }
-        this.database = database;
-        this.tableName = tableName;
-
-        this.targetCatalogConfig = new HashMap<>();
-        if (!targetCatalogConfig.isEmpty()) {
-            this.targetCatalogConfig = targetCatalogConfig;
+        if (!(sourceCatalog instanceof HiveCatalog)) {
+            throw new UnsupportedOperationException(
+                    "Only support clone hive tables using HiveCatalog, but current source catalog is "
+                            + sourceCatalog.getClass().getName());
         }
+
+        this.sourceDatabase = sourceDatabase;
+        this.sourceTableName = sourceTableName;
+        this.sourceCatalogConfig = sourceCatalogConfig;
+
         this.targetDatabase = targetDatabase;
         this.targetTableName = targetTableName;
-    }
+        this.targetCatalogConfig = targetCatalogConfig;
 
-    // ------------------------------------------------------------------------
-    //  Java API
-    // ------------------------------------------------------------------------
+        this.parallelism = parallelism == null ? env.getParallelism() : parallelism;
+        this.whereSql = whereSql;
+    }
 
     @Override
-    public void build() {
-        try {
-            buildCloneFlinkJob(env);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
+    public void build() throws Exception {
+        // list source tables
+        DataStream<Tuple2<Identifier, Identifier>> source =
+                CloneUtils.buildSource(
+                        sourceDatabase,
+                        sourceTableName,
+                        targetDatabase,
+                        targetTableName,
+                        catalog,
+                        env);
 
-    private void buildCloneFlinkJob(StreamExecutionEnvironment env) throws Exception {
-        DataStream<Tuple2<String, String>> cloneSource =
-                new CloneSourceBuilder(
-                                env,
-                                sourceCatalogConfig,
-                                database,
-                                tableName,
-                                targetDatabase,
-                                targetTableName)
-                        .build();
-
-        SingleOutputStreamOperator<Void> copyMetaFiles =
-                cloneSource
-                        .forward()
-                        .process(
-                                new CopyMetaFilesForCloneOperator(
-                                        sourceCatalogConfig, targetCatalogConfig))
-                        .name("Side Output")
-                        .setParallelism(1);
-
-        DataStream<CloneFileInfo> indexFilesStream =
-                copyMetaFiles.getSideOutput(CopyMetaFilesForCloneOperator.INDEX_FILES_TAG);
-        DataStream<CloneFileInfo> dataManifestFilesStream =
-                copyMetaFiles.getSideOutput(CopyMetaFilesForCloneOperator.DATA_MANIFEST_FILES_TAG);
-
-        SingleOutputStreamOperator<CloneFileInfo> copyIndexFiles =
-                indexFilesStream
-                        .transform(
-                                "Copy Index Files",
-                                TypeInformation.of(CloneFileInfo.class),
-                                new CopyDataFileOperator(sourceCatalogConfig, targetCatalogConfig))
-                        .setParallelism(parallelism);
-
-        SingleOutputStreamOperator<CloneFileInfo> copyDataManifestFiles =
-                dataManifestFilesStream
-                        .transform(
-                                "Copy Data Manifest Files",
-                                TypeInformation.of(CloneFileInfo.class),
-                                new CopyManifestFileOperator(
-                                        sourceCatalogConfig, targetCatalogConfig))
-                        .setParallelism(parallelism);
-
-        SingleOutputStreamOperator<CloneFileInfo> copyDataFile =
-                copyDataManifestFiles
-                        .transform(
-                                "Copy Data Files",
-                                TypeInformation.of(CloneFileInfo.class),
-                                new CopyDataFileOperator(sourceCatalogConfig, targetCatalogConfig))
-                        .setParallelism(parallelism);
-
-        DataStream<CloneFileInfo> combinedStream = copyDataFile.union(copyIndexFiles);
-
-        SingleOutputStreamOperator<CloneFileInfo> snapshotHintOperator =
+        DataStream<Tuple2<Identifier, Identifier>> partitionedSource =
                 FlinkStreamPartitioner.partition(
-                                combinedStream, new SnapshotHintChannelComputer(), parallelism)
-                        .transform(
-                                "Recreate Snapshot Hint",
-                                TypeInformation.of(CloneFileInfo.class),
-                                new SnapshotHintOperator(targetCatalogConfig))
+                        source, new CloneUtils.TableChannelComputer(), parallelism);
+
+        // create target table, list files and group by <table, partition>
+        DataStream<CloneFileInfo> files =
+                partitionedSource
+                        .process(
+                                new ListCloneFilesFunction(
+                                        sourceCatalogConfig, targetCatalogConfig, whereSql))
+                        .name("List Files")
                         .setParallelism(parallelism);
 
-        snapshotHintOperator.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
+        // copy files and commit
+        DataStream<DataFileInfo> dataFile =
+                files.rebalance()
+                        .process(new CloneFilesFunction(sourceCatalogConfig, targetCatalogConfig))
+                        .name("Copy Files")
+                        .setParallelism(parallelism);
+
+        DataStream<DataFileInfo> partitionedDataFile =
+                FlinkStreamPartitioner.partition(
+                        dataFile, new CloneUtils.DataFileChannelComputer(), parallelism);
+
+        DataStream<Long> committed =
+                partitionedDataFile
+                        .transform(
+                                "Commit table",
+                                BasicTypeInfo.LONG_TYPE_INFO,
+                                new CommitTableOperator(targetCatalogConfig))
+                        .setParallelism(parallelism);
+        committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     @Override
     public void run() throws Exception {
         build();
-        execute("Clone job");
+        execute("Clone Hive job");
     }
 }

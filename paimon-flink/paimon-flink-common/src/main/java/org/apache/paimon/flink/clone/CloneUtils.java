@@ -16,12 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone.hive;
+package org.apache.paimon.flink.clone;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.CloneHiveAction;
+import org.apache.paimon.flink.action.CloneAction;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.hive.migrate.HiveCloneUtils;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -40,10 +40,10 @@ import java.util.Objects;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Utils for building {@link CloneHiveAction}. */
-public class CloneHiveUtils {
+/** Utils for building {@link CloneAction}. */
+public class CloneUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CloneHiveUtils.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CloneUtils.class);
 
     public static DataStream<Tuple2<Identifier, Identifier>> buildSource(
             String sourceDatabase,

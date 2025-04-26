@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone.hive;
+package org.apache.paimon.flink.clone;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -28,15 +28,19 @@ import org.apache.paimon.table.Table;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.flink.FlinkCatalogFactory.createPaimonCatalog;
-import static org.apache.paimon.flink.clone.hive.CloneHiveUtils.getRootHiveCatalog;
+import static org.apache.paimon.flink.clone.CloneUtils.getRootHiveCatalog;
 
 /** Abstract function for copying tables. */
-public abstract class CopyProcessFunction<I, O> extends ProcessFunction<I, O> {
+public abstract class CloneProcessFunction<I, O> extends ProcessFunction<I, O> {
+
+    protected static final Logger LOG = LoggerFactory.getLogger(CloneProcessFunction.class);
 
     protected final Map<String, String> sourceCatalogConfig;
     protected final Map<String, String> targetCatalogConfig;
@@ -47,7 +51,7 @@ public abstract class CopyProcessFunction<I, O> extends ProcessFunction<I, O> {
     protected transient Map<Identifier, Table> tableCache;
     protected transient DataFileMetaSerializer dataFileSerializer;
 
-    public CopyProcessFunction(
+    public CloneProcessFunction(
             Map<String, String> sourceCatalogConfig, Map<String, String> targetCatalogConfig) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;

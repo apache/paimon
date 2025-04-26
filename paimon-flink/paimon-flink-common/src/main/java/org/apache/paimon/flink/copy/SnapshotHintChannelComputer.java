@@ -16,18 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.copy;
 
 import org.apache.paimon.table.sink.ChannelComputer;
 
 /**
- * {@link ChannelComputer} for distributing {@link CloneFileInfo} records into SnapshotHintOperator
+ * {@link ChannelComputer} for distributing {@link CopyFileInfo} records into SnapshotHintOperator
  * for recreate snapshot hints.
  *
- * <p>{@link CloneFileInfo}s are distributed by target table name, so the creation of snapshot hints
+ * <p>{@link CopyFileInfo}s are distributed by target table name, so the creation of snapshot hints
  * of each table is handled by only one parallelism.
  */
-public class SnapshotHintChannelComputer implements ChannelComputer<CloneFileInfo> {
+public class SnapshotHintChannelComputer implements ChannelComputer<CopyFileInfo> {
 
     private static final long serialVersionUID = 1L;
 
@@ -39,7 +39,7 @@ public class SnapshotHintChannelComputer implements ChannelComputer<CloneFileInf
     }
 
     @Override
-    public int channel(CloneFileInfo record) {
+    public int channel(CopyFileInfo record) {
         int hsh = 0;
         for (int i = 0; i < record.getTargetIdentifier().length(); i++) {
             hsh = (hsh * 131 + record.getTargetIdentifier().charAt(i)) % numChannels;

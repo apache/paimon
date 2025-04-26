@@ -51,6 +51,7 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
             }
             .start()
 
+          val table = loadTable("T")
           val query = () => spark.sql("SELECT * FROM T ORDER BY a")
 
           try {
@@ -79,13 +80,13 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
             // rollback to snapshot
             checkAnswer(
               spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '2')"),
-              Row(true) :: Nil)
+              Row(table.latestSnapshot().get().id, 2) :: Nil)
             checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
 
             // rollback to tag
             checkAnswer(
               spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => 'test_tag')"),
-              Row(true) :: Nil)
+              Row(table.latestSnapshot().get().id, 1) :: Nil)
             checkAnswer(query(), Row(1, "a") :: Nil)
           } finally {
             stream.stop()

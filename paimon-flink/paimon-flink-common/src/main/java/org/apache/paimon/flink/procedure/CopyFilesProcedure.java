@@ -18,7 +18,8 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.flink.action.CloneAction;
+import org.apache.paimon.flink.action.CopyFilesAction;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -28,19 +29,30 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Clone tables procedure. */
-public class CloneProcedure extends ProcedureBase {
+/**
+ * Copy files for latest snapshot procedure.
+ *
+ * @deprecated The normal process should commit a snapshot to the catalog, but this procedure does
+ *     not do so. Currently, this procedure can only be applied to the FileSystemCatalog.
+ */
+@Deprecated
+public class CopyFilesProcedure extends ProcedureBase {
 
-    public static final String IDENTIFIER = "clone";
+    public static final String IDENTIFIER = "copy_files";
 
     @ProcedureHint(
             argument = {
+                @ArgumentHint(
+                        name = "warehouse",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
                 @ArgumentHint(name = "database", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING"), isOptional = true),
                 @ArgumentHint(
                         name = "catalog_conf",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
+                @ArgumentHint(name = "target_warehouse", type = @DataTypeHint("STRING")),
                 @ArgumentHint(
                         name = "target_database",
                         type = @DataTypeHint("STRING"),
@@ -53,37 +65,44 @@ public class CloneProcedure extends ProcedureBase {
                         name = "target_catalog_conf",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
-                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true),
-                @ArgumentHint(name = "where", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
+            String warehouse,
             String database,
             String tableName,
             String sourceCatalogConfigStr,
+            String targetWarehouse,
             String targetDatabase,
             String targetTableName,
             String targetCatalogConfigStr,
-            Integer parallelism,
-            String where)
+            Integer parallelismStr)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
+        if (!StringUtils.isNullOrWhitespaceOnly(warehouse)
+                && !sourceCatalogConfig.containsKey("warehouse")) {
+            sourceCatalogConfig.put("warehouse", warehouse);
+        }
 
         Map<String, String> targetCatalogConfig =
                 new HashMap<>(optionalConfigMap(targetCatalogConfigStr));
+        if (!StringUtils.isNullOrWhitespaceOnly(warehouse)
+                && !targetCatalogConfig.containsKey("warehouse")) {
+            targetCatalogConfig.put("warehouse", targetWarehouse);
+        }
 
-        CloneAction action =
-                new CloneAction(
+        CopyFilesAction action =
+                new CopyFilesAction(
                         database,
                         tableName,
                         sourceCatalogConfig,
                         targetDatabase,
                         targetTableName,
                         targetCatalogConfig,
-                        parallelism,
-                        where);
-        return execute(procedureContext, action, "Clone Job");
+                        parallelismStr == null ? null : Integer.toString(parallelismStr));
+        return execute(procedureContext, action, "Copy Files Job");
     }
 
     @Override

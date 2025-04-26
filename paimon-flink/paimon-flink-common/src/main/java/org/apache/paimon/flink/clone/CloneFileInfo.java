@@ -18,48 +18,67 @@
 
 package org.apache.paimon.flink.clone;
 
-import javax.annotation.Nullable;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.hive.migrate.HivePartitionFiles;
 
-/** The information of copy file. */
-public class CloneFileInfo {
-    @Nullable private final String sourceFilePath;
-    @Nullable private final String filePathExcludeTableRoot;
-    private final String sourceIdentifier;
-    private final String targetIdentifier;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
+
+/** Clone File (table, partition) with necessary information. */
+public class CloneFileInfo implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    private final Identifier identifier;
+    private final byte[] partition;
+    private final Path path;
+    private final long fileSize;
+    private final String format;
 
     public CloneFileInfo(
-            @Nullable String sourceFilePath,
-            @Nullable String filePathExcludeTableRoot,
-            String sourceIdentifier,
-            String targetIdentifier) {
-        this.sourceFilePath = sourceFilePath;
-        this.filePathExcludeTableRoot = filePathExcludeTableRoot;
-        this.sourceIdentifier = sourceIdentifier;
-        this.targetIdentifier = targetIdentifier;
+            Identifier identifier, BinaryRow partition, Path path, long fileSize, String format) {
+        this.identifier = identifier;
+        this.partition = serializeBinaryRow(partition);
+        this.path = path;
+        this.fileSize = fileSize;
+        this.format = format;
     }
 
-    @Nullable
-    public String getSourceFilePath() {
-        return sourceFilePath;
+    public Identifier identifier() {
+        return identifier;
     }
 
-    @Nullable
-    public String getFilePathExcludeTableRoot() {
-        return filePathExcludeTableRoot;
+    public BinaryRow partition() {
+        return deserializeBinaryRow(partition);
     }
 
-    public String getSourceIdentifier() {
-        return sourceIdentifier;
+    public Path path() {
+        return path;
     }
 
-    public String getTargetIdentifier() {
-        return targetIdentifier;
+    public long fileSize() {
+        return fileSize;
     }
 
-    @Override
-    public String toString() {
-        return String.format(
-                "{ sourceFilePath: %s, filePathExcludeTableRoot: %s, sourceIdentifier: %s, targetIdentifier: %s}",
-                sourceFilePath, filePathExcludeTableRoot, sourceIdentifier, targetIdentifier);
+    public String format() {
+        return format;
+    }
+
+    public static List<CloneFileInfo> fromHive(Identifier identifier, HivePartitionFiles files) {
+        List<CloneFileInfo> result = new ArrayList<>();
+        for (int i = 0; i < files.paths().size(); i++) {
+            Path path = files.paths().get(i);
+            long fileSize = files.fileSizes().get(i);
+            result.add(
+                    new CloneFileInfo(
+                            identifier, files.partition(), path, fileSize, files.format()));
+        }
+        return result;
     }
 }

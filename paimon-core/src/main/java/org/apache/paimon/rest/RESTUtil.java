@@ -61,11 +61,15 @@ public class RESTUtil {
         }
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
         for (Map.Entry<String, String> entry : targets.entrySet()) {
-            if (!updates.containsKey(entry.getKey())) {
+            if (!updates.containsKey(entry.getKey()) && entry.getValue() != null) {
                 builder.put(entry.getKey(), entry.getValue());
             }
         }
-        updates.forEach(builder::put);
+        for (Map.Entry<String, String> entry : updates.entrySet()) {
+            if (entry.getValue() != null) {
+                builder.put(entry.getKey(), entry.getValue());
+            }
+        }
 
         return builder.build();
     }

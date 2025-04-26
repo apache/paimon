@@ -24,11 +24,13 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+import org.apache.flink.types.Row;
 
 /**
  * Rollback to timestamp procedure. Usage:
@@ -47,16 +49,21 @@ public class RollbackToTimestampProcedure extends ProcedureBase {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "timestamp", type = @DataTypeHint("BIGINT"))
             })
-    public String[] call(ProcedureContext procedureContext, String tableId, Long timestamp)
+    public @DataTypeHint("ROW<previous_snapshot_id BIGINT, current_snapshot_id BIGINT>") Row[] call(
+            ProcedureContext procedureContext, String tableId, Long timestamp)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-        Snapshot snapshot = fileStoreTable.snapshotManager().earlierOrEqualTimeMills(timestamp);
+        SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        Preconditions.checkNotNull(latestSnapshot, "Latest snapshot is null, can not rollback.");
+
+        Snapshot snapshot = snapshotManager.earlierOrEqualTimeMills(timestamp);
         Preconditions.checkNotNull(
                 snapshot, String.format("count not find snapshot earlier than %s", timestamp));
         long snapshotId = snapshot.id();
         fileStoreTable.rollbackTo(snapshotId);
-        return new String[] {String.format("Success roll back to snapshot: %s .", snapshotId)};
+        return new Row[] {Row.of(latestSnapshot.id(), snapshotId)};
     }
 
     @Override

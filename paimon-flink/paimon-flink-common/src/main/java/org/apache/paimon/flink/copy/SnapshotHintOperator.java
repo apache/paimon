@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.clone;
+package org.apache.paimon.flink.copy;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
@@ -38,8 +38,8 @@ import java.util.OptionalLong;
 import java.util.Set;
 
 /** Create snapshot hint files after copying a table. */
-public class SnapshotHintOperator extends AbstractStreamOperator<CloneFileInfo>
-        implements OneInputStreamOperator<CloneFileInfo, CloneFileInfo>, BoundedOneInput {
+public class SnapshotHintOperator extends AbstractStreamOperator<CopyFileInfo>
+        implements OneInputStreamOperator<CopyFileInfo, CopyFileInfo>, BoundedOneInput {
 
     private final Map<String, String> targetCatalogConfig;
 
@@ -58,7 +58,7 @@ public class SnapshotHintOperator extends AbstractStreamOperator<CloneFileInfo>
     }
 
     @Override
-    public void processElement(StreamRecord<CloneFileInfo> streamRecord) throws Exception {
+    public void processElement(StreamRecord<CopyFileInfo> streamRecord) throws Exception {
         String identifier = streamRecord.getValue().getTargetIdentifier();
         identifiers.add(identifier);
     }

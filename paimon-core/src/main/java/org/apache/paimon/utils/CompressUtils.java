@@ -16,13 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow.writer;
+package org.apache.paimon.utils;
 
-import org.apache.arrow.vector.FieldVector;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.zip.GZIPOutputStream;
 
-/** Factory to create {@link ArrowFieldWriter}. */
-@FunctionalInterface
-public interface ArrowFieldWriterFactory {
+/** Compress utils. */
+public class CompressUtils {
 
-    ArrowFieldWriter create(FieldVector fieldVector, boolean isNullable);
+    public static void gzipCompressFile(String src, String dest) throws IOException {
+        FileInputStream fis = new FileInputStream(src);
+        FileOutputStream fos = new FileOutputStream(dest);
+        GZIPOutputStream gzipOs = new GZIPOutputStream(fos);
+        byte[] buffer = new byte[1024];
+        int bytesRead;
+        while (true) {
+            bytesRead = fis.read(buffer);
+            if (bytesRead == -1) {
+                fis.close();
+                gzipOs.close();
+                return;
+            }
+
+            gzipOs.write(buffer, 0, bytesRead);
+        }
+    }
 }

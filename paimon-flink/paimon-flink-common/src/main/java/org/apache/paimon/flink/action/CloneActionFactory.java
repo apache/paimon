@@ -26,11 +26,12 @@ import java.util.Optional;
 public class CloneActionFactory implements ActionFactory {
 
     private static final String IDENTIFIER = "clone";
-    private static final String PARALLELISM = "parallelism";
     private static final String TARGET_WAREHOUSE = "target_warehouse";
     private static final String TARGET_DATABASE = "target_database";
     private static final String TARGET_TABLE = "target_table";
     private static final String TARGET_CATALOG_CONF = "target_catalog_conf";
+    private static final String PARALLELISM = "parallelism";
+    private static final String WHERE = "where";
 
     @Override
     public String identifier() {
@@ -48,6 +49,8 @@ public class CloneActionFactory implements ActionFactory {
             targetCatalogConfig.put(WAREHOUSE, targetWarehouse);
         }
 
+        String parallelism = params.get(PARALLELISM);
+
         CloneAction cloneAction =
                 new CloneAction(
                         params.get(DATABASE),
@@ -56,43 +59,16 @@ public class CloneActionFactory implements ActionFactory {
                         params.get(TARGET_DATABASE),
                         params.get(TARGET_TABLE),
                         targetCatalogConfig,
-                        params.get(PARALLELISM));
+                        parallelism == null ? null : Integer.parseInt(parallelism),
+                        params.get(WHERE));
 
         return Optional.of(cloneAction);
     }
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"clone\" runs a batch job for clone the latest Snapshot.");
-        System.out.println();
-
-        System.out.println("Syntax:");
         System.out.println(
-                "  clone --warehouse <warehouse_path> \\\n"
-                        + "[--database <database_name>] \\\n"
-                        + "[--table <table_name>] \\\n"
-                        + "[--catalog_conf <source-paimon-catalog-conf> [--catalog_conf <source-paimon-catalog-conf> ...]] \\\n"
-                        + "--target_warehouse <target_warehouse_path> \\\n"
-                        + "[--target_database <target_database_name>] \\\n"
-                        + "[--target_table <target_table_name>] \\\n"
-                        + "[--target_catalog_conf <target-paimon-catalog-conf> [--target_catalog_conf <target-paimon-catalog-conf> ...]] \\\n"
-                        + "[--parallelism <parallelism>]");
-
+                "Action \"clone\" clones the source files and migrate them to paimon table.");
         System.out.println();
-
-        System.out.println("Examples:");
-        System.out.println(
-                "  clone --warehouse s3:///path1/from/warehouse \\\n"
-                        + "--database test_db \\\n"
-                        + "--table test_table \\\n"
-                        + "--catalog_conf s3.endpoint=https://****.com \\\n"
-                        + "--catalog_conf s3.access-key=***** \\\n"
-                        + "--catalog_conf s3.secret-key=***** \\\n"
-                        + "--target_warehouse s3:///path2/to/warehouse \\\n"
-                        + "--target_database test_db_copy \\\n"
-                        + "--target_table test_table_copy \\\n"
-                        + "--target_catalog_conf s3.endpoint=https://****.com \\\n"
-                        + "--target_catalog_conf s3.access-key=***** \\\n"
-                        + "--target_catalog_conf s3.secret-key=***** ");
     }
 }
