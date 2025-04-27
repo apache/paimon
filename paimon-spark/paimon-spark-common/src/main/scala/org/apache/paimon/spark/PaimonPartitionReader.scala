@@ -24,19 +24,20 @@ import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.connector.read.PartitionReader
 
 import java.io.IOException
+import java.util.{ArrayList => JList}
 
 import scala.collection.JavaConverters._
 
 case class PaimonPartitionReader(
     readBuilder: ReadBuilder,
     partition: PaimonInputPartition,
-    row: SparkInternalRow,
     metadataColumns: Seq[PaimonMetadataColumn]
 ) extends PartitionReader[InternalRow] {
 
@@ -46,6 +47,12 @@ case class PaimonPartitionReader(
   private var currentRow: PaimonInternalRow = _
   private val ioManager: IOManager = createIOManager()
   private val read = readBuilder.newRead().withIOManager(ioManager)
+  private lazy val sparkRow: SparkInternalRow = {
+    val dataFields = new JList(readBuilder.readType().getFields)
+    dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
+    val rowType = new RowType(dataFields)
+    SparkInternalRow.create(rowType)
+  }
 
   override def next(): Boolean = {
     if (currentRecordReader == null) {
@@ -61,7 +68,7 @@ case class PaimonPartitionReader(
       null
     } else {
       advanced = false
-      row.replace(currentRow)
+      sparkRow.replace(currentRow)
     }
   }
 
