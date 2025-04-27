@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -33,6 +34,9 @@ import java.util.Map;
 
 /** Util for REST. */
 public class RESTUtil {
+
+    public static final String TABLE_NAME_PATTERN = "tableNamePattern";
+    public static final String VIEW_NAME_PATTERN = "viewNamePattern";
 
     public static Map<String, String> extractPrefixMap(Options options, String prefix) {
         return extractPrefixMap(options.toMap(), prefix);
@@ -95,6 +99,39 @@ public class RESTUtil {
                     String.format(
                             "Failed to URL decode '%s': UTF-8 encoding is not supported", encoded),
                     e);
+        }
+    }
+
+    public static void validatePrefixPattern(String pattern) {
+        if (pattern != null && !pattern.isEmpty()) {
+            boolean escaped = false;
+            boolean inWildcardZone = false;
+
+            for (int i = 0; i < pattern.length(); i++) {
+                char c = pattern.charAt(i);
+
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\') {
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '%' || c == '_') {
+                    inWildcardZone = true;
+                } else {
+                    if (inWildcardZone) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Can only support sql like prefix query now. "
+                                                + "Note please escape the underline if you want to match it exactly. Invalid pattern %s",
+                                        StringUtils.replace(pattern, "%", "%%")));
+                    }
+                }
+            }
         }
     }
 }

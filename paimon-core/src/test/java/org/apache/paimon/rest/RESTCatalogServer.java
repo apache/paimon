@@ -21,7 +21,6 @@ package org.apache.paimon.rest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
@@ -89,7 +88,6 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
@@ -106,13 +104,18 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
+import static org.apache.paimon.rest.RESTCatalog.MAX_RESULTS;
+import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
+import static org.apache.paimon.rest.RESTUtil.TABLE_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTUtil.VIEW_NAME_PATTERN;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -120,11 +123,7 @@ public class RESTCatalogServer {
     private static final Logger LOG = LoggerFactory.getLogger(RESTCatalogServer.class);
 
     public static final int DEFAULT_MAX_RESULTS = 100;
-    public static final String MAX_RESULTS = RESTCatalog.MAX_RESULTS;
-    public static final String PAGE_TOKEN = RESTCatalog.PAGE_TOKEN;
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
-    public static final String SEARCH = "search";
-    public static final String TABLE_TYPE = "tableType";
 
     private final String prefix;
     private final String databaseUri;
@@ -870,38 +869,23 @@ public class RESTCatalogServer {
     }
 
     private List<String> listTables(String databaseName, Map<String, String> parameters) {
-        String search = parameters.get(SEARCH);
-        TableType tableType = getTableType(parameters);
+        String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
         List<String> tables = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
-            CoreOptions options = CoreOptions.fromMap(entry.getValue().schema().options());
             if (databaseName.equals(identifier.getDatabaseName())
-                    && (Objects.isNull(search)
-                            || StringUtils.startsWith(identifier.getTableName(), search))
-                    && (Objects.isNull(tableType) || tableType.equals(options.type()))) {
+                    && (Objects.isNull(tableNamePattern)
+                            || matchNamePattern(identifier.getTableName(), tableNamePattern))) {
                 tables.add(identifier.getTableName());
             }
         }
         return tables;
     }
 
-    private TableType getTableType(Map<String, String> parameters) {
-        TableType tableType = null;
-        if (Objects.nonNull(parameters.get(TABLE_TYPE))) {
-            try {
-                tableType = TableType.fromString(parameters.get(TABLE_TYPE));
-            } catch (UnsupportedOperationException e) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Unsupported table type: %s, supported table types are: %s",
-                                parameters.get(TABLE_TYPE),
-                                Arrays.stream(TableType.values())
-                                        .map(TableType::name)
-                                        .collect(Collectors.joining(","))));
-            }
-        }
-        return tableType;
+    private boolean matchNamePattern(String name, String pattern) {
+        RESTUtil.validatePrefixPattern(pattern);
+        String regex = toRegex(pattern);
+        return Pattern.compile(regex).matcher(name).matches();
     }
 
     private MockResponse generateFinalListTablesResponse(
@@ -970,18 +954,13 @@ public class RESTCatalogServer {
 
     private List<GetTableResponse> listTableDetails(
             String databaseName, Map<String, String> parameters) {
-        String search = parameters.get(SEARCH);
-        TableType tableType = getTableType(parameters);
+        String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
         List<GetTableResponse> tableDetails = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if (databaseName.equals(identifier.getDatabaseName())
-                    && (Objects.isNull(search)
-                            || StringUtils.startsWith(identifier.getTableName(), search))
-                    && (Objects.isNull(tableType)
-                            || tableType.equals(
-                                    CoreOptions.fromMap(entry.getValue().schema().options())
-                                            .type()))) {
+                    && (Objects.isNull(tableNamePattern)
+                            || matchNamePattern(identifier.getTableName(), tableNamePattern))) {
                 GetTableResponse getTableResponse =
                         new GetTableResponse(
                                 entry.getValue().uuid(),
@@ -1250,12 +1229,15 @@ public class RESTCatalogServer {
     }
 
     private List<String> listViews(String databaseName, Map<String, String> parameters) {
-        String search = parameters.get(SEARCH);
+        String viewNamePattern = parameters.get(VIEW_NAME_PATTERN);
         return viewStore.keySet().stream()
                 .map(Identifier::fromString)
                 .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
                 .map(Identifier::getTableName)
-                .filter(tableName -> Objects.isNull(search) || tableName.startsWith(search))
+                .filter(
+                        viewName ->
+                                (Objects.isNull(viewNamePattern)
+                                        || matchNamePattern(viewName, viewNamePattern)))
                 .collect(Collectors.toList());
     }
 
@@ -1333,14 +1315,15 @@ public class RESTCatalogServer {
 
     private List<GetViewResponse> listViewDetails(
             String databaseName, Map<String, String> parameters) {
-        String search = parameters.get(SEARCH);
+        String viewNamePattern = parameters.get(VIEW_NAME_PATTERN);
         return viewStore.keySet().stream()
                 .map(Identifier::fromString)
                 .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
                 .filter(
                         identifier ->
-                                Objects.isNull(search)
-                                        || identifier.getTableName().startsWith(search))
+                                (Objects.isNull(viewNamePattern)
+                                        || matchNamePattern(
+                                                identifier.getTableName(), viewNamePattern)))
                 .map(
                         identifier -> {
                             View view = viewStore.get(identifier.getFullName());
@@ -1756,15 +1739,44 @@ public class RESTCatalogServer {
     }
 
     private Map<String, String> getParameters(String query) {
-        Map<String, String> parameters =
-                Arrays.stream(query.split("&"))
-                        .map(pair -> pair.split("=", 2))
-                        .collect(
-                                Collectors.toMap(
-                                        pair -> pair[0].trim(), // key
-                                        pair -> RESTUtil.decodeString(pair[1].trim()), // value
-                                        (existing, replacement) -> existing // handle duplicates
-                                        ));
-        return parameters;
+        return Arrays.stream(query.split("&"))
+                .map(pair -> pair.split("=", 2))
+                .collect(
+                        Collectors.toMap(
+                                pair -> pair[0].trim(), // key
+                                pair -> RESTUtil.decodeString(pair[1].trim()), // value
+                                (existing, replacement) -> existing // handle duplicates
+                                ));
+    }
+
+    private String toRegex(String pattern) {
+        StringBuilder regex = new StringBuilder();
+        boolean escaped = false;
+
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+
+            if (escaped) {
+                regex.append(c);
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            switch (c) {
+                case '%':
+                    regex.append(".*");
+                    break;
+                case '_':
+                    regex.append(".");
+                    break;
+                default:
+                    regex.append(c);
+                    break;
+            }
+        }
+        return "^" + regex + "$";
     }
 }

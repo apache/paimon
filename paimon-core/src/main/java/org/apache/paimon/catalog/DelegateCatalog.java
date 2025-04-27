@@ -99,22 +99,16 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName,
-            Integer maxResults,
-            String pageToken,
-            Map<String, String> queryOptions)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
-        return wrapped.listTablesPaged(databaseName, maxResults, pageToken, queryOptions);
+        return wrapped.listTablesPaged(databaseName, maxResults, pageToken, tableNamePattern);
     }
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String databaseName,
-            Integer maxResults,
-            String pageToken,
-            Map<String, String> queryOptions)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
-        return wrapped.listTableDetailsPaged(databaseName, maxResults, pageToken, queryOptions);
+        return wrapped.listTableDetailsPaged(databaseName, maxResults, pageToken, tableNamePattern);
     }
 
     @Override
@@ -245,22 +239,16 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<String> listViewsPaged(
-            String databaseName,
-            Integer maxResults,
-            String pageToken,
-            Map<String, String> queryOptions)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
-        return wrapped.listViewsPaged(databaseName, maxResults, pageToken, queryOptions);
+        return wrapped.listViewsPaged(databaseName, maxResults, pageToken, tableNamePattern);
     }
 
     @Override
     public PagedList<View> listViewDetailsPaged(
-            String databaseName,
-            Integer maxResults,
-            String pageToken,
-            Map<String, String> queryOptions)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
-        return wrapped.listViewDetailsPaged(databaseName, maxResults, pageToken, queryOptions);
+        return wrapped.listViewDetailsPaged(databaseName, maxResults, pageToken, tableNamePattern);
     }
 
     @Override

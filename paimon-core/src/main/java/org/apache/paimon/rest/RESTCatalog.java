@@ -117,6 +117,8 @@ import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSyste
 import static org.apache.paimon.catalog.CatalogUtils.validateAutoCreateClose;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.rest.RESTUtil.TABLE_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTUtil.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthSession.createAuthSession;
 import static org.apache.paimon.utils.ThreadPoolUtils.createScheduledThreadPool;
@@ -199,7 +201,7 @@ public class RESTCatalog implements Catalog {
         ListDatabasesResponse response =
                 client.get(
                         resourcePaths.databases(),
-                        buildPagedQueryParams(maxResults, pageToken, new HashMap<>()),
+                        buildPagedQueryParams(maxResults, pageToken),
                         ListDatabasesResponse.class,
                         restAuthFunction);
         List<String> databases = response.getDatabases();
@@ -317,13 +319,13 @@ public class RESTCatalog implements Catalog {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable Map<String, String> queryOptions)
+            @Nullable String tableNamePattern)
             throws DatabaseNotExistException {
         try {
             ListTablesResponse response =
                     client.get(
                             resourcePaths.tables(databaseName),
-                            buildPagedQueryParams(maxResults, pageToken, queryOptions),
+                            buildPagedQueryParams(maxResults, pageToken, tableNamePattern, true),
                             ListTablesResponse.class,
                             restAuthFunction);
             List<String> tables = response.getTables();
@@ -341,13 +343,13 @@ public class RESTCatalog implements Catalog {
             String db,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable Map<String, String> queryOptions)
+            @Nullable String tableNamePattern)
             throws DatabaseNotExistException {
         try {
             ListTableDetailsResponse response =
                     client.get(
                             resourcePaths.tableDetails(db),
-                            buildPagedQueryParams(maxResults, pageToken, queryOptions),
+                            buildPagedQueryParams(maxResults, pageToken, tableNamePattern, true),
                             ListTableDetailsResponse.class,
                             restAuthFunction);
             List<GetTableResponse> tables = response.getTableDetails();
@@ -663,7 +665,7 @@ public class RESTCatalog implements Catalog {
                     client.get(
                             resourcePaths.partitions(
                                     identifier.getDatabaseName(), identifier.getObjectName()),
-                            buildPagedQueryParams(maxResults, pageToken, new HashMap<>()),
+                            buildPagedQueryParams(maxResults, pageToken),
                             ListPartitionsResponse.class,
                             restAuthFunction);
             List<Partition> partitions = response.getPartitions();
@@ -857,13 +859,13 @@ public class RESTCatalog implements Catalog {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable Map<String, String> queryOptions)
+            @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         try {
             ListViewsResponse response =
                     client.get(
                             resourcePaths.views(databaseName),
-                            buildPagedQueryParams(maxResults, pageToken, queryOptions),
+                            buildPagedQueryParams(maxResults, pageToken, viewNamePattern, false),
                             ListViewsResponse.class,
                             restAuthFunction);
             List<String> views = response.getViews();
@@ -881,13 +883,13 @@ public class RESTCatalog implements Catalog {
             String db,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable Map<String, String> queryOptions)
+            @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         try {
             ListViewDetailsResponse response =
                     client.get(
                             resourcePaths.viewDetails(db),
-                            buildPagedQueryParams(maxResults, pageToken, queryOptions),
+                            buildPagedQueryParams(maxResults, pageToken, viewNamePattern, false),
                             ListViewDetailsResponse.class,
                             restAuthFunction);
             List<GetViewResponse> views = response.getViewDetails();
@@ -1043,16 +1045,29 @@ public class RESTCatalog implements Catalog {
     }
 
     private Map<String, String> buildPagedQueryParams(
+            @Nullable Integer maxResults, @Nullable String pageToken) {
+        return buildPagedQueryParams(maxResults, pageToken, null, true);
+    }
+
+    private Map<String, String> buildPagedQueryParams(
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable Map<String, String> queryOptions) {
-        Map<String, String> queryParams =
-                Objects.nonNull(queryOptions) ? new HashMap<>(queryOptions) : Maps.newHashMap();
+            @Nullable String namePattern,
+            boolean isTable) {
+        Map<String, String> queryParams = Maps.newHashMap();
         if (Objects.nonNull(maxResults) && maxResults > 0) {
             queryParams.put(MAX_RESULTS, maxResults.toString());
         }
         if (Objects.nonNull(pageToken)) {
             queryParams.put(PAGE_TOKEN, pageToken);
+        }
+        if (Objects.nonNull(namePattern)) {
+            RESTUtil.validatePrefixPattern(namePattern);
+            if (isTable) {
+                queryParams.put(TABLE_NAME_PATTERN, namePattern);
+            } else {
+                queryParams.put(VIEW_NAME_PATTERN, namePattern);
+            }
         }
         return queryParams;
     }

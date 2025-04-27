@@ -20,7 +20,6 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
@@ -33,7 +32,6 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
-import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -72,7 +70,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -384,22 +381,45 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
                 .isThrownBy(() -> catalog.listTables("non_existing_db"));
 
-        Map<String, String> queryOptions = new HashMap<>();
-        queryOptions.put("search", "table");
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, queryOptions);
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table%");
         tables = pagedTables.getElements();
         assertEquals(3, tables.size());
         assertThat(tables).containsExactly("table1", "table2", "table3");
         assertNull(pagedTables.getNextPageToken());
 
-        queryOptions.put("tableType", TableType.FORMAT_TABLE.toString());
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, queryOptions);
-        assertTrue(pagedTables.getElements().isEmpty());
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_");
+        tables = pagedTables.getElements();
+        assertEquals(3, tables.size());
+        assertThat(tables).containsExactly("table1", "table2", "table3");
+        assertNull(pagedTables.getNextPageToken());
 
-        queryOptions.put("tableType", "dummyTableType");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_%");
+        tables = pagedTables.getElements();
+        assertEquals(3, tables.size());
+        assertThat(tables).containsExactly("table1", "table2", "table3");
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table%_");
+        tables = pagedTables.getElements();
+        assertEquals(3, tables.size());
+        assertThat(tables).containsExactly("table1", "table2", "table3");
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table\\_");
+        Assertions.assertTrue(pagedTables.getElements().isEmpty());
+        Assertions.assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "tabl_");
+        Assertions.assertTrue(pagedTables.getElements().isEmpty());
+        Assertions.assertNull(pagedTables.getNextPageToken());
+
         Assertions.assertThrows(
-                BadRequestException.class,
-                () -> catalog.listTablesPaged(databaseName, null, null, queryOptions));
+                IllegalArgumentException.class,
+                () -> catalog.listTablesPaged(databaseName, null, null, "ta%le"));
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listTablesPaged(databaseName, null, null, "ta_le"));
     }
 
     @Test
@@ -470,20 +490,37 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
                 .isThrownBy(() -> catalog.listTables("non_existing_db"));
 
-        Map<String, String> queryOptions = new HashMap<>();
-        queryOptions.put("search", "table");
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, queryOptions);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table%");
         assertPagedTableDetails(pagedTableDetails, 3, "table1", "table2", "table3");
         assertNull(pagedTableDetails.getNextPageToken());
 
-        queryOptions.put("tableType", TableType.FORMAT_TABLE.toString());
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, queryOptions);
-        assertThat(pagedTableDetails.getElements()).isEmpty();
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_");
+        assertPagedTableDetails(pagedTableDetails, 3, "table1", "table2", "table3");
+        assertNull(pagedTableDetails.getNextPageToken());
 
-        queryOptions.put("tableType", "dummyTableType");
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_%");
+        assertPagedTableDetails(pagedTableDetails, 3, "table1", "table2", "table3");
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table%_");
+        assertPagedTableDetails(pagedTableDetails, 3, "table1", "table2", "table3");
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table\\_");
+        assertTrue(pagedTableDetails.getElements().isEmpty());
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "tabl_");
+        assertTrue(pagedTableDetails.getElements().isEmpty());
+        assertNull(pagedTableDetails.getNextPageToken());
+
         Assertions.assertThrows(
-                BadRequestException.class,
-                () -> catalog.listTablesPaged(databaseName, null, null, queryOptions));
+                IllegalArgumentException.class,
+                () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta%le"));
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta_le"));
     }
 
     @Test
@@ -570,11 +607,37 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 catalog.listViewsPaged(
                                         "non_existing_db", finalMaxResults, pageToken, null));
 
-        Map<String, String> queryOptions = new HashMap<>();
-        queryOptions.put("search", "view");
-        pagedViews = catalog.listViewsPaged(databaseName, null, null, queryOptions);
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "view%");
         assertPagedViews(pagedViews, "view1", "view2", "view3");
         assertNull(pagedViews.getNextPageToken());
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "view_");
+        assertPagedViews(pagedViews, "view1", "view2", "view3");
+        assertNull(pagedViews.getNextPageToken());
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "view_%");
+        assertPagedViews(pagedViews, "view1", "view2", "view3");
+        assertNull(pagedViews.getNextPageToken());
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "view%_");
+        assertPagedViews(pagedViews, "view1", "view2", "view3");
+        assertNull(pagedViews.getNextPageToken());
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "view\\_");
+        assertTrue(pagedViews.getElements().isEmpty());
+        assertNull(pagedViews.getNextPageToken());
+
+        pagedViews = catalog.listViewsPaged(databaseName, null, null, "vie_");
+        Assertions.assertTrue(pagedViews.getElements().isEmpty());
+        assertNull(pagedViews.getNextPageToken());
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listViewsPaged(databaseName, null, null, "vi%ew"));
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listViewsPaged(databaseName, null, null, "vi_ew"));
     }
 
     @Test
@@ -643,11 +706,37 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 catalog.listViewDetailsPaged(
                                         "non_existing_db", finalMaxResults, pageToken, null));
 
-        Map<String, String> queryOptions = new HashMap<>();
-        queryOptions.put("search", "view");
-        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, queryOptions);
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view%");
         assertPagedViewDetails(pagedViewDetails, view, 3, "view1", "view2", "view3");
         assertNull(pagedViewDetails.getNextPageToken());
+
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view_");
+        assertPagedViewDetails(pagedViewDetails, view, 3, "view1", "view2", "view3");
+        assertNull(pagedViewDetails.getNextPageToken());
+
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view%_");
+        assertPagedViewDetails(pagedViewDetails, view, 3, "view1", "view2", "view3");
+        assertNull(pagedViewDetails.getNextPageToken());
+
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view_%");
+        assertPagedViewDetails(pagedViewDetails, view, 3, "view1", "view2", "view3");
+        assertNull(pagedViewDetails.getNextPageToken());
+
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "vie_");
+        Assertions.assertTrue(pagedViewDetails.getElements().isEmpty());
+        assertNull(pagedViewDetails.getNextPageToken());
+
+        pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view\\_");
+        Assertions.assertTrue(pagedViewDetails.getElements().isEmpty());
+        assertNull(pagedViewDetails.getNextPageToken());
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listViewDetailsPaged(databaseName, null, null, "vi%ew"));
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listViewDetailsPaged(databaseName, null, null, "vi_ew"));
     }
 
     @Test
