@@ -491,9 +491,9 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * Whether this catalog supports version management for tables. If not, corresponding methods
-     * will fall back to listing all objects. For example, {@link #listTablesPaged(String, Integer,
-     * String, String)} would fall back to {@link #listTables(String)}.
+     * Whether this catalog supports liat objects paged. If not, corresponding methods will fall
+     * back to listing all objects. For example, {@link #listTablesPaged(String, Integer, String,
+     * String)} would fall back to {@link #listTables(String)}.
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String)}.

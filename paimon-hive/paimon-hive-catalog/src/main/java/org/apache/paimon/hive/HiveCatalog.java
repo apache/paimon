@@ -856,10 +856,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public PagedList<View> listViewDetailsPaged(
-            String databaseName,
-            Integer maxResults,
-            String pageToken,
-            Map<String, String> queryOptions)
+            String databaseName, Integer maxResults, String pageToken, String viewNamePattern)
             throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
             return new PagedList<>(Collections.emptyList(), null);
@@ -867,7 +864,7 @@ public class HiveCatalog extends AbstractCatalog {
         getDatabase(databaseName);
 
         PagedList<String> pagedViewNames =
-                listViewsPaged(databaseName, maxResults, pageToken, queryOptions);
+                listViewsPaged(databaseName, maxResults, pageToken, viewNamePattern);
         return new PagedList<>(
                 pagedViewNames.getElements().stream()
                         .map(
