@@ -232,10 +232,10 @@ paths:
           in: query
           schema:
             type: string
-        - name: queryOptions
+        - name: tableNamePattern
+          description: A sql LIKE pattern (% and _) for table names.
           in: query
-          type: object
-          additionalProperties:
+          schema:
             type: string
       responses:
         "200":
@@ -310,10 +310,10 @@ paths:
           in: query
           schema:
             type: string
-        - name: queryOptions
+        - name: tableNamePattern
+          description: A sql LIKE pattern (% and _) for table names.
           in: query
-          type: object
-          additionalProperties:
+          schema:
             type: string
       responses:
         "200":
@@ -906,10 +906,10 @@ paths:
           in: query
           schema:
             type: string
-        - name: queryOptions
+        - name: viewNamePattern
+          description: A sql LIKE pattern (% and _) for view names.
           in: query
-          type: object
-          additionalProperties:
+          schema:
             type: string
       responses:
         "200":
@@ -984,10 +984,10 @@ paths:
           in: query
           schema:
             type: string
-        - name: queryOptions
+        - name: viewNamePattern
+          description: A sql LIKE pattern (% and _) for view names.
           in: query
-          type: object
-          additionalProperties:
+          schema:
             type: string
       responses:
         "200":

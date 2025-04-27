@@ -263,7 +263,7 @@ public class RESTCatalogController {
             @PathVariable String database,
             @RequestParam(required = false) Integer maxResults,
             @RequestParam(required = false) String pageToken,
-            @RequestParam(required = false) Map<String, String> queryOptions) {
+            @RequestParam(required = false) String tableNamePattern) {
         // paged list tables in this database with provided maxResults and pageToken
         return new ListTablesResponse(ImmutableList.of("user"), null);
     }
@@ -291,7 +291,7 @@ public class RESTCatalogController {
             @PathVariable String database,
             @RequestParam(required = false) Integer maxResults,
             @RequestParam(required = false) String pageToken,
-            @RequestParam(required = false) Map<String, String> queryOptions) {
+            @RequestParam(required = false) String tableNamePattern) {
         // paged list table details in this database with provided maxResults and pageToken
         GetTableResponse singleTable =
                 new GetTableResponse(
@@ -732,7 +732,7 @@ public class RESTCatalogController {
             @PathVariable String database,
             @RequestParam(required = false) Integer maxResults,
             @RequestParam(required = false) String pageToken,
-            @RequestParam(required = false) Map<String, String> queryOptions) {
+            @RequestParam(required = false) String viewNamePattern) {
         // paged list tables in this database with provided maxResults and pageToken
         return new ListViewsResponse(ImmutableList.of("user"), null);
     }
@@ -764,7 +764,7 @@ public class RESTCatalogController {
             @PathVariable String database,
             @RequestParam(required = false) Integer maxResults,
             @RequestParam(required = false) String pageToken,
-            @RequestParam(required = false) Map<String, String> queryOptions) {
+            @RequestParam(required = false) String viewNamePattern) {
         // paged list view details in this database with provided maxResults and pageToken
         List<DataField> fields =
                 Arrays.asList(
