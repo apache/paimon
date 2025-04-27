@@ -21,25 +21,32 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -47,8 +54,10 @@ import org.apache.paimon.utils.TagManager;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.table.system.AuditLogTable.PREDICATE_CONVERTER;
 
 /**
  * A {@link Table} optimized for reading by avoiding merging files.
@@ -131,12 +140,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public DataTableBatchScan newScan() {
-        return new DataTableBatchScan(
-                !wrapped.schema().primaryKeys().isEmpty(),
-                coreOptions(),
-                newSnapshotReader(),
-                DefaultValueAssigner.create(wrapped.schema()));
+    public DataTableScan newScan() {
+        return new ReadOptimizedTableBatchScan(wrapped.newScan());
     }
 
     @Override
@@ -212,5 +217,91 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public FileIO fileIO() {
         return wrapped.fileIO();
+    }
+
+    private class ReadOptimizedTableBatchScan implements DataTableScan {
+        private final DataTableScan batchScan;
+
+        private ReadOptimizedTableBatchScan(DataTableScan batchScan) {
+            this.batchScan = batchScan;
+        }
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            convert(predicate).ifPresent(batchScan::withFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+            batchScan.withMetricsRegistry(metricsRegistry);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withLimit(int limit) {
+            batchScan.withLimit(limit);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+            batchScan.withPartitionFilter(partitionSpec);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
+            batchScan.withPartitionFilter(partitions);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+            batchScan.withPartitionsFilter(partitions);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+            batchScan.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
+            batchScan.withLevelFilter(levelFilter);
+            return this;
+        }
+
+        @Override
+        public Plan plan() {
+            return batchScan.plan();
+        }
+
+        @Override
+        public List<PartitionEntry> listPartitionEntries() {
+            return batchScan.listPartitionEntries();
+        }
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+            return this;
+        }
+
+        /** Push down predicate to dataScan and dataRead. */
+        private Optional<Predicate> convert(Predicate predicate) {
+            List<Predicate> result =
+                    PredicateBuilder.splitAnd(predicate).stream()
+                            .map(p -> p.visit(PREDICATE_CONVERTER))
+                            .filter(Optional::isPresent)
+                            .map(Optional::get)
+                            .collect(Collectors.toList());
+            if (result.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(PredicateBuilder.and(result));
+        }
     }
 }
