@@ -40,8 +40,6 @@ case class PaimonPartitionReaderFactory(
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
   extends PartitionReaderFactory {
 
-  private lazy val ioManager: IOManager = createIOManager()
-
   private lazy val row: SparkInternalRow = {
     val dataFields = new JList(readBuilder.readType().getFields)
     dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
@@ -52,9 +50,10 @@ case class PaimonPartitionReaderFactory(
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case paimonInputPartition: PaimonInputPartition =>
+        val ioManager = createIOManager()
         val readFunc: Split => RecordReader[PaimonInternalRow] =
           (split: Split) => readBuilder.newRead().withIOManager(ioManager).createReader(split)
-        PaimonPartitionReader(readFunc, paimonInputPartition, row, metadataColumns)
+        PaimonPartitionReader(readFunc, paimonInputPartition, row, metadataColumns, ioManager)
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }

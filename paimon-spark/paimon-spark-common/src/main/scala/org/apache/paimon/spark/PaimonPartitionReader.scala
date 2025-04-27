@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
+import org.apache.paimon.disk.IOManager
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
@@ -36,7 +37,8 @@ case class PaimonPartitionReader(
     readFunc: Split => RecordReader[PaimonInternalRow],
     partition: PaimonInputPartition,
     row: SparkInternalRow,
-    metadataColumns: Seq[PaimonMetadataColumn]
+    metadataColumns: Seq[PaimonMetadataColumn],
+    ioManager: IOManager
 ) extends PartitionReader[InternalRow] {
 
   private val splits: Iterator[Split] = partition.splits.toIterator
@@ -117,6 +119,7 @@ case class PaimonPartitionReader(
       if (currentRecordReader != null) {
         currentRecordReader.close()
       }
+      ioManager.close()
     } catch {
       case e: Exception =>
         throw new IOException(e)
