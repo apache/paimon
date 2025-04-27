@@ -1096,11 +1096,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testReadOptimizedTable() {
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '1')");
-        innerTestReadOptimizedTable();
+        innerTestReadOptimizedTableAndCheckData("T");
 
         sql("DROP TABLE T");
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
-        innerTestReadOptimizedTable();
+        innerTestReadOptimizedTableAndCheckData("T");
     }
 
     @Test
@@ -1108,22 +1108,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '1')");
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
-        // full compaction will always be performed at the end of batch jobs, as long as
-        // full-compaction.delta-commits is set, regardless of its value
-        sql(
-                "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (1, 10), (2, 20)");
-        List<Row> result = sql("SELECT k, v FROM T$branch_stream$ro ORDER BY k");
-        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
-
-        // no compaction, so result of ro table does not change
-        sql("INSERT INTO T$branch_stream VALUES (1, 11), (3, 30)");
-        result = sql("SELECT k, v FROM T$ro ORDER BY k");
-        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
-
-        sql(
-                "INSERT INTO T$branch_stream /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 21), (3, 31)");
-        result = sql("SELECT k, v FROM T$ro ORDER BY k");
-        assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
+        innerTestReadOptimizedTableAndCheckData("T$branch_stream");
     }
 
     @Test
@@ -1192,21 +1177,25 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(row.getField(6)).isNotNull();
     }
 
-    private void innerTestReadOptimizedTable() {
+    private void innerTestReadOptimizedTableAndCheckData(String insertTableName) {
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value
         sql(
-                "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (1, 10), (2, 20)");
+                String.format(
+                        "INSERT INTO %s /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (1, 10), (2, 20)",
+                        insertTableName));
         List<Row> result = sql("SELECT k, v FROM T$ro ORDER BY k");
         assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
 
         // no compaction, so result of ro table does not change
-        sql("INSERT INTO T VALUES (1, 11), (3, 30)");
+        sql(String.format("INSERT INTO %s VALUES (1, 11), (3, 30)", insertTableName));
         result = sql("SELECT k, v FROM T$ro ORDER BY k");
         assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
 
         sql(
-                "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 21), (3, 31)");
+                String.format(
+                        "INSERT INTO %s /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 21), (3, 31)",
+                        insertTableName));
         result = sql("SELECT k, v FROM T$ro ORDER BY k");
         assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
     }

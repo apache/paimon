@@ -228,49 +228,59 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            convert(predicate).ifPresent(batchScan::withFilter);
+            Optional<Predicate> predicateOpt = convert(predicate);
+            if (predicateOpt.isPresent()) {
+                batchScan.withFilter(predicateOpt.get());
+            }
+            getScan(batchScan);
             return this;
         }
 
         @Override
         public InnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
-            batchScan.withMetricsRegistry(metricsRegistry);
+            getScan(batchScan.withMetricsRegistry(metricsRegistry));
             return this;
         }
 
         @Override
         public InnerTableScan withLimit(int limit) {
-            batchScan.withLimit(limit);
+            getScan(batchScan.withLimit(limit));
             return this;
         }
 
         @Override
         public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
-            batchScan.withPartitionFilter(partitionSpec);
+            getScan(batchScan.withPartitionFilter(partitionSpec));
             return this;
         }
 
         @Override
         public InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
-            batchScan.withPartitionFilter(partitions);
+            getScan(batchScan.withPartitionFilter(partitions));
             return this;
         }
 
         @Override
         public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
-            batchScan.withPartitionsFilter(partitions);
+            getScan(batchScan.withPartitionsFilter(partitions));
             return this;
         }
 
         @Override
         public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
-            batchScan.withBucketFilter(bucketFilter);
+            getScan(batchScan.withBucketFilter(bucketFilter));
             return this;
         }
 
         @Override
         public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
-            batchScan.withLevelFilter(levelFilter);
+            throw new UnsupportedOperationException(
+                    "Unsupported level filter for read optimized table");
+        }
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            getScan(batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks));
             return this;
         }
 
@@ -284,10 +294,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
             return batchScan.listPartitionEntries();
         }
 
-        @Override
-        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-            batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
-            return this;
+        private InnerTableScan getScan(InnerTableScan scan) {
+            return scan.withLevelFilter(l -> l == coreOptions().numLevels() - 1);
         }
 
         /** Push down predicate to dataScan and dataRead. */
