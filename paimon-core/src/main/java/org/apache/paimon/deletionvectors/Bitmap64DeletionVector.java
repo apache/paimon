@@ -24,6 +24,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Objects;
 import java.util.zip.CRC32;
 
 /**
@@ -33,6 +34,8 @@ import java.util.zip.CRC32;
  * <p>Mostly copied from iceberg.
  */
 public class Bitmap64DeletionVector implements DeletionVector {
+
+    public static final int VERSION = 2;
 
     public static final int MAGIC_NUMBER = 1681511377;
     public static final int LENGTH_SIZE_BYTES = 4;
@@ -84,6 +87,11 @@ public class Bitmap64DeletionVector implements DeletionVector {
     @Override
     public long getCardinality() {
         return roaringBitmap.cardinality();
+    }
+
+    @Override
+    public int dvVersion() {
+        return VERSION;
     }
 
     @Override
@@ -163,5 +171,22 @@ public class Bitmap64DeletionVector implements DeletionVector {
         CRC32 crc = new CRC32();
         crc.update(bytes, BITMAP_DATA_OFFSET, bitmapDataLength);
         return (int) crc.getValue();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        Bitmap64DeletionVector that = (Bitmap64DeletionVector) o;
+        return Objects.equals(this.roaringBitmap, that.roaringBitmap);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(roaringBitmap);
     }
 }

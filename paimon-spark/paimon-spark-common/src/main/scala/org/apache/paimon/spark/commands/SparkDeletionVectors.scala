@@ -32,7 +32,8 @@ case class SparkDeletionVectors(
     partitionAndBucket: String,
     partition: Array[Byte],
     bucket: Int,
-    dataFileAndDeletionVector: Seq[(String, Array[Byte])]
+    dataFileAndDeletionVector: Seq[(String, Array[Byte])],
+    dvWriteVersion: Int
 ) {
   def relativePaths(fileStorePathFactory: FileStorePathFactory): Seq[String] = {
     val prefix = fileStorePathFactory

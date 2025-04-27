@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.LongConsumer;
 
@@ -313,5 +314,17 @@ public class OptimizedRoaringBitmap64 {
                 "OptimizedRoaringBitmap64 supports positions that are >= 0 and <= %s: %s",
                 MAX_VALUE,
                 pos);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        OptimizedRoaringBitmap64 that = (OptimizedRoaringBitmap64) o;
+        return Arrays.equals(this.bitmaps, that.bitmaps);
     }
 }

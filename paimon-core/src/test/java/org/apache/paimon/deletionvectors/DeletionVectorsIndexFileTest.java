@@ -20,8 +20,10 @@ package org.apache.paimon.deletionvectors;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.PathFactory;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -255,6 +258,41 @@ public class DeletionVectorsIndexFileTest {
         assertThat(dvs2.size()).isEqualTo(100000);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testReadDeletionFile(boolean isV2) throws IOException {
+        PathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, isV2);
+
+        HashMap<String, DeletionVector> deleteMap = new HashMap<>();
+        DeletionVector index1 = createEmptyDV(isV2);
+        index1.delete(1);
+        index1.delete(10);
+        index1.delete(100);
+        deleteMap.put("file1.parquet", index1);
+
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        assertThat(indexFiles.size()).isEqualTo(1);
+
+        IndexFileMeta indexFileMeta = indexFiles.get(0);
+        DeletionVectorMeta deletionVectorMeta =
+                indexFileMeta.deletionVectorMetas().get("file1.parquet");
+
+        DeletionFile deletionFile =
+                new DeletionFile(
+                        pathFactory.toPath(indexFileMeta.fileName()).toString(),
+                        deletionVectorMeta.offset(),
+                        deletionVectorMeta.length(),
+                        deletionVectorMeta.cardinality());
+
+        // test DeletionVector#read()
+        DeletionVector dv = DeletionVector.read(LocalFileIO.create(), deletionFile);
+        assertThat(dv.isDeleted(1)).isTrue();
+        assertThat(dv.isDeleted(10)).isTrue();
+        assertThat(dv.isDeleted(100)).isTrue();
+    }
+
     private DeletionVector createEmptyDV(boolean isV2) {
         if (isV2) {
             return new Bitmap64DeletionVector();
@@ -275,7 +313,7 @@ public class DeletionVectorsIndexFileTest {
                     LocalFileIO.create(),
                     pathFactory,
                     targetSizePerIndexFile,
-                    DeletionVectorsIndexFile.VERSION_ID_V2);
+                    Bitmap64DeletionVector.VERSION);
         } else {
             return new DeletionVectorsIndexFile(
                     LocalFileIO.create(), pathFactory, targetSizePerIndexFile);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.deletionvectors.append;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -31,8 +32,9 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.PathFactory;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -46,9 +48,12 @@ class AppendDeletionFileMaintainerTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    @Test
-    public void test() throws Exception {
-        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void test(int dvVersion) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTOR_VERSION.key(), String.valueOf(dvVersion));
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
 
         Map<String, List<Integer>> dvs = new HashMap<>();
         dvs.put("f1", Arrays.asList(1, 3, 5));

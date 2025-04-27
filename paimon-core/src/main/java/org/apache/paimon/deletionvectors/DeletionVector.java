@@ -28,7 +28,6 @@ import javax.annotation.Nullable;
 
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Optional;
 
@@ -85,6 +84,9 @@ public interface DeletionVector {
     /** @return the number of distinct integers added to the DeletionVector. */
     long getCardinality();
 
+    /** @return the version of the deletion vector. */
+    int dvVersion();
+
     /**
      * Serializes the deletion vector to a byte array for storage or transmission.
      *
@@ -98,40 +100,55 @@ public interface DeletionVector {
      * @param bytes The byte array containing the serialized deletion vector.
      * @return A DeletionVector instance that represents the deserialized data.
      */
-    static DeletionVector deserializeFromBytes(byte[] bytes) {
-        try {
-            ByteBuffer buffer = ByteBuffer.wrap(bytes);
-            int magicNum = buffer.getInt();
-            if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {
-                return BitmapDeletionVector.deserializeFromByteBuffer(buffer);
-            } else {
-                throw new RuntimeException("Invalid magic number: " + magicNum);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("Unable to deserialize deletion vector", e);
+    static DeletionVector deserializeFromBytes(byte[] bytes, int version) {
+        if (version == BitmapDeletionVector.VERSION) {
+            return BitmapDeletionVector.deserializeFromBytes(bytes);
+        } else if (version == Bitmap64DeletionVector.VERSION) {
+            return Bitmap64DeletionVector.deserializeFromBytes(bytes);
+        } else {
+            throw new RuntimeException("Invalid deletion vector version: " + version);
         }
     }
 
     static DeletionVector read(FileIO fileIO, DeletionFile deletionFile) throws IOException {
         Path path = new Path(deletionFile.path());
         try (SeekableInputStream input = fileIO.newInputStream(path)) {
+            // read dv version
+            int version = input.read();
             input.seek(deletionFile.offset());
             DataInputStream dis = new DataInputStream(input);
-            int actualSize = dis.readInt();
-            if (actualSize != deletionFile.length()) {
-                throw new RuntimeException(
-                        "Size not match, actual size: "
-                                + actualSize
-                                + ", expected size: "
-                                + deletionFile.length()
-                                + ", file path: "
-                                + path);
-            }
 
-            // read DeletionVector bytes
-            byte[] bytes = new byte[actualSize];
-            dis.readFully(bytes);
-            return deserializeFromBytes(bytes);
+            if (version == BitmapDeletionVector.VERSION) {
+                // read v1 deletion vector
+                int actualSize = dis.readInt();
+                if (actualSize != deletionFile.length()) {
+                    throw new RuntimeException(
+                            "Size not match, actual size: "
+                                    + actualSize
+                                    + ", expected size: "
+                                    + deletionFile.length()
+                                    + ", file path: "
+                                    + path);
+                }
+
+                byte[] bytes = new byte[actualSize];
+                dis.readFully(bytes);
+                return BitmapDeletionVector.deserializeFromBytes(bytes);
+            } else if (version == Bitmap64DeletionVector.VERSION) {
+                // read v2 deletion vector
+                byte[] bytes = new byte[(int) deletionFile.length()];
+                dis.readFully(bytes);
+
+                return Bitmap64DeletionVector.deserializeFromBytes(bytes);
+            } else {
+                throw new RuntimeException(
+                        "Version not match, actual version: "
+                                + version
+                                + ", expected version: "
+                                + BitmapDeletionVector.VERSION
+                                + " or "
+                                + Bitmap64DeletionVector.VERSION);
+            }
         }
     }
 

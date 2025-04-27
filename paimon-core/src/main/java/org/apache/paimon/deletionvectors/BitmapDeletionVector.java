@@ -31,6 +31,7 @@ import java.util.Objects;
  * not exceeding {@link RoaringBitmap32#MAX_VALUE}.
  */
 public class BitmapDeletionVector implements DeletionVector {
+    public static final int VERSION = 1;
 
     public static final int MAGIC_NUMBER = 1581511376;
 
@@ -82,6 +83,11 @@ public class BitmapDeletionVector implements DeletionVector {
     }
 
     @Override
+    public int dvVersion() {
+        return VERSION;
+    }
+
+    @Override
     public byte[] serializeToBytes() {
         try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(bos)) {
@@ -90,6 +96,20 @@ public class BitmapDeletionVector implements DeletionVector {
             return bos.toByteArray();
         } catch (Exception e) {
             throw new RuntimeException("Unable to serialize deletion vector", e);
+        }
+    }
+
+    public static DeletionVector deserializeFromBytes(byte[] bytes) {
+        try {
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            int magicNum = buffer.getInt();
+            if (magicNum == MAGIC_NUMBER) {
+                return deserializeFromByteBuffer(buffer);
+            } else {
+                throw new RuntimeException("Invalid magic number: " + magicNum);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to deserialize deletion vector", e);
         }
     }
 
