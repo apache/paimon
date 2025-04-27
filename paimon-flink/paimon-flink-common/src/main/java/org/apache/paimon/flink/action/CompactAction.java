@@ -259,7 +259,7 @@ public class CompactAction extends TableActionBase {
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
                         fileStoreTable.coreOptions().partitionDefaultName(),
-                        fileStoreTable.rowType(),
+                        fileStoreTable.store().partitionType(),
                         fileStoreTable.partitionKeys().toArray(new String[0]),
                         fileStoreTable.coreOptions().legacyPartitionName());
         String commitUser = CoreOptions.createCommitUser(options);

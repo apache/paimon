@@ -21,14 +21,15 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
-import org.apache.spark.unsafe.types.UTF8String;
 
 import static org.apache.spark.sql.types.DataTypes.LongType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -46,7 +47,13 @@ public class RollbackToTimestampProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", StringType, true, Metadata.empty())
+                        new StructField(
+                                "previous_snapshot_id",
+                                DataTypes.LongType,
+                                false,
+                                Metadata.empty()),
+                        new StructField(
+                                "current_snapshot_id", DataTypes.LongType, false, Metadata.empty())
                     });
 
     private RollbackToTimestampProcedure(TableCatalog tableCatalog) {
@@ -72,19 +79,18 @@ public class RollbackToTimestampProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
-                    Snapshot snapshot =
-                            fileStoreTable.snapshotManager().earlierOrEqualTimeMills(timestamp);
+                    SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
+                    Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+                    Preconditions.checkNotNull(
+                            latestSnapshot, "Latest snapshot is null, can not rollback.");
+
+                    Snapshot snapshot = snapshotManager.earlierOrEqualTimeMills(timestamp);
                     Preconditions.checkNotNull(
                             snapshot,
-                            String.format("count not find snapshot earlier than %s", timestamp));
+                            String.format("Can not find snapshot earlier than %s", timestamp));
                     long snapshotId = snapshot.id();
                     fileStoreTable.rollbackTo(snapshotId);
-                    InternalRow outputRow =
-                            newInternalRow(
-                                    UTF8String.fromString(
-                                            String.format(
-                                                    "Success roll back to snapshot: %s .",
-                                                    snapshotId)));
+                    InternalRow outputRow = newInternalRow(latestSnapshot.id(), snapshotId);
                     return new InternalRow[] {outputRow};
                 });
     }
