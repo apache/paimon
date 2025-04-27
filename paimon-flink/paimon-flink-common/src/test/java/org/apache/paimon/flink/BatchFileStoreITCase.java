@@ -775,4 +775,15 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         Row.of("+I", 2, "B"), Row.of("-D", 2, "B"), Row.of("+I", 3, "C"));
     }
+
+    @Test
+    public void testAuditLogTableWithComputedColumn() throws Exception {
+        sql("CREATE TABLE test_table (a int, b int, c AS a + b);");
+        String ddl = sql("SHOW CREATE TABLE `test_table$audit_log`").get(0).getFieldAs(0);
+        assertThat(ddl).contains("`c` AS `a` + `b`");
+
+        sql("INSERT INTO test_table VALUES (1, 1)");
+        assertThat(sql("SELECT * FROM `test_table$audit_log`"))
+                .containsExactly(Row.of("+I", 1, 1, 2));
+    }
 }
