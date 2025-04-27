@@ -30,7 +30,8 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.connector.read.PartitionReader
 
-import java.io.IOException
+import javax.annotation.Nullable
+
 import java.util.{ArrayList => JList}
 
 import scala.collection.JavaConverters._
@@ -42,7 +43,7 @@ case class PaimonPartitionReader(
 ) extends PartitionReader[InternalRow] {
 
   private val splits: Iterator[Split] = partition.splits.toIterator
-  private var currentRecordReader: PaimonRecordReaderIterator = readSplit()
+  @Nullable private var currentRecordReader = readSplit()
   private var advanced = false
   private var currentRow: PaimonInternalRow = _
   private val ioManager: IOManager = createIOManager()
@@ -127,10 +128,8 @@ case class PaimonPartitionReader(
       if (currentRecordReader != null) {
         currentRecordReader.close()
       }
+    } finally {
       ioManager.close()
-    } catch {
-      case e: Exception =>
-        throw new IOException(e)
     }
   }
 }
