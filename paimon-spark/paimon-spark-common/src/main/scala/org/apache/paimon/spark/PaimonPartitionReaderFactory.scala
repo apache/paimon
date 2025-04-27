@@ -50,10 +50,7 @@ case class PaimonPartitionReaderFactory(
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case paimonInputPartition: PaimonInputPartition =>
-        val ioManager = createIOManager()
-        val readFunc: Split => RecordReader[PaimonInternalRow] =
-          (split: Split) => readBuilder.newRead().withIOManager(ioManager).createReader(split)
-        PaimonPartitionReader(readFunc, paimonInputPartition, row, metadataColumns, ioManager)
+        PaimonPartitionReader(readBuilder, paimonInputPartition, row, metadataColumns)
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }
