@@ -46,13 +46,14 @@ case class PaimonPartitionReader(
   private var advanced = false
   private var currentRow: PaimonInternalRow = _
   private val ioManager: IOManager = createIOManager()
-  private val read = readBuilder.newRead().withIOManager(ioManager)
-  private lazy val sparkRow: SparkInternalRow = {
+  private val sparkRow: SparkInternalRow = {
     val dataFields = new JList(readBuilder.readType().getFields)
     dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
     val rowType = new RowType(dataFields)
     SparkInternalRow.create(rowType)
   }
+
+  private lazy val read = readBuilder.newRead().withIOManager(ioManager)
 
   override def next(): Boolean = {
     if (currentRecordReader == null) {
