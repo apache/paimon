@@ -1109,6 +1109,12 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
         innerTestReadOptimizedTableAndCheckData("T$branch_stream");
+
+        sql("DROP TABLE T");
+        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
+        sql("CALL sys.create_branch('default.T', 'stream')");
+        sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
+        innerTestReadOptimizedTableAndCheckData("T$branch_stream");
     }
 
     @Test

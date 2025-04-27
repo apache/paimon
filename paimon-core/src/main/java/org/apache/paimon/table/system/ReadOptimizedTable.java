@@ -31,7 +31,6 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
@@ -54,10 +53,8 @@ import org.apache.paimon.utils.TagManager;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.table.system.AuditLogTable.PREDICATE_CONVERTER;
 
 /**
  * A {@link Table} optimized for reading by avoiding merging files.
@@ -228,9 +225,8 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            Optional<Predicate> predicateOpt = convert(predicate);
-            if (predicateOpt.isPresent()) {
-                batchScan.withFilter(predicateOpt.get());
+            if (predicate != null) {
+                batchScan.withFilter(predicate);
             }
             getScan(batchScan);
             return this;
@@ -296,20 +292,6 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
         private InnerTableScan getScan(InnerTableScan scan) {
             return scan.withLevelFilter(l -> l == coreOptions().numLevels() - 1);
-        }
-
-        /** Push down predicate to dataScan and dataRead. */
-        private Optional<Predicate> convert(Predicate predicate) {
-            List<Predicate> result =
-                    PredicateBuilder.splitAnd(predicate).stream()
-                            .map(p -> p.visit(PREDICATE_CONVERTER))
-                            .filter(Optional::isPresent)
-                            .map(Optional::get)
-                            .collect(Collectors.toList());
-            if (result.isEmpty()) {
-                return Optional.empty();
-            }
-            return Optional.of(PredicateBuilder.and(result));
         }
     }
 }
