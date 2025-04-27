@@ -26,14 +26,16 @@ import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonRowType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions._
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.types.{ArrayType, LocalZonedTimestampType, MapType, RowType, TimestampType, DataType => PaimonDataType}
+import org.apache.paimon.types.{ArrayType, DataType => PaimonDataType, LocalZonedTimestampType, MapType, RowType, TimestampType}
 import org.apache.paimon.utils.ProjectedRow
+
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.catalog.functions.{BoundFunction, ScalarFunction, UnboundFunction}
-import org.apache.spark.sql.types.DataTypes.{IntegerType, StringType}
 import org.apache.spark.sql.types.{DataType, StructType}
+import org.apache.spark.sql.types.DataTypes.{IntegerType, StringType}
 
 import javax.annotation.Nullable
+
 import scala.collection.JavaConverters._
 
 object PaimonFunctions {
@@ -43,7 +45,7 @@ object PaimonFunctions {
 
   private val FUNCTIONS = ImmutableMap.of(
     PAIMON_BUCKET,
-    new PaimonBucketFunction,
+    new BucketFunction(PAIMON_BUCKET, BucketFunctionType.PAIMON),
     MAX_PT,
     new MaxPtFunction
   )
@@ -67,7 +69,7 @@ object PaimonFunctions {
  *
  * params arg0: bucket number, arg1...argn bucket keys.
  */
-abstract class BucketFunction(funcName: String, bucketFunctionType: BucketFunctionType)
+class BucketFunction(funcName: String, bucketFunctionType: BucketFunctionType)
   extends UnboundFunction {
 
   override def bind(inputType: StructType): BoundFunction = {
@@ -79,7 +81,8 @@ abstract class BucketFunction(funcName: String, bucketFunctionType: BucketFuncti
     val mapping = (1 to bucketKeyRowType.getFieldCount).toArray
     val reusedRow =
       new SparkInternalRowWrapper(-1, inputType, inputType.fields.length)
-    val bucketFunc: bucket.BucketFunction = bucketFunction(bucketFunctionType, bucketKeyRowType)
+    val bucketFunc: bucket.BucketFunction =
+      bucket.BucketFunction.create(bucketFunctionType, bucketKeyRowType)
     new ScalarFunction[Int]() {
 
       override def inputTypes: Array[DataType] = inputType.fields.map(_.dataType)
@@ -103,21 +106,10 @@ abstract class BucketFunction(funcName: String, bucketFunctionType: BucketFuncti
 
   }
 
-  def bucketFunction(funcType: BucketFunctionType, bucketKeyType: RowType): bucket.BucketFunction
-
   override def description: String = name
 
-  override def name: String = PAIMON_BUCKET
+  override def name: String = funcName
 
-}
-
-/** Paimon bucket function. */
-class PaimonBucketFunction extends BucketFunction(PAIMON_BUCKET, BucketFunctionType.PAIMON) {
-  override def bucketFunction(
-      funcType: BucketFunctionType,
-      bucketKeyType: RowType): bucket.BucketFunction = {
-    new bucket.PaimonBucketFunction
-  }
 }
 
 object BucketFunction {
