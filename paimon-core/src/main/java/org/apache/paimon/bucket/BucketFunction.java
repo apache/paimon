@@ -40,7 +40,8 @@ public interface BucketFunction extends Serializable {
             case PAIMON:
                 return new PaimonBucketFunction();
             default:
-                throw new IllegalArgumentException("Unsupported hash type: " + bucketFunctionType);
+                throw new IllegalArgumentException(
+                        "Unsupported bucket type: " + bucketFunctionType);
         }
     }
 }

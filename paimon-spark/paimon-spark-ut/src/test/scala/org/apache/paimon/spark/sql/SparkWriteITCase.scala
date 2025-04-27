@@ -18,9 +18,9 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.schema.Schema
-import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.DataTypes
 
