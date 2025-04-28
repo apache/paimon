@@ -45,7 +45,7 @@ public class OrcOptions {
     public static final ConfigOption<Boolean> ORC_TIMESTAMP_LTZ_LEGACY_TYPE =
             key("orc.timestamp-ltz.legacy.type")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "This option is used to be compatible with the paimon-orc‘s old behavior for the `timestamp_ltz` data type.");
 }

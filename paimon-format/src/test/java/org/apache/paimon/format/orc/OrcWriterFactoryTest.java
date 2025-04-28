@@ -49,7 +49,8 @@ class OrcWriterFactoryTest {
                 new TestOrcWriterFactory(
                         new RowDataVectorizer(
                                 TypeDescription.fromString("struct<_col0:string,_col1:int>"),
-                                new DataType[] {DataTypes.STRING(), DataTypes.INT()}),
+                                new DataType[] {DataTypes.STRING(), DataTypes.INT()},
+                                true),
                         memoryManager);
         factory.create(new LocalPositionOutputStream(tmpDir.resolve("file1").toFile()), "LZ4");
         factory.create(new LocalPositionOutputStream(tmpDir.resolve("file2").toFile()), "LZ4");
