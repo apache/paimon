@@ -778,6 +778,37 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public List<String> listFunctions() {
+        return emptyList();
+    }
+
+    @Override
+    public org.apache.paimon.function.Function getFunction(Identifier identifier)
+            throws FunctionNotExistException {
+        return null;
+    }
+
+    @Override
+    public boolean functionExists(Identifier identifier) {
+        return false;
+    }
+
+    @Override
+    public void createFunction(Identifier identifier, org.apache.paimon.function.Function function)
+            throws FunctionAlreadyExistException {}
+
+    @Override
+    public void alterFunction(
+            Identifier identifier,
+            org.apache.paimon.function.Function function,
+            boolean ignoreIfNotExists)
+            throws FunctionNotExistException {}
+
+    @Override
+    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+            throws FunctionNotExistException {}
+
+    @Override
     public View getView(Identifier identifier) throws ViewNotExistException {
         try {
             GetViewResponse response =

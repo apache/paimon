@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.function.Function;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
@@ -619,6 +620,55 @@ public interface Catalog extends AutoCloseable {
     void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException;
 
+    /** List all functions in catalog. */
+    List<String> listFunctions();
+
+    /**
+     * Get function by identifier.
+     *
+     * @param identifier
+     * @throws FunctionNotExistException
+     */
+    Function getFunction(Identifier identifier) throws FunctionNotExistException;
+
+    /**
+     * Check if function exists.
+     *
+     * @param identifier
+     */
+    boolean functionExists(Identifier identifier);
+
+    /**
+     * Create function.
+     *
+     * @param identifier
+     * @param function
+     * @throws FunctionAlreadyExistException
+     */
+    void createFunction(Identifier identifier, Function function)
+            throws FunctionAlreadyExistException;
+
+    /**
+     * Alter function.
+     *
+     * @param identifier
+     * @param function
+     * @param ignoreIfNotExists
+     * @throws FunctionNotExistException
+     */
+    void alterFunction(Identifier identifier, Function function, boolean ignoreIfNotExists)
+            throws FunctionNotExistException;
+
+    /**
+     * Drop function.
+     *
+     * @param identifier
+     * @param ignoreIfNotExists
+     * @throws FunctionNotExistException
+     */
+    void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+            throws FunctionNotExistException;
+
     // ==================== Catalog Information ==========================
 
     /** Catalog options for re-creating this catalog. */
@@ -1036,6 +1086,48 @@ public interface Catalog extends AutoCloseable {
 
         public String dialect() {
             return dialect;
+        }
+    }
+
+    /** Exception for trying to create a function that already exists. */
+    class FunctionAlreadyExistException extends Exception {
+
+        private static final String MSG = "Function %s already exists.";
+
+        private final Identifier identifier;
+
+        public FunctionAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public FunctionAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to get a function that doesn't exist. */
+    class FunctionNotExistException extends Exception {
+
+        private static final String MSG = "Function %s doesn't exist.";
+
+        private final Identifier identifier;
+
+        public FunctionNotExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public FunctionNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 }

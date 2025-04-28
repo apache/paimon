@@ -24,7 +24,7 @@ import org.apache.paimon.types.DataField;
 import java.util.List;
 import java.util.Map;
 
-/** Function implementation. **/
+/** Function implementation. * */
 public class FunctionImpl implements Function {
 
     private final Identifier identifier;
