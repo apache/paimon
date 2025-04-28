@@ -113,9 +113,10 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.rest.RESTCatalog.MAX_RESULTS;
 import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
+import static org.apache.paimon.rest.RESTCatalog.PARTITION_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTCatalog.TABLE_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTCatalog.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
-import static org.apache.paimon.rest.RESTUtil.TABLE_NAME_PATTERN;
-import static org.apache.paimon.rest.RESTUtil.VIEW_NAME_PATTERN;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -883,7 +884,7 @@ public class RESTCatalogServer {
     }
 
     private boolean matchNamePattern(String name, String pattern) {
-        RESTUtil.validatePrefixPattern(pattern);
+        RESTUtil.validatePrefixSqlPattern(pattern);
         String regex = toRegex(pattern);
         return Pattern.compile(regex).matcher(name).matches();
     }
@@ -1060,15 +1061,23 @@ public class RESTCatalogServer {
     }
 
     private MockResponse partitionsApiHandle(
-            String method, Map<String, String> parameters, Identifier tableIdentifier)
-            throws Exception {
+            String method, Map<String, String> parameters, Identifier tableIdentifier) {
+        String partitionNamePattern = parameters.get(PARTITION_NAME_PATTERN);
         switch (method) {
             case "GET":
                 List<Partition> partitions = new ArrayList<>();
                 for (Map.Entry<String, List<Partition>> entry : tablePartitionsStore.entrySet()) {
                     String objectName = Identifier.fromString(entry.getKey()).getObjectName();
                     if (objectName.equals(tableIdentifier.getObjectName())) {
-                        partitions.addAll(entry.getValue());
+                        partitions.addAll(
+                                entry.getValue().stream()
+                                        .filter(
+                                                partition ->
+                                                        Objects.isNull(partitionNamePattern)
+                                                                || matchNamePattern(
+                                                                        getPagedKey(partition),
+                                                                        partitionNamePattern))
+                                        .collect(Collectors.toList()));
                     }
                 }
                 return generateFinalListPartitionsResponse(parameters, partitions);

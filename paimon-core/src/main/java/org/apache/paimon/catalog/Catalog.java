@@ -328,7 +328,10 @@ public interface Catalog extends AutoCloseable {
      * @throws TableNotExistException if the table does not exist
      */
     PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
             throws TableNotExistException;
 
     // ======================= view methods ===============================
@@ -501,7 +504,7 @@ public interface Catalog extends AutoCloseable {
      *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
-     *   <li>{@link #listPartitionsPaged(Identifier, Integer, String)}.
+     *   <li>{@link #listPartitionsPaged(Identifier, Integer, String, String)}.
      * </ul>
      */
     boolean supportsListObjectsPaged();
@@ -516,10 +519,10 @@ public interface Catalog extends AutoCloseable {
      *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
-     *   <li>{@link #listPartitionsPaged(Identifier, Integer, String)}.
+     *   <li>{@link #listPartitionsPaged(Identifier, Integer, String, String)}.
      * </ul>
      */
-    default boolean supportsNamePatternFilter() {
+    default boolean supportsListByPattern() {
         return false;
     }
 

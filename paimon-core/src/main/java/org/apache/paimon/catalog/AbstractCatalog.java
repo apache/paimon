@@ -179,8 +179,12 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, Integer maxResults, String pageToken)
+            Identifier identifier,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern)
             throws TableNotExistException {
+        CatalogUtils.validateNamePattern(this, partitionNamePattern);
         return new PagedList<>(listPartitions(identifier), null);
     }
 

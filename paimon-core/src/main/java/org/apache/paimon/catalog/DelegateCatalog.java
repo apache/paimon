@@ -142,8 +142,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public boolean supportsNamePatternFilter() {
-        return wrapped.supportsNamePatternFilter();
+    public boolean supportsListByPattern() {
+        return wrapped.supportsListByPattern();
     }
 
     @Override
@@ -275,9 +275,12 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, Integer maxResults, String pageToken)
+            Identifier identifier,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern)
             throws TableNotExistException {
-        return wrapped.listPartitionsPaged(identifier, maxResults, pageToken);
+        return wrapped.listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
     }
 
     @Override

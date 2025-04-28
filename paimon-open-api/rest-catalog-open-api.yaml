@@ -668,6 +668,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: partitionNamePattern
+          description: A sql LIKE pattern (% and _) for partition names.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK

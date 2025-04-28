@@ -75,6 +75,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
@@ -1353,23 +1354,24 @@ public abstract class CatalogTestBase {
         // List partitions paged returns a list with all partitions of the table in all catalogs
         // except RestCatalog even
         // if the maxResults or pageToken is not null
-        PagedList<Partition> pagedPartitions = catalog.listPartitionsPaged(identifier, null, null);
+        PagedList<Partition> pagedPartitions =
+                catalog.listPartitionsPaged(identifier, null, null, null);
         Map[] specs = partitionSpecs.toArray(new Map[0]);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
         int maxResults = 2;
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, null);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
         String pageToken = "dt=20250101";
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken, null);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
         maxResults = 8;
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, null);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, pageToken, null);
         assertPagedPartitions(pagedPartitions, specs.length, specs);
 
         // List partitions throws TableNotExistException when the table does not exist
@@ -1380,7 +1382,28 @@ public abstract class CatalogTestBase {
                                 catalog.listPartitionsPaged(
                                         Identifier.create(databaseName, "non_existing_table"),
                                         finalMaxResults,
-                                        pageToken));
+                                        pageToken,
+                                        null));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=_0101"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101_"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=%0101"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101%"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101"));
     }
 
     protected boolean supportsAlterDatabase() {

@@ -139,7 +139,7 @@ public class CatalogUtils {
     }
 
     public static void validateNamePattern(Catalog catalog, String namePattern) {
-        if (Objects.nonNull(namePattern) && !catalog.supportsNamePatternFilter()) {
+        if (Objects.nonNull(namePattern) && !catalog.supportsListByPattern()) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Current catalog %s does not support name pattern filter.",

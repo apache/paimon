@@ -244,7 +244,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.TableNoPermissionException.class, () -> catalog.listPartitions(identifier));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
-                () -> catalog.listPartitionsPaged(identifier, 100, null));
+                () -> catalog.listPartitionsPaged(identifier, 100, null, null));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.createBranch(identifier, "test_branch", null));
@@ -414,11 +414,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Assertions.assertNull(pagedTables.getNextPageToken());
 
         Assertions.assertThrows(
-                IllegalArgumentException.class,
+                UnsupportedOperationException.class,
                 () -> catalog.listTablesPaged(databaseName, null, null, "ta%le"));
 
         Assertions.assertThrows(
-                IllegalArgumentException.class,
+                UnsupportedOperationException.class,
                 () -> catalog.listTablesPaged(databaseName, null, null, "ta_le"));
     }
 
@@ -515,11 +515,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedTableDetails.getNextPageToken());
 
         Assertions.assertThrows(
-                IllegalArgumentException.class,
+                UnsupportedOperationException.class,
                 () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta%le"));
 
         Assertions.assertThrows(
-                IllegalArgumentException.class,
+                UnsupportedOperationException.class,
                 () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta_le"));
     }
 
@@ -632,11 +632,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedViews.getNextPageToken());
 
         Assertions.assertThrows(
-                IllegalArgumentException.class,
+                UnsupportedOperationException.class,
                 () -> catalog.listViewsPaged(databaseName, null, null, "vi%ew"));
 
         Assertions.assertThrows(
-                IllegalArgumentException.class,
+                UnsupportedOperationException.class,
                 () -> catalog.listViewsPaged(databaseName, null, null, "vi_ew"));
     }
 
@@ -731,11 +731,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedViewDetails.getNextPageToken());
 
         Assertions.assertThrows(
-                IllegalArgumentException.class,
+                UnsupportedOperationException.class,
                 () -> catalog.listViewDetailsPaged(databaseName, null, null, "vi%ew"));
 
         Assertions.assertThrows(
-                IllegalArgumentException.class,
+                UnsupportedOperationException.class,
                 () -> catalog.listViewDetailsPaged(databaseName, null, null, "vi_ew"));
     }
 
@@ -856,7 +856,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         assertThrows(
                 Catalog.TableNotExistException.class,
-                () -> catalog.listPartitionsPaged(identifier, 10, "dt=20250101"));
+                () -> catalog.listPartitionsPaged(identifier, 10, "dt=20250101", null));
 
         catalog.createTable(
                 identifier,
@@ -877,7 +877,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             }
             commit.commit(write.prepareCommit());
         }
-        PagedList<Partition> pagedPartitions = catalog.listPartitionsPaged(identifier, null, null);
+        PagedList<Partition> pagedPartitions =
+                catalog.listPartitionsPaged(identifier, null, null, null);
         Map[] sortedSpecs =
                 partitionSpecs.stream()
                         .sorted(Comparator.comparing(i -> i.get("dt")))
@@ -885,47 +886,78 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertPagedPartitions(pagedPartitions, partitionSpecs.size(), sortedSpecs);
 
         int maxResults = 2;
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, null);
         assertPagedPartitions(
                 pagedPartitions, maxResults, partitionSpecs.get(2), partitionSpecs.get(0));
         assertEquals("dt=20250101", pagedPartitions.getNextPageToken());
 
         pagedPartitions =
                 catalog.listPartitionsPaged(
-                        identifier, maxResults, pagedPartitions.getNextPageToken());
+                        identifier, maxResults, pagedPartitions.getNextPageToken(), null);
         assertPagedPartitions(
                 pagedPartitions, maxResults, partitionSpecs.get(1), partitionSpecs.get(5));
         assertEquals("dt=20250103", pagedPartitions.getNextPageToken());
 
         pagedPartitions =
                 catalog.listPartitionsPaged(
-                        identifier, maxResults, pagedPartitions.getNextPageToken());
+                        identifier, maxResults, pagedPartitions.getNextPageToken(), null);
         assertPagedPartitions(
                 pagedPartitions, maxResults, partitionSpecs.get(4), partitionSpecs.get(3));
         assertEquals("dt=20260101", pagedPartitions.getNextPageToken());
 
         pagedPartitions =
                 catalog.listPartitionsPaged(
-                        identifier, maxResults, pagedPartitions.getNextPageToken());
+                        identifier, maxResults, pagedPartitions.getNextPageToken(), null);
         assertThat(pagedPartitions.getElements()).isEmpty();
         assertNull(pagedPartitions.getNextPageToken());
 
         maxResults = 8;
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null);
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, null);
 
         assertPagedPartitions(
                 pagedPartitions, Math.min(maxResults, partitionSpecs.size()), sortedSpecs);
         assertNull(pagedPartitions.getNextPageToken());
 
-        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, "dt=20250101");
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, "dt=2025");
+        assertTrue(pagedPartitions.getElements().isEmpty());
+        assertNull(pagedPartitions.getNextPageToken());
+
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, "dt=2025%");
         assertPagedPartitions(
                 pagedPartitions,
                 4,
+                partitionSpecs.get(0),
                 partitionSpecs.get(1),
                 partitionSpecs.get(5),
-                partitionSpecs.get(4),
-                partitionSpecs.get(3));
+                partitionSpecs.get(4));
         assertNull(pagedPartitions.getNextPageToken());
+
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, "dt=2025010_");
+        assertPagedPartitions(
+                pagedPartitions,
+                4,
+                partitionSpecs.get(0),
+                partitionSpecs.get(1),
+                partitionSpecs.get(5),
+                partitionSpecs.get(4));
+        assertNull(pagedPartitions.getNextPageToken());
+
+        pagedPartitions =
+                catalog.listPartitionsPaged(identifier, maxResults, null, "dt=2025010\\_");
+        assertTrue(pagedPartitions.getElements().isEmpty());
+        assertNull(pagedPartitions.getNextPageToken());
+
+        pagedPartitions = catalog.listPartitionsPaged(identifier, maxResults, null, "dt=202501_");
+        assertTrue(pagedPartitions.getElements().isEmpty());
+        assertNull(pagedPartitions.getNextPageToken());
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=%0101"));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> catalog.listPartitionsPaged(identifier, null, null, "dt=_0101"));
     }
 
     @Test

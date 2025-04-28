@@ -20,7 +20,6 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -34,9 +33,6 @@ import java.util.Map;
 
 /** Util for REST. */
 public class RESTUtil {
-
-    public static final String TABLE_NAME_PATTERN = "tableNamePattern";
-    public static final String VIEW_NAME_PATTERN = "viewNamePattern";
 
     public static Map<String, String> extractPrefixMap(Options options, String prefix) {
         return extractPrefixMap(options.toMap(), prefix);
@@ -102,7 +98,7 @@ public class RESTUtil {
         }
     }
 
-    public static void validatePrefixPattern(String pattern) {
+    public static void validatePrefixSqlPattern(String pattern) {
         if (pattern != null && !pattern.isEmpty()) {
             boolean escaped = false;
             boolean inWildcardZone = false;
@@ -124,11 +120,11 @@ public class RESTUtil {
                     inWildcardZone = true;
                 } else {
                     if (inWildcardZone) {
-                        throw new IllegalArgumentException(
+                        throw new UnsupportedOperationException(
                                 String.format(
                                         "Can only support sql like prefix query now. "
                                                 + "Note please escape the underline if you want to match it exactly. Invalid pattern %s",
-                                        StringUtils.replace(pattern, "%", "%%")));
+                                        pattern));
                     }
                 }
             }

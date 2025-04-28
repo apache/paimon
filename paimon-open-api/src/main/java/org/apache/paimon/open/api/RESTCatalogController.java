@@ -584,8 +584,9 @@ public class RESTCatalogController {
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) String partitionNamePattern) {
         // paged list partitions in this table with provided maxResults and pageToken
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
