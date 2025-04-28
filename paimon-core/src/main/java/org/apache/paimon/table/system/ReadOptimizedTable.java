@@ -226,6 +226,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     private class ReadOptimizedTableBatchScan implements DataTableScan {
+
         private final DataTableScan batchScan;
 
         private ReadOptimizedTableBatchScan(DataTableScan batchScan) {
