@@ -35,12 +35,18 @@ public class OrcMapColumnVector extends AbstractOrcColumnVector
     private final ColumnVector valuePaimonVector;
 
     public OrcMapColumnVector(
-            MapColumnVector hiveVector, VectorizedRowBatch orcBatch, MapType type) {
+            MapColumnVector hiveVector,
+            VectorizedRowBatch orcBatch,
+            MapType type,
+            boolean legacyTimestampLtzType) {
         super(hiveVector, orcBatch);
         this.hiveVector = hiveVector;
-        this.keyPaimonVector = createPaimonVector(hiveVector.keys, orcBatch, type.getKeyType());
+        this.keyPaimonVector =
+                createPaimonVector(
+                        hiveVector.keys, orcBatch, type.getKeyType(), legacyTimestampLtzType);
         this.valuePaimonVector =
-                createPaimonVector(hiveVector.values, orcBatch, type.getValueType());
+                createPaimonVector(
+                        hiveVector.values, orcBatch, type.getValueType(), legacyTimestampLtzType);
     }
 
     @Override
