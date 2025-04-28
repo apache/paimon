@@ -282,12 +282,12 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
         @Override
         public Plan plan() {
-            return batchScan.plan();
+            return getScan(batchScan).plan();
         }
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
-            return batchScan.listPartitionEntries();
+            return getScan(batchScan).listPartitionEntries();
         }
 
         private InnerTableScan getScan(InnerTableScan scan) {
