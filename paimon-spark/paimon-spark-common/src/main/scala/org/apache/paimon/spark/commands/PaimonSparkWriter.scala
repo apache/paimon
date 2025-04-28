@@ -290,6 +290,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
           var dvIndexFileMaintainer: BaseAppendDeleteFileMaintainer = null
           while (iter.hasNext) {
             val sdv: SparkDeletionVectors = iter.next()
+            val dvWriteVersion = sdv.dvWriteVersion
             if (dvIndexFileMaintainer == null) {
               val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
               dvIndexFileMaintainer = if (bucketMode == BUCKET_UNAWARE) {
@@ -310,7 +311,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
               case (dataFileName, dv) =>
                 dvIndexFileMaintainer.notifyNewDeletionVector(
                   dataFileName,
-                  DeletionVector.deserializeFromBytes(dv))
+                  DeletionVector.deserializeFromBytes(dv, dvWriteVersion))
             }
           }
           val indexEntries = dvIndexFileMaintainer.persist()

@@ -38,6 +38,7 @@ import javax.annotation.Nonnull;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
@@ -1139,9 +1140,12 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testIndexesTable() {
+        int dvVersion = ThreadLocalRandom.current().nextInt(1, 3);
         sql(
-                "CREATE TABLE T (pt STRING, a INT, b STRING, PRIMARY KEY (pt, a) NOT ENFORCED)"
-                        + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true')");
+                String.format(
+                        "CREATE TABLE T (pt STRING, a INT, b STRING, PRIMARY KEY (pt, a) NOT ENFORCED)"
+                                + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true', 'deletion-vectors.version' = '%s')",
+                        dvVersion));
         sql(
                 "INSERT INTO T VALUES ('2024-10-01', 1, 'aaaaaaaaaaaaaaaaaaa'), ('2024-10-01', 2, 'b'), ('2024-10-01', 3, 'c')");
         sql("INSERT INTO T VALUES ('2024-10-01', 1, 'a_new1'), ('2024-10-01', 3, 'c_new1')");
@@ -1164,7 +1168,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(row.getField(1)).isEqualTo(0);
         assertThat(row.getField(2)).isEqualTo("DELETION_VECTORS");
         assertThat(row.getField(3).toString().startsWith("index-")).isTrue();
-        assertThat(row.getField(4)).isEqualTo(33L);
+        // dv version 1 and 2 have different file size
+        assertThat(row.getField(4)).isIn(33L, 45L);
         assertThat(row.getField(5)).isEqualTo(1L);
         assertThat(row.getField(6)).isNotNull();
     }

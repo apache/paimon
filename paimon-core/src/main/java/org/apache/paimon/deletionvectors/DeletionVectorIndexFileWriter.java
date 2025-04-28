@@ -37,8 +37,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.VERSION_ID_V1;
-import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.VERSION_ID_V2;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.calculateChecksum;
 
 /** Writer for deletion vector index file. */
@@ -48,7 +46,7 @@ public class DeletionVectorIndexFileWriter {
     private final FileIO fileIO;
     private final long targetSizeInBytes;
 
-    private final int versionId;
+    private final int writeVersionId;
 
     public DeletionVectorIndexFileWriter(
             FileIO fileIO,
@@ -59,7 +57,7 @@ public class DeletionVectorIndexFileWriter {
         this.fileIO = fileIO;
         this.targetSizeInBytes = targetSizePerIndexFile.getBytes();
 
-        this.versionId = versionId;
+        this.writeVersionId = versionId;
     }
 
     /**
@@ -117,7 +115,7 @@ public class DeletionVectorIndexFileWriter {
         private SingleIndexFileWriter() throws IOException {
             this.path = indexPathFactory.newPath();
             this.dataOutputStream = new DataOutputStream(fileIO.newOutputStream(path, true));
-            dataOutputStream.writeByte(versionId);
+            dataOutputStream.writeByte(writeVersionId);
             this.dvMetas = new LinkedHashMap<>();
         }
 
@@ -127,9 +125,23 @@ public class DeletionVectorIndexFileWriter {
 
         private void write(String key, DeletionVector deletionVector) throws IOException {
             Preconditions.checkNotNull(dataOutputStream);
-            if (versionId == VERSION_ID_V1) {
+            if (writeVersionId == BitmapDeletionVector.VERSION) {
+                Preconditions.checkArgument(
+                        deletionVector instanceof BitmapDeletionVector,
+                        "write version id is %s, but deletionVector is not an instance of %s, actual class is %s.",
+                        writeVersionId,
+                        BitmapDeletionVector.class.getName(),
+                        deletionVector.getClass().getName());
+
                 writeV1(key, deletionVector);
-            } else if (versionId == VERSION_ID_V2) {
+            } else if (writeVersionId == Bitmap64DeletionVector.VERSION) {
+                Preconditions.checkArgument(
+                        deletionVector instanceof Bitmap64DeletionVector,
+                        "write version id is %s, but deletionVector is not an instance of %s, actual class is %s.",
+                        writeVersionId,
+                        Bitmap64DeletionVector.class.getName(),
+                        deletionVector.getClass().getName());
+
                 writeV2(key, deletionVector);
             }
         }
