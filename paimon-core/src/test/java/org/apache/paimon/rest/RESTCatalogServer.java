@@ -104,12 +104,18 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
+import static org.apache.paimon.rest.RESTCatalog.MAX_RESULTS;
+import static org.apache.paimon.rest.RESTCatalog.PAGE_TOKEN;
+import static org.apache.paimon.rest.RESTCatalog.PARTITION_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTCatalog.TABLE_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTCatalog.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** Mock REST server for testing. */
@@ -118,8 +124,6 @@ public class RESTCatalogServer {
     private static final Logger LOG = LoggerFactory.getLogger(RESTCatalogServer.class);
 
     public static final int DEFAULT_MAX_RESULTS = 100;
-    public static final String MAX_RESULTS = RESTCatalog.MAX_RESULTS;
-    public static final String PAGE_TOKEN = RESTCatalog.PAGE_TOKEN;
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
 
     private final String prefix;
@@ -834,7 +838,7 @@ public class RESTCatalogServer {
         if (databaseStore.containsKey(databaseName)) {
             switch (method) {
                 case "GET":
-                    List<String> tables = listTables(databaseName);
+                    List<String> tables = listTables(databaseName, parameters);
                     return generateFinalListTablesResponse(parameters, tables);
                 case "POST":
                     CreateTableRequest requestBody =
@@ -865,15 +869,24 @@ public class RESTCatalogServer {
                 new ErrorResponse(ErrorResponse.RESOURCE_TYPE_DATABASE, null, "", 404), 404);
     }
 
-    private List<String> listTables(String databaseName) {
+    private List<String> listTables(String databaseName, Map<String, String> parameters) {
+        String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
         List<String> tables = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
-            if (databaseName.equals(identifier.getDatabaseName())) {
+            if (databaseName.equals(identifier.getDatabaseName())
+                    && (Objects.isNull(tableNamePattern)
+                            || matchNamePattern(identifier.getTableName(), tableNamePattern))) {
                 tables.add(identifier.getTableName());
             }
         }
         return tables;
+    }
+
+    private boolean matchNamePattern(String name, String pattern) {
+        RESTUtil.validatePrefixSqlPattern(pattern);
+        String regex = sqlPatternToRegex(pattern);
+        return Pattern.compile(regex).matcher(name).matches();
     }
 
     private MockResponse generateFinalListTablesResponse(
@@ -910,7 +923,7 @@ public class RESTCatalogServer {
 
     private MockResponse tableDetailsHandle(Map<String, String> parameters, String databaseName) {
         RESTResponse response;
-        List<GetTableResponse> tableDetails = listTableDetails(databaseName);
+        List<GetTableResponse> tableDetails = listTableDetails(databaseName, parameters);
         if (!tableDetails.isEmpty()) {
             int maxResults;
             try {
@@ -940,11 +953,15 @@ public class RESTCatalogServer {
         return mockResponse(response, 200);
     }
 
-    private List<GetTableResponse> listTableDetails(String databaseName) {
+    private List<GetTableResponse> listTableDetails(
+            String databaseName, Map<String, String> parameters) {
+        String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
         List<GetTableResponse> tableDetails = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
-            if (databaseName.equals(identifier.getDatabaseName())) {
+            if (databaseName.equals(identifier.getDatabaseName())
+                    && (Objects.isNull(tableNamePattern)
+                            || matchNamePattern(identifier.getTableName(), tableNamePattern))) {
                 GetTableResponse getTableResponse =
                         new GetTableResponse(
                                 entry.getValue().uuid(),
@@ -1044,15 +1061,23 @@ public class RESTCatalogServer {
     }
 
     private MockResponse partitionsApiHandle(
-            String method, Map<String, String> parameters, Identifier tableIdentifier)
-            throws Exception {
+            String method, Map<String, String> parameters, Identifier tableIdentifier) {
+        String partitionNamePattern = parameters.get(PARTITION_NAME_PATTERN);
         switch (method) {
             case "GET":
                 List<Partition> partitions = new ArrayList<>();
                 for (Map.Entry<String, List<Partition>> entry : tablePartitionsStore.entrySet()) {
                     String objectName = Identifier.fromString(entry.getKey()).getObjectName();
                     if (objectName.equals(tableIdentifier.getObjectName())) {
-                        partitions.addAll(entry.getValue());
+                        partitions.addAll(
+                                entry.getValue().stream()
+                                        .filter(
+                                                partition ->
+                                                        Objects.isNull(partitionNamePattern)
+                                                                || matchNamePattern(
+                                                                        getPagedKey(partition),
+                                                                        partitionNamePattern))
+                                        .collect(Collectors.toList()));
                     }
                 }
                 return generateFinalListPartitionsResponse(parameters, partitions);
@@ -1187,7 +1212,7 @@ public class RESTCatalogServer {
             throws Exception {
         switch (method) {
             case "GET":
-                List<String> views = listViews(databaseName);
+                List<String> views = listViews(databaseName, parameters);
                 return generateFinalListViewsResponse(parameters, views);
             case "POST":
                 CreateViewRequest requestBody =
@@ -1212,11 +1237,16 @@ public class RESTCatalogServer {
         }
     }
 
-    private List<String> listViews(String databaseName) {
+    private List<String> listViews(String databaseName, Map<String, String> parameters) {
+        String viewNamePattern = parameters.get(VIEW_NAME_PATTERN);
         return viewStore.keySet().stream()
                 .map(Identifier::fromString)
                 .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
                 .map(Identifier::getTableName)
+                .filter(
+                        viewName ->
+                                (Objects.isNull(viewNamePattern)
+                                        || matchNamePattern(viewName, viewNamePattern)))
                 .collect(Collectors.toList());
     }
 
@@ -1256,7 +1286,7 @@ public class RESTCatalogServer {
         RESTResponse response;
         if ("GET".equals(method)) {
 
-            List<GetViewResponse> viewDetails = listViewDetails(databaseName);
+            List<GetViewResponse> viewDetails = listViewDetails(databaseName, parameters);
             if (!viewDetails.isEmpty()) {
 
                 int maxResults;
@@ -1292,10 +1322,17 @@ public class RESTCatalogServer {
         }
     }
 
-    private List<GetViewResponse> listViewDetails(String databaseName) {
+    private List<GetViewResponse> listViewDetails(
+            String databaseName, Map<String, String> parameters) {
+        String viewNamePattern = parameters.get(VIEW_NAME_PATTERN);
         return viewStore.keySet().stream()
                 .map(Identifier::fromString)
                 .filter(identifier -> identifier.getDatabaseName().equals(databaseName))
+                .filter(
+                        identifier ->
+                                (Objects.isNull(viewNamePattern)
+                                        || matchNamePattern(
+                                                identifier.getTableName(), viewNamePattern)))
                 .map(
                         identifier -> {
                             View view = viewStore.get(identifier.getFullName());
@@ -1711,15 +1748,44 @@ public class RESTCatalogServer {
     }
 
     private Map<String, String> getParameters(String query) {
-        Map<String, String> parameters =
-                Arrays.stream(query.split("&"))
-                        .map(pair -> pair.split("=", 2))
-                        .collect(
-                                Collectors.toMap(
-                                        pair -> pair[0].trim(), // key
-                                        pair -> RESTUtil.decodeString(pair[1].trim()), // value
-                                        (existing, replacement) -> existing // handle duplicates
-                                        ));
-        return parameters;
+        return Arrays.stream(query.split("&"))
+                .map(pair -> pair.split("=", 2))
+                .collect(
+                        Collectors.toMap(
+                                pair -> pair[0].trim(), // key
+                                pair -> RESTUtil.decodeString(pair[1].trim()), // value
+                                (existing, replacement) -> existing // handle duplicates
+                                ));
+    }
+
+    private String sqlPatternToRegex(String pattern) {
+        StringBuilder regex = new StringBuilder();
+        boolean escaped = false;
+
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+
+            if (escaped) {
+                regex.append(c);
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            switch (c) {
+                case '%':
+                    regex.append(".*");
+                    break;
+                case '_':
+                    regex.append(".");
+                    break;
+                default:
+                    regex.append(c);
+                    break;
+            }
+        }
+        return "^" + regex + "$";
     }
 }

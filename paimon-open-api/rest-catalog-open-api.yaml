@@ -232,6 +232,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (% and _) for table names.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -302,6 +307,11 @@ paths:
             type: integer
             format: int32
         - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: tableNamePattern
+          description: A sql LIKE pattern (% and _) for table names.
           in: query
           schema:
             type: string
@@ -658,6 +668,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: partitionNamePattern
+          description: A sql LIKE pattern (% and _) for partition names.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -896,6 +911,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: viewNamePattern
+          description: A sql LIKE pattern (% and _) for view names.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -966,6 +986,11 @@ paths:
             type: integer
             format: int32
         - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: viewNamePattern
+          description: A sql LIKE pattern (% and _) for view names.
           in: query
           schema:
             type: string

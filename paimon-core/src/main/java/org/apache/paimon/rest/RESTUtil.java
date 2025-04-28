@@ -97,4 +97,35 @@ public class RESTUtil {
                     e);
         }
     }
+
+    public static void validatePrefixSqlPattern(String pattern) {
+        if (pattern != null && !pattern.isEmpty()) {
+            boolean escaped = false;
+            boolean inWildcardZone = false;
+
+            for (int i = 0; i < pattern.length(); i++) {
+                char c = pattern.charAt(i);
+
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\') {
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '%' || c == '_') {
+                    inWildcardZone = true;
+                } else {
+                    if (inWildcardZone) {
+                        throw new IllegalArgumentException(
+                                "Can only support sql like prefix query now. "
+                                        + "Note please escape the underline if you want to match it exactly");
+                    }
+                }
+            }
+        }
+    }
 }
