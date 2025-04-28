@@ -32,16 +32,25 @@ case class SparkDeletionVector(
     partitionAndBucket: String,
     partition: Array[Byte],
     bucket: Int,
-    dataFilePath: String,
+    dataFileName: String,
     deletionVector: Array[Byte]
-)
+) {
+  def relativePath(pathFactory: FileStorePathFactory): String = {
+    val prefix = pathFactory
+      .relativeBucketPath(SerializationUtils.deserializeBinaryRow(partition), bucket)
+      .toUri
+      .toString + "/"
+    prefix + dataFileName
+  }
+}
 
 object SparkDeletionVector {
   def toDataSplit(
       deletionVector: SparkDeletionVector,
       root: Path,
+      pathFactory: FileStorePathFactory,
       dataFilePathToMeta: Map[String, SparkDataFileMeta]): DataSplit = {
-    val meta = dataFilePathToMeta(deletionVector.dataFilePath)
+    val meta = dataFilePathToMeta(deletionVector.relativePath(pathFactory))
     DataSplit
       .builder()
       .withBucketPath(root + "/" + deletionVector.partitionAndBucket)

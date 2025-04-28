@@ -276,7 +276,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
             relativeBucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
-            filePath,
+            new Path(filePath).getName,
             DeletionVector.serializeToBytes(dv)
           )
       }

@@ -308,7 +308,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             }
 
             dvIndexFileMaintainer.notifyNewDeletionVector(
-              new Path(sdv.dataFilePath).getName,
+              sdv.dataFileName,
               DeletionVector.deserializeFromBytes(sdv.deletionVector))
           }
           val indexEntries = dvIndexFileMaintainer.persist()
