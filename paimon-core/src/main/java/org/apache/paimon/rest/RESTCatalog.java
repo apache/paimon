@@ -323,7 +323,6 @@ public class RESTCatalog implements Catalog {
             @Nullable String pageToken,
             @Nullable String tableNamePattern)
             throws DatabaseNotExistException {
-        RESTUtil.validatePrefixSqlPattern(tableNamePattern);
         try {
             ListTablesResponse response =
                     client.get(
@@ -349,7 +348,6 @@ public class RESTCatalog implements Catalog {
             @Nullable String pageToken,
             @Nullable String tableNamePattern)
             throws DatabaseNotExistException {
-        RESTUtil.validatePrefixSqlPattern(tableNamePattern);
         try {
             ListTableDetailsResponse response =
                     client.get(
@@ -674,7 +672,6 @@ public class RESTCatalog implements Catalog {
             @Nullable String pageToken,
             @Nullable String partitionNamePattern)
             throws TableNotExistException {
-        RESTUtil.validatePrefixSqlPattern(partitionNamePattern);
         try {
             ListPartitionsResponse response =
                     client.get(
@@ -880,7 +877,6 @@ public class RESTCatalog implements Catalog {
             @Nullable String pageToken,
             @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
-        RESTUtil.validatePrefixSqlPattern(viewNamePattern);
         try {
             ListViewsResponse response =
                     client.get(
@@ -906,7 +902,6 @@ public class RESTCatalog implements Catalog {
             @Nullable String pageToken,
             @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
-        RESTUtil.validatePrefixSqlPattern(viewNamePattern);
         try {
             ListViewDetailsResponse response =
                     client.get(
@@ -1085,7 +1080,6 @@ public class RESTCatalog implements Catalog {
             queryParams.put(PAGE_TOKEN, pageToken);
         }
         if (Objects.nonNull(namePatternValue)) {
-            RESTUtil.validatePrefixSqlPattern(namePatternValue);
             queryParams.put(namePatternKey, namePatternValue);
         }
         return queryParams;

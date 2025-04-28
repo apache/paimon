@@ -120,11 +120,9 @@ public class RESTUtil {
                     inWildcardZone = true;
                 } else {
                     if (inWildcardZone) {
-                        throw new UnsupportedOperationException(
-                                String.format(
-                                        "Can only support sql like prefix query now. "
-                                                + "Note please escape the underline if you want to match it exactly. Invalid pattern %s",
-                                        pattern));
+                        throw new IllegalArgumentException(
+                                "Can only support sql like prefix query now. "
+                                        + "Note please escape the underline if you want to match it exactly");
                     }
                 }
             }

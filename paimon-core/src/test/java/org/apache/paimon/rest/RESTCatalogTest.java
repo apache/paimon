@@ -32,6 +32,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
+import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -414,11 +415,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Assertions.assertNull(pagedTables.getNextPageToken());
 
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listTablesPaged(databaseName, null, null, "ta%le"));
 
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listTablesPaged(databaseName, null, null, "ta_le"));
     }
 
@@ -515,11 +516,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedTableDetails.getNextPageToken());
 
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta%le"));
 
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta_le"));
     }
 
@@ -632,11 +633,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedViews.getNextPageToken());
 
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listViewsPaged(databaseName, null, null, "vi%ew"));
 
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listViewsPaged(databaseName, null, null, "vi_ew"));
     }
 
@@ -731,11 +732,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedViewDetails.getNextPageToken());
 
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listViewDetailsPaged(databaseName, null, null, "vi%ew"));
 
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listViewDetailsPaged(databaseName, null, null, "vi_ew"));
     }
 
@@ -952,11 +953,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedPartitions.getNextPageToken());
 
         assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=%0101"));
 
         assertThrows(
-                UnsupportedOperationException.class,
+                BadRequestException.class,
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=_0101"));
     }
 
