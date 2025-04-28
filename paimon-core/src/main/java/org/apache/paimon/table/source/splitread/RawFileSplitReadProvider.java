@@ -52,7 +52,7 @@ public class RawFileSplitReadProvider implements SplitReadProvider {
             // compatible with the query acceleration of the OLAP engine, we have generated raw
             // files.
             // Here, for the sake of correctness, we still need to perform drop delete filtering.
-            for (DataFileMeta file : split.dataFiles()) {
+            for (DataFileMeta file : split.dataFileMetas()) {
                 if (!file.deleteRowCount().isPresent()) {
                     return false;
                 }

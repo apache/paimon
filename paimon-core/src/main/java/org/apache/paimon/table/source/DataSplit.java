@@ -69,7 +69,7 @@ public class DataSplit implements Split {
     private List<DataFileMeta> beforeFiles = new ArrayList<>();
     @Nullable private List<DeletionFile> beforeDeletionFiles;
 
-    private List<DataFileMeta> dataFiles;
+    private List<DataFileMeta> dataFileMetas;
     @Nullable private List<DeletionFile> dataDeletionFiles;
 
     private boolean isStreaming = false;
@@ -105,8 +105,8 @@ public class DataSplit implements Split {
         return Optional.ofNullable(beforeDeletionFiles);
     }
 
-    public List<DataFileMeta> dataFiles() {
-        return dataFiles;
+    public List<DataFileMeta> dataFileMetas() {
+        return dataFileMetas;
     }
 
     @Override
@@ -123,17 +123,17 @@ public class DataSplit implements Split {
     }
 
     public OptionalLong latestFileCreationEpochMillis() {
-        return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
+        return this.dataFileMetas.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
     }
 
     public OptionalLong earliestFileCreationEpochMillis() {
-        return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).min();
+        return this.dataFileMetas.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).min();
     }
 
     @Override
     public long rowCount() {
         long rowCount = 0;
-        for (DataFileMeta file : dataFiles) {
+        for (DataFileMeta file : dataFileMetas) {
             rowCount += file.rowCount();
         }
         return rowCount;
@@ -154,7 +154,7 @@ public class DataSplit implements Split {
 
     public Object minValue(int fieldIndex, DataField dataField, SimpleStatsEvolutions evolutions) {
         Object minValue = null;
-        for (DataFileMeta dataFile : dataFiles) {
+        for (DataFileMeta dataFile : dataFileMetas) {
             SimpleStatsEvolution evolution = evolutions.getOrCreate(dataFile.schemaId());
             InternalRow minValues =
                     evolution.evolution(
@@ -173,7 +173,7 @@ public class DataSplit implements Split {
 
     public Object maxValue(int fieldIndex, DataField dataField, SimpleStatsEvolutions evolutions) {
         Object maxValue = null;
-        for (DataFileMeta dataFile : dataFiles) {
+        for (DataFileMeta dataFile : dataFileMetas) {
             SimpleStatsEvolution evolution = evolutions.getOrCreate(dataFile.schemaId());
             InternalRow maxValues =
                     evolution.evolution(
@@ -220,7 +220,7 @@ public class DataSplit implements Split {
     public Optional<List<RawFile>> convertToRawFiles() {
         if (rawConvertible) {
             return Optional.of(
-                    dataFiles.stream()
+                    dataFileMetas.stream()
                             .map(f -> makeRawTableFile(bucketPath, f))
                             .collect(Collectors.toList()));
         } else {
@@ -244,7 +244,7 @@ public class DataSplit implements Split {
     public Optional<List<IndexFile>> indexFiles() {
         List<IndexFile> indexFiles = new ArrayList<>();
         boolean hasIndexFile = false;
-        for (DataFileMeta file : dataFiles) {
+        for (DataFileMeta file : dataFileMetas) {
             List<String> exFiles =
                     file.extraFiles().stream()
                             .filter(s -> s.endsWith(INDEX_PATH_SUFFIX))
@@ -284,7 +284,7 @@ public class DataSplit implements Split {
                 && Objects.equals(totalBuckets, dataSplit.totalBuckets)
                 && Objects.equals(beforeFiles, dataSplit.beforeFiles)
                 && Objects.equals(beforeDeletionFiles, dataSplit.beforeDeletionFiles)
-                && Objects.equals(dataFiles, dataSplit.dataFiles)
+                && Objects.equals(dataFileMetas, dataSplit.dataFileMetas)
                 && Objects.equals(dataDeletionFiles, dataSplit.dataDeletionFiles);
     }
 
@@ -298,7 +298,7 @@ public class DataSplit implements Split {
                 totalBuckets,
                 beforeFiles,
                 beforeDeletionFiles,
-                dataFiles,
+                dataFileMetas,
                 dataDeletionFiles,
                 isStreaming,
                 rawConvertible);
@@ -320,7 +320,7 @@ public class DataSplit implements Split {
         this.totalBuckets = other.totalBuckets;
         this.beforeFiles = other.beforeFiles;
         this.beforeDeletionFiles = other.beforeDeletionFiles;
-        this.dataFiles = other.dataFiles;
+        this.dataFileMetas = other.dataFileMetas;
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
@@ -348,8 +348,8 @@ public class DataSplit implements Split {
 
         DeletionFile.serializeList(out, beforeDeletionFiles);
 
-        out.writeInt(dataFiles.size());
-        for (DataFileMeta file : dataFiles) {
+        out.writeInt(dataFileMetas.size());
+        for (DataFileMeta file : dataFileMetas) {
             dataFileSer.serialize(file, out);
         }
 
@@ -490,7 +490,7 @@ public class DataSplit implements Split {
         }
 
         public Builder withDataFiles(List<DataFileMeta> dataFiles) {
-            this.split.dataFiles = new ArrayList<>(dataFiles);
+            this.split.dataFileMetas = new ArrayList<>(dataFiles);
             return this;
         }
 
@@ -513,7 +513,7 @@ public class DataSplit implements Split {
             checkArgument(split.partition != null);
             checkArgument(split.bucket != -1);
             checkArgument(split.bucketPath != null);
-            checkArgument(split.dataFiles != null);
+            checkArgument(split.dataFileMetas != null);
 
             DataSplit split = new DataSplit();
             split.assign(this.split);

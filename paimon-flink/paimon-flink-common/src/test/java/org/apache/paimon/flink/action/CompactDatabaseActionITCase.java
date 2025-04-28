@@ -292,7 +292,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
             assertThat(splits.size()).isEqualTo(3);
             for (DataSplit split : splits) {
-                assertThat(split.dataFiles().size()).isEqualTo(1);
+                assertThat(split.dataFileMetas().size()).isEqualTo(1);
             }
         }
     }
@@ -654,9 +654,9 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             assertThat(splits.size()).isEqualTo(3);
             for (DataSplit split : splits) {
                 if (split.partition().getInt(1) == 16) {
-                    assertThat(split.dataFiles().size()).isEqualTo(3);
+                    assertThat(split.dataFileMetas().size()).isEqualTo(3);
                 } else {
-                    assertThat(split.dataFiles().size()).isEqualTo(1);
+                    assertThat(split.dataFileMetas().size()).isEqualTo(1);
                 }
             }
         }
@@ -838,7 +838,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
             assertThat(splits.size()).isEqualTo(3);
             for (DataSplit split : splits) {
-                assertThat(split.dataFiles().size()).isEqualTo(1);
+                assertThat(split.dataFileMetas().size()).isEqualTo(1);
             }
         }
 
@@ -853,7 +853,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
             assertThat(splits.size()).isEqualTo(3);
             for (DataSplit split : splits) {
-                assertThat(split.dataFiles().size()).isEqualTo(2);
+                assertThat(split.dataFileMetas().size()).isEqualTo(2);
             }
         }
     }
@@ -1067,7 +1067,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         assertThat(splits.size()).isEqualTo(1);
 
         boolean hasAvroFile =
-                splits.get(0).dataFiles().stream()
+                splits.get(0).dataFileMetas().stream()
                         .anyMatch(file -> file.fileFormat().equalsIgnoreCase("avro"));
         assertThat(hasAvroFile).isTrue();
         jobClient.cancel();

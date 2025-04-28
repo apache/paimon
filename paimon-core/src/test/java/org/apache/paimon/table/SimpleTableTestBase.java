@@ -594,7 +594,7 @@ public abstract class SimpleTableTestBase {
 
         List<DataFileMeta> files =
                 table.newSnapshotReader().read().dataSplits().stream()
-                        .flatMap(split -> split.dataFiles().stream())
+                        .flatMap(split -> split.dataFileMetas().stream())
                         .collect(Collectors.toList());
         for (DataFileMeta file : files) {
             assertThat(file.level()).isEqualTo(0);

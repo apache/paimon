@@ -100,7 +100,7 @@ case class PaimonPartitionReader(
     val dataSplits = partition.splits.collect { case ds: DataSplit => ds }
     val numSplits = dataSplits.length
     val paimonMetricsValues: Array[CustomTaskMetric] = if (dataSplits.nonEmpty) {
-      val splitSize = dataSplits.map(_.dataFiles().asScala.map(_.fileSize).sum).sum
+      val splitSize = dataSplits.map(_.dataFileMetas().asScala.map(_.fileSize).sum).sum
       Array(
         PaimonNumSplitsTaskMetric(numSplits),
         PaimonSplitSizeTaskMetric(splitSize),

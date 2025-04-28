@@ -92,7 +92,7 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
                     // filter value by whole bucket
                     checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return splits.stream()
-                            .flatMap(s -> s.dataFiles().stream())
+                            .flatMap(s -> s.dataFileMetas().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {

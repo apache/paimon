@@ -74,7 +74,7 @@ public class PartitionStatisticsReporter implements Closeable {
             long totalSize = 0;
             long fileCount = 0;
             for (DataSplit split : splits) {
-                List<DataFileMeta> fileMetas = split.dataFiles();
+                List<DataFileMeta> fileMetas = split.dataFileMetas();
                 rowCount += split.rowCount();
                 fileCount += fileMetas.size();
                 for (DataFileMeta fileMeta : fileMetas) {

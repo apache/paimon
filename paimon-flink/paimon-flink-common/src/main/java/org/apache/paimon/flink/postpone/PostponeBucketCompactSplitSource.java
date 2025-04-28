@@ -99,7 +99,7 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
 
                 for (Split split : splits) {
                     DataSplit dataSplit = (DataSplit) split;
-                    List<DataFileMeta> files = new ArrayList<>(dataSplit.dataFiles());
+                    List<DataFileMeta> files = new ArrayList<>(dataSplit.dataFileMetas());
                     // we must replay the written records in exact order
                     files.sort(Comparator.comparing(DataFileMeta::creationTime));
                     for (DataFileMeta meta : files) {
@@ -174,7 +174,7 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
         @Override
         public int channel(Split record) {
             DataSplit dataSplit = (DataSplit) record;
-            String fileName = dataSplit.dataFiles().get(0).fileName();
+            String fileName = dataSplit.dataFileMetas().get(0).fileName();
 
             Matcher matcher = pattern.matcher(fileName);
             Preconditions.checkState(

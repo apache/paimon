@@ -356,7 +356,7 @@ public class FilesTable implements ReadonlyTable {
             for (Split dataSplit : splits) {
                 iteratorList.add(
                         Iterators.transform(
-                                ((DataSplit) dataSplit).dataFiles().iterator(),
+                                ((DataSplit) dataSplit).dataFileMetas().iterator(),
                                 file ->
                                         toRow(
                                                 (DataSplit) dataSplit,

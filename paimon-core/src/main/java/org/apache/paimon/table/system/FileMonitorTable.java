@@ -250,7 +250,7 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
                             dataSplit.partition(),
                             dataSplit.bucket(),
                             dataSplit.beforeFiles(),
-                            dataSplit.dataFiles());
+                            dataSplit.dataFileMetas());
 
             return new IteratorRecordReader<>(Collections.singletonList(toRow(change)).iterator());
         }

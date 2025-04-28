@@ -48,8 +48,8 @@ object SparkDataFileMeta {
     import PaimonImplicits._
 
     val dvFactory =
-      DeletionFile.factory(dataSplit.dataFiles(), dataSplit.deletionFiles().orElse(null))
-    dataSplit.dataFiles().asScala.map {
+      DeletionFile.factory(dataSplit.dataFileMetas(), dataSplit.deletionFiles().orElse(null))
+    dataSplit.dataFileMetas().asScala.map {
       file =>
         SparkDataFileMeta(
           dataSplit.partition,

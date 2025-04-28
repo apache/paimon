@@ -401,14 +401,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
-            if (!dataSplit.dataFiles().isEmpty()
-                    && dataSplit.dataFiles().get(0).minKey().getFieldCount() > 0) {
+            if (!dataSplit.dataFileMetas().isEmpty()
+                    && dataSplit.dataFileMetas().get(0).minKey().getFieldCount() > 0) {
                 try {
                     return fallbackRead.createReader(split);
                 } catch (Exception ignored) {
                     LOG.error(
                             "Reading from fallback branch has problems for files: {}",
-                            dataSplit.dataFiles().stream()
+                            dataSplit.dataFileMetas().stream()
                                     .map(DataFileMeta::fileName)
                                     .collect(Collectors.joining(", ")));
                 }

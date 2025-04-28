@@ -148,7 +148,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
                 RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
         List<DataSplit> splits1 = table.newSnapshotReader().read().dataSplits();
         assertThat(splits1.size()).isEqualTo(1);
-        List<DataFileMeta> files1 = splits1.get(0).dataFiles();
+        List<DataFileMeta> files1 = splits1.get(0).dataFileMetas();
         assertThat(files1.size()).isEqualTo(2);
         assertThat(recordLevelExpire.isExpireFile(files1.get(0))).isTrue();
         assertThat(recordLevelExpire.isExpireFile(files1.get(1))).isFalse();
@@ -167,7 +167,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         recordLevelExpire =
                 RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
         List<DataSplit> splits2 = table.newSnapshotReader().read().dataSplits();
-        List<DataFileMeta> files2 = splits2.get(0).dataFiles();
+        List<DataFileMeta> files2 = splits2.get(0).dataFileMetas();
         assertThat(recordLevelExpire.isExpireFile(files2.get(0))).isTrue();
         assertThat(recordLevelExpire.isExpireFile(files2.get(1))).isFalse();
 
@@ -187,7 +187,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         recordLevelExpire =
                 RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
         List<DataSplit> splits3 = table.newSnapshotReader().read().dataSplits();
-        List<DataFileMeta> files3 = splits3.get(0).dataFiles();
+        List<DataFileMeta> files3 = splits3.get(0).dataFileMetas();
         assertThat(recordLevelExpire.isExpireFile(files3.get(0))).isTrue();
         assertThat(recordLevelExpire.isExpireFile(files3.get(1))).isFalse();
         assertThat(recordLevelExpire.isExpireFile(files3.get(2))).isFalse();
@@ -219,7 +219,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         recordLevelExpire =
                 RecordLevelExpire.create(coreOptions, table.schema(), table.schemaManager());
         List<DataSplit> splits4 = table.newSnapshotReader().read().dataSplits();
-        List<DataFileMeta> files4 = splits4.get(0).dataFiles();
+        List<DataFileMeta> files4 = splits4.get(0).dataFileMetas();
         // old files with record-level.time-field stats
         assertThat(recordLevelExpire.isExpireFile(files4.get(0))).isTrue();
         assertThat(recordLevelExpire.isExpireFile(files4.get(1))).isFalse();
@@ -265,7 +265,7 @@ class RecordLevelExpireTest extends PrimaryKeyTableTestBase {
         compact(1);
         List<DataSplit> splits1 = table.newSnapshotReader().read().dataSplits();
         assertThat(splits1.size()).isEqualTo(1);
-        assertThat(splits1.get(0).dataFiles().size()).isEqualTo(2);
+        assertThat(splits1.get(0).dataFileMetas().size()).isEqualTo(2);
         // full compaction, expired records will be removed
         assertThat(query())
                 .containsExactlyInAnyOrder(

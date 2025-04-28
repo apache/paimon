@@ -84,10 +84,10 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         for (DataSplit split : splits) {
             if (split.partition().getInt(1) == 15) {
                 // compacted
-                assertThat(split.dataFiles().size()).isEqualTo(1);
+                assertThat(split.dataFileMetas().size()).isEqualTo(1);
             } else {
                 // not compacted
-                assertThat(split.dataFiles().size()).isEqualTo(2);
+                assertThat(split.dataFileMetas().size()).isEqualTo(2);
             }
         }
     }
@@ -188,10 +188,10 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         for (DataSplit split : splits) {
             if (split.partition().getInt(1) == 15) {
                 // compacted
-                assertThat(split.dataFiles().size()).isEqualTo(1);
+                assertThat(split.dataFileMetas().size()).isEqualTo(1);
             } else {
                 // not compacted
-                assertThat(split.dataFiles().size()).isEqualTo(3);
+                assertThat(split.dataFileMetas().size()).isEqualTo(3);
             }
         }
     }
@@ -287,7 +287,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         assertThat(splits.size()).isEqualTo(2);
         for (DataSplit split : splits) {
             // Par-16 is not compacted.
-            assertThat(split.dataFiles().size())
+            assertThat(split.dataFileMetas().size())
                     .isEqualTo(split.partition().getInt(1) == 16 ? 2 : 1);
         }
     }
@@ -323,7 +323,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         assertThat(splits.size()).isEqualTo(2);
         for (DataSplit split : splits) {
             // Par-16 is not compacted.
-            assertThat(split.dataFiles().size()).isEqualTo(1);
+            assertThat(split.dataFileMetas().size()).isEqualTo(1);
         }
     }
 

@@ -71,7 +71,7 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
                                             read.createMergeReader(
                                                     split.partition(),
                                                     split.bucket(),
-                                                    split.dataFiles(),
+                                                    split.dataFileMetas(),
                                                     split.deletionFiles().orElse(null),
                                                     false));
                     return unwrap(reader);

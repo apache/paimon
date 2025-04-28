@@ -79,8 +79,8 @@ public class PlaceholderSplit extends DataSplit {
     }
 
     @Override
-    public List<DataFileMeta> dataFiles() {
-        return dataSplit.dataFiles();
+    public List<DataFileMeta> dataFileMetas() {
+        return dataSplit.dataFileMetas();
     }
 
     @Override

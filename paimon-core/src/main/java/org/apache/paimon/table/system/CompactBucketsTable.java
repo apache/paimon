@@ -266,7 +266,7 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
                 // Serialized files are only useful in streaming jobs.
                 // Batch compact jobs only run once, so they only need to know what buckets should
                 // be compacted and don't need to concern incremental new files.
-                files = dataSplit.dataFiles();
+                files = dataSplit.dataFileMetas();
             }
             InternalRow row =
                     GenericRow.of(

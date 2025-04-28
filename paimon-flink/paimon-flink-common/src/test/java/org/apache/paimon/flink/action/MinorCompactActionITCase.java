@@ -94,7 +94,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
         assertThat(splits.size()).isEqualTo(2);
         for (DataSplit split : splits) {
             // Par-16 is not compacted.
-            assertThat(split.dataFiles().size())
+            assertThat(split.dataFileMetas().size())
                     .isEqualTo(split.partition().getInt(1) == 16 ? 2 : 1);
         }
     }
@@ -142,7 +142,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
         List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
         assertThat(splits.size()).isEqualTo(2);
         for (DataSplit split : splits) {
-            assertThat(split.dataFiles().size()).isEqualTo(1);
+            assertThat(split.dataFileMetas().size()).isEqualTo(1);
         }
     }
 

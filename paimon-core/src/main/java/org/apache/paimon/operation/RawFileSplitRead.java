@@ -131,14 +131,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             LOG.info("Ignore split before files: {}", split.beforeFiles());
         }
 
-        List<DataFileMeta> files = split.dataFiles();
+        List<DataFileMeta> files = split.dataFileMetas();
         DeletionVector.Factory dvFactory =
                 DeletionVector.factory(fileIO, files, split.deletionFiles().orElse(null));
         List<IOExceptionSupplier<DeletionVector>> dvFactories = new ArrayList<>();
         for (DataFileMeta file : files) {
             dvFactories.add(() -> dvFactory.create(file.fileName()).orElse(null));
         }
-        return createReader(split.partition(), split.bucket(), split.dataFiles(), dvFactories);
+        return createReader(split.partition(), split.bucket(), split.dataFileMetas(), dvFactories);
     }
 
     public RecordReader<InternalRow> createReader(

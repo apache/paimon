@@ -125,7 +125,7 @@ public class IndexBootstrap implements Serializable {
 
     @VisibleForTesting
     static boolean filterSplit(Split split, long indexTtl, long currentTime) {
-        List<DataFileMeta> files = ((DataSplit) split).dataFiles();
+        List<DataFileMeta> files = ((DataSplit) split).dataFileMetas();
         for (DataFileMeta file : files) {
             long fileTime = file.creationTimeEpochMillis();
             if (currentTime <= fileTime + indexTtl) {

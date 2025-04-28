@@ -434,7 +434,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
               .mkString("/")
             s"$location/$partitionPath/bucket-${ds.bucket}"
           }
-          ds.dataFiles().asScala.map(f => prefix + "/" + f.fileName)
+          ds.dataFileMetas().asScala.map(f => prefix + "/" + f.fileName)
       }
     files.sorted.toArray
   }

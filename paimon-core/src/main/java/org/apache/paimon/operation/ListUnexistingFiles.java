@@ -76,7 +76,7 @@ public class ListUnexistingFiles {
         List<ListResult> results = new ArrayList<>();
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(dataSplit.partition(), dataSplit.bucket());
-        for (DataFileMeta meta : dataSplit.dataFiles()) {
+        for (DataFileMeta meta : dataSplit.dataFileMetas()) {
             Path path = dataFilePathFactory.toPath(meta);
             try {
                 if (!table.fileIO().exists(path)) {

@@ -366,7 +366,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
   private def scanFilesCount(str: String, tableName: String = "test_tbl"): Int = {
     getPaimonScan(s"SELECT * FROM $tableName WHERE $str").lazyInputPartitions
       .flatMap(_.splits)
-      .map(_.asInstanceOf[DataSplit].dataFiles().size())
+      .map(_.asInstanceOf[DataSplit].dataFileMetas().size())
       .sum
   }
 }

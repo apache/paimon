@@ -52,7 +52,7 @@ public class IncrementalCompactDiffSplitRead extends IncrementalDiffSplitRead {
                         .filter(file -> file.level() > 0)
                         .collect(Collectors.toList());
         List<DataFileMeta> afterFiles =
-                split.dataFiles().stream()
+                split.dataFileMetas().stream()
                         .filter(file -> file.level() > 0)
                         .collect(Collectors.toList());
         DataSplit.Builder builder =

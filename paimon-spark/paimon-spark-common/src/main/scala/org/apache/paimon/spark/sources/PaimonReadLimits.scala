@@ -110,7 +110,7 @@ case class PaimonReadLimitGuard(limits: Array[ReadLimit], lastTriggerMillis: Lon
   private def getBytesAndRows(indexedDataSplit: IndexedDataSplit): (Long, Long) = {
     var rows = 0L
     var bytes = 0L
-    indexedDataSplit.entry.dataFiles().asScala.foreach {
+    indexedDataSplit.entry.dataFileMetas().asScala.foreach {
       file =>
         rows += file.rowCount()
         bytes += file.fileSize()

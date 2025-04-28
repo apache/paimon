@@ -123,7 +123,7 @@ trait ScanHelper extends Logging {
   private def unpack(split: Split): Array[DataFileMeta] = {
     split match {
       case ds: DataSplit =>
-        ds.dataFiles().asScala.toArray
+        ds.dataFileMetas().asScala.toArray
       case _ => Array.empty
     }
   }
@@ -154,9 +154,9 @@ trait ScanHelper extends Logging {
   private def dataFileAndDeletionFiles(split: DataSplit): Array[(DataFileMeta, DeletionFile)] = {
     if (deletionVectors && split.deletionFiles().isPresent) {
       val deletionFiles = split.deletionFiles().get().asScala
-      split.dataFiles().asScala.zip(deletionFiles).toArray
+      split.dataFileMetas().asScala.zip(deletionFiles).toArray
     } else {
-      split.dataFiles().asScala.map((_, null)).toArray
+      split.dataFileMetas().asScala.map((_, null)).toArray
     }
   }
 

@@ -138,7 +138,7 @@ public class PartitionEntry {
         Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
         for (DataSplit split : splits) {
             BinaryRow partition = split.partition();
-            for (DataFileMeta file : split.dataFiles()) {
+            for (DataFileMeta file : split.dataFileMetas()) {
                 PartitionEntry partitionEntry = fromDataFile(partition, ADD, file);
                 partitions.compute(
                         partition,

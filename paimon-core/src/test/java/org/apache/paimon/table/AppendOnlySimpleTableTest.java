@@ -118,7 +118,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 table.store()
                         .pathFactory()
                         .createDataFilePathFactory(split.partition(), split.bucket())
-                        .toPath(split.dataFiles().get(0));
+                        .toPath(split.dataFileMetas().get(0));
         table.fileIO().deleteQuietly(path);
 
         // read
@@ -527,7 +527,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .plan();
         List<DataFileMeta> metas =
                 plan.splits().stream()
-                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .flatMap(split -> ((DataSplit) split).dataFileMetas().stream())
                         .collect(Collectors.toList());
         assertThat(metas.size()).isEqualTo(1);
     }
@@ -575,7 +575,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         .plan();
         List<DataFileMeta> metas =
                 plan.splits().stream()
-                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .flatMap(split -> ((DataSplit) split).dataFileMetas().stream())
                         .collect(Collectors.toList());
         assertThat(metas.size()).isEqualTo(2);
 
@@ -645,7 +645,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
         List<DataFileMeta> metas =
                 plan.splits().stream()
-                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .flatMap(split -> ((DataSplit) split).dataFileMetas().stream())
                         .collect(Collectors.toList());
         assertThat(metas.size()).isEqualTo(1);
 
@@ -715,7 +715,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
         List<DataFileMeta> metas =
                 plan.splits().stream()
-                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .flatMap(split -> ((DataSplit) split).dataFileMetas().stream())
                         .collect(Collectors.toList());
         assertThat(metas.size()).isEqualTo(2);
 
@@ -965,7 +965,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
         List<DataFileMeta> metas =
                 plan.splits().stream()
-                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .flatMap(split -> ((DataSplit) split).dataFileMetas().stream())
                         .collect(Collectors.toList());
         assertThat(metas.size()).isEqualTo(2);
 

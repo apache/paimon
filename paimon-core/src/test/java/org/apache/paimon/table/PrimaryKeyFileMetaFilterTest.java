@@ -50,7 +50,7 @@ public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                     return splits.stream()
-                            .flatMap(s -> s.dataFiles().stream())
+                            .flatMap(s -> s.dataFileMetas().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
@@ -84,7 +84,7 @@ public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                             table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                     return splits.stream()
-                            .flatMap(s -> s.dataFiles().stream())
+                            .flatMap(s -> s.dataFileMetas().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
@@ -117,7 +117,7 @@ public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                     return splits.stream()
-                            .flatMap(s -> s.dataFiles().stream())
+                            .flatMap(s -> s.dataFileMetas().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {

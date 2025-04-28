@@ -91,7 +91,7 @@ public class FileStoreSourceSplitGeneratorTest {
         assertThat(((DataSplit) split.split()).bucket()).isEqualTo(bucket);
         assertThat(
                         ((DataSplit) split.split())
-                                .dataFiles().stream()
+                                .dataFileMetas().stream()
                                         .map(DataFileMeta::fileName)
                                         .collect(Collectors.toList()))
                 .isEqualTo(files);

@@ -100,7 +100,7 @@ public class SnapshotReaderTest {
         List<DataSplit> dataSplits = reader.read().dataSplits();
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
-            assertThat(dataSplit.dataFiles()).hasSize(1);
+            assertThat(dataSplit.dataFileMetas()).hasSize(1);
             assertThat(dataSplit.convertToRawFiles()).isPresent();
         }
 
@@ -115,7 +115,7 @@ public class SnapshotReaderTest {
         dataSplits = reader.read().dataSplits();
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
-            assertThat(dataSplit.dataFiles()).hasSize(2);
+            assertThat(dataSplit.dataFileMetas()).hasSize(2);
             assertThat(dataSplit.convertToRawFiles()).isNotPresent();
         }
 
@@ -136,8 +136,8 @@ public class SnapshotReaderTest {
         dataSplits = reader.read().dataSplits();
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
-            assertThat(dataSplit.dataFiles()).hasSize(1);
-            DataFileMeta meta = dataSplit.dataFiles().get(0);
+            assertThat(dataSplit.dataFileMetas()).hasSize(1);
+            DataFileMeta meta = dataSplit.dataFileMetas().get(0);
             String partition = dataSplit.partition().getString(0).toString();
             assertThat(dataSplit.convertToRawFiles())
                     .hasValue(
@@ -165,7 +165,7 @@ public class SnapshotReaderTest {
         dataSplits = reader.read().dataSplits();
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
-            assertThat(dataSplit.dataFiles()).hasSize(2);
+            assertThat(dataSplit.dataFileMetas()).hasSize(2);
             assertThat(dataSplit.convertToRawFiles()).isNotPresent();
         }
 
@@ -198,8 +198,8 @@ public class SnapshotReaderTest {
         List<DataSplit> dataSplits = reader.read().dataSplits();
         assertThat(dataSplits).hasSize(1);
         DataSplit dataSplit = dataSplits.get(0);
-        assertThat(dataSplit.dataFiles()).hasSize(1);
-        DataFileMeta meta = dataSplit.dataFiles().get(0);
+        assertThat(dataSplit.dataFileMetas()).hasSize(1);
+        DataFileMeta meta = dataSplit.dataFileMetas().get(0);
         assertThat(dataSplit.convertToRawFiles())
                 .hasValue(
                         Collections.singletonList(
@@ -231,9 +231,9 @@ public class SnapshotReaderTest {
         dataSplits = reader.read().dataSplits();
         assertThat(dataSplits).hasSize(1);
         dataSplit = dataSplits.get(0);
-        assertThat(dataSplit.dataFiles()).hasSize(2);
-        DataFileMeta meta0 = dataSplit.dataFiles().get(0);
-        DataFileMeta meta1 = dataSplit.dataFiles().get(1);
+        assertThat(dataSplit.dataFileMetas()).hasSize(2);
+        DataFileMeta meta0 = dataSplit.dataFileMetas().get(0);
+        DataFileMeta meta1 = dataSplit.dataFileMetas().get(1);
         assertThat(dataSplit.convertToRawFiles())
                 .hasValue(
                         Arrays.asList(
@@ -285,8 +285,8 @@ public class SnapshotReaderTest {
         List<DataSplit> dataSplits = reader.read().dataSplits();
         assertThat(dataSplits).hasSize(1);
         DataSplit dataSplit = dataSplits.get(0);
-        assertThat(dataSplit.dataFiles()).hasSize(1);
-        DataFileMeta meta = dataSplit.dataFiles().get(0);
+        assertThat(dataSplit.dataFileMetas()).hasSize(1);
+        DataFileMeta meta = dataSplit.dataFileMetas().get(0);
         assertThat(dataSplit.indexFiles())
                 .hasValue(
                         Collections.singletonList(
@@ -315,9 +315,9 @@ public class SnapshotReaderTest {
         dataSplits = reader.read().dataSplits();
         assertThat(dataSplits).hasSize(1);
         dataSplit = dataSplits.get(0);
-        assertThat(dataSplit.dataFiles()).hasSize(2);
-        DataFileMeta meta0 = dataSplit.dataFiles().get(0);
-        DataFileMeta meta1 = dataSplit.dataFiles().get(1);
+        assertThat(dataSplit.dataFileMetas()).hasSize(2);
+        DataFileMeta meta0 = dataSplit.dataFileMetas().get(0);
+        DataFileMeta meta1 = dataSplit.dataFileMetas().get(1);
         assertThat(dataSplit.indexFiles())
                 .hasValue(
                         Arrays.asList(

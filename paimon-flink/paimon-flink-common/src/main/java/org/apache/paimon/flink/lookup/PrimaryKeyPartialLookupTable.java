@@ -298,7 +298,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
             BinaryRow partition = split.partition();
             int bucket = split.bucket();
             List<DataFileMeta> before = split.beforeFiles();
-            List<DataFileMeta> after = split.dataFiles();
+            List<DataFileMeta> after = split.dataFileMetas();
 
             tableQuery.refreshFiles(partition, bucket, before, after);
             Integer totalBuckets = split.totalBuckets();

@@ -112,7 +112,7 @@ case class PaimonScan(
           // - `Split` is not rawConvertible so that the merge read can happen
           // - `Split` only contains one data file so it always sorted even without merge read
           splits.size < 2 && splits.forall {
-            split => !split.rawConvertible() || split.dataFiles().size() < 2
+            split => !split.rawConvertible() || split.dataFileMetas().size() < 2
           }
       }
     if (!allSplitsKeepOrdering) {

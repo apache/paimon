@@ -179,7 +179,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         // assert level 0
         DataSplit split = (DataSplit) table.newScan().plan().splits().get(0);
-        DataFileMeta file = split.dataFiles().get(0);
+        DataFileMeta file = split.dataFileMetas().get(0);
         assertThat(file.level()).isEqualTo(0);
         assertThat(file.valueStatsCols()).isEmpty();
 
@@ -198,7 +198,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         }
 
         // assert level 5
-        file = ((DataSplit) table.newScan().plan().splits().get(0)).dataFiles().get(0);
+        file = ((DataSplit) table.newScan().plan().splits().get(0)).dataFileMetas().get(0);
         assertThat(file.level()).isEqualTo(5);
         assertThat(file.valueStats().maxValues().getFieldCount()).isGreaterThan(4);
     }
@@ -887,7 +887,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
-        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        assertThat(((DataSplit) splits.get(0)).dataFileMetas().size()).isEqualTo(2);
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -1048,7 +1048,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         List<Split> splits =
                 toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
 
-        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFileMetas().size()).isEqualTo(1);
     }
 
     @Test
@@ -1219,7 +1219,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         SnapshotReader snapshotReader = table.newSnapshotReader().withMode(ScanMode.DELTA);
         List<DataSplit> splits0 = snapshotReader.read().dataSplits();
         assertThat(splits0).hasSize(1);
-        assertThat(splits0.get(0).dataFiles()).hasSize(1);
+        assertThat(splits0.get(0).dataFileMetas()).hasSize(1);
 
         write.write(rowData(1, 10, 1000L));
         write.write(rowData(1, 20, 2000L));
@@ -1230,9 +1230,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         List<DataSplit> splits1 = snapshotReader.read().dataSplits();
         assertThat(splits1).hasSize(1);
-        assertThat(splits1.get(0).dataFiles()).hasSize(1);
-        assertThat(splits1.get(0).dataFiles().get(0).fileName())
-                .isNotEqualTo(splits0.get(0).dataFiles().get(0).fileName());
+        assertThat(splits1.get(0).dataFileMetas()).hasSize(1);
+        assertThat(splits1.get(0).dataFileMetas().get(0).fileName())
+                .isNotEqualTo(splits0.get(0).dataFileMetas().get(0).fileName());
         write.close();
         commit.close();
     }
@@ -2037,7 +2037,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         Predicate filter = builder.equal(0, 1);
         int files =
                 table.newScan().withFilter(filter).plan().splits().stream()
-                        .mapToInt(split -> ((DataSplit) split).dataFiles().size())
+                        .mapToInt(split -> ((DataSplit) split).dataFileMetas().size())
                         .sum();
         assertThat(files).isEqualTo(3);
 
@@ -2045,7 +2045,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         filter = and(filter, builder.equal(2, 110L));
         files =
                 table.newScan().withFilter(filter).plan().splits().stream()
-                        .mapToInt(split -> ((DataSplit) split).dataFiles().size())
+                        .mapToInt(split -> ((DataSplit) split).dataFileMetas().size())
                         .sum();
         assertThat(files).isEqualTo(1);
 
@@ -2086,11 +2086,11 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         // split1[file1], split2[file2], split3[file3, file4]
         List<DataSplit> dataSplits = table.newSnapshotReader().read().dataSplits();
         assertThat(dataSplits).hasSize(3);
-        assertThat(dataSplits.get(0).dataFiles()).hasSize(1);
+        assertThat(dataSplits.get(0).dataFileMetas()).hasSize(1);
         assertThat(dataSplits.get(0).convertToRawFiles()).isPresent();
-        assertThat(dataSplits.get(1).dataFiles()).hasSize(1);
+        assertThat(dataSplits.get(1).dataFileMetas()).hasSize(1);
         assertThat(dataSplits.get(1).convertToRawFiles()).isPresent();
-        assertThat(dataSplits.get(2).dataFiles()).hasSize(2);
+        assertThat(dataSplits.get(2).dataFileMetas()).hasSize(2);
         assertThat(dataSplits.get(2).convertToRawFiles()).isEmpty();
 
         Function<InternalRow, String> rowDataToString =
@@ -2114,7 +2114,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         // split1[compactedFile]
         dataSplits = table.newSnapshotReader().read().dataSplits();
         assertThat(dataSplits).hasSize(1);
-        assertThat(dataSplits.get(0).dataFiles()).hasSize(1);
+        assertThat(dataSplits.get(0).dataFileMetas()).hasSize(1);
         assertThat(dataSplits.get(0).convertToRawFiles()).isPresent();
 
         result = getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);

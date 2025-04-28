@@ -309,8 +309,8 @@ public class IcebergCommitCallback implements CommitCallback {
             DataSplit dataSplit, long snapshotId, SchemaCache schemaCache) {
         List<IcebergManifestEntry> result = new ArrayList<>();
         List<RawFile> rawFiles = dataSplit.convertToRawFiles().get();
-        for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
-            DataFileMeta paimonFileMeta = dataSplit.dataFiles().get(i);
+        for (int i = 0; i < dataSplit.dataFileMetas().size(); i++) {
+            DataFileMeta paimonFileMeta = dataSplit.dataFileMetas().get(i);
             RawFile rawFile = rawFiles.get(i);
             IcebergDataFileMeta fileMeta =
                     IcebergDataFileMeta.create(

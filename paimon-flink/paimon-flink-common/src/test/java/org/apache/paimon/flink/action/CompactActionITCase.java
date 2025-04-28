@@ -83,10 +83,10 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         for (DataSplit split : splits) {
             if (split.partition().getInt(1) == 15) {
                 // compacted
-                assertThat(split.dataFiles().size()).isEqualTo(1);
+                assertThat(split.dataFileMetas().size()).isEqualTo(1);
             } else {
                 // not compacted
-                assertThat(split.dataFiles().size()).isEqualTo(2);
+                assertThat(split.dataFileMetas().size()).isEqualTo(2);
             }
         }
     }
@@ -225,10 +225,10 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         for (DataSplit split : splits) {
             if (split.partition().getInt(1) == 15) {
                 // compacted
-                assertThat(split.dataFiles().size()).isEqualTo(1);
+                assertThat(split.dataFileMetas().size()).isEqualTo(1);
             } else {
                 // not compacted
-                assertThat(split.dataFiles().size()).isEqualTo(3);
+                assertThat(split.dataFileMetas().size()).isEqualTo(3);
             }
         }
     }

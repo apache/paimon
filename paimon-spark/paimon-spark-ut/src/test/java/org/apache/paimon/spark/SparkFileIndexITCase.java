@@ -193,7 +193,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
             DataFilePathFactory dataFilePathFactory =
                     pathFactory.createDataFilePathFactory(
                             dataSplit.partition(), dataSplit.bucket());
-            for (DataFileMeta dataFileMeta : dataSplit.dataFiles()) {
+            for (DataFileMeta dataFileMeta : dataSplit.dataFileMetas()) {
                 TableSchema tableSchema = schemaManager.schema(dataFileMeta.schemaId());
                 List<String> indexFiles =
                         dataFileMeta.extraFiles().stream()

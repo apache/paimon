@@ -81,7 +81,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       splits.forEach(
         split => {
           Assertions
-            .assertThat(split.dataFiles.size)
+            .assertThat(split.dataFileMetas.size)
             .isEqualTo(if (split.partition().getString(0).toString == "p2") 2 else 1)
         })
     }
@@ -646,11 +646,11 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
           for (dataSplit: DataSplit <- dataSplits) {
             if (dataSplit.partition().getInt(1) == 0) {
               Assertions
-                .assertThat(dataSplit.dataFiles().size())
+                .assertThat(dataSplit.dataFileMetas().size())
                 .isEqualTo(3)
             } else {
               Assertions
-                .assertThat(dataSplit.dataFiles().size())
+                .assertThat(dataSplit.dataFileMetas().size())
                 .isEqualTo(1)
             }
           }
@@ -685,11 +685,11 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     for (dataSplit: DataSplit <- dataSplits) {
       if (dataSplit.partition().getInt(1) == 0) {
         Assertions
-          .assertThat(dataSplit.dataFiles().size())
+          .assertThat(dataSplit.dataFileMetas().size())
           .isEqualTo(3)
       } else {
         Assertions
-          .assertThat(dataSplit.dataFiles().size())
+          .assertThat(dataSplit.dataFileMetas().size())
           .isEqualTo(1)
       }
     }

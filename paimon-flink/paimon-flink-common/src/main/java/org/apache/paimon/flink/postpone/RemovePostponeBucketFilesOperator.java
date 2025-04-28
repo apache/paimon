@@ -48,7 +48,7 @@ public class RemovePostponeBucketFilesOperator extends BoundedOneInputOperator<S
                         dataSplit.totalBuckets(),
                         DataIncrement.emptyIncrement(),
                         new CompactIncrement(
-                                dataSplit.dataFiles(),
+                                dataSplit.dataFileMetas(),
                                 Collections.emptyList(),
                                 Collections.emptyList()));
         output.collect(

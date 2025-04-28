@@ -160,7 +160,7 @@ public class CompactionMetricsTest {
             for (Split split : table.newScan().plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
                 totalFileSizes[dataSplit.bucket()] +=
-                        dataSplit.dataFiles().stream().mapToLong(DataFileMeta::fileSize).sum();
+                        dataSplit.dataFileMetas().stream().mapToLong(DataFileMeta::fileSize).sum();
             }
 
             CompactionMetrics metrics =

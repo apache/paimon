@@ -250,14 +250,14 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             return createNoMergeReader(
                     split.partition(),
                     split.bucket(),
-                    split.dataFiles(),
+                    split.dataFileMetas(),
                     split.deletionFiles().orElse(null),
                     split.isStreaming());
         } else {
             return createMergeReader(
                     split.partition(),
                     split.bucket(),
-                    split.dataFiles(),
+                    split.dataFileMetas(),
                     split.deletionFiles().orElse(null),
                     forceKeepDelete);
         }
