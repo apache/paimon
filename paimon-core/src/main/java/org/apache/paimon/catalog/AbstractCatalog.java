@@ -522,19 +522,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public boolean functionExists(Identifier identifier) {
-        return false;
-    }
-
-    @Override
-    public void createFunction(Identifier identifier, Function function)
+    public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
             throws FunctionAlreadyExistException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void alterFunction(Identifier identifier, Function function, boolean ignoreIfNotExists)
-            throws FunctionNotExistException {
         throw new UnsupportedOperationException();
     }
 

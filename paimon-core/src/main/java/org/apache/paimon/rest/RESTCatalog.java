@@ -30,6 +30,8 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.function.FunctionImpl;
+import org.apache.paimon.function.FunctionSchema;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -48,6 +50,7 @@ import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
@@ -59,12 +62,14 @@ import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -779,34 +784,72 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public List<String> listFunctions() {
-        return emptyList();
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(
+                                resourcePaths.functions(),
+                                queryParams,
+                                ListFunctionsResponse.class,
+                                restAuthFunction));
     }
 
     @Override
     public org.apache.paimon.function.Function getFunction(Identifier identifier)
             throws FunctionNotExistException {
-        return null;
+        try {
+            GetFunctionResponse response =
+                    client.get(
+                            resourcePaths.functionDetails(identifier.getObjectName()),
+                            GetFunctionResponse.class,
+                            restAuthFunction);
+            return new FunctionImpl(identifier, response.getId(), response.getSchema());
+        } catch (NoSuchResourceException e) {
+            throw new FunctionNotExistException(identifier, e);
+        }
     }
 
     @Override
-    public boolean functionExists(Identifier identifier) {
-        return false;
-    }
-
-    @Override
-    public void createFunction(Identifier identifier, org.apache.paimon.function.Function function)
-            throws FunctionAlreadyExistException {}
-
-    @Override
-    public void alterFunction(
+    public void createFunction(
             Identifier identifier,
             org.apache.paimon.function.Function function,
-            boolean ignoreIfNotExists)
-            throws FunctionNotExistException {}
+            boolean ignoreIfExists)
+            throws FunctionAlreadyExistException {
+        try {
+            FunctionSchema schema =
+                    new FunctionSchema(
+                            function.inputParams(),
+                            function.returnParams(),
+                            function.isDeterministic(),
+                            function.definitions(),
+                            function.comment(),
+                            function.options());
+            client.post(
+                    resourcePaths.functions(),
+                    new CreateFunctionRequest(identifier, schema),
+                    restAuthFunction);
+        } catch (AlreadyExistsException e) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new FunctionAlreadyExistException(identifier, e);
+        }
+    }
 
     @Override
     public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
-            throws FunctionNotExistException {}
+            throws FunctionNotExistException {
+        try {
+            client.get(
+                    resourcePaths.function(identifier.getObjectName()),
+                    GetFunctionResponse.class,
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new FunctionNotExistException(identifier, e);
+        }
+    }
 
     @Override
     public View getView(Identifier identifier) throws ViewNotExistException {

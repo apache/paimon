@@ -47,6 +47,12 @@ public class FunctionImpl implements Function {
                         inputParams, returnParams, deterministic, definitions, comment, options);
     }
 
+    public FunctionImpl(Identifier identifier, String uuid, FunctionSchema schema) {
+        this.identifier = identifier;
+        this.uuid = uuid;
+        this.schema = schema;
+    }
+
     @Override
     public String uuid() {
         return this.uuid;

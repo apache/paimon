@@ -632,32 +632,15 @@ public interface Catalog extends AutoCloseable {
     Function getFunction(Identifier identifier) throws FunctionNotExistException;
 
     /**
-     * Check if function exists.
-     *
-     * @param identifier
-     */
-    boolean functionExists(Identifier identifier);
-
-    /**
      * Create function.
      *
      * @param identifier
      * @param function
+     * @param ignoreIfExists
      * @throws FunctionAlreadyExistException
      */
-    void createFunction(Identifier identifier, Function function)
+    void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
             throws FunctionAlreadyExistException;
-
-    /**
-     * Alter function.
-     *
-     * @param identifier
-     * @param function
-     * @param ignoreIfNotExists
-     * @throws FunctionNotExistException
-     */
-    void alterFunction(Identifier identifier, Function function, boolean ignoreIfNotExists)
-            throws FunctionNotExistException;
 
     /**
      * Drop function.

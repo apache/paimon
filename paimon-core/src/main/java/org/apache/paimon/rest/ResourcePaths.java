@@ -36,6 +36,8 @@ public class ResourcePaths {
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
     protected static final String ROLLBACK = "rollback";
+    protected static final String FUNCTIONS = "functions";
+    protected static final String FUNCTION_DETAILS = "function-details";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
 
@@ -201,5 +203,17 @@ public class ResourcePaths {
 
     public String renameView() {
         return SLASH.join(V1, prefix, VIEWS, "rename");
+    }
+
+    public String functions() {
+        return SLASH.join(V1, prefix, FUNCTIONS);
+    }
+
+    public String function(String functionName) {
+        return SLASH.join(V1, prefix, FUNCTIONS, encodeString(functionName));
+    }
+
+    public String functionDetails(String functionName) {
+        return SLASH.join(V1, prefix, FUNCTIONS, encodeString(functionName), FUNCTION_DETAILS);
     }
 }
