@@ -885,7 +885,7 @@ public class RESTCatalogServer {
 
     private boolean matchNamePattern(String name, String pattern) {
         RESTUtil.validatePrefixSqlPattern(pattern);
-        String regex = toRegex(pattern);
+        String regex = sqlPatternToRegex(pattern);
         return Pattern.compile(regex).matcher(name).matches();
     }
 
@@ -1758,7 +1758,7 @@ public class RESTCatalogServer {
                                 ));
     }
 
-    private String toRegex(String pattern) {
+    private String sqlPatternToRegex(String pattern) {
         StringBuilder regex = new StringBuilder();
         boolean escaped = false;
 

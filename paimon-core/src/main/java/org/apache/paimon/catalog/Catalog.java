@@ -164,9 +164,9 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All table details will
-     *     be returned if not set or empty. Currently, only prefix matching is supported. Note
-     *     please escape the underline if you want to match it exactly.
+     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All tables will be
+     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
+     *     escape the underline if you want to match it exactly.
      * @return a list of the names of tables with provided page size in this database and next page
      *     token, or a list of the names of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
@@ -191,9 +191,9 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
-     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All tables will be
-     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
-     *     escape the underline if you want to match it exactly.
+     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All table details will
+     *     be returned if not set or empty. Currently, only prefix matching is supported. Note
+     *     please escape the underline if you want to match it exactly.
      * @return a list of the table details with provided page size in this database and next page
      *     token, or a list of the details of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
@@ -322,6 +322,9 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param partitionNamePattern A sql LIKE pattern (% and _) for partition names. All partitions
+     *     will be * returned if not set or empty. Currently, only prefix matching is supported.
+     *     Note please * escape the underline if you want to match it exactly.
      * @return a list of the partitions with provided page size(@param maxResults) in this table and
      *     next page token, or a list of all partitions of the table if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
