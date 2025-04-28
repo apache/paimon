@@ -21,14 +21,15 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
 import org.apache.paimon.fs.Path
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.FileStoreTable
+
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.columnar.InMemoryTableScanExec
 import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2Relation}
-import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
 import org.apache.spark.sql.functions.lit
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.util.QueryExecutionListener
