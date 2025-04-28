@@ -128,21 +128,19 @@ public class DeletionVectorIndexFileWriter {
             if (writeVersionId == BitmapDeletionVector.VERSION) {
                 Preconditions.checkArgument(
                         deletionVector instanceof BitmapDeletionVector,
-                        String.format(
-                                "write version id is %s, but deletionVector is not an instance of %s, actual class is %s.",
-                                writeVersionId,
-                                BitmapDeletionVector.class.getName(),
-                                deletionVector.getClass().getName()));
+                        "write version id is %s, but deletionVector is not an instance of %s, actual class is %s.",
+                        writeVersionId,
+                        BitmapDeletionVector.class.getName(),
+                        deletionVector.getClass().getName());
 
                 writeV1(key, deletionVector);
             } else if (writeVersionId == Bitmap64DeletionVector.VERSION) {
                 Preconditions.checkArgument(
                         deletionVector instanceof Bitmap64DeletionVector,
-                        String.format(
-                                "write version id is %s, but deletionVector is not an instance of %s, actual class is %s.",
-                                writeVersionId,
-                                Bitmap64DeletionVector.class.getName(),
-                                deletionVector.getClass().getName()));
+                        "write version id is %s, but deletionVector is not an instance of %s, actual class is %s.",
+                        writeVersionId,
+                        Bitmap64DeletionVector.class.getName(),
+                        deletionVector.getClass().getName());
 
                 writeV2(key, deletionVector);
             }

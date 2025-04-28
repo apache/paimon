@@ -1511,7 +1511,7 @@ public class CoreOptions implements Serializable {
                     .withDescription("The target size of deletion vector index file.");
 
     public static final ConfigOption<Integer> DELETION_VECTOR_VERSION =
-            key("deletion-vector.version")
+            key("deletion-vectors.version")
                     .intType()
                     .defaultValue(2)
                     .withDescription(

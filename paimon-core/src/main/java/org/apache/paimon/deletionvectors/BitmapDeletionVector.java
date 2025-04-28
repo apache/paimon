@@ -31,9 +31,11 @@ import java.util.Objects;
  * not exceeding {@link RoaringBitmap32#MAX_VALUE}.
  */
 public class BitmapDeletionVector implements DeletionVector {
+
     public static final int VERSION = 1;
 
     public static final int MAGIC_NUMBER = 1581511376;
+    public static final int MAGIC_NUMBER_SIZE_BYTES = 4;
 
     private final RoaringBitmap32 roaringBitmap;
 
@@ -83,7 +85,7 @@ public class BitmapDeletionVector implements DeletionVector {
     }
 
     @Override
-    public int dvVersion() {
+    public int version() {
         return VERSION;
     }
 

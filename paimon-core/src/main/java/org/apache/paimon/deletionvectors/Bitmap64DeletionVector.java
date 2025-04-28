@@ -40,7 +40,7 @@ public class Bitmap64DeletionVector implements DeletionVector {
     public static final int MAGIC_NUMBER = 1681511377;
     public static final int LENGTH_SIZE_BYTES = 4;
     public static final int CRC_SIZE_BYTES = 4;
-    private static final int MAGIC_NUMBER_SIZE_BYTES = 4;
+    public static final int MAGIC_NUMBER_SIZE_BYTES = 4;
     private static final int BITMAP_DATA_OFFSET = 4;
 
     private final OptimizedRoaringBitmap64 roaringBitmap;
@@ -90,7 +90,7 @@ public class Bitmap64DeletionVector implements DeletionVector {
     }
 
     @Override
-    public int dvVersion() {
+    public int version() {
         return VERSION;
     }
 
@@ -117,6 +117,13 @@ public class Bitmap64DeletionVector implements DeletionVector {
         int crcOffset = LENGTH_SIZE_BYTES + bitmapDataLength;
         int expectedCrc = buffer.getInt(crcOffset);
         Preconditions.checkArgument(crc == expectedCrc, "Invalid CRC");
+        return new Bitmap64DeletionVector(bitmap);
+    }
+
+    public static DeletionVector deserializeFromBitmapDataBytes(byte[] bytes) {
+        ByteBuffer bitmapData = ByteBuffer.wrap(bytes);
+        bitmapData.order(ByteOrder.LITTLE_ENDIAN);
+        OptimizedRoaringBitmap64 bitmap = OptimizedRoaringBitmap64.deserialize(bitmapData);
         return new Bitmap64DeletionVector(bitmap);
     }
 
@@ -171,6 +178,12 @@ public class Bitmap64DeletionVector implements DeletionVector {
         CRC32 crc = new CRC32();
         crc.update(bytes, BITMAP_DATA_OFFSET, bitmapDataLength);
         return (int) crc.getValue();
+    }
+
+    protected static int toLittleEndianInt(int bigEndianInt) {
+        byte[] bytes = ByteBuffer.allocate(4).putInt(bigEndianInt).array();
+
+        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
     }
 
     @Override

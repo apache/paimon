@@ -102,7 +102,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
-                                + "'deletion-vector.version' = '%s')",
+                                + "'deletion-vectors.version' = '%s')",
                         changelogProducer, dvVersion));
 
         sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
@@ -155,7 +155,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
-                                + "'deletion-vector.version' = '%s')",
+                                + "'deletion-vectors.version' = '%s')",
                         changelogProducer, dvVersion));
 
         sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
@@ -188,7 +188,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         sql(
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, v INT) "
-                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', 'deletion-vector.version' = '%s', "
+                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', 'deletion-vectors.version' = '%s', "
                                 + "'merge-engine'='aggregation', 'fields.v.aggregate-function'='sum')",
                         changelogProducer, dvVersion));
 
@@ -230,7 +230,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, v1 STRING, v2 STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
-                                + "'deletion-vector.version' = '%s', 'merge-engine'='partial-update')",
+                                + "'deletion-vectors.version' = '%s', 'merge-engine'='partial-update')",
                         changelogProducer, dvVersion));
 
         sql(
@@ -275,7 +275,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, sequence INT, name STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'sequence.field' = 'sequence', 'changelog-producer' = '%s', "
-                                + "'deletion-vector.version' = '%s')",
+                                + "'deletion-vectors.version' = '%s')",
                         changelogProducer, dvVersion));
 
         sql("INSERT INTO T VALUES (1, 1, '1'), (2, 1, '2')");
@@ -292,7 +292,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) WITH ("
                         + "'deletion-vectors.enabled' = 'true', "
-                        + "'deletion-vector.version' = '"
+                        + "'deletion-vectors.version' = '"
                         + dvVersion
                         + "', "
                         + "'snapshot.num-retained.min' = '1', "

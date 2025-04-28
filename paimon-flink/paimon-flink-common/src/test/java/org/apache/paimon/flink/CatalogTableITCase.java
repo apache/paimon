@@ -1144,7 +1144,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql(
                 String.format(
                         "CREATE TABLE T (pt STRING, a INT, b STRING, PRIMARY KEY (pt, a) NOT ENFORCED)"
-                                + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true', 'deletion-vector.version' = '%s')",
+                                + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true', 'deletion-vectors.version' = '%s')",
                         dvVersion));
         sql(
                 "INSERT INTO T VALUES ('2024-10-01', 1, 'aaaaaaaaaaaaaaaaaaa'), ('2024-10-01', 2, 'b'), ('2024-10-01', 3, 'c')");

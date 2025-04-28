@@ -594,7 +594,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql(
                 String.format(
                         "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true', "
-                                + "'deletion-vector.version' = '%s') ",
+                                + "'deletion-vectors.version' = '%s') ",
                         dvVersion));
         sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
 
@@ -623,7 +623,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
                                 + "'file.format' = 'avro', "
                                 + "'deletion-vectors.enabled' = 'true', "
-                                + "'deletion-vector.version' = '%s')",
+                                + "'deletion-vectors.version' = '%s')",
                         dvVersion));
         sql("INSERT INTO count_pk_dv VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
         sql("INSERT INTO count_pk_dv VALUES (1, 'e')");

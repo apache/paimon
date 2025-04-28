@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Optional;
 
@@ -85,7 +86,7 @@ public interface DeletionVector {
     long getCardinality();
 
     /** @return the version of the deletion vector. */
-    int dvVersion();
+    int version();
 
     /**
      * Serializes the deletion vector to a byte array for storage or transmission.
@@ -113,41 +114,61 @@ public interface DeletionVector {
     static DeletionVector read(FileIO fileIO, DeletionFile deletionFile) throws IOException {
         Path path = new Path(deletionFile.path());
         try (SeekableInputStream input = fileIO.newInputStream(path)) {
-            // read dv version
-            int version = input.read();
             input.seek(deletionFile.offset());
             DataInputStream dis = new DataInputStream(input);
+            // read bitmap length
+            int bitmapLength = dis.readInt();
+            // read magic number
+            int magicNumber = dis.readInt();
+            // v2 dv serializes magic number in little endian
+            int magicNumberInLittleEndian = Bitmap64DeletionVector.toLittleEndianInt(magicNumber);
 
-            if (version == BitmapDeletionVector.VERSION) {
-                // read v1 deletion vector
-                int actualSize = dis.readInt();
-                if (actualSize != deletionFile.length()) {
+            if (magicNumber == BitmapDeletionVector.MAGIC_NUMBER) {
+                if (bitmapLength != deletionFile.length()) {
                     throw new RuntimeException(
                             "Size not match, actual size: "
-                                    + actualSize
+                                    + bitmapLength
                                     + ", expected size: "
                                     + deletionFile.length()
                                     + ", file path: "
                                     + path);
                 }
 
-                byte[] bytes = new byte[actualSize];
+                // magic number has been read
+                byte[] bytes =
+                        new byte[bitmapLength - BitmapDeletionVector.MAGIC_NUMBER_SIZE_BYTES];
                 dis.readFully(bytes);
-                return BitmapDeletionVector.deserializeFromBytes(bytes);
-            } else if (version == Bitmap64DeletionVector.VERSION) {
-                // read v2 deletion vector
-                byte[] bytes = new byte[(int) deletionFile.length()];
-                dis.readFully(bytes);
+                ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                return BitmapDeletionVector.deserializeFromByteBuffer(buffer);
+            } else if (magicNumberInLittleEndian == Bitmap64DeletionVector.MAGIC_NUMBER) {
+                long expectedBitmapLength =
+                        deletionFile.length()
+                                - Bitmap64DeletionVector.LENGTH_SIZE_BYTES
+                                - Bitmap64DeletionVector.CRC_SIZE_BYTES;
 
-                return Bitmap64DeletionVector.deserializeFromBytes(bytes);
+                if (bitmapLength != expectedBitmapLength) {
+                    throw new RuntimeException(
+                            "Size not match, actual size: "
+                                    + bitmapLength
+                                    + ", expected size: "
+                                    + expectedBitmapLength
+                                    + ", file path: "
+                                    + path);
+                }
+
+                // magic number have been read
+                byte[] bytes =
+                        new byte[bitmapLength - Bitmap64DeletionVector.MAGIC_NUMBER_SIZE_BYTES];
+                dis.readFully(bytes);
+                return Bitmap64DeletionVector.deserializeFromBitmapDataBytes(bytes);
             } else {
                 throw new RuntimeException(
-                        "Version not match, actual version: "
-                                + version
-                                + ", expected version: "
-                                + BitmapDeletionVector.VERSION
-                                + " or "
-                                + Bitmap64DeletionVector.VERSION);
+                        "Invalid magic number: "
+                                + magicNumber
+                                + ", v1 dv magic number: "
+                                + BitmapDeletionVector.MAGIC_NUMBER
+                                + ", v2 magic number: "
+                                + Bitmap64DeletionVector.MAGIC_NUMBER);
             }
         }
     }

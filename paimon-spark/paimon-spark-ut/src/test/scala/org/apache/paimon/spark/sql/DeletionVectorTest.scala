@@ -21,15 +21,14 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
 import org.apache.paimon.fs.Path
-import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
+import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
 import org.apache.paimon.table.FileStoreTable
-
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.columnar.InMemoryTableScanExec
 import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2Relation}
+import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
 import org.apache.spark.sql.functions.lit
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.util.QueryExecutionListener
@@ -110,7 +109,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           spark.sql(
             s"""
                |CREATE TABLE target (a INT, b INT, c STRING)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vector.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
           spark.sql(
             "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
@@ -162,7 +161,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                        |CREATE TABLE T (id INT, name STRING)
                        |TBLPROPERTIES (
                        |  'deletion-vectors.enabled' = 'true',
-                       |  'deletion-vector.version' = '$dvVersion',
+                       |  'deletion-vectors.version' = '$dvVersion',
                        |  'bucket' = '$bucket' $bucketKey)
                        |""".stripMargin)
 
@@ -235,7 +234,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
             s"""
                |CREATE TABLE T (id INT, name STRING, pt STRING)
                |PARTITIONED BY(pt)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vector.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -322,7 +321,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           spark.sql(
             s"""
                |CREATE TABLE T (id INT, name STRING)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vector.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -379,7 +378,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
             s"""
                |CREATE TABLE T (id INT, name STRING, pt STRING)
                |PARTITIONED BY(pt)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vector.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -454,7 +453,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                    | 'primary-key' = 'id',
                    | 'file.format' = 'parquet',
                    | 'deletion-vectors.enabled' = 'true',
-                   | 'deletion-vector.version' = '$dvVersion'
+                   | 'deletion-vectors.version' = '$dvVersion'
                    |)
                    |""".stripMargin)
       val table = loadTable("T")
@@ -522,7 +521,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                  |TBLPROPERTIES (
                  | 'primary-key' = 'id, pt',
                  | 'deletion-vectors.enabled' = 'true',
-                 | 'deletion-vector.version' = '$dvVersion',
+                 | 'deletion-vectors.version' = '$dvVersion',
                  | 'bucket' = '$bucket',
                  | 'changelog-producer' = '$changelogProducer',
                  | 'file.format' = '$format',
@@ -537,7 +536,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                  |TBLPROPERTIES (
                  | 'primary-key' = 'id, pt',
                  | 'deletion-vectors.enabled' = 'false',
-                 | 'deletion-vector.version' = '$dvVersion'
+                 | 'deletion-vectors.version' = '$dvVersion'
                  |)
                  |PARTITIONED BY (pt)
                  |""".stripMargin)
@@ -608,7 +607,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                  |TBLPROPERTIES (
                  | 'primary-key' = 'id',
                  | 'deletion-vectors.enabled' = 'true',
-                 | 'deletion-vector.version' = '$dvVersion',
+                 | 'deletion-vectors.version' = '$dvVersion',
                  | 'file.format' = '$format',
                  | 'file.block-size' = '${blockSize}b',
                  | 'bucket' = '1'
@@ -649,7 +648,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
            |CREATE TABLE T (id INT)
            |TBLPROPERTIES (
            | 'deletion-vectors.enabled' = 'true',
-           | 'deletion-vector.version' = '$dvVersion',
+           | 'deletion-vectors.version' = '$dvVersion',
            | 'bucket-key' = 'id',
            | 'bucket' = '1'
            |)
@@ -672,7 +671,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
            |CREATE TABLE T (id INT)
            |TBLPROPERTIES (
            | 'deletion-vectors.enabled' = 'true',
-           | 'deletion-vector.version' = '$dvVersion',
+           | 'deletion-vectors.version' = '$dvVersion',
            | 'bucket-key' = 'id',
            | 'bucket' = '1',
            | 'data-file.path-directory' = 'data'
