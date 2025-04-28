@@ -1140,6 +1140,12 @@ public abstract class CatalogTestBase {
                         () ->
                                 catalog.listViewsPaged(
                                         "non_existing_db", finalMaxResults, pageToken, null));
+
+        assertThatExceptionOfType(UnsupportedOperationException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listViewsPaged(
+                                        databaseName, finalMaxResults, pageToken, "view%"));
     }
 
     @Test

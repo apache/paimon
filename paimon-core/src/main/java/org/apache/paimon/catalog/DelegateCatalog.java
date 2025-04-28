@@ -142,6 +142,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsNamePatternFilter() {
+        return wrapped.supportsNamePatternFilter();
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return wrapped.supportsVersionManagement();
     }

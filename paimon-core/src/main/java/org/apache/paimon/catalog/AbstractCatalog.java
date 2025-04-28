@@ -244,6 +244,7 @@ public abstract class AbstractCatalog implements Catalog {
     public PagedList<String> listTablesPaged(
             String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, tableNamePattern);
         return new PagedList<>(listTables(databaseName), null);
     }
 
@@ -251,6 +252,7 @@ public abstract class AbstractCatalog implements Catalog {
     public PagedList<Table> listTableDetailsPaged(
             String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, tableNamePattern);
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
                     SystemTableLoader.loadGlobalTableNames().stream()

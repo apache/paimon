@@ -491,7 +491,7 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * Whether this catalog supports liat objects paged. If not, corresponding methods will fall
+     * Whether this catalog supports list objects paged. If not, corresponding methods will fall
      * back to listing all objects. For example, {@link #listTablesPaged(String, Integer, String,
      * String)} would fall back to {@link #listTables(String)}.
      *
@@ -505,6 +505,23 @@ public interface Catalog extends AutoCloseable {
      * </ul>
      */
     boolean supportsListObjectsPaged();
+
+    /**
+     * Whether this catalog supports name pattern filter when list objects paged. If not,
+     * corresponding methods will throw exception if name pattern provided.
+     *
+     * <ul>
+     *   <li>{@link #listDatabasesPaged(Integer, String)}.
+     *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
+     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listPartitionsPaged(Identifier, Integer, String)}.
+     * </ul>
+     */
+    default boolean supportsNamePatternFilter() {
+        return false;
+    }
 
     // ==================== Version management methods ==========================
 

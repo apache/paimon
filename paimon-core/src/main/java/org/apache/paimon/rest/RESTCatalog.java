@@ -405,6 +405,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsNamePatternFilter() {
+        return true;
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return true;
     }
