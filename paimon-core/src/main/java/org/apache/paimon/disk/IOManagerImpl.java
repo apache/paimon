@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 /** The facade for the provided I/O manager services. */
 public class IOManagerImpl implements IOManager {
 
-    protected static final Logger LOG = LoggerFactory.getLogger(IOManager.class);
+    protected static final Logger LOG = LoggerFactory.getLogger(IOManagerImpl.class);
 
     private static final String DIR_NAME_PREFIX = "io";
 
@@ -60,9 +60,7 @@ public class IOManagerImpl implements IOManager {
             LOG.info(
                     "Created a new {} for spilling of task related data to disk (joins, sorting, ...). Used directories:\n\t{}",
                     FileChannelManager.class.getSimpleName(),
-                    Arrays.stream(fileChannelManager.getPaths())
-                            .map(File::getAbsolutePath)
-                            .collect(Collectors.joining("\n\t")));
+                    getSpillingDirectoriesPathsString());
         }
     }
 
@@ -70,6 +68,12 @@ public class IOManagerImpl implements IOManager {
     @Override
     public void close() throws Exception {
         fileChannelManager.close();
+        if (LOG.isInfoEnabled()) {
+            LOG.info(
+                    "Closed {} with directories:\n\t{}",
+                    FileChannelManager.class.getSimpleName(),
+                    getSpillingDirectoriesPathsString());
+        }
     }
 
     @Override
@@ -127,6 +131,12 @@ public class IOManagerImpl implements IOManager {
             strings[i] = paths[i].getAbsolutePath();
         }
         return strings;
+    }
+
+    private String getSpillingDirectoriesPathsString() {
+        return Arrays.stream(fileChannelManager.getPaths())
+                .map(File::getAbsolutePath)
+                .collect(Collectors.joining("\n\t"));
     }
 
     @Override
