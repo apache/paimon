@@ -33,9 +33,11 @@ import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -138,7 +140,14 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTableScan newScan() {
-        return new ReadOptimizedTableBatchScan(wrapped.newScan());
+        if (wrapped instanceof FallbackReadFileStoreTable) {
+            return new ReadOptimizedTableBatchScan(wrapped.newScan());
+        }
+        return new DataTableBatchScan(
+                !wrapped.schema().primaryKeys().isEmpty(),
+                coreOptions(),
+                newSnapshotReader(),
+                DefaultValueAssigner.create(wrapped.schema()));
     }
 
     @Override
