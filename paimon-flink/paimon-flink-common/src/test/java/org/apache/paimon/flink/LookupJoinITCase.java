@@ -1071,4 +1071,35 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 11), Row.of(1, 12), Row.of(2, 22));
         iterator.close();
     }
+
+    @Test
+    public void testMaxPtAndOverwrite() throws Exception {
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt INT, k INT, v INT) "
+                        + "PARTITIONED BY (`pt`) WITH ("
+                        + "'bucket' = '2', "
+                        + "'bucket-key' = 'k', "
+                        + "'lookup.dynamic-partition' = 'max_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '99999 s', "
+                        + "'continuous.discovery-interval'='1 ms')");
+        sql(
+                "INSERT INTO PARTITIONED_DIM VALUES (1, 1, 101), (1, 2, 102), (2, 1, 201), (2, 2, 202)");
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        String query =
+                "SELECT T.i, D.v FROM T "
+                        + "LEFT JOIN PARTITIONED_DIM /*+ OPTIONS('scan.partitions' = 'max_pt()') */ "
+                        + "for system_time as of T.proctime AS D ON T.i = D.k";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(1, 201), Row.of(2, 202), Row.of(3, null));
+
+        sql(
+                "INSERT OVERWRITE PARTITIONED_DIM PARTITION (pt = 2) VALUES (1, 211), (2, 212), (3, 213)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(1, 211), Row.of(2, 212), Row.of(3, 213));
+    }
 }

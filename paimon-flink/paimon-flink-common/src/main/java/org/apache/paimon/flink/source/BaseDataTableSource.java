@@ -38,6 +38,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.BucketSpec;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -86,6 +87,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -409,7 +411,9 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
     private boolean supportBucketShufflePartitioner(
             List<String> joinKeyFieldNames, List<String> bucketKeyFieldNames) {
-        return BucketMode.HASH_FIXED.equals(((FileStoreTable) table).bucketMode())
+        BucketSpec bucketSpec = ((FileStoreTable) table).bucketSpec();
+        return bucketSpec.getBucketMode() == BucketMode.HASH_FIXED
+                && bucketSpec.getNumBuckets() != POSTPONE_BUCKET
                 && new HashSet<>(joinKeyFieldNames).containsAll(bucketKeyFieldNames);
     }
 }

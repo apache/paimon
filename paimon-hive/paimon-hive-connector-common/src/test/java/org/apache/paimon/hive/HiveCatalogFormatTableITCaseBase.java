@@ -18,13 +18,19 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.flink.FormatCatalogTable;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.utils.CompressUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.Rule;
@@ -40,6 +46,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -215,6 +222,31 @@ public abstract class HiveCatalogFormatTableITCaseBase {
                 .containsExactlyInAnyOrder(
                         Row.of(1, LocalDateTime.parse("2025-03-17T10:15:30")),
                         Row.of(2, LocalDateTime.parse("2025-03-18T10:15:30")));
+
+        // test compression
+        FormatCatalogTable catalogTable =
+                (FormatCatalogTable)
+                        tEnv.getCatalog(tEnv.getCurrentCatalog())
+                                .get()
+                                .getTable(new ObjectPath(tEnv.getCurrentDatabase(), tableName));
+        FormatTable table = catalogTable.table();
+        FileIO fileIO = table.fileIO();
+        String file =
+                Arrays.stream(fileIO.listStatus(new Path(table.location())))
+                        .filter(status -> !status.getPath().getName().startsWith("."))
+                        .findFirst()
+                        .get()
+                        .getPath()
+                        .toUri()
+                        .getPath();
+        CompressUtils.gzipCompressFile(file, file + ".gz");
+        fileIO.deleteQuietly(new Path(file));
+
+        assertThat(collect(String.format("SELECT * FROM %s", tableName)))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, LocalDateTime.parse("2025-03-17T10:15:30")),
+                        Row.of(2, LocalDateTime.parse("2025-03-18T10:15:30")));
+
         tEnv.executeSql(
                         String.format(
                                 "INSERT INTO %s VALUES (3, CAST('2025-03-19 10:15:30' AS TIMESTAMP))",
