@@ -22,6 +22,8 @@ import org.apache.paimon.utils.OptimizedRoaringBitmap64;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RoaringBitmap32;
 
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Objects;
@@ -34,8 +36,6 @@ import java.util.zip.CRC32;
  * <p>Mostly copied from iceberg.
  */
 public class Bitmap64DeletionVector implements DeletionVector {
-
-    public static final int VERSION = 2;
 
     public static final int MAGIC_NUMBER = 1681511377;
     public static final int LENGTH_SIZE_BYTES = 4;
@@ -90,12 +90,7 @@ public class Bitmap64DeletionVector implements DeletionVector {
     }
 
     @Override
-    public int version() {
-        return VERSION;
-    }
-
-    @Override
-    public byte[] serializeToBytes() {
+    public int serializeTo(DataOutputStream out) throws IOException {
         roaringBitmap.runLengthEncode(); // run-length encode the bitmap before serializing
         int bitmapDataLength = computeBitmapDataLength(roaringBitmap); // magic bytes + bitmap
         byte[] bytes = new byte[LENGTH_SIZE_BYTES + bitmapDataLength + CRC_SIZE_BYTES];
@@ -106,18 +101,8 @@ public class Bitmap64DeletionVector implements DeletionVector {
         int crc = computeChecksum(bytes, bitmapDataLength);
         buffer.putInt(crcOffset, crc);
         buffer.rewind();
-        return bytes;
-    }
-
-    public static DeletionVector deserializeFromBytes(byte[] bytes) {
-        ByteBuffer buffer = ByteBuffer.wrap(bytes);
-        int bitmapDataLength = readBitmapDataLength(buffer, bytes.length);
-        OptimizedRoaringBitmap64 bitmap = deserializeBitmap(bytes, bitmapDataLength);
-        int crc = computeChecksum(bytes, bitmapDataLength);
-        int crcOffset = LENGTH_SIZE_BYTES + bitmapDataLength;
-        int expectedCrc = buffer.getInt(crcOffset);
-        Preconditions.checkArgument(crc == expectedCrc, "Invalid CRC");
-        return new Bitmap64DeletionVector(bitmap);
+        out.write(bytes);
+        return bytes.length;
     }
 
     public static DeletionVector deserializeFromBitmapDataBytes(byte[] bytes) {
@@ -182,7 +167,6 @@ public class Bitmap64DeletionVector implements DeletionVector {
 
     protected static int toLittleEndianInt(int bigEndianInt) {
         byte[] bytes = ByteBuffer.allocate(4).putInt(bigEndianInt).array();
-
         return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
     }
 

@@ -243,7 +243,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                         bucketMode() == BucketMode.BUCKET_UNAWARE
                                 ? options.deletionVectorIndexFileTargetSize()
                                 : MemorySize.ofBytes(Long.MAX_VALUE),
-                        options.deletionVectorVersion()));
+                        options.deletionVectorBitmap64()));
     }
 
     @Override

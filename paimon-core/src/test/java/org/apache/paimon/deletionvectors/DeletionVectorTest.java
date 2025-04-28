@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DeletionVector}. */
 public class DeletionVectorTest {
+
     @Test
     public void testBitmapDeletionVector() {
         HashSet<Integer> toDelete = new HashSet<>();
@@ -51,7 +52,7 @@ public class DeletionVectorTest {
         }
         DeletionVector deserializedDeletionVector =
                 DeletionVector.deserializeFromBytes(
-                        deletionVector.serializeToBytes(), BitmapDeletionVector.VERSION);
+                        DeletionVector.serializeToBytes(deletionVector));
 
         assertThat(deletionVector.isEmpty()).isFalse();
         assertThat(deserializedDeletionVector.isEmpty()).isFalse();
@@ -88,7 +89,7 @@ public class DeletionVectorTest {
         }
         DeletionVector deserializedDeletionVector =
                 DeletionVector.deserializeFromBytes(
-                        deletionVector.serializeToBytes(), Bitmap64DeletionVector.VERSION);
+                        DeletionVector.serializeToBytes(deletionVector));
 
         assertThat(deletionVector.isEmpty()).isFalse();
         assertThat(deserializedDeletionVector.isEmpty()).isFalse();

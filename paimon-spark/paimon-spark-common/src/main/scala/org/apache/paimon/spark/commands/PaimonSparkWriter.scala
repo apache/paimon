@@ -25,6 +25,7 @@ import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
+import org.apache.paimon.fs.Path
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.FileKind
@@ -278,19 +279,18 @@ case class PaimonSparkWriter(table: FileStoreTable) {
    * deletion vectors; else, one index file will contains all deletion vector with the same
    * partition and bucket.
    */
-  def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVectors]): Seq[CommitMessage] = {
+  def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVector]): Seq[CommitMessage] = {
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
     val snapshot = table.snapshotManager().latestSnapshot()
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {
-        (_, iter: Iterator[SparkDeletionVectors]) =>
+        (_, iter: Iterator[SparkDeletionVector]) =>
           val indexHandler = table.store().newIndexFileHandler()
           var dvIndexFileMaintainer: BaseAppendDeleteFileMaintainer = null
           while (iter.hasNext) {
-            val sdv: SparkDeletionVectors = iter.next()
-            val dvWriteVersion = sdv.dvWriteVersion
+            val sdv: SparkDeletionVector = iter.next()
             if (dvIndexFileMaintainer == null) {
               val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
               dvIndexFileMaintainer = if (bucketMode == BUCKET_UNAWARE) {
@@ -307,12 +307,9 @@ case class PaimonSparkWriter(table: FileStoreTable) {
               throw new RuntimeException("can't create the dv maintainer.")
             }
 
-            sdv.dataFileAndDeletionVector.foreach {
-              case (dataFileName, dv) =>
-                dvIndexFileMaintainer.notifyNewDeletionVector(
-                  dataFileName,
-                  DeletionVector.deserializeFromBytes(dv, dvWriteVersion))
-            }
+            dvIndexFileMaintainer.notifyNewDeletionVector(
+              new Path(sdv.dataFilePath).getName,
+              DeletionVector.deserializeFromBytes(sdv.deletionVector))
           }
           val indexEntries = dvIndexFileMaintainer.persist()
 

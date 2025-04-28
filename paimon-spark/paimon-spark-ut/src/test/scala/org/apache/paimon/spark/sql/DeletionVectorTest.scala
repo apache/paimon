@@ -684,6 +684,28 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     checkAnswer(sql("SELECT count(*) FROM T"), Row(49665))
   }
 
+  test("Paimon deletionVector: work v1 with v2") {
+    sql(s"""
+           |CREATE TABLE T (id INT)
+           |TBLPROPERTIES (
+           | 'deletion-vectors.enabled' = 'true',
+           | 'deletion-vectors.version' = '1',
+           | 'file.format' = 'avro'
+           |)
+           |""".stripMargin)
+    // file 1
+    sql("INSERT INTO T VALUES (1), (2)")
+    // file 2
+    sql("INSERT INTO T VALUES (3), (4)")
+    // delete in file 1
+    sql("DELETE FROM T WHERE id = 1")
+    // alter to v2 deletion vectors
+    sql("ALTER TABLE T SET TBLPROPERTIES ('deletion-vectors.version' = '2')")
+    // delete in file 2
+    sql("DELETE FROM T WHERE id = 3")
+    checkAnswer(sql("SELECT * FROM T"), Row(2) :: Row(4) :: Nil)
+  }
+
   private def getPathName(path: String): String = {
     new Path(path).getName
   }

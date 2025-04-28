@@ -50,15 +50,15 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
     private IndexFileHandler fileHandler;
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    public void test0(int dvVersion) {
-        initIndexHandler(dvVersion);
+    @ValueSource(booleans = {true, false})
+    public void test0(boolean bitmap64) {
+        initIndexHandler(bitmap64);
 
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
         DeletionVectorsMaintainer dvMaintainer =
                 factory.createOrRestore(null, BinaryRow.EMPTY_ROW, 0);
-        assertThat(dvMaintainer.dvWriteVersion()).isEqualTo(dvVersion);
+        assertThat(dvMaintainer.bitmap64).isEqualTo(bitmap64);
 
         dvMaintainer.notifyNewDeletion("f1", 1);
         dvMaintainer.notifyNewDeletion("f2", 2);
@@ -78,20 +78,20 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    public void test1(int dvVersion) {
-        initIndexHandler(dvVersion);
+    @ValueSource(booleans = {true, false})
+    public void test1(boolean bitmap64) {
+        initIndexHandler(bitmap64);
 
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
 
         DeletionVectorsMaintainer dvMaintainer = factory.create();
-        DeletionVector deletionVector1 = createDeletionVector(dvVersion);
+        DeletionVector deletionVector1 = createDeletionVector(bitmap64);
         deletionVector1.delete(1);
         deletionVector1.delete(3);
         deletionVector1.delete(5);
         dvMaintainer.notifyNewDeletion("f1", deletionVector1);
-        assertThat(dvMaintainer.dvWriteVersion()).isEqualTo(dvVersion);
+        assertThat(dvMaintainer.bitmap64()).isEqualTo(bitmap64);
 
         List<IndexFileMeta> fileMetas1 = dvMaintainer.writeDeletionVectorsIndex();
         assertThat(fileMetas1.size()).isEqualTo(1);
@@ -136,9 +136,9 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    public void testCompactDeletion(int dvVersion) throws IOException {
-        initIndexHandler(dvVersion);
+    @ValueSource(booleans = {true, false})
+    public void testCompactDeletion(boolean bitmap64) throws IOException {
+        initIndexHandler(bitmap64);
 
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
@@ -178,14 +178,14 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(indexDir.listFiles()).hasSize(1);
     }
 
-    private DeletionVector createDeletionVector(int dvVersion) {
-        return dvVersion == 2 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
+    private DeletionVector createDeletionVector(boolean bitmap64) {
+        return bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
     }
 
-    private void initIndexHandler(int dvVersion) {
+    private void initIndexHandler(boolean bitmap64) {
         Map<String, String> options = new HashMap<>();
 
-        options.put(CoreOptions.DELETION_VECTOR_VERSION.key(), String.valueOf(dvVersion));
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), String.valueOf(bitmap64));
 
         table = table.copy(options);
         fileHandler = table.store().newIndexFileHandler();
