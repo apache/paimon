@@ -1513,7 +1513,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> DELETION_VECTOR_VERSION =
             key("deletion-vectors.version")
                     .intType()
-                    .defaultValue(2)
+                    .defaultValue(1)
                     .withDescription(
                             "The version of deletion vector, currently support v1 and v2, default version is 1.");
 
