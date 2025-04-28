@@ -34,10 +34,15 @@ public class OrcArrayColumnVector extends AbstractOrcColumnVector
     private final ColumnVector paimonVector;
 
     public OrcArrayColumnVector(
-            ListColumnVector hiveVector, VectorizedRowBatch orcBatch, ArrayType type) {
+            ListColumnVector hiveVector,
+            VectorizedRowBatch orcBatch,
+            ArrayType type,
+            boolean legacyTimestampLtzType) {
         super(hiveVector, orcBatch);
         this.hiveVector = hiveVector;
-        this.paimonVector = createPaimonVector(hiveVector.child, orcBatch, type.getElementType());
+        this.paimonVector =
+                createPaimonVector(
+                        hiveVector.child, orcBatch, type.getElementType(), legacyTimestampLtzType);
     }
 
     @Override
