@@ -25,7 +25,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -120,8 +119,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='0') */"))
                 .satisfies(
                         anyCauseMatches(
-                                SnapshotNotExistException.class,
-                                "Specified parameter scan.snapshot-id = 0 is not exist, you can set it in range from 1 to 4."));
+                                Exception.class,
+                                "The specified scan snapshotId 0 is out of available snapshotId range [1, 4]."));
 
         assertThatThrownBy(
                         () ->
@@ -129,8 +128,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='0') */"))
                 .satisfies(
                         anyCauseMatches(
-                                SnapshotNotExistException.class,
-                                "Specified parameter scan.snapshot-id = 0 is not exist, you can set it in range from 1 to 4."));
+                                Exception.class,
+                                "The specified scan snapshotId 0 is out of available snapshotId range [1, 4]."));
 
         assertThat(
                         batchSql(

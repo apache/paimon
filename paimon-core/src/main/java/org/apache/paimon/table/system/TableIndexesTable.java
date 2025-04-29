@@ -230,7 +230,7 @@ public class TableIndexesTable implements ReadonlyTable {
 
     private static List<IndexManifestEntry> allIndexEntries(FileStoreTable dataTable) {
         IndexFileHandler indexFileHandler = dataTable.store().newIndexFileHandler();
-        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(dataTable);
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(dataTable);
         if (snapshot == null) {
             LOG.warn("Check if your snapshot is empty.");
             return Collections.emptyList();

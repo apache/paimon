@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class TimeTravelUtilsTest extends ScannerTestBase {
 
     @Test
-    public void testResolveSnapshotFromOptions() throws Exception {
+    public void testtryTravelToSnapshot() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -56,21 +56,27 @@ public class TimeTravelUtilsTest extends ScannerTestBase {
         HashMap<String, String> optMap = new HashMap<>(4);
         optMap.put("scan.snapshot-id", "2");
         CoreOptions options = CoreOptions.fromMap(optMap);
-        Snapshot snapshot = TimeTravelUtil.resolveSnapshotFromOptions(options, snapshotManager);
+        Snapshot snapshot =
+                TimeTravelUtil.tryTravelToSnapshot(options.toConfiguration(), snapshotManager, null)
+                        .orElse(null);
         assertNotNull(snapshot);
         assertTrue(snapshot.id() == 2);
 
         optMap.clear();
         optMap.put("scan.timestamp-millis", ts + "");
         options = CoreOptions.fromMap(optMap);
-        snapshot = TimeTravelUtil.resolveSnapshotFromOptions(options, snapshotManager);
+        snapshot =
+                TimeTravelUtil.tryTravelToSnapshot(options.toConfiguration(), snapshotManager, null)
+                        .orElse(null);
         assertTrue(snapshot.id() == 1);
 
         table.createTag("tag3", 3);
         optMap.clear();
         optMap.put("scan.tag-name", "tag3");
         options = CoreOptions.fromMap(optMap);
-        snapshot = TimeTravelUtil.resolveSnapshotFromOptions(options, snapshotManager);
+        snapshot =
+                TimeTravelUtil.tryTravelToSnapshot(options.toConfiguration(), snapshotManager, null)
+                        .orElse(null);
         assertTrue(snapshot.id() == 3);
 
         // if contain more scan.xxx config would throw out
@@ -78,7 +84,9 @@ public class TimeTravelUtilsTest extends ScannerTestBase {
         CoreOptions options1 = CoreOptions.fromMap(optMap);
         assertThrows(
                 IllegalArgumentException.class,
-                () -> TimeTravelUtil.resolveSnapshotFromOptions(options1, snapshotManager),
+                () ->
+                        TimeTravelUtil.tryTravelToSnapshot(
+                                options1.toConfiguration(), snapshotManager, null),
                 "scan.snapshot-id scan.tag-name scan.watermark and scan.timestamp-millis can contains only one");
 
         assertThat(
