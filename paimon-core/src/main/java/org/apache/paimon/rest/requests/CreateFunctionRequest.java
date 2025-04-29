@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.function.FunctionSchema;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -31,26 +30,26 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateFunctionRequest implements RESTRequest {
 
-    private static final String FIELD_IDENTIFIER = "identifier";
+    private static final String FIELD_NAME = "name";
     private static final String FIELD_SCHEMA = "schema";
 
-    @JsonProperty(FIELD_IDENTIFIER)
-    private final Identifier identifier;
+    @JsonProperty(FIELD_NAME)
+    private final String functionName;
 
     @JsonProperty(FIELD_SCHEMA)
     private final FunctionSchema schema;
 
     @JsonCreator
     public CreateFunctionRequest(
-            @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
+            @JsonProperty(FIELD_NAME) String functionName,
             @JsonProperty(FIELD_SCHEMA) FunctionSchema schema) {
         this.schema = schema;
-        this.identifier = identifier;
+        this.functionName = functionName;
     }
 
-    @JsonGetter(FIELD_IDENTIFIER)
-    public Identifier getIdentifier() {
-        return identifier;
+    @JsonGetter(FIELD_NAME)
+    public String getName() {
+        return functionName;
     }
 
     @JsonGetter(FIELD_SCHEMA)

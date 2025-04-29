@@ -673,30 +673,30 @@ public interface Catalog extends AutoCloseable {
     /**
      * Get function by identifier.
      *
-     * @param identifier
+     * @param functionName
      * @throws FunctionNotExistException
      */
-    Function getFunction(Identifier identifier) throws FunctionNotExistException;
+    Function getFunction(String functionName) throws FunctionNotExistException;
 
     /**
      * Create function.
      *
-     * @param identifier
+     * @param functionName
      * @param function
      * @param ignoreIfExists
      * @throws FunctionAlreadyExistException
      */
-    void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
+    void createFunction(String functionName, Function function, boolean ignoreIfExists)
             throws FunctionAlreadyExistException;
 
     /**
      * Drop function.
      *
-     * @param identifier
+     * @param functionName
      * @param ignoreIfNotExists
      * @throws FunctionNotExistException
      */
-    void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+    void dropFunction(String functionName, boolean ignoreIfNotExists)
             throws FunctionNotExistException;
 
     // ==================== Catalog Information ==========================
@@ -1124,19 +1124,19 @@ public interface Catalog extends AutoCloseable {
 
         private static final String MSG = "Function %s already exists.";
 
-        private final Identifier identifier;
+        private final String functionName;
 
-        public FunctionAlreadyExistException(Identifier identifier) {
-            this(identifier, null);
+        public FunctionAlreadyExistException(String functionName) {
+            this(functionName, null);
         }
 
-        public FunctionAlreadyExistException(Identifier identifier, Throwable cause) {
-            super(String.format(MSG, identifier.getFullName()), cause);
-            this.identifier = identifier;
+        public FunctionAlreadyExistException(String functionName, Throwable cause) {
+            super(String.format(MSG, functionName), cause);
+            this.functionName = functionName;
         }
 
-        public Identifier identifier() {
-            return identifier;
+        public String functionName() {
+            return functionName;
         }
     }
 
@@ -1145,19 +1145,19 @@ public interface Catalog extends AutoCloseable {
 
         private static final String MSG = "Function %s doesn't exist.";
 
-        private final Identifier identifier;
+        private final String functionName;
 
-        public FunctionNotExistException(Identifier identifier) {
-            this(identifier, null);
+        public FunctionNotExistException(String functionName) {
+            this(functionName, null);
         }
 
-        public FunctionNotExistException(Identifier identifier, Throwable cause) {
-            super(String.format(MSG, identifier.getFullName()), cause);
-            this.identifier = identifier;
+        public FunctionNotExistException(String functionName, Throwable cause) {
+            super(String.format(MSG, functionName), cause);
+            this.functionName = functionName;
         }
 
-        public Identifier identifier() {
-            return identifier;
+        public String functionName() {
+            return functionName;
         }
     }
 }

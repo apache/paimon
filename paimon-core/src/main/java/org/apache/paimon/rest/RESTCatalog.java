@@ -815,23 +815,23 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public org.apache.paimon.function.Function getFunction(Identifier identifier)
+    public org.apache.paimon.function.Function getFunction(String functionName)
             throws FunctionNotExistException {
         try {
             GetFunctionResponse response =
                     client.get(
-                            resourcePaths.functionDetails(identifier.getObjectName()),
+                            resourcePaths.functionDetails(functionName),
                             GetFunctionResponse.class,
                             restAuthFunction);
-            return new FunctionImpl(identifier, response.getId(), response.getSchema());
+            return new FunctionImpl(functionName, response.getId(), response.getSchema());
         } catch (NoSuchResourceException e) {
-            throw new FunctionNotExistException(identifier, e);
+            throw new FunctionNotExistException(functionName, e);
         }
     }
 
     @Override
     public void createFunction(
-            Identifier identifier,
+            String functionName,
             org.apache.paimon.function.Function function,
             boolean ignoreIfExists)
             throws FunctionAlreadyExistException {
@@ -846,29 +846,29 @@ public class RESTCatalog implements Catalog {
                             function.options());
             client.post(
                     resourcePaths.functions(),
-                    new CreateFunctionRequest(identifier, schema),
+                    new CreateFunctionRequest(functionName, schema),
                     restAuthFunction);
         } catch (AlreadyExistsException e) {
             if (ignoreIfExists) {
                 return;
             }
-            throw new FunctionAlreadyExistException(identifier, e);
+            throw new FunctionAlreadyExistException(functionName, e);
         }
     }
 
     @Override
-    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+    public void dropFunction(String functionName, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
         try {
             client.get(
-                    resourcePaths.function(identifier.getObjectName()),
+                    resourcePaths.function(functionName),
                     GetFunctionResponse.class,
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (ignoreIfNotExists) {
                 return;
             }
-            throw new FunctionNotExistException(identifier, e);
+            throw new FunctionNotExistException(functionName, e);
         }
     }
 

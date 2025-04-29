@@ -20,25 +20,51 @@ package org.apache.paimon.function;
 
 import org.apache.paimon.types.DataField;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 import java.util.Map;
 
 /** Function schema. */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class FunctionSchema {
+
+    private static final String FIELD_INPUT_PARAMETERS = "inputParams";
+    private static final String FIELD_RETURN_PARAMETERS = "returnParams";
+    private static final String FIELD_DEFINITIONS = "definitions";
+    private static final String FIELD_DETERMINISTIC = "deterministic";
+    private static final String FIELD_COMMENT = "comment";
+    private static final String FIELD_OPTIONS = "options";
+
+    @JsonProperty(FIELD_INPUT_PARAMETERS)
     private final List<DataField> inputParams;
+
+    @JsonProperty(FIELD_RETURN_PARAMETERS)
     private final List<DataField> returnParams;
+
+    @JsonProperty(FIELD_DETERMINISTIC)
     private final boolean deterministic;
+
+    @JsonProperty(FIELD_DEFINITIONS)
     private final Map<String, FunctionDefinition> definitions;
+
+    @JsonProperty(FIELD_COMMENT)
     private final String comment;
+
+    @JsonProperty(FIELD_OPTIONS)
     private final Map<String, String> options;
 
+    @JsonCreator
     public FunctionSchema(
-            List<DataField> inputParams,
-            List<DataField> returnParams,
-            boolean deterministic,
-            Map<String, FunctionDefinition> definitions,
-            String comment,
-            Map<String, String> options) {
+            @JsonProperty(FIELD_INPUT_PARAMETERS) List<DataField> inputParams,
+            @JsonProperty(FIELD_RETURN_PARAMETERS) List<DataField> returnParams,
+            @JsonProperty(FIELD_DETERMINISTIC) boolean deterministic,
+            @JsonProperty(FIELD_DEFINITIONS) Map<String, FunctionDefinition> definitions,
+            @JsonProperty(FIELD_COMMENT) String comment,
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
         this.inputParams = inputParams;
         this.returnParams = returnParams;
         this.deterministic = deterministic;
@@ -47,18 +73,22 @@ public class FunctionSchema {
         this.options = options;
     }
 
+    @JsonGetter(FIELD_INPUT_PARAMETERS)
     public List<DataField> inputParams() {
         return inputParams;
     }
 
+    @JsonGetter(FIELD_RETURN_PARAMETERS)
     public List<DataField> returnParams() {
         return returnParams;
     }
 
+    @JsonGetter(FIELD_DETERMINISTIC)
     public boolean isDeterministic() {
         return deterministic;
     }
 
+    @JsonGetter(FIELD_DEFINITIONS)
     public Map<String, FunctionDefinition> definitions() {
         return definitions;
     }
@@ -67,10 +97,12 @@ public class FunctionSchema {
         return definitions.get(dialect);
     }
 
+    @JsonGetter(FIELD_COMMENT)
     public String comment() {
         return comment;
     }
 
+    @JsonGetter(FIELD_OPTIONS)
     public Map<String, String> options() {
         return options;
     }

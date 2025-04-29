@@ -18,7 +18,6 @@
 
 package org.apache.paimon.function;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
@@ -27,28 +26,28 @@ import java.util.Map;
 /** Function implementation. * */
 public class FunctionImpl implements Function {
 
-    private final Identifier identifier;
+    private final String functionName;
     private final String uuid;
     private final FunctionSchema schema;
 
     public FunctionImpl(
             String uuid,
-            Identifier identifier,
+            String functionName,
             List<DataField> inputParams,
             List<DataField> returnParams,
             boolean deterministic,
             Map<String, FunctionDefinition> definitions,
             String comment,
             Map<String, String> options) {
-        this.identifier = identifier;
+        this.functionName = functionName;
         this.uuid = uuid;
         this.schema =
                 new FunctionSchema(
                         inputParams, returnParams, deterministic, definitions, comment, options);
     }
 
-    public FunctionImpl(Identifier identifier, String uuid, FunctionSchema schema) {
-        this.identifier = identifier;
+    public FunctionImpl(String functionName, String uuid, FunctionSchema schema) {
+        this.functionName = functionName;
         this.uuid = uuid;
         this.schema = schema;
     }
@@ -60,7 +59,7 @@ public class FunctionImpl implements Function {
 
     @Override
     public String name() {
-        return this.identifier.getObjectName();
+        return this.functionName;
     }
 
     @Override
@@ -96,5 +95,10 @@ public class FunctionImpl implements Function {
     @Override
     public Map<String, String> options() {
         return this.schema.options();
+    }
+
+    @Override
+    public FunctionSchema schema() {
+        return this.schema;
     }
 }

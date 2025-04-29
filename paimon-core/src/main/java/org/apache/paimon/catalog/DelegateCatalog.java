@@ -216,20 +216,20 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Function getFunction(Identifier identifier) throws FunctionNotExistException {
-        return wrapped.getFunction(identifier);
+    public Function getFunction(String functionName) throws FunctionNotExistException {
+        return wrapped.getFunction(functionName);
     }
 
     @Override
-    public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
+    public void createFunction(String functionName, Function function, boolean ignoreIfExists)
             throws FunctionAlreadyExistException {
-        wrapped.createFunction(identifier, function, ignoreIfExists);
+        wrapped.createFunction(functionName, function, ignoreIfExists);
     }
 
     @Override
-    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+    public void dropFunction(String functionName, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
-        wrapped.dropFunction(identifier, ignoreIfNotExists);
+        wrapped.dropFunction(functionName, ignoreIfNotExists);
     }
 
     @Override

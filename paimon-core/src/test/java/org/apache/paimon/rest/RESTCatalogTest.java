@@ -27,6 +27,9 @@ import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.function.Function;
+import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -1307,6 +1310,37 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 identifier,
                                 ImmutableList.of(ViewChange.dropDialect("no_exist")),
                                 false));
+    }
+
+    @Test
+    void testFunction() throws Exception {
+        List<DataField> inputParams =
+                Lists.newArrayList(
+                        new DataField(0, "length", DataTypes.DOUBLE()),
+                        new DataField(1, "width", DataTypes.DOUBLE()));
+        List<DataField> returnParams =
+                Lists.newArrayList(new DataField(0, "area", DataTypes.DOUBLE()));
+        FunctionDefinition flinkFunction =
+                FunctionDefinition.file(
+                        "jar", Lists.newArrayList("/a/b/c.jar"), "java", "className", "eval");
+        Map<String, FunctionDefinition> definitions = Maps.newHashMap();
+        definitions.put("flink", flinkFunction);
+        Function function =
+                new FunctionImpl(
+                        UUID.randomUUID().toString(),
+                        "functionName",
+                        inputParams,
+                        returnParams,
+                        false,
+                        definitions,
+                        "",
+                        null);
+
+        catalog.createFunction(function.name(), function, true);
+
+        assertThat(catalog.listFunctions().contains(function.name())).isTrue();
+        Function getFunction = catalog.getFunction(function.name());
+        assertThat(getFunction.name()).isEqualTo(function.name());
     }
 
     private TestPagedResponse generateTestPagedResponse(

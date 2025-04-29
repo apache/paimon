@@ -524,18 +524,18 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public Function getFunction(Identifier identifier) throws FunctionNotExistException {
+    public Function getFunction(String functionName) throws FunctionNotExistException {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void createFunction(Identifier identifier, Function function, boolean ignoreIfExists)
+    public void createFunction(String functionName, Function function, boolean ignoreIfExists)
             throws FunctionAlreadyExistException {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void dropFunction(Identifier identifier, boolean ignoreIfNotExists)
+    public void dropFunction(String functionName, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
         throw new UnsupportedOperationException();
     }
