@@ -35,6 +35,7 @@ import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
+import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -153,7 +154,7 @@ public class HiveCloneUtils {
         List<Partition> partitions =
                 client.listPartitions(
                         identifier.getDatabaseName(), identifier.getTableName(), Short.MAX_VALUE);
-        String format = parseFormat(sourceTable.getSd().getSerdeInfo().toString());
+        String format = parseFormat(sourceTable);
 
         if (partitions.isEmpty()) {
             String location = sourceTable.getSd().getLocation();
@@ -198,15 +199,31 @@ public class HiveCloneUtils {
         return new HivePartitionFiles(partition, paths, fileSizes, format);
     }
 
-    public static String parseFormat(String serder) {
+    private static String parseFormat(StorageDescriptor storageDescriptor) {
+        String serder = storageDescriptor.getSerdeInfo().toString();
         if (serder.contains("avro")) {
             return "avro";
         } else if (serder.contains("parquet")) {
             return "parquet";
         } else if (serder.contains("orc")) {
             return "orc";
-        } else {
-            throw new UnsupportedOperationException("Unknown partition format: " + serder);
         }
+        return null;
+    }
+
+    public static String parseFormat(Table table) {
+        String format = parseFormat(table.getSd());
+        if (format == null) {
+            throw new UnsupportedOperationException("Unknown table format:" + table);
+        }
+        return format;
+    }
+
+    public static String parseFormat(Partition partition) {
+        String format = parseFormat(partition.getSd());
+        if (format == null) {
+            throw new UnsupportedOperationException("Unknown partition format: " + partition);
+        }
+        return format;
     }
 }
