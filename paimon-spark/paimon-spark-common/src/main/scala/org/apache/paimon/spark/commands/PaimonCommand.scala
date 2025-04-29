@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector}
+import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
@@ -226,7 +226,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       dataFilePathToMeta: Map[String, SparkDataFileMeta],
       condition: Expression,
       relation: DataSourceV2Relation,
-      sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
+      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation)
     val dataWithMetadataColumns = createDataset(sparkSession, filteredRelation)
     collectDeletionVectors(dataFilePathToMeta, dataWithMetadataColumns, sparkSession)
@@ -235,7 +235,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
   protected def collectDeletionVectors(
       dataFilePathToMeta: Map[String, SparkDataFileMeta],
       dataWithMetadataColumns: Dataset[Row],
-      sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
+      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     import sparkSession.implicits._
 
     val resolver = sparkSession.sessionState.conf.resolver
@@ -252,7 +252,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
 
     val my_table = table
     val location = my_table.location
-    val dvWriteVersion = my_table.coreOptions().deletionVectorVersion()
+    val dvBitmap64 = my_table.coreOptions().deletionVectorBitmap64()
     dataWithMetadataColumns
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
       .as[(String, Long)]
@@ -260,7 +260,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       .mapGroups {
         (filePath, iter) =>
           val dv =
-            if (dvWriteVersion == 2) new Bitmap64DeletionVector() else new BitmapDeletionVector()
+            if (dvBitmap64) new Bitmap64DeletionVector() else new BitmapDeletionVector()
           while (iter.hasNext) {
             dv.delete(iter.next()._2)
           }
@@ -272,12 +272,12 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
             .relativeBucketPath(partition, bucket)
             .toString
 
-          SparkDeletionVectors(
+          SparkDeletionVector(
             relativeBucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
-            Seq((new Path(filePath).getName, dv.serializeToBytes())),
-            dvWriteVersion
+            new Path(filePath).getName,
+            DeletionVector.serializeToBytes(dv)
           )
       }
   }

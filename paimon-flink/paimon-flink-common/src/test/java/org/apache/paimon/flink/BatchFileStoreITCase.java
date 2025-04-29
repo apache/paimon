@@ -590,12 +590,11 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testCountStarAppendWithDv() {
-        int dvVersion = ThreadLocalRandom.current().nextInt(1, 3);
         sql(
                 String.format(
                         "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true', "
-                                + "'deletion-vectors.version' = '%s') ",
-                        dvVersion));
+                                + "'deletion-vectors.bitmap64' = '%s') ",
+                        ThreadLocalRandom.current().nextBoolean()));
         sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
 
         String sql = "SELECT COUNT(*) FROM count_append_dv";
@@ -617,14 +616,13 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testCountStarPKDv() {
-        int dvVersion = ThreadLocalRandom.current().nextInt(1, 3);
         sql(
                 String.format(
                         "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
                                 + "'file.format' = 'avro', "
                                 + "'deletion-vectors.enabled' = 'true', "
-                                + "'deletion-vectors.version' = '%s')",
-                        dvVersion));
+                                + "'deletion-vectors.bitmap64' = '%s')",
+                        ThreadLocalRandom.current().nextBoolean()));
         sql("INSERT INTO count_pk_dv VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
         sql("INSERT INTO count_pk_dv VALUES (1, 'e')");
 

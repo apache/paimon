@@ -49,24 +49,24 @@ public class DeletionVectorsIndexFileTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testReadDvIndex(boolean isV2) {
+    public void testReadDvIndex(boolean bitmap64) {
         PathFactory pathFactory = getPathFactory();
 
         DeletionVectorsIndexFile deletionVectorsIndexFile =
-                deletionVectorsIndexFile(pathFactory, isV2);
+                deletionVectorsIndexFile(pathFactory, bitmap64);
 
         // write
         HashMap<String, DeletionVector> deleteMap = new HashMap<>();
-        DeletionVector index1 = createEmptyDV(isV2);
+        DeletionVector index1 = createEmptyDV(bitmap64);
         index1.delete(1);
         deleteMap.put("file1.parquet", index1);
 
-        DeletionVector index2 = createEmptyDV(isV2);
+        DeletionVector index2 = createEmptyDV(bitmap64);
         index2.delete(2);
         index2.delete(3);
         deleteMap.put("file2.parquet", index2);
 
-        DeletionVector index3 = createEmptyDV(isV2);
+        DeletionVector index3 = createEmptyDV(bitmap64);
         index3.delete(3);
         deleteMap.put("file33.parquet", index3);
 
@@ -90,17 +90,17 @@ public class DeletionVectorsIndexFileTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testReadDvIndexWithCopiousDv(boolean isV2) {
+    public void testReadDvIndexWithCopiousDv(boolean bitmap64) {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
-                deletionVectorsIndexFile(pathFactory, isV2);
+                deletionVectorsIndexFile(pathFactory, bitmap64);
 
         // write
         Random random = new Random();
         HashMap<String, DeletionVector> deleteMap = new HashMap<>();
         HashMap<String, Integer> deleteInteger = new HashMap<>();
         for (int i = 0; i < 100000; i++) {
-            DeletionVector index = createEmptyDV(isV2);
+            DeletionVector index = createEmptyDV(bitmap64);
             int num = random.nextInt(1000000);
             index.delete(num);
             deleteMap.put(String.format("file%s.parquet", i), index);
@@ -122,17 +122,17 @@ public class DeletionVectorsIndexFileTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testReadDvIndexWithEnormousDv(boolean isV2) {
+    public void testReadDvIndexWithEnormousDv(boolean bitmap64) {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
-                deletionVectorsIndexFile(pathFactory, isV2);
+                deletionVectorsIndexFile(pathFactory, bitmap64);
 
         // write
         Random random = new Random();
         Map<String, DeletionVector> fileToDV = new HashMap<>();
         Map<String, Long> fileToCardinality = new HashMap<>();
         for (int i = 0; i < 5; i++) {
-            DeletionVector index = createEmptyDV(isV2);
+            DeletionVector index = createEmptyDV(bitmap64);
             // the size of dv index file is about 20M
             for (int j = 0; j < 10000000; j++) {
                 index.delete(random.nextInt(Integer.MAX_VALUE));
@@ -154,17 +154,17 @@ public class DeletionVectorsIndexFileTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testWriteDVIndexWithLimitedTargetSizePerIndexFile(boolean isV2) {
+    public void testWriteDVIndexWithLimitedTargetSizePerIndexFile(boolean bitmap64) {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
-                deletionVectorsIndexFile(pathFactory, MemorySize.parse("2MB"), isV2);
+                deletionVectorsIndexFile(pathFactory, MemorySize.parse("2MB"), bitmap64);
 
         // write1
         Random random = new Random();
         Map<String, DeletionVector> fileToDV = new HashMap<>();
         Map<String, Long> fileToCardinality = new HashMap<>();
         for (int i = 0; i < 5; i++) {
-            DeletionVector index = createEmptyDV(isV2);
+            DeletionVector index = createEmptyDV(bitmap64);
             // the size of dv index file is about 1.7M
             for (int j = 0; j < 750000; j++) {
                 index.delete(random.nextInt(Integer.MAX_VALUE));
@@ -186,7 +186,7 @@ public class DeletionVectorsIndexFileTest {
         fileToDV.clear();
         fileToCardinality.clear();
         for (int i = 0; i < 10; i++) {
-            DeletionVector index = createEmptyDV(isV2);
+            DeletionVector index = createEmptyDV(bitmap64);
             // the size of dv index file is about 0.42M
             for (int j = 0; j < 100000; j++) {
                 index.delete(random.nextInt(Integer.MAX_VALUE));
@@ -260,13 +260,13 @@ public class DeletionVectorsIndexFileTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testReadDeletionFile(boolean isV2) throws IOException {
+    public void testReadDeletionFile(boolean bitmap64) throws IOException {
         PathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
-                deletionVectorsIndexFile(pathFactory, isV2);
+                deletionVectorsIndexFile(pathFactory, bitmap64);
 
         HashMap<String, DeletionVector> deleteMap = new HashMap<>();
-        DeletionVector index1 = createEmptyDV(isV2);
+        DeletionVector index1 = createEmptyDV(bitmap64);
         index1.delete(1);
         index1.delete(10);
         index1.delete(100);
@@ -293,31 +293,19 @@ public class DeletionVectorsIndexFileTest {
         assertThat(dv.isDeleted(100)).isTrue();
     }
 
-    private DeletionVector createEmptyDV(boolean isV2) {
-        if (isV2) {
-            return new Bitmap64DeletionVector();
-        }
-        return new BitmapDeletionVector();
+    private DeletionVector createEmptyDV(boolean bitmap64) {
+        return bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
     }
 
     private DeletionVectorsIndexFile deletionVectorsIndexFile(
-            PathFactory pathFactory, boolean isV2) {
-
-        return deletionVectorsIndexFile(pathFactory, MemorySize.ofBytes(Long.MAX_VALUE), isV2);
+            PathFactory pathFactory, boolean bitmap64) {
+        return deletionVectorsIndexFile(pathFactory, MemorySize.ofBytes(Long.MAX_VALUE), bitmap64);
     }
 
     private DeletionVectorsIndexFile deletionVectorsIndexFile(
-            PathFactory pathFactory, MemorySize targetSizePerIndexFile, boolean isV2) {
-        if (isV2) {
-            return new DeletionVectorsIndexFile(
-                    LocalFileIO.create(),
-                    pathFactory,
-                    targetSizePerIndexFile,
-                    Bitmap64DeletionVector.VERSION);
-        } else {
-            return new DeletionVectorsIndexFile(
-                    LocalFileIO.create(), pathFactory, targetSizePerIndexFile);
-        }
+            PathFactory pathFactory, MemorySize targetSizePerIndexFile, boolean bitmap64) {
+        return new DeletionVectorsIndexFile(
+                LocalFileIO.create(), pathFactory, targetSizePerIndexFile, bitmap64);
     }
 
     private PathFactory getPathFactory() {

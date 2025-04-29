@@ -25,14 +25,13 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
+import java.util.zip.CRC32;
 
 /**
  * A {@link DeletionVector} based on {@link RoaringBitmap32}, it only supports files with row count
  * not exceeding {@link RoaringBitmap32#MAX_VALUE}.
  */
 public class BitmapDeletionVector implements DeletionVector {
-
-    public static final int VERSION = 1;
 
     public static final int MAGIC_NUMBER = 1581511376;
     public static final int MAGIC_NUMBER_SIZE_BYTES = 4;
@@ -85,33 +84,19 @@ public class BitmapDeletionVector implements DeletionVector {
     }
 
     @Override
-    public int version() {
-        return VERSION;
-    }
-
-    @Override
-    public byte[] serializeToBytes() {
+    public int serializeTo(DataOutputStream out) {
         try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(bos)) {
             dos.writeInt(MAGIC_NUMBER);
             roaringBitmap.serialize(dos);
-            return bos.toByteArray();
+            byte[] data = bos.toByteArray();
+            int size = data.length;
+            out.writeInt(size);
+            out.write(data);
+            out.writeInt(calculateChecksum(data));
+            return size;
         } catch (Exception e) {
             throw new RuntimeException("Unable to serialize deletion vector", e);
-        }
-    }
-
-    public static DeletionVector deserializeFromBytes(byte[] bytes) {
-        try {
-            ByteBuffer buffer = ByteBuffer.wrap(bytes);
-            int magicNum = buffer.getInt();
-            if (magicNum == MAGIC_NUMBER) {
-                return deserializeFromByteBuffer(buffer);
-            } else {
-                throw new RuntimeException("Invalid magic number: " + magicNum);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("Unable to deserialize deletion vector", e);
         }
     }
 
@@ -152,5 +137,11 @@ public class BitmapDeletionVector implements DeletionVector {
     @Override
     public int hashCode() {
         return Objects.hashCode(roaringBitmap);
+    }
+
+    public static int calculateChecksum(byte[] bytes) {
+        CRC32 crc = new CRC32();
+        crc.update(bytes);
+        return (int) crc.getValue();
     }
 }

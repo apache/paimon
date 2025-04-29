@@ -96,7 +96,7 @@ case class UpdatePaimonTableCommand(
         try {
           // Step3: write these updated data
           val touchedDataSplits = deletionVectors.collect().map {
-            SparkDeletionVectors.toDataSplit(_, root, pathFactory, dataFilePathToMeta)
+            SparkDeletionVector.toDataSplit(_, root, pathFactory, dataFilePathToMeta)
           }
           val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
 
