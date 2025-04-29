@@ -477,8 +477,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
         CoreOptions coreOptions = new CoreOptions(options);
-        Snapshot snapshot =
-                TimeTravelUtil.resolveSnapshotFromOptions(coreOptions, snapshotManager());
+        Snapshot snapshot;
+        try {
+            snapshot = TimeTravelUtil.resolveSnapshotFromOptions(coreOptions, snapshotManager());
+        } catch (Exception e) {
+            return Optional.empty();
+        }
         if (snapshot == null) {
             return Optional.empty();
         }
