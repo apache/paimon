@@ -20,12 +20,14 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +46,8 @@ public class TimeTravelUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(TimeTravelUtil.class);
 
+    private static final String WATERMARK_PREFIX = "watermark-";
+
     private static final String[] SCAN_KEYS = {
         CoreOptions.SCAN_SNAPSHOT_ID.key(),
         CoreOptions.SCAN_TAG_NAME.key(),
@@ -53,15 +57,18 @@ public class TimeTravelUtil {
 
     @Nullable
     public static Snapshot resolveSnapshot(FileStoreTable table) {
-        return resolveSnapshotFromOptions(table.coreOptions(), table.snapshotManager());
+        return resolveSnapshotFromOptions(
+                table.coreOptions().toConfiguration(), table.snapshotManager(), table.tagManager());
     }
 
     @Nullable
     public static Snapshot resolveSnapshotFromOptions(
-            CoreOptions options, SnapshotManager snapshotManager) {
+            Options options, SnapshotManager snapshotManager, TagManager tagManager) {
+        adaptScanVersion(options, tagManager);
+
         List<String> scanHandleKey = new ArrayList<>(1);
         for (String key : SCAN_KEYS) {
-            if (options.toConfiguration().containsKey(key)) {
+            if (options.containsKey(key)) {
                 scanHandleKey.add(key);
             }
         }
@@ -81,26 +88,47 @@ public class TimeTravelUtil {
 
         String key = scanHandleKey.get(0);
         Snapshot snapshot = null;
+        CoreOptions coreOptions = new CoreOptions(options);
         if (key.equals(CoreOptions.SCAN_SNAPSHOT_ID.key())) {
             snapshot =
-                    new StaticFromSnapshotStartingScanner(snapshotManager, options.scanSnapshotId())
+                    new StaticFromSnapshotStartingScanner(
+                                    snapshotManager, coreOptions.scanSnapshotId())
                             .getSnapshot();
         } else if (key.equals(CoreOptions.SCAN_WATERMARK.key())) {
             snapshot =
-                    new StaticFromWatermarkStartingScanner(snapshotManager, options.scanWatermark())
+                    new StaticFromWatermarkStartingScanner(
+                                    snapshotManager, coreOptions.scanWatermark())
                             .getSnapshot();
         } else if (key.equals(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())) {
             snapshot =
                     new StaticFromTimestampStartingScanner(
-                                    snapshotManager, options.scanTimestampMills())
+                                    snapshotManager, coreOptions.scanTimestampMills())
                             .getSnapshot();
         } else if (key.equals(CoreOptions.SCAN_TAG_NAME.key())) {
             snapshot =
-                    new StaticFromTagStartingScanner(snapshotManager, options.scanTagName())
+                    new StaticFromTagStartingScanner(snapshotManager, coreOptions.scanTagName())
                             .getSnapshot();
         }
 
         return snapshot;
+    }
+
+    private static void adaptScanVersion(Options options, TagManager tagManager) {
+        String version = options.remove(CoreOptions.SCAN_VERSION.key());
+        if (version == null) {
+            return;
+        }
+
+        if (tagManager.tagExists(version)) {
+            options.set(CoreOptions.SCAN_TAG_NAME, version);
+        } else if (version.startsWith(WATERMARK_PREFIX)) {
+            long watermark = Long.parseLong(version.substring(WATERMARK_PREFIX.length()));
+            options.set(CoreOptions.SCAN_WATERMARK, watermark);
+        } else if (version.chars().allMatch(Character::isDigit)) {
+            options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
+        } else {
+            throw new RuntimeException("Cannot find a time travel version for " + version);
+        }
     }
 
     /**
