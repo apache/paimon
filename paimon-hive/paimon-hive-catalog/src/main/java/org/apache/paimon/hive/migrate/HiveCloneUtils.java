@@ -49,6 +49,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -126,8 +127,10 @@ public class HiveCloneUtils {
 
         String format = parseFormat(hiveTable);
         paimonOptions.put(FILE_FORMAT.key(), format);
+        Map<String, String> formatOptions = getIdentifierPrefixOptions(format, hiveTableOptions);
+        paimonOptions.putAll(formatOptions);
 
-        String compression = parseCompression(hiveTable);
+        String compression = parseCompression(hiveTable, format, formatOptions);
         paimonOptions.put(FILE_COMPRESSION.key(), compression);
 
         Schema.Builder schemaBuilder =
@@ -240,10 +243,37 @@ public class HiveCloneUtils {
         if (serderParams.containsKey("compression")) {
             return serderParams.get("compression");
         }
-        return "none";
+        return null;
     }
 
-    private static String parseCompression(Table table) {
-        return parseCompression(table.getSd());
+    private static String parseCompression(
+            Table table, String format, Map<String, String> formatOptions) {
+        String compression = null;
+        if (Objects.equals(format, "avro")) {
+            compression = formatOptions.get("avro.codec");
+        } else if (Objects.equals(format, "parquet")) {
+            compression = formatOptions.get("parquet.compression");
+        } else if (Objects.equals(format, "orc")) {
+            compression = formatOptions.get("orc.compress");
+        }
+        if (compression == null) {
+            compression = parseCompression(table.getSd());
+        }
+        if (compression == null) {
+            compression = "none";
+        }
+        return compression;
+    }
+
+    private static Map<String, String> getIdentifierPrefixOptions(
+            String formatIdentifier, Map<String, String> options) {
+        Map<String, String> result = new HashMap<>();
+        String prefix = formatIdentifier.toLowerCase() + ".";
+        for (String key : options.keySet()) {
+            if (key.toLowerCase().startsWith(prefix)) {
+                result.put(prefix + key.substring(prefix.length()), options.get(key));
+            }
+        }
+        return result;
     }
 }
