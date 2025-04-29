@@ -18,12 +18,15 @@
 
 package org.apache.paimon.spark.catalog.functions
 
+import org.apache.paimon.{bucket, CoreOptions}
+import org.apache.paimon.CoreOptions.BucketFunctionType
+import org.apache.paimon.bucket.BucketFunction
 import org.apache.paimon.data.serializer.InternalRowSerializer
 import org.apache.paimon.shade.guava30.com.google.common.collect.{ImmutableList, ImmutableMap}
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonRowType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions._
-import org.apache.paimon.table.sink.KeyAndBucketExtractor.{bucket, bucketKeyHashCode}
+import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.ProjectedRow
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -35,17 +38,25 @@ import javax.annotation.Nullable
 
 object PaimonFunctions {
 
-  val BUCKET: String = "bucket"
+  val PAIMON_BUCKET: String = "bucket"
   val MAX_PT: String = "max_pt"
 
   private val FUNCTIONS = ImmutableMap.of(
-    BUCKET,
-    new BucketFunction,
+    PAIMON_BUCKET,
+    new PaimonBucketFunction,
     MAX_PT,
     new MaxPtFunction
   )
 
+  /** The bucket function type to the function name mapping */
+  private val TYPE_FUNC_MAPPING = ImmutableMap.of(
+    BucketFunctionType.PAIMON,
+    PAIMON_BUCKET
+  )
+
   val names: ImmutableList[String] = FUNCTIONS.keySet.asList()
+
+  def bucketFunctionName(funcType: BucketFunctionType): String = TYPE_FUNC_MAPPING.get(funcType)
 
   @Nullable
   def load(name: String): UnboundFunction = FUNCTIONS.get(name)
@@ -56,7 +67,8 @@ object PaimonFunctions {
  *
  * params arg0: bucket number, arg1...argn bucket keys.
  */
-class BucketFunction extends UnboundFunction {
+abstract class BucketFunction(funcName: String, bucketFunctionType: BucketFunctionType)
+  extends UnboundFunction {
 
   override def bind(inputType: StructType): BoundFunction = {
     assert(inputType.fields(0).dataType == IntegerType, "bucket number field must be integer type")
@@ -67,35 +79,45 @@ class BucketFunction extends UnboundFunction {
     val mapping = (1 to bucketKeyRowType.getFieldCount).toArray
     val reusedRow =
       new SparkInternalRowWrapper(-1, inputType, inputType.fields.length)
-
+    val bucketFunc: bucket.BucketFunction = bucketFunction(bucketFunctionType, bucketKeyRowType)
     new ScalarFunction[Int]() {
+
       override def inputTypes: Array[DataType] = inputType.fields.map(_.dataType)
 
       override def resultType: DataType = IntegerType
 
-      override def name: String = BUCKET
+      override def name: String = funcName
 
       override def canonicalName: String = {
         // We have to override this method to make it support canonical equivalent
-        s"paimon.bucket(int, ${bucketKeyStructType.fields.map(_.dataType.catalogString).mkString(", ")})"
+        s"paimon.$funcName(int, ${bucketKeyStructType.fields.map(_.dataType.catalogString).mkString(", ")})"
       }
 
       override def produceResult(input: InternalRow): Int = {
-        val numberBuckets = input.getInt(0)
-        bucket(
-          bucketKeyHashCode(
-            serializer.toBinaryRow(
-              ProjectedRow.from(mapping).replaceRow(reusedRow.replace(input)))),
-          numberBuckets)
+        bucketFunc.bucket(
+          serializer.toBinaryRow(ProjectedRow.from(mapping).replaceRow(reusedRow.replace(input))),
+          input.getInt(0))
       }
-
       override def isResultNullable: Boolean = false
     }
+
   }
+
+  def bucketFunction(funcType: BucketFunctionType, bucketKeyType: RowType): bucket.BucketFunction
 
   override def description: String = name
 
-  override def name: String = BUCKET
+  override def name: String = PAIMON_BUCKET
+
+}
+
+/** Paimon bucket function. */
+class PaimonBucketFunction extends BucketFunction(PAIMON_BUCKET, BucketFunctionType.PAIMON) {
+  override def bucketFunction(
+      funcType: BucketFunctionType,
+      bucketKeyType: RowType): bucket.BucketFunction = {
+    new bucket.PaimonBucketFunction
+  }
 }
 
 /**
