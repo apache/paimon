@@ -31,7 +31,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.DataInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -291,6 +293,29 @@ public class DeletionVectorsIndexFileTest {
         assertThat(dv.isDeleted(1)).isTrue();
         assertThat(dv.isDeleted(10)).isTrue();
         assertThat(dv.isDeleted(100)).isTrue();
+    }
+
+    @Test
+    public void testReadOldDeletionVector() throws IOException {
+        // dv metadata for dvindex-v1:
+        // DeletionVectorMeta("file2.parquet", 1, 24, 2L), and pos(2, 3) should be isDeleted
+        // DeletionVectorMeta("file1.parquet", 33, 22, 1L), and pos(1) should be isDeleted
+
+        try (InputStream inputStream =
+                DeletionVectorsIndexFile.class
+                        .getClassLoader()
+                        .getResourceAsStream("compatibility/dvindex-v1")) {
+            // read version
+            assertThat(inputStream.read()).isEqualTo(1);
+            DataInputStream dataInputStream = new DataInputStream(inputStream);
+            DeletionVector dv1 = DeletionVector.read(dataInputStream, 24L);
+            DeletionVector dv2 = DeletionVector.read(dataInputStream, 22L);
+            assertThat(dv1.getCardinality()).isEqualTo(2L);
+            assertThat(dv2.getCardinality()).isEqualTo(1L);
+            assertThat(dv1.isDeleted(2)).isTrue();
+            assertThat(dv1.isDeleted(3)).isTrue();
+            assertThat(dv2.isDeleted(1)).isTrue();
+        }
     }
 
     private DeletionVector createEmptyDV(boolean bitmap64) {
