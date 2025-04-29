@@ -106,10 +106,11 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
             .toDF("a", "b", "c")
             .createOrReplaceTempView("source")
 
+          val dvVersion = Random.nextInt(2) + 1
           spark.sql(
             s"""
                |CREATE TABLE target (a INT, b INT, c STRING)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
           spark.sql(
             "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
@@ -156,10 +157,12 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           } else {
             ""
           }
+          val dvVersion = Random.nextInt(2) + 1
           spark.sql(s"""
                        |CREATE TABLE T (id INT, name STRING)
                        |TBLPROPERTIES (
                        |  'deletion-vectors.enabled' = 'true',
+                       |  'deletion-vectors.version' = '$dvVersion',
                        |  'bucket' = '$bucket' $bucketKey)
                        |""".stripMargin)
 
@@ -227,11 +230,12 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           } else {
             ""
           }
+          val dvVersion = Random.nextInt(2) + 1
           spark.sql(
             s"""
                |CREATE TABLE T (id INT, name STRING, pt STRING)
                |PARTITIONED BY(pt)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -314,10 +318,11 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           } else {
             ""
           }
+          val dvVersion = Random.nextInt(2) + 1
           spark.sql(
             s"""
                |CREATE TABLE T (id INT, name STRING)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -369,11 +374,12 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           } else {
             ""
           }
+          val dvVersion = Random.nextInt(2) + 1
           spark.sql(
             s"""
                |CREATE TABLE T (id INT, name STRING, pt STRING)
                |PARTITIONED BY(pt)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.version' = '$dvVersion', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -440,13 +446,15 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
   test("Paimon deletionVector: deletion vector write verification") {
     withTable("T") {
+      val dvVersion = Random.nextInt(2) + 1
       spark.sql(s"""
                    |CREATE TABLE T (id INT, name STRING)
                    |TBLPROPERTIES (
                    | 'bucket' = '1',
                    | 'primary-key' = 'id',
                    | 'file.format' = 'parquet',
-                   | 'deletion-vectors.enabled' = 'true'
+                   | 'deletion-vectors.enabled' = 'true',
+                   | 'deletion-vectors.version' = '$dvVersion'
                    |)
                    |""".stripMargin)
       val table = loadTable("T")
@@ -508,11 +516,13 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     val dvTbl = "deletion_vector_tbl"
     val resultTbl = "result_tbl"
     spark.sql(s"drop table if exists $dvTbl")
+    val dvVersion = Random.nextInt(2) + 1
     spark.sql(s"""
                  |CREATE TABLE $dvTbl (id INT, name STRING, pt STRING)
                  |TBLPROPERTIES (
                  | 'primary-key' = 'id, pt',
                  | 'deletion-vectors.enabled' = 'true',
+                 | 'deletion-vectors.version' = '$dvVersion',
                  | 'bucket' = '$bucket',
                  | 'changelog-producer' = '$changelogProducer',
                  | 'file.format' = '$format',
@@ -526,7 +536,8 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                  |CREATE TABLE $resultTbl (id INT, name STRING, pt STRING)
                  |TBLPROPERTIES (
                  | 'primary-key' = 'id, pt',
-                 | 'deletion-vectors.enabled' = 'false'
+                 | 'deletion-vectors.enabled' = 'false',
+                 | 'deletion-vectors.version' = '$dvVersion'
                  |)
                  |PARTITIONED BY (pt)
                  |""".stripMargin)
@@ -591,11 +602,13 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
   test("Paimon deletionVector: select with format filter push down") {
     val format = Random.shuffle(Seq("parquet", "orc", "avro")).head
     val blockSize = Random.nextInt(10240) + 1
+    val dvVersion = Random.nextInt(2) + 1
     spark.sql(s"""
                  |CREATE TABLE T (id INT, name STRING)
                  |TBLPROPERTIES (
                  | 'primary-key' = 'id',
                  | 'deletion-vectors.enabled' = 'true',
+                 | 'deletion-vectors.version' = '$dvVersion',
                  | 'file.format' = '$format',
                  | 'file.block-size' = '${blockSize}b',
                  | 'bucket' = '1'
@@ -631,10 +644,12 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
   }
 
   test("Paimon deletionVector: get cardinality") {
+    val dvVersion = Random.nextInt(2) + 1
     sql(s"""
            |CREATE TABLE T (id INT)
            |TBLPROPERTIES (
            | 'deletion-vectors.enabled' = 'true',
+           | 'deletion-vectors.version' = '$dvVersion',
            | 'bucket-key' = 'id',
            | 'bucket' = '1'
            |)
@@ -652,10 +667,12 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
   }
 
   test("Paimon deletionVector: delete from non-pk table with data file path") {
+    val dvVersion = Random.nextInt(2) + 1
     sql(s"""
            |CREATE TABLE T (id INT)
            |TBLPROPERTIES (
            | 'deletion-vectors.enabled' = 'true',
+           | 'deletion-vectors.version' = '$dvVersion',
            | 'bucket-key' = 'id',
            | 'bucket' = '1',
            | 'data-file.path-directory' = 'data'

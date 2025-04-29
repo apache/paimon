@@ -45,6 +45,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -589,8 +590,12 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testCountStarAppendWithDv() {
+        int dvVersion = ThreadLocalRandom.current().nextInt(1, 3);
         sql(
-                "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true')");
+                String.format(
+                        "CREATE TABLE count_append_dv (f0 INT, f1 STRING) WITH ('deletion-vectors.enabled' = 'true', "
+                                + "'deletion-vectors.version' = '%s') ",
+                        dvVersion));
         sql("INSERT INTO count_append_dv VALUES (1, 'a'), (2, 'b')");
 
         String sql = "SELECT COUNT(*) FROM count_append_dv";
@@ -612,10 +617,14 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testCountStarPKDv() {
+        int dvVersion = ThreadLocalRandom.current().nextInt(1, 3);
         sql(
-                "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
-                        + "'file.format' = 'avro', "
-                        + "'deletion-vectors.enabled' = 'true')");
+                String.format(
+                        "CREATE TABLE count_pk_dv (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING) WITH ("
+                                + "'file.format' = 'avro', "
+                                + "'deletion-vectors.enabled' = 'true', "
+                                + "'deletion-vectors.version' = '%s')",
+                        dvVersion));
         sql("INSERT INTO count_pk_dv VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
         sql("INSERT INTO count_pk_dv VALUES (1, 'e')");
 
@@ -774,5 +783,16 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of("+I", 2, "B"), Row.of("-D", 2, "B"), Row.of("+I", 3, "C"));
+    }
+
+    @Test
+    public void testAuditLogTableWithComputedColumn() throws Exception {
+        sql("CREATE TABLE test_table (a int, b int, c AS a + b);");
+        String ddl = sql("SHOW CREATE TABLE `test_table$audit_log`").get(0).getFieldAs(0);
+        assertThat(ddl).contains("`c` AS `a` + `b`");
+
+        sql("INSERT INTO test_table VALUES (1, 1)");
+        assertThat(sql("SELECT * FROM `test_table$audit_log`"))
+                .containsExactly(Row.of("+I", 1, 1, 2));
     }
 }

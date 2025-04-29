@@ -18,6 +18,7 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.compact.CompactDeletionFile;
@@ -32,12 +33,13 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.FileIOUtils;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -47,17 +49,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
     private IndexFileHandler fileHandler;
 
-    @BeforeEach
-    public void beforeEach() throws Exception {
-        fileHandler = table.store().newIndexFileHandler();
-    }
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void test0(int dvVersion) {
+        initIndexHandler(dvVersion);
 
-    @Test
-    public void test0() {
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
         DeletionVectorsMaintainer dvMaintainer =
                 factory.createOrRestore(null, BinaryRow.EMPTY_ROW, 0);
+        assertThat(dvMaintainer.dvWriteVersion()).isEqualTo(dvVersion);
 
         dvMaintainer.notifyNewDeletion("f1", 1);
         dvMaintainer.notifyNewDeletion("f2", 2);
@@ -76,17 +77,21 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(deletionVectors.containsKey("f3")).isFalse();
     }
 
-    @Test
-    public void test1() {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void test1(int dvVersion) {
+        initIndexHandler(dvVersion);
+
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
 
         DeletionVectorsMaintainer dvMaintainer = factory.create();
-        BitmapDeletionVector deletionVector1 = new BitmapDeletionVector();
+        DeletionVector deletionVector1 = createDeletionVector(dvVersion);
         deletionVector1.delete(1);
         deletionVector1.delete(3);
         deletionVector1.delete(5);
         dvMaintainer.notifyNewDeletion("f1", deletionVector1);
+        assertThat(dvMaintainer.dvWriteVersion()).isEqualTo(dvVersion);
 
         List<IndexFileMeta> fileMetas1 = dvMaintainer.writeDeletionVectorsIndex();
         assertThat(fileMetas1.size()).isEqualTo(1);
@@ -130,8 +135,11 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(deletionVector3.isDeleted(2)).isTrue();
     }
 
-    @Test
-    public void testCompactDeletion() throws IOException {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testCompactDeletion(int dvVersion) throws IOException {
+        initIndexHandler(dvVersion);
+
         DeletionVectorsMaintainer.Factory factory =
                 new DeletionVectorsMaintainer.Factory(fileHandler);
         DeletionVectorsMaintainer dvMaintainer =
@@ -168,5 +176,18 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
 
         deletionFile4.getOrCompute();
         assertThat(indexDir.listFiles()).hasSize(1);
+    }
+
+    private DeletionVector createDeletionVector(int dvVersion) {
+        return dvVersion == 2 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
+    }
+
+    private void initIndexHandler(int dvVersion) {
+        Map<String, String> options = new HashMap<>();
+
+        options.put(CoreOptions.DELETION_VECTOR_VERSION.key(), String.valueOf(dvVersion));
+
+        table = table.copy(options);
+        fileHandler = table.store().newIndexFileHandler();
     }
 }

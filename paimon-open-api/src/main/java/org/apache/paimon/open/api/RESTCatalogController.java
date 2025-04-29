@@ -261,8 +261,9 @@ public class RESTCatalogController {
     public ListTablesResponse listTables(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) String tableNamePattern) {
         // paged list tables in this database with provided maxResults and pageToken
         return new ListTablesResponse(ImmutableList.of("user"), null);
     }
@@ -288,8 +289,9 @@ public class RESTCatalogController {
     public ListTableDetailsResponse listTableDetails(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) String tableNamePattern) {
         // paged list table details in this database with provided maxResults and pageToken
         GetTableResponse singleTable =
                 new GetTableResponse(
@@ -582,8 +584,9 @@ public class RESTCatalogController {
             @PathVariable String prefix,
             @PathVariable String database,
             @PathVariable String table,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) String partitionNamePattern) {
         // paged list partitions in this table with provided maxResults and pageToken
         Map<String, String> spec = new HashMap<>();
         spec.put("f1", "1");
@@ -710,12 +713,40 @@ public class RESTCatalogController {
             @PathVariable String branch) {}
 
     @Operation(
-            summary = "List view details",
+            summary = "List views",
             tags = {"view"})
     @ApiResponses({
         @ApiResponse(
                 responseCode = "200",
                 content = {@Content(schema = @Schema(implementation = ListViewsResponse.class))}),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/views")
+    public ListViewsResponse listViews(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) String viewNamePattern) {
+        // paged list tables in this database with provided maxResults and pageToken
+        return new ListViewsResponse(ImmutableList.of("user"), null);
+    }
+
+    @Operation(
+            summary = "List view details",
+            tags = {"view"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = ListViewDetailsResponse.class))
+                }),
         @ApiResponse(
                 responseCode = "401",
                 description = "Unauthorized",
@@ -732,8 +763,9 @@ public class RESTCatalogController {
     public ListViewDetailsResponse listViewDetails(
             @PathVariable String prefix,
             @PathVariable String database,
-            @PathVariable Integer maxResults,
-            @PathVariable String pageToken) {
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken,
+            @RequestParam(required = false) String viewNamePattern) {
         // paged list view details in this database with provided maxResults and pageToken
         List<DataField> fields =
                 Arrays.asList(

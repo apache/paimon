@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.deletionvectors.BitmapDeletionVector
+import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
@@ -41,7 +41,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, EqualTo, Filter}
+import org.apache.spark.sql.sources._
 
 import java.net.URI
 import java.util.Collections
@@ -252,13 +252,15 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
 
     val my_table = table
     val location = my_table.location
+    val dvWriteVersion = my_table.coreOptions().deletionVectorVersion()
     dataWithMetadataColumns
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
       .as[(String, Long)]
       .groupByKey(_._1)
       .mapGroups {
         (filePath, iter) =>
-          val dv = new BitmapDeletionVector()
+          val dv =
+            if (dvWriteVersion == 2) new Bitmap64DeletionVector() else new BitmapDeletionVector()
           while (iter.hasNext) {
             dv.delete(iter.next()._2)
           }
@@ -274,7 +276,8 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
             relativeBucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
-            Seq((new Path(filePath).getName, dv.serializeToBytes()))
+            Seq((new Path(filePath).getName, dv.serializeToBytes())),
+            dvWriteVersion
           )
       }
   }

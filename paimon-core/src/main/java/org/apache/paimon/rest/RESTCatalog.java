@@ -129,6 +129,10 @@ public class RESTCatalog implements Catalog {
     public static final String PAGE_TOKEN = "pageToken";
     public static final String QUERY_PARAMETER_WAREHOUSE_KEY = "warehouse";
 
+    public static final String TABLE_NAME_PATTERN = "tableNamePattern";
+    public static final String VIEW_NAME_PATTERN = "viewNamePattern";
+    public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
+
     private final RESTClient client;
     private final ResourcePaths resourcePaths;
     private final CatalogContext context;
@@ -314,13 +318,17 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern)
             throws DatabaseNotExistException {
         try {
             ListTablesResponse response =
                     client.get(
                             resourcePaths.tables(databaseName),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(
+                                    maxResults, pageToken, TABLE_NAME_PATTERN, tableNamePattern),
                             ListTablesResponse.class,
                             restAuthFunction);
             List<String> tables = response.getTables();
@@ -335,13 +343,17 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String db, @Nullable Integer maxResults, @Nullable String pageToken)
+            String db,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern)
             throws DatabaseNotExistException {
         try {
             ListTableDetailsResponse response =
                     client.get(
                             resourcePaths.tableDetails(db),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(
+                                    maxResults, pageToken, TABLE_NAME_PATTERN, tableNamePattern),
                             ListTableDetailsResponse.class,
                             restAuthFunction);
             List<GetTableResponse> tables = response.getTableDetails();
@@ -393,6 +405,11 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public boolean supportsListObjectsPaged() {
+        return true;
+    }
+
+    @Override
+    public boolean supportsListByPattern() {
         return true;
     }
 
@@ -650,14 +667,21 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
             throws TableNotExistException {
         try {
             ListPartitionsResponse response =
                     client.get(
                             resourcePaths.partitions(
                                     identifier.getDatabaseName(), identifier.getObjectName()),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(
+                                    maxResults,
+                                    pageToken,
+                                    PARTITION_NAME_PATTERN,
+                                    partitionNamePattern),
                             ListPartitionsResponse.class,
                             restAuthFunction);
             List<Partition> partitions = response.getPartitions();
@@ -848,13 +872,17 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<String> listViewsPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         try {
             ListViewsResponse response =
                     client.get(
                             resourcePaths.views(databaseName),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(
+                                    maxResults, pageToken, VIEW_NAME_PATTERN, viewNamePattern),
                             ListViewsResponse.class,
                             restAuthFunction);
             List<String> views = response.getViews();
@@ -869,13 +897,17 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public PagedList<View> listViewDetailsPaged(
-            String db, @Nullable Integer maxResults, @Nullable String pageToken)
+            String db,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         try {
             ListViewDetailsResponse response =
                     client.get(
                             resourcePaths.viewDetails(db),
-                            buildPagedQueryParams(maxResults, pageToken),
+                            buildPagedQueryParams(
+                                    maxResults, pageToken, VIEW_NAME_PATTERN, viewNamePattern),
                             ListViewDetailsResponse.class,
                             restAuthFunction);
             List<GetViewResponse> views = response.getViewDetails();
@@ -1032,12 +1064,23 @@ public class RESTCatalog implements Catalog {
 
     private Map<String, String> buildPagedQueryParams(
             @Nullable Integer maxResults, @Nullable String pageToken) {
+        return buildPagedQueryParams(maxResults, pageToken, null, null);
+    }
+
+    private Map<String, String> buildPagedQueryParams(
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String namePatternKey,
+            @Nullable String namePatternValue) {
         Map<String, String> queryParams = Maps.newHashMap();
         if (Objects.nonNull(maxResults) && maxResults > 0) {
             queryParams.put(MAX_RESULTS, maxResults.toString());
         }
         if (Objects.nonNull(pageToken)) {
             queryParams.put(PAGE_TOKEN, pageToken);
+        }
+        if (Objects.nonNull(namePatternValue)) {
+            queryParams.put(namePatternKey, namePatternValue);
         }
         return queryParams;
     }
