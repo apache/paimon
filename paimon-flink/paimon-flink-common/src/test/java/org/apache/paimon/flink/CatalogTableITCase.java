@@ -1140,12 +1140,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testIndexesTable() {
-        int dvVersion = ThreadLocalRandom.current().nextInt(1, 3);
         sql(
                 String.format(
                         "CREATE TABLE T (pt STRING, a INT, b STRING, PRIMARY KEY (pt, a) NOT ENFORCED)"
-                                + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true', 'deletion-vectors.version' = '%s')",
-                        dvVersion));
+                                + " PARTITIONED BY (pt) with ('deletion-vectors.enabled'='true', 'deletion-vectors.bitmap64' = '%s')",
+                        ThreadLocalRandom.current().nextBoolean()));
         sql(
                 "INSERT INTO T VALUES ('2024-10-01', 1, 'aaaaaaaaaaaaaaaaaaa'), ('2024-10-01', 2, 'b'), ('2024-10-01', 3, 'c')");
         sql("INSERT INTO T VALUES ('2024-10-01', 1, 'a_new1'), ('2024-10-01', 3, 'c_new1')");

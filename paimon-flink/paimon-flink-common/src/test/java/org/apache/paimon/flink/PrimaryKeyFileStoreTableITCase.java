@@ -968,8 +968,8 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                 enableFailure,
                 "'bucket' = '4',"
                         + String.format(
-                                "'deletion-vectors.enabled' = '%s', 'deletion-vectors.version' = '%s'",
-                                enableDeletionVectors, random.nextInt(1, 3)));
+                                "'deletion-vectors.enabled' = '%s', 'deletion-vectors.bitmap64' = '%s'",
+                                enableDeletionVectors, random.nextBoolean()));
 
         // changelog is produced by Flink normalize operator
         checkChangelogTestResult(numProducers);
@@ -1015,12 +1015,12 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 + "'changelog-producer' = 'lookup', "
                                 + "'lookup-wait' = '%s', "
                                 + "'deletion-vectors.enabled' = '%s', "
-                                + "'deletion-vectors.version' = '%s', "
+                                + "'deletion-vectors.bitmap64' = '%s', "
                                 + "'precommit-compact' = '%s'",
                         random.nextBoolean() ? "4mb" : "8mb",
                         random.nextBoolean(),
                         enableDeletionVectors,
-                        random.nextInt(1, 3),
+                        random.nextBoolean(),
                         random.nextBoolean()));
 
         // sleep for a random amount of time to check
