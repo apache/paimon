@@ -37,6 +37,7 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SnapshotManager.EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
@@ -55,14 +56,16 @@ public class TimeTravelUtil {
         CoreOptions.SCAN_TIMESTAMP_MILLIS.key()
     };
 
-    @Nullable
-    public static Snapshot resolveSnapshot(FileStoreTable table) {
-        return resolveSnapshotFromOptions(
+    public static Snapshot tryTravelOrLatest(FileStoreTable table) {
+        return tryTravelToSnapshot(table).orElseGet(() -> table.latestSnapshot().orElse(null));
+    }
+
+    public static Optional<Snapshot> tryTravelToSnapshot(FileStoreTable table) {
+        return tryTravelToSnapshot(
                 table.coreOptions().toConfiguration(), table.snapshotManager(), table.tagManager());
     }
 
-    @Nullable
-    public static Snapshot resolveSnapshotFromOptions(
+    public static Optional<Snapshot> tryTravelToSnapshot(
             Options options, SnapshotManager snapshotManager, TagManager tagManager) {
         adaptScanVersion(options, tagManager);
 
@@ -74,7 +77,7 @@ public class TimeTravelUtil {
         }
 
         if (scanHandleKey.isEmpty()) {
-            return snapshotManager.latestSnapshot();
+            return Optional.empty();
         }
 
         checkArgument(
@@ -87,8 +90,8 @@ public class TimeTravelUtil {
                         CoreOptions.SCAN_TIMESTAMP_MILLIS.key()));
 
         String key = scanHandleKey.get(0);
-        Snapshot snapshot = null;
         CoreOptions coreOptions = new CoreOptions(options);
+        Snapshot snapshot;
         if (key.equals(CoreOptions.SCAN_SNAPSHOT_ID.key())) {
             snapshot =
                     new StaticFromSnapshotStartingScanner(
@@ -108,9 +111,10 @@ public class TimeTravelUtil {
             snapshot =
                     new StaticFromTagStartingScanner(snapshotManager, coreOptions.scanTagName())
                             .getSnapshot();
+        } else {
+            throw new UnsupportedOperationException("Unsupported time travel mode: " + key);
         }
-
-        return snapshot;
+        return Optional.of(snapshot);
     }
 
     private static void adaptScanVersion(Options options, TagManager tagManager) {

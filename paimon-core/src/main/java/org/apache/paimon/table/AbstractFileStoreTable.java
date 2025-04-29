@@ -86,6 +86,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
+    private static final String WATERMARK_PREFIX = "watermark-";
+
     protected final FileIO fileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
@@ -188,7 +190,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public Optional<Statistics> statistics() {
-        Snapshot snapshot = TimeTravelUtil.resolveSnapshot(this);
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(this);
         if (snapshot != null) {
             String file = snapshot.statistics();
             if (file == null) {
@@ -479,8 +481,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Snapshot snapshot;
         try {
             snapshot =
-                    TimeTravelUtil.resolveSnapshotFromOptions(
-                            options, snapshotManager(), tagManager());
+                    TimeTravelUtil.tryTravelToSnapshot(options, snapshotManager(), tagManager())
+                            .orElse(null);
         } catch (Exception e) {
             return Optional.empty();
         }
