@@ -277,7 +277,7 @@ class SparkWriteITCase extends PaimonSparkTestBase {
 
       // insert using table api
       val table = loadTable("t")
-      val writeBuilder = table.newBatchWriteBuilder.withOverwrite
+      val writeBuilder = table.newBatchWriteBuilder
       val write = writeBuilder.newWrite
       write.write(
         GenericRow.of(
