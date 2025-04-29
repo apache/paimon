@@ -68,6 +68,14 @@ scenario. Using a bitmap may consume more space but can result in greater accura
 `Bit-Slice Index Bitmap`
 * `file-index.bsi.columns`: specify the columns that need bsi index.
 
+`TokenBloomFilter`:
+* `file-index.token-bloom-filter.columns`: specify the columns that need token bloom filter index.
+* `file-index.token-bloom-filter.<column_name>.fpp` to config false positive probability.
+* `file-index.token-bloom-filter.<column_name>.items` to config the expected distinct items in one data file.
+* `file-index.token-bloom-filter.<column_name>.token.delimiter` to config the delimiter for tokenization (default is space).
+
+TokenBloomFilter is designed for text search scenarios where you need to match on individual tokens within text fields. It splits text by a delimiter and indexes each token separately, allowing for efficient partial text matching.
+
 More filter types will be supported...
 
 If you want to add file index to existing table, without any rewrite, you can use `rewrite_file_index` procedure. Before
