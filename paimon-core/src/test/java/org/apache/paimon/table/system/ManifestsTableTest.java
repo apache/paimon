@@ -36,7 +36,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +47,6 @@ import java.util.List;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Unit tests for {@link ManifestsTable}. */
 public class ManifestsTableTest extends TableTestBase {
@@ -148,18 +146,6 @@ public class ManifestsTableTest extends TableTestBase {
                                         String.valueOf(System.currentTimeMillis())));
         List<InternalRow> result = read(manifestsTable);
         assertThat(result).containsExactlyElementsOf(expectedRow);
-    }
-
-    @Test
-    public void testReadManifestsFromNotExistSnapshot() {
-        manifestsTable =
-                (ManifestsTable)
-                        manifestsTable.copy(
-                                Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
-        assertThrows(
-                SnapshotNotExistException.class,
-                () -> read(manifestsTable),
-                "Specified parameter scan.snapshot-id = 3 is not exist, you can set it in range from 1 to 2");
     }
 
     private List<InternalRow> getExpectedResult(long snapshotId) {

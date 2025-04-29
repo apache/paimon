@@ -26,8 +26,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
-import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +36,6 @@ import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SnapshotManager.EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
 
@@ -54,10 +51,12 @@ public class TimeTravelUtil {
         CoreOptions.SCAN_TIMESTAMP_MILLIS.key()
     };
 
+    @Nullable
     public static Snapshot resolveSnapshot(FileStoreTable table) {
         return resolveSnapshotFromOptions(table.coreOptions(), table.snapshotManager());
     }
 
+    @Nullable
     public static Snapshot resolveSnapshotFromOptions(
             CoreOptions options, SnapshotManager snapshotManager) {
         List<String> scanHandleKey = new ArrayList<>(1);
@@ -67,7 +66,7 @@ public class TimeTravelUtil {
             }
         }
 
-        if (scanHandleKey.size() == 0) {
+        if (scanHandleKey.isEmpty()) {
             return snapshotManager.latestSnapshot();
         }
 
@@ -83,59 +82,25 @@ public class TimeTravelUtil {
         String key = scanHandleKey.get(0);
         Snapshot snapshot = null;
         if (key.equals(CoreOptions.SCAN_SNAPSHOT_ID.key())) {
-            snapshot = resolveSnapshotBySnapshotId(snapshotManager, options);
+            snapshot =
+                    new StaticFromSnapshotStartingScanner(snapshotManager, options.scanSnapshotId())
+                            .getSnapshot();
         } else if (key.equals(CoreOptions.SCAN_WATERMARK.key())) {
-            snapshot = resolveSnapshotByWatermark(snapshotManager, options);
+            snapshot =
+                    new StaticFromWatermarkStartingScanner(snapshotManager, options.scanWatermark())
+                            .getSnapshot();
         } else if (key.equals(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())) {
-            snapshot = resolveSnapshotByTimestamp(snapshotManager, options);
+            snapshot =
+                    new StaticFromTimestampStartingScanner(
+                                    snapshotManager, options.scanTimestampMills())
+                            .getSnapshot();
         } else if (key.equals(CoreOptions.SCAN_TAG_NAME.key())) {
-            snapshot = resolveSnapshotByTagName(snapshotManager, options);
+            snapshot =
+                    new StaticFromTagStartingScanner(snapshotManager, options.scanTagName())
+                            .getSnapshot();
         }
 
-        if (snapshot == null) {
-            snapshot = snapshotManager.latestSnapshot();
-        }
         return snapshot;
-    }
-
-    private static Snapshot resolveSnapshotBySnapshotId(
-            SnapshotManager snapshotManager, CoreOptions options) {
-        Long snapshotId = options.scanSnapshotId();
-        if (snapshotId != null) {
-            if (!snapshotManager.snapshotExists(snapshotId)) {
-                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-                Long latestSnapshotId = snapshotManager.latestSnapshotId();
-                throw new SnapshotNotExistException(
-                        String.format(
-                                "Specified parameter %s = %s is not exist, you can set it in range from %s to %s.",
-                                SCAN_SNAPSHOT_ID.key(),
-                                snapshotId,
-                                earliestSnapshotId,
-                                latestSnapshotId));
-            }
-            return snapshotManager.snapshot(snapshotId);
-        }
-        return null;
-    }
-
-    private static Snapshot resolveSnapshotByTimestamp(
-            SnapshotManager snapshotManager, CoreOptions options) {
-        Long timestamp = options.scanTimestampMills();
-        return snapshotManager.earlierOrEqualTimeMills(timestamp);
-    }
-
-    private static Snapshot resolveSnapshotByWatermark(
-            SnapshotManager snapshotManager, CoreOptions options) {
-        Long watermark = options.scanWatermark();
-        return snapshotManager.laterOrEqualWatermark(watermark);
-    }
-
-    private static Snapshot resolveSnapshotByTagName(
-            SnapshotManager snapshotManager, CoreOptions options) {
-        String tagName = options.scanTagName();
-        TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        return tagManager.getOrThrow(tagName).trimToSnapshot();
     }
 
     /**

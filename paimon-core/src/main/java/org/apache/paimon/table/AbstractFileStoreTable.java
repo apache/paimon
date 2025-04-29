@@ -50,8 +50,6 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
-import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.CatalogBranchManager;
@@ -87,8 +85,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
-
-    private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
     protected final Path path;
@@ -481,74 +477,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
         CoreOptions coreOptions = new CoreOptions(options);
-
-        switch (coreOptions.startupMode()) {
-            case FROM_SNAPSHOT:
-            case FROM_SNAPSHOT_FULL:
-                if (coreOptions.scanVersion() != null) {
-                    return travelToVersion(coreOptions.scanVersion(), options);
-                } else if (coreOptions.scanSnapshotId() != null) {
-                    return travelToSnapshot(coreOptions.scanSnapshotId(), options);
-                } else if (coreOptions.scanWatermark() != null) {
-                    return travelToWatermark(coreOptions.scanWatermark(), options);
-                } else {
-                    return travelToTag(coreOptions.scanTagName(), options);
-                }
-            case FROM_TIMESTAMP:
-                Snapshot snapshot =
-                        StaticFromTimestampStartingScanner.timeTravelToTimestamp(
-                                snapshotManager(), coreOptions.scanTimestampMills());
-                return travelToSnapshot(snapshot, options);
-            default:
-                return Optional.empty();
-        }
-    }
-
-    /** Tag first when travelling to a version. */
-    private Optional<TableSchema> travelToVersion(String version, Options options) {
-        options.remove(CoreOptions.SCAN_VERSION.key());
-        if (tagManager().tagExists(version)) {
-            options.set(CoreOptions.SCAN_TAG_NAME, version);
-            return travelToTag(version, options);
-        } else if (version.startsWith(WATERMARK_PREFIX)) {
-            long watermark = Long.parseLong(version.substring(WATERMARK_PREFIX.length()));
-            options.set(CoreOptions.SCAN_WATERMARK, watermark);
-            return travelToWatermark(watermark, options);
-        } else if (version.chars().allMatch(Character::isDigit)) {
-            options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
-            return travelToSnapshot(Long.parseLong(version), options);
-        } else {
-            throw new RuntimeException("Cannot find a time travel version for " + version);
-        }
-    }
-
-    private Optional<TableSchema> travelToTag(String tagName, Options options) {
-        return travelToSnapshot(tagManager().getOrThrow(tagName).trimToSnapshot(), options);
-    }
-
-    private Optional<TableSchema> travelToSnapshot(long snapshotId, Options options) {
-        SnapshotManager snapshotManager = snapshotManager();
-        if (snapshotManager.snapshotExists(snapshotId)) {
-            return travelToSnapshot(snapshotManager.snapshot(snapshotId), options);
-        }
-        return Optional.empty();
-    }
-
-    private Optional<TableSchema> travelToWatermark(long watermark, Options options) {
         Snapshot snapshot =
-                StaticFromWatermarkStartingScanner.timeTravelToWatermark(
-                        snapshotManager(), watermark);
-        if (snapshot != null) {
-            return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
+                TimeTravelUtil.resolveSnapshotFromOptions(coreOptions, snapshotManager());
+        if (snapshot == null) {
+            return Optional.empty();
         }
-        return Optional.empty();
-    }
-
-    private Optional<TableSchema> travelToSnapshot(@Nullable Snapshot snapshot, Options options) {
-        if (snapshot != null) {
-            return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
-        }
-        return Optional.empty();
+        return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
     }
 
     @Override
