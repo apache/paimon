@@ -296,20 +296,65 @@ public class DeletionVectorsIndexFileTest {
     }
 
     @Test
-    public void testReadOldDeletionVector() throws IOException {
-        // dv metadata for dvindex-v1:
-        // DeletionVectorMeta("file2.parquet", 1, 24, 2L), and pos(2, 3) should be isDeleted
-        // DeletionVectorMeta("file1.parquet", 33, 22, 1L), and pos(1) should be isDeleted
+    public void testReadOldDeletionVector32Bit() throws IOException {
+        // write
+        //        LocalFileIO fileIO = LocalFileIO.create();
+        //        try (DeletionFileWriter writer = new DeletionFileWriter(new
+        // Path("/tmp/dvindex-32"), fileIO)) {
+        //            BitmapDeletionVector vector1 = new BitmapDeletionVector();
+        //            vector1.delete(2);
+        //            vector1.delete(3);
+        //            writer.write("file2.parquet", vector1);
+        //
+        //            BitmapDeletionVector vector2 = new BitmapDeletionVector();
+        //            vector2.delete(1);
+        //            writer.write("file1.parquet", vector2);
+        //        }
 
         try (InputStream inputStream =
                 DeletionVectorsIndexFile.class
                         .getClassLoader()
-                        .getResourceAsStream("compatibility/dvindex-v1")) {
+                        .getResourceAsStream("compatibility/dvindex-32")) {
             // read version
             assertThat(inputStream.read()).isEqualTo(1);
             DataInputStream dataInputStream = new DataInputStream(inputStream);
             DeletionVector dv1 = DeletionVector.read(dataInputStream, 24L);
+            assertThat(dv1).isInstanceOf(BitmapDeletionVector.class);
             DeletionVector dv2 = DeletionVector.read(dataInputStream, 22L);
+            assertThat(dv2).isInstanceOf(BitmapDeletionVector.class);
+            assertThat(dv1.getCardinality()).isEqualTo(2L);
+            assertThat(dv2.getCardinality()).isEqualTo(1L);
+            assertThat(dv1.isDeleted(2)).isTrue();
+            assertThat(dv1.isDeleted(3)).isTrue();
+            assertThat(dv2.isDeleted(1)).isTrue();
+        }
+    }
+
+    @Test
+    public void testReadOldDeletionVector64Bit() throws IOException {
+        // write
+        //        LocalFileIO fileIO = LocalFileIO.create();
+        //        try (DeletionFileWriter writer = new DeletionFileWriter(new
+        // Path("/tmp/dvindex-64"), fileIO)) {
+        //            Bitmap64DeletionVector vector1 = new Bitmap64DeletionVector();
+        //            vector1.delete(2);
+        //            vector1.delete(3);
+        //            writer.write("file2.parquet", vector1);
+        //
+        //            Bitmap64DeletionVector vector2 = new Bitmap64DeletionVector();
+        //            vector2.delete(1);
+        //            writer.write("file1.parquet", vector2);
+        //        }
+        try (InputStream inputStream =
+                DeletionVectorsIndexFile.class
+                        .getClassLoader()
+                        .getResourceAsStream("compatibility/dvindex-64")) {
+            assertThat(inputStream.read()).isEqualTo(1);
+            DataInputStream dataInputStream = new DataInputStream(inputStream);
+            DeletionVector dv1 = DeletionVector.read(dataInputStream, 44L);
+            assertThat(dv1).isInstanceOf(Bitmap64DeletionVector.class);
+            DeletionVector dv2 = DeletionVector.read(dataInputStream, 42L);
+            assertThat(dv2).isInstanceOf(Bitmap64DeletionVector.class);
             assertThat(dv1.getCardinality()).isEqualTo(2L);
             assertThat(dv2.getCardinality()).isEqualTo(1L);
             assertThat(dv1.isDeleted(2)).isTrue();
