@@ -301,9 +301,6 @@ public class DeletionVectorsIndexFileTest {
         // DeletionVectorMeta("file2.parquet", 1, 24, 2L), and pos(2, 3) should be isDeleted
         // DeletionVectorMeta("file1.parquet", 33, 22, 1L), and pos(1) should be isDeleted
 
-        DeletionVectorsIndexFile deletionVectorsIndexFile =
-                deletionVectorsIndexFile(getPathFactory(), false);
-
         try (InputStream inputStream =
                 DeletionVectorsIndexFile.class
                         .getClassLoader()
