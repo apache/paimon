@@ -52,6 +52,8 @@ import java.util.Map;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
 /** Utils for cloning Hive table to Paimon table. */
@@ -121,6 +123,12 @@ public class HiveCloneUtils {
         if (hiveTableOptions.get("comment") != null) {
             paimonOptions.put("hive.comment", hiveTableOptions.get("comment"));
         }
+
+        String format = parseFormat(hiveTable);
+        paimonOptions.put(FILE_FORMAT.key(), format);
+
+        String compression = parseCompression(hiveTable);
+        paimonOptions.put(FILE_COMPRESSION.key(), compression);
 
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
@@ -225,5 +233,17 @@ public class HiveCloneUtils {
             throw new UnsupportedOperationException("Unknown partition format: " + partition);
         }
         return format;
+    }
+
+    private static String parseCompression(StorageDescriptor storageDescriptor) {
+        Map<String, String> serderParams = storageDescriptor.getSerdeInfo().getParameters();
+        if (serderParams.containsKey("compression")) {
+            return serderParams.get("compression");
+        }
+        return "none";
+    }
+
+    private static String parseCompression(Table table) {
+        return parseCompression(table.getSd());
     }
 }

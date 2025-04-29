@@ -43,7 +43,10 @@ import javax.annotation.Nullable;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
+import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -135,6 +138,20 @@ public class ListCloneFilesFunction
                 existedTable.coreOptions().bucket() == -1,
                 "Can not clone data to existed paimon table which bucket is not -1. Existed paimon table is "
                         + existedTable.name());
+
+        // check format
+        checkState(
+                Objects.equals(
+                        sourceSchema.options().get(FILE_FORMAT.key()),
+                        existedTable.coreOptions().formatType()),
+                "source table format is not compatible with existed paimon table format.");
+
+        // check compression
+        checkState(
+                Objects.equals(
+                        sourceSchema.options().get(FILE_COMPRESSION.key()),
+                        existedTable.coreOptions().fileCompression()),
+                "source table compression is not compatible with existed paimon table compression.");
 
         // check partition keys
         List<String> sourcePartitionFields = sourceSchema.partitionKeys();
