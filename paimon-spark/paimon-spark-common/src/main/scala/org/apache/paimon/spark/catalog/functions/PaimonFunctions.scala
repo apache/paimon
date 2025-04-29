@@ -115,7 +115,7 @@ object BucketFunction {
   }
 
   /**
-   * The reason of this is that Spark's timestamp precision is limited to 6, and in
+   * The reason of this is that Spark's timestamp precision is fixed to 6, and in
    * [[BucketFunction.bind]], we use `InternalRowSerializer(bucketKeyRowType)` to convert paimon
    * rows, but the `bucketKeyRowType` is derived from Spark's StructType which will lose the true
    * precision of timestamp, leading to anomalies in bucket calculations.
