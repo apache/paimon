@@ -30,6 +30,7 @@ import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.FileKind
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
+import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
@@ -243,12 +244,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
       case HASH_FIXED =>
         if (table.bucketSpec().getNumBuckets == -2) {
           writeWithoutBucket(data)
-        } else if (!paimonExtensionEnabled) {
-          // Topology: input -> bucket-assigner -> shuffle by partition & bucket
-          writeWithBucketProcessor(
-            withInitBucketCol,
-            CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol))
-        } else {
+        } else if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {
           // Topology: input -> shuffle by partition & bucket
           val bucketNumber = table.coreOptions().bucket()
           val bucketKeyCol = tableSchema
@@ -262,6 +258,11 @@ case class PaimonSparkWriter(table: FileStoreTable) {
             repartitionByPartitionsAndBucket(
               data.withColumn(BUCKET_COL, call_udf(BucketExpression.FIXED_BUCKET, args: _*)))
           writeWithBucket(repartitioned)
+        } else {
+          // Topology: input -> bucket-assigner -> shuffle by partition & bucket
+          writeWithBucketProcessor(
+            withInitBucketCol,
+            CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol))
         }
 
       case _ =>
