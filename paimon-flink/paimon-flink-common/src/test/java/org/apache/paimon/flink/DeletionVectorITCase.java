@@ -289,7 +289,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2})
+    @ValueSource(booleans = {true, false})
     public void testReadTagWithDv(boolean dvBitmap64) {
         sql(
                 "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) WITH ("
