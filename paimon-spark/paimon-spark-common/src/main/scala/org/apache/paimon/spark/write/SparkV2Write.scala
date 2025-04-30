@@ -157,7 +157,7 @@ private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: St
   }
 }
 
-private class TaskCommit private (
+class TaskCommit private (
     private val serializedMessageBytes: Seq[Array[Byte]]
 ) extends WriterCommitMessage {
   def commitMessages(): Seq[CommitMessage] = {
