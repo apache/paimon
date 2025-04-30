@@ -146,6 +146,20 @@ public class ListCloneFilesFunction
                         existedTable.coreOptions().formatType()),
                 "source table format is not compatible with existed paimon table format.");
 
+        Map<String, String> sourceFormatOptions =
+                HiveCloneUtils.getIdentifierPrefixOptions(
+                        sourceSchema.options().get(FILE_FORMAT.key()), sourceSchema.options());
+        Map<String, String> existedFormatOptions =
+                HiveCloneUtils.getIdentifierPrefixOptions(
+                        existedTable.coreOptions().formatType(), existedTable.schema().options());
+        for (String key : sourceFormatOptions.keySet()) {
+            checkState(
+                    existedFormatOptions.containsKey(key)
+                            && Objects.equals(
+                                    sourceFormatOptions.get(key), existedFormatOptions.get(key)),
+                    "source table format options is not compatible with existed paimon table format options.");
+        }
+
         // check compression
         checkState(
                 Objects.equals(

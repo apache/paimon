@@ -265,7 +265,7 @@ public class HiveCloneUtils {
         return compression;
     }
 
-    private static Map<String, String> getIdentifierPrefixOptions(
+    public static Map<String, String> getIdentifierPrefixOptions(
             String formatIdentifier, Map<String, String> options) {
         Map<String, String> result = new HashMap<>();
         String prefix = formatIdentifier.toLowerCase() + ".";
