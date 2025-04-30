@@ -27,7 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 
@@ -73,8 +73,8 @@ public class DLFToken {
             this.expirationAtMills = null;
         } else {
             LocalDateTime dateTime = LocalDateTime.parse(expiration, TOKEN_DATE_FORMATTER);
-            this.expirationAtMills =
-                    dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+            // Note: the date time is UTC time zone
+            this.expirationAtMills = dateTime.atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
         }
     }
 
