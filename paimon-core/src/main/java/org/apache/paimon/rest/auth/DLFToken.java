@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -56,7 +57,7 @@ public class DLFToken {
     @Nullable
     private final String expiration;
 
-    @Nullable private final Long expirationAtMills;
+    @JsonIgnore @Nullable private final Long expirationAtMills;
 
     @JsonCreator
     public DLFToken(

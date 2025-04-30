@@ -32,8 +32,6 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.io.IOException;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -379,8 +377,7 @@ public class AuthProviderTest {
 
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
         File tokenFile = folder.newFile(fileName);
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-        String expiration = now.format(TOKEN_DATE_FORMATTER);
+        String expiration = LocalDateTime.now().format(TOKEN_DATE_FORMATTER);
         String secret = UUID.randomUUID().toString();
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
@@ -392,11 +389,11 @@ public class AuthProviderTest {
         return generateToken(LocalDateTime.now());
     }
 
-    private DLFToken generateToken(LocalDateTime now) {
+    private DLFToken generateToken(LocalDateTime expireTime) {
         String accessKeyId = UUID.randomUUID().toString();
         String accessKeySecret = UUID.randomUUID().toString();
         String securityToken = UUID.randomUUID().toString();
-        String expiration = now.format(TOKEN_DATE_FORMATTER);
+        String expiration = expireTime.format(TOKEN_DATE_FORMATTER);
         return new DLFToken(accessKeyId, accessKeySecret, securityToken, expiration);
     }
 
