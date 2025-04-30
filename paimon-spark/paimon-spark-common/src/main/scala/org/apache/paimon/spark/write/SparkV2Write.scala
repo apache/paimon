@@ -138,7 +138,7 @@ private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: St
 
   override def commit(): WriterCommitMessage = {
     try {
-      val commitMessages = batchTableWrite.prepareCommit().asScala
+      val commitMessages = batchTableWrite.prepareCommit().asScala.toSeq
       TaskCommit(commitMessages)
     } finally {
       close()
