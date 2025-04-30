@@ -21,18 +21,25 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.StringUtils;
+
+import static org.apache.paimon.rest.RESTCatalogOptions.TOKEN_PROVIDER;
 
 /** Factory for {@link AuthProvider}. */
 public interface AuthProviderFactory extends Factory {
 
     AuthProvider create(Options options);
 
-    static AuthProvider createAuthProvider(String name, Options options) {
+    static AuthProvider createAuthProvider(Options options) {
+        String tokenProvider = options.get(TOKEN_PROVIDER);
+        if (StringUtils.isEmpty(tokenProvider)) {
+            throw new IllegalArgumentException("token.provider is not set.");
+        }
         AuthProviderFactory factory =
                 FactoryUtil.discoverFactory(
                         AuthProviderFactory.class.getClassLoader(),
                         AuthProviderFactory.class,
-                        name);
+                        tokenProvider);
         return factory.create(options);
     }
 }

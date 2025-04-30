@@ -35,15 +35,10 @@ public class BearTokenAuthProvider implements AuthProvider {
     }
 
     @Override
-    public Map<String, String> header(
+    public Map<String, String> mergeAuthHeader(
             Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
         Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
         headersWithAuth.put(AUTHORIZATION_HEADER_KEY, BEARER_PREFIX + token);
         return headersWithAuth;
-    }
-
-    @Override
-    public boolean refresh() {
-        return true;
     }
 }

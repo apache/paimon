@@ -20,13 +20,22 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.annotation.Nullable;
+
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 
 /** <b>Ali CLoud</b> DLF Token. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DLFToken {
+
+    public static final DateTimeFormatter TOKEN_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
     private static final String ACCESS_KEY_ID_FIELD_NAME = "AccessKeyId";
     private static final String ACCESS_KEY_SECRET_FIELD_NAME = "AccessKeySecret";
@@ -42,19 +51,30 @@ public class DLFToken {
     @JsonProperty(SECURITY_TOKEN_FIELD_NAME)
     private final String securityToken;
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(EXPIRATION_FIELD_NAME)
+    @Nullable
     private final String expiration;
+
+    @Nullable private final Long expirationAtMills;
 
     @JsonCreator
     public DLFToken(
             @JsonProperty(ACCESS_KEY_ID_FIELD_NAME) String accessKeyId,
             @JsonProperty(ACCESS_KEY_SECRET_FIELD_NAME) String accessKeySecret,
             @JsonProperty(SECURITY_TOKEN_FIELD_NAME) String securityToken,
-            @JsonProperty(EXPIRATION_FIELD_NAME) String expiration) {
+            @Nullable @JsonProperty(EXPIRATION_FIELD_NAME) String expiration) {
         this.accessKeyId = accessKeyId;
         this.accessKeySecret = accessKeySecret;
         this.securityToken = securityToken;
         this.expiration = expiration;
+        if (expiration == null) {
+            this.expirationAtMills = null;
+        } else {
+            LocalDateTime dateTime = LocalDateTime.parse(expiration, TOKEN_DATE_FORMATTER);
+            this.expirationAtMills =
+                    dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        }
     }
 
     public String getAccessKeyId() {
@@ -69,8 +89,9 @@ public class DLFToken {
         return securityToken;
     }
 
-    public String getExpiration() {
-        return expiration;
+    @Nullable
+    public Long getExpirationAtMills() {
+        return expirationAtMills;
     }
 
     @Override

@@ -43,6 +43,11 @@ public class DLFLocalFileTokenLoader implements DLFTokenLoader {
         return readToken(tokenFilePath, 0);
     }
 
+    @Override
+    public String description() {
+        return tokenFilePath;
+    }
+
     protected static DLFToken readToken(String tokenFilePath, int retryTimes) {
         try {
             File tokenFile = new File(tokenFilePath);
