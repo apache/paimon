@@ -20,11 +20,10 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 
-import java.io.Closeable;
 import java.util.Map;
 
 /** Interface for a basic HTTP Client for interfacing with the REST catalog. */
-public interface RESTClient extends Closeable {
+public interface RESTClient {
 
     <T extends RESTResponse> T get(
             String path, Class<T> responseType, RESTAuthFunction restAuthFunction);

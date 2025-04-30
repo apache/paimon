@@ -46,6 +46,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
+import static org.apache.paimon.rest.RESTCatalog.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
@@ -191,11 +192,13 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     private boolean shouldRefresh() {
-        return token == null || token.expireAtMillis() - System.currentTimeMillis() < 3600_000L;
+        return token == null
+                || token.expireAtMillis() - System.currentTimeMillis()
+                        < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
     }
 
     private void refreshToken() {
-        LOG.info("begin refresh token for identifier [{}]", identifier);
+        LOG.info("begin refresh data token for identifier [{}]", identifier);
         GetTableTokenResponse response;
         if (catalogInstance != null) {
             try {
@@ -211,7 +214,7 @@ public class RESTTokenFileIO implements FileIO {
             }
         }
         LOG.info(
-                "end refresh token for identifier [{}] expiresAtMillis [{}]",
+                "end refresh data token for identifier [{}] expiresAtMillis [{}]",
                 identifier,
                 response.getExpiresAtMillis());
 
