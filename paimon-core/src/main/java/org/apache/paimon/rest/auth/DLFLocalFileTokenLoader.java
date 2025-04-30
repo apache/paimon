@@ -46,7 +46,7 @@ public class DLFLocalFileTokenLoader implements DLFTokenLoader {
     protected static DLFToken readToken(String tokenFilePath) {
         int retry = 1;
         Exception lastException = null;
-        while (retry <= 3) {
+        while (retry <= 5) {
             try {
                 String tokenStr = FileIOUtils.readFileUtf8(new File(tokenFilePath));
                 return OBJECT_MAPPER.readValue(tokenStr, DLFToken.class);
