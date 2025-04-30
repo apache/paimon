@@ -40,6 +40,12 @@ class SparkWriteWithNoExtensionITCase extends SparkWriteITCase {
   }
 }
 
+class SparkV2WriteITCase extends SparkWriteITCase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
+  }
+}
+
 class SparkWriteITCase extends PaimonSparkTestBase {
 
   test("Paimon Write : Postpone Bucket") {
