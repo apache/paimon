@@ -247,7 +247,7 @@ public class RESTCatalogServer {
                                     resourcePath, parameters, request.getMethod(), data);
                     String authToken =
                             authProvider
-                                    .header(headers, restAuthParameter)
+                                    .mergeAuthHeader(headers, restAuthParameter)
                                     .get(AUTHORIZATION_HEADER_KEY);
                     if (!authToken.equals(token)) {
                         return new MockResponse().setResponseCode(401);

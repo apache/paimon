@@ -19,28 +19,10 @@
 package org.apache.paimon.rest.auth;
 
 import java.util.Map;
-import java.util.Optional;
 
 /** Authentication provider. */
 public interface AuthProvider {
 
-    Map<String, String> header(Map<String, String> baseHeader, RESTAuthParameter restAuthParameter);
-
-    boolean refresh();
-
-    default boolean keepRefreshed() {
-        return false;
-    }
-
-    default boolean willSoonExpire() {
-        return false;
-    }
-
-    default Optional<Long> expiresAtMillis() {
-        return Optional.empty();
-    }
-
-    default Optional<Long> tokenRefreshInMills() {
-        return Optional.empty();
-    }
+    Map<String, String> mergeAuthHeader(
+            Map<String, String> baseHeader, RESTAuthParameter restAuthParameter);
 }

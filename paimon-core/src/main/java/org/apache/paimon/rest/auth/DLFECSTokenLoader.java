@@ -53,7 +53,7 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
                     .readTimeout(Duration.ofMinutes(3))
                     .build();
 
-    private String ecsMetadataURL;
+    private final String ecsMetadataURL;
 
     private String roleName;
 
@@ -68,6 +68,11 @@ public class DLFECSTokenLoader implements DLFTokenLoader {
             roleName = getRole(ecsMetadataURL);
         }
         return getToken(ecsMetadataURL + roleName);
+    }
+
+    @Override
+    public String description() {
+        return ecsMetadataURL;
     }
 
     private static String getRole(String url) {
