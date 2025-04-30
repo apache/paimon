@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex.token;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
@@ -37,9 +38,7 @@ import java.util.Arrays;
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
 import static org.apache.paimon.fileindex.FileIndexResult.SKIP;
 
-/**
- * Token bloom filter for file index.
- */
+/** Token bloom filter for file index. */
 public class TokenBloomFilterFileIndex implements FileIndexer {
 
     private static final int DEFAULT_ITEMS = 1_000_000;
@@ -96,7 +95,11 @@ public class TokenBloomFilterFileIndex implements FileIndexer {
                 String text = (String) key;
                 Arrays.stream(text.split(delimiter))
                         .filter(token -> !token.isEmpty())
-                        .forEach(token -> filter.addHash(hashFunction.hash(token)));
+                        .forEach(
+                                token -> {
+                                    BinaryString binaryToken = BinaryString.fromString(token);
+                                    filter.addHash(hashFunction.hash(binaryToken));
+                                });
             }
         }
 
@@ -104,7 +107,6 @@ public class TokenBloomFilterFileIndex implements FileIndexer {
         public byte[] serializedBytes() {
             int numHashFunctions = filter.getNumHashFunctions();
             byte[] serialized = new byte[filter.getBitSet().bitSize() / Byte.SIZE + Integer.BYTES];
-            // big endian
             serialized[0] = (byte) ((numHashFunctions >>> 24) & 0xFF);
             serialized[1] = (byte) ((numHashFunctions >>> 16) & 0xFF);
             serialized[2] = (byte) ((numHashFunctions >>> 8) & 0xFF);
@@ -133,7 +135,7 @@ public class TokenBloomFilterFileIndex implements FileIndexer {
 
         @Override
         public FileIndexResult visitEqual(FieldRef fieldRef, Object key) {
-            if (key == null){
+            if (key == null) {
                 return REMAIN;
             }
             if (key instanceof String) {
@@ -141,7 +143,12 @@ public class TokenBloomFilterFileIndex implements FileIndexer {
                 boolean anyTokenMatch =
                         Arrays.stream(text.split(delimiter))
                                 .filter(token -> !token.isEmpty())
-                                .anyMatch(token -> filter.testHash(hashFunction.hash(token)));
+                                .anyMatch(
+                                        token -> {
+                                            BinaryString binaryToken =
+                                                    BinaryString.fromString(token);
+                                            return filter.testHash(hashFunction.hash(binaryToken));
+                                        });
                 return anyTokenMatch ? REMAIN : SKIP;
             }
             return REMAIN;
