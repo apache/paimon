@@ -21,16 +21,11 @@ package org.apache.paimon.rest.auth;
 import org.apache.paimon.utils.FileIOUtils;
 
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 
 import static org.apache.paimon.rest.RESTObjectMapper.OBJECT_MAPPER;
 
 /** DLF Token Loader for local file. */
 public class DLFLocalFileTokenLoader implements DLFTokenLoader {
-
-    private static final long[] READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS = {1_000, 3_000, 5_000};
 
     private final String tokenFilePath;
 
@@ -40,7 +35,7 @@ public class DLFLocalFileTokenLoader implements DLFTokenLoader {
 
     @Override
     public DLFToken loadToken() {
-        return readToken(tokenFilePath, 0);
+        return readToken(tokenFilePath);
     }
 
     @Override
@@ -48,22 +43,24 @@ public class DLFLocalFileTokenLoader implements DLFTokenLoader {
         return tokenFilePath;
     }
 
-    protected static DLFToken readToken(String tokenFilePath, int retryTimes) {
-        try {
-            File tokenFile = new File(tokenFilePath);
-            if (tokenFile.exists()) {
-                String tokenStr = FileIOUtils.readFileUtf8(tokenFile);
+    protected static DLFToken readToken(String tokenFilePath) {
+        int retry = 1;
+        Exception lastException = null;
+        while (retry <= 3) {
+            try {
+                String tokenStr = FileIOUtils.readFileUtf8(new File(tokenFilePath));
                 return OBJECT_MAPPER.readValue(tokenStr, DLFToken.class);
-            } else if (retryTimes < READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS.length - 1) {
-                Thread.sleep(READ_TOKEN_FILE_BACKOFF_WAIT_TIME_MILLIS[retryTimes]);
-                return readToken(tokenFilePath, retryTimes + 1);
-            } else {
-                throw new FileNotFoundException(tokenFilePath);
+            } catch (Exception e) {
+                lastException = e;
             }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            try {
+                Thread.sleep(retry * 1000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+            retry++;
         }
+        throw new RuntimeException(lastException);
     }
 }
