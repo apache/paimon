@@ -20,7 +20,7 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkUtils}
-import org.apache.paimon.table.{AppendOnlyFileStoreTable, FileStoreTable}
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage, CommitMessageSerializer}
 
 import org.apache.spark.internal.Logging
@@ -90,18 +90,15 @@ class SparkV2Write(
       logInfo(s"Committing to table ${table.name()}")
       val batchTableCommit = batchWriteBuilder.newCommit()
 
-      val commitMessages = messages
-        .collect {
-          case taskCommit: TaskCommit => taskCommit.commitMessages
-          case other =>
-            throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
-        }
-        .flatten
-        .toList
+      val commitMessages = messages.collect {
+        case taskCommit: TaskCommit => taskCommit.commitMessages
+        case other =>
+          throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
+      }.flatten
 
       try {
         val start = System.currentTimeMillis()
-        batchTableCommit.commit(commitMessages.asJava)
+        batchTableCommit.commit(commitMessages.toList.asJava)
         logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
       } finally {
         batchTableCommit.close()
@@ -141,7 +138,7 @@ private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: St
 
   override def commit(): WriterCommitMessage = {
     try {
-      val commitMessages = batchTableWrite.prepareCommit().asScala.toList
+      val commitMessages = batchTableWrite.prepareCommit().asScala
       TaskCommit(commitMessages)
     } finally {
       close()
@@ -160,27 +157,12 @@ private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: St
   }
 }
 
-private case class TaskCommit(commitMessagesList: List[CommitMessage]) extends WriterCommitMessage {
-  // Although CommitMessage is serializable, the variables in CommitMessageImpl are all transient.
-  private val serializedMessageList: List[Array[Byte]] = {
-    Option(commitMessagesList).filter(_.nonEmpty) match {
-      case Some(messages) =>
-        val serializer = new CommitMessageSerializer()
-        messages.map {
-          msg =>
-            Try(serializer.serialize(msg)) match {
-              case Success(serializedBytes) => serializedBytes
-              case Failure(e: IOException) => throw new UncheckedIOException(e)
-              case Failure(e) => throw e
-            }
-        }
-      case None => Nil
-    }
-  }
-
-  def commitMessages(): List[CommitMessage] = {
+private class TaskCommit private (
+    private val serializedMessageBytes: Seq[Array[Byte]]
+) extends WriterCommitMessage {
+  def commitMessages(): Seq[CommitMessage] = {
     val deserializer = new CommitMessageSerializer()
-    serializedMessageList.map {
+    serializedMessageBytes.map {
       bytes =>
         Try(deserializer.deserialize(deserializer.getVersion, bytes)) match {
           case Success(msg) => msg
@@ -188,5 +170,24 @@ private case class TaskCommit(commitMessagesList: List[CommitMessage]) extends W
           case Failure(e) => throw e
         }
     }
+  }
+}
+
+object TaskCommit {
+  def apply(commitMessages: Seq[CommitMessage]): TaskCommit = {
+    val serializer = new CommitMessageSerializer()
+    val serializedBytes: Seq[Array[Byte]] = Option(commitMessages)
+      .filter(_.nonEmpty)
+      .map(_.map {
+        msg =>
+          Try(serializer.serialize(msg)) match {
+            case Success(serializedBytes) => serializedBytes
+            case Failure(e: IOException) => throw new UncheckedIOException(e)
+            case Failure(e) => throw e
+          }
+      })
+      .getOrElse(Seq.empty)
+
+    new TaskCommit(serializedBytes)
   }
 }
