@@ -23,6 +23,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.spark.sql.Row
 
 abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
+
   test("Tag ddl: show tags syntax") {
     spark.sql("""CREATE TABLE T (id INT, name STRING)
                 |USING PAIMON
@@ -39,7 +40,7 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
       Row("2024-10-11") :: Row("2024-10-12") :: Row("2024-10-13") :: Nil)
   }
 
-  test("Tag ddl: alter table t crete tag syntax") {
+  test("Tag ddl: alter table t create tag syntax") {
     spark.sql("""CREATE TABLE T (id INT, name STRING)
                 |USING PAIMON
                 |TBLPROPERTIES ('primary-key'='id')""".stripMargin)
@@ -98,6 +99,33 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
     checkAnswer(
       spark.sql("select tag_name,snapshot_id,time_retained from `T$tags` where tag_name = 'tag-2'"),
       Row("tag-2", 2, "PT1H") :: Nil)
+  }
+
+  test("Tag ddl: alter table t create or replace tag twice") {
+    sql("""
+          |CREATE TABLE T (id INT, name STRING)
+          |USING PAIMON
+          |TBLPROPERTIES ('primary-key'='id')
+          |""".stripMargin)
+
+    sql("INSERT INTO T VALUES (1, 'a')")
+
+    sql("ALTER TABLE  T CREATE TAG `tag-1`")
+    checkAnswer(sql("SHOW TAGS T"), Row("tag-1"))
+
+    // create tag
+    val t = intercept[Throwable] {
+      sql("ALTER TABLE T CREATE TAG `tag-1`")
+    }
+    assert(t.getMessage.contains("Tag tag-1 is exists."))
+    sql("ALTER TABLE T CREATE TAG IF NOT EXISTS `tag-1`")
+    sql("ALTER TABLE T CREATE TAG IF NOT EXISTS `tag-1` AS OF VERSION 1")
+    sql("ALTER TABLE T CREATE TAG IF NOT EXISTS `tag-1` AS OF VERSION 1 RETAIN 1 HOURS")
+
+    // replace tag
+    sql("ALTER TABLE T CREATE OR REPLACE TAG `tag-1`")
+    sql("ALTER TABLE T CREATE OR REPLACE TAG `tag-1` AS OF VERSION 1")
+    sql("ALTER TABLE T CREATE OR REPLACE TAG `tag-1` AS OF VERSION 1 RETAIN 1 HOURS")
   }
 
   test("Tag ddl: alter table t delete tag syntax") {
