@@ -24,16 +24,16 @@ import org.apache.spark.sql.connector.write.{SupportsDynamicOverwrite, SupportsO
 import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 
-class SparkV2WriteBuilder(table: FileStoreTable, writeSchema: StructType)
+class PaimonV2WriteBuilder(table: FileStoreTable, writeSchema: StructType)
   extends BaseWriteBuilder(table)
   with SupportsOverwrite
   with SupportsDynamicOverwrite {
 
   private var overwriteDynamic = false
-  private var overwritePartitions: Map[String, String] = null
+  private var overwritePartitions: Option[Map[String, String]] = None
 
   override def build =
-    new SparkV2Write(table, overwriteDynamic, Option.apply(overwritePartitions), writeSchema)
+    new PaimonV2Write(table, overwriteDynamic, overwritePartitions, writeSchema)
 
   override def overwrite(filters: Array[Filter]): WriteBuilder = {
     if (overwriteDynamic) {
@@ -49,17 +49,17 @@ class SparkV2WriteBuilder(table: FileStoreTable, writeSchema: StructType)
     }
 
     if (isTruncate(conjunctiveFilters.get)) {
-      overwritePartitions = Map.empty[String, String]
+      overwritePartitions = Option.apply(Map.empty[String, String])
     } else {
-      overwritePartitions =
-        convertPartitionFilterToMap(conjunctiveFilters.get, table.schema.logicalPartitionType())
+      overwritePartitions = Option.apply(
+        convertPartitionFilterToMap(conjunctiveFilters.get, table.schema.logicalPartitionType()))
     }
 
     this
   }
 
   override def overwriteDynamicPartitions(): WriteBuilder = {
-    if (overwritePartitions != null) {
+    if (overwritePartitions.isDefined) {
       throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
     }
 

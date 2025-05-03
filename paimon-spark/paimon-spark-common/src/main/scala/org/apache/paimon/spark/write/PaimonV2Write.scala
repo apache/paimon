@@ -35,7 +35,7 @@ import java.io.{IOException, UncheckedIOException}
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
-class SparkV2Write(
+class PaimonV2Write(
     storeTable: FileStoreTable,
     overwriteDynamic: Boolean,
     overwritePartitions: Option[Map[String, String]],
@@ -58,7 +58,7 @@ class SparkV2Write(
     builder
   }
 
-  private val writeRequirement = SparkWriteRequirement(table)
+  private val writeRequirement = PaimonWriteRequirement(table)
 
   override def requiredDistribution(): Distribution = {
     val distribution = writeRequirement.distribution
@@ -74,11 +74,19 @@ class SparkV2Write(
 
   override def toBatch: BatchWrite = new PaimonBatchWrite
 
-  override def toString: String =
-    if (overwriteDynamic)
-      s"PaimonWrite(table=${table.fullName()}, overwriteDynamic=true)"
-    else
-      s"PaimonWrite(table=${table.fullName()}, overwritePartitions=$overwritePartitions)"
+  override def toString: String = {
+    val overwriteDynamicStr = if (overwriteDynamic) {
+      ", overwriteDynamic=true"
+    } else {
+      ""
+    }
+    val overwritePartitionsStr = overwritePartitions match {
+      case Some(partitions) if partitions.nonEmpty => s", overwritePartitions=$partitions"
+      case Some(_) => ", overwriteTable=true"
+      case None => ""
+    }
+    s"PaimonWrite(table=${table.fullName()}$overwriteDynamicStr$overwritePartitionsStr)"
+  }
 
   private class PaimonBatchWrite extends BatchWrite {
     override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
@@ -91,7 +99,7 @@ class SparkV2Write(
       val batchTableCommit = batchWriteBuilder.newCommit()
 
       val commitMessages = messages.collect {
-        case taskCommit: TaskCommit => taskCommit.commitMessages
+        case taskCommit: TaskCommit => taskCommit.commitMessages()
         case other =>
           throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
       }.flatten

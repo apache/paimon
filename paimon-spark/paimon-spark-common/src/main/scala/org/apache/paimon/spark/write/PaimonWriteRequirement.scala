@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
+import org.apache.paimon.table.BucketMode._
 
 import org.apache.spark.sql.connector.distributions.{ClusteredDistribution, Distribution, Distributions}
 import org.apache.spark.sql.connector.expressions.{Expression, Expressions, SortOrder}
@@ -26,22 +27,27 @@ import org.apache.spark.sql.connector.expressions.{Expression, Expressions, Sort
 import scala.collection.JavaConverters._
 
 /** Distribution requirements of Spark write. */
-case class SparkWriteRequirement(distribution: Distribution, ordering: Array[SortOrder])
+case class PaimonWriteRequirement(distribution: Distribution, ordering: Array[SortOrder])
 
-object SparkWriteRequirement {
+object PaimonWriteRequirement {
+
   private val EMPTY_ORDERING: Array[SortOrder] = Array.empty
-  private val EMPTY: SparkWriteRequirement =
-    SparkWriteRequirement(Distributions.unspecified(), EMPTY_ORDERING)
+  private val EMPTY: PaimonWriteRequirement =
+    PaimonWriteRequirement(Distributions.unspecified(), EMPTY_ORDERING)
 
-  def apply(table: FileStoreTable): SparkWriteRequirement = {
+  def apply(table: FileStoreTable): PaimonWriteRequirement = {
     val bucketSpec = table.bucketSpec()
     val bucketTransforms = bucketSpec.getBucketMode match {
-      case BucketMode.HASH_FIXED =>
-        Seq(
-          Expressions.bucket(
-            bucketSpec.getNumBuckets,
-            bucketSpec.getBucketKeys.asScala.map(quote).toArray: _*))
-      case BucketMode.BUCKET_UNAWARE =>
+      case HASH_FIXED =>
+        if (bucketSpec.getNumBuckets == POSTPONE_BUCKET) {
+          Seq.empty
+        } else {
+          Seq(
+            Expressions.bucket(
+              bucketSpec.getNumBuckets,
+              bucketSpec.getBucketKeys.asScala.map(quote).toArray: _*))
+        }
+      case BUCKET_UNAWARE =>
         Seq.empty
       case _ =>
         throw new UnsupportedOperationException(
@@ -58,7 +64,7 @@ object SparkWriteRequirement {
     } else {
       val distribution: ClusteredDistribution =
         Distributions.clustered(clusteringExpressions)
-      SparkWriteRequirement(distribution, EMPTY_ORDERING)
+      PaimonWriteRequirement(distribution, EMPTY_ORDERING)
     }
   }
 

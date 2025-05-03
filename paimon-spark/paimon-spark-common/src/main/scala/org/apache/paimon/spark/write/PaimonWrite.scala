@@ -19,30 +19,25 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{InsertInto, Overwrite, SaveMode}
+import org.apache.paimon.spark.SaveMode
+import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.connector.write.{SupportsOverwrite, WriteBuilder}
-import org.apache.spark.sql.sources._
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.connector.write.V1Write
+import org.apache.spark.sql.sources.InsertableRelation
 
-class SparkWriteBuilder(table: FileStoreTable, options: Options)
-  extends BaseWriteBuilder(table)
-  with SupportsOverwrite {
+/** Spark [[V1Write]], it is required to use v1 write for grouping by bucket. */
+class PaimonWrite(val table: FileStoreTable, saveMode: SaveMode, options: Options) extends V1Write {
 
-  private var saveMode: SaveMode = InsertInto
-
-  override def build = new SparkWrite(table, saveMode, options)
-
-  override def overwrite(filters: Array[Filter]): WriteBuilder = {
-    failIfCanNotOverwrite(filters)
-
-    val conjunctiveFilters = if (filters.nonEmpty) {
-      Some(filters.reduce((l, r) => And(l, r)))
-    } else {
-      None
-    }
-    this.saveMode = Overwrite(conjunctiveFilters)
-    this
+  override def toInsertableRelation: InsertableRelation = {
+    (data: DataFrame, overwrite: Boolean) =>
+      {
+        WriteIntoPaimonTable(table, saveMode, data, options).run(data.sparkSession)
+      }
   }
 
+  override def toString: String = {
+    s"table: ${table.fullName()}, saveMode: $saveMode, options: ${options.toMap}"
+  }
 }

@@ -23,7 +23,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.OptionUtils
-import org.apache.paimon.spark.write.{SparkV2WriteBuilder, SparkWriteBuilder}
+import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
 import org.apache.paimon.table.{BucketMode, DataTable, FileStoreTable, KnownSplitsTable, Table}
 import org.apache.paimon.utils.StringUtils
 
@@ -47,7 +47,7 @@ case class SparkTable(table: Table)
   with PaimonPartitionManagement {
 
   private lazy val useV2Write: Boolean = {
-    val v2WriteConfigured = OptionUtils.useV2Write
+    val v2WriteConfigured = OptionUtils.useV2Write()
     v2WriteConfigured && supportsV2Write
   }
 
@@ -55,10 +55,8 @@ case class SparkTable(table: Table)
     table match {
       case storeTable: FileStoreTable =>
         storeTable.bucketMode() match {
-          case BucketMode.HASH_FIXED =>
-            storeTable.coreOptions().bucket() > 0 && BucketFunction.supportsTable(storeTable)
-          case BucketMode.BUCKET_UNAWARE =>
-            storeTable.coreOptions().bucket() == BucketMode.UNAWARE_BUCKET
+          case BucketMode.HASH_FIXED => BucketFunction.supportsTable(storeTable)
+          case BucketMode.BUCKET_UNAWARE => true
           case _ => false
         }
 
@@ -137,9 +135,9 @@ case class SparkTable(table: Table)
       case fileStoreTable: FileStoreTable =>
         val options = Options.fromMap(info.options)
         if (useV2Write) {
-          new SparkV2WriteBuilder(fileStoreTable, info.schema())
+          new PaimonV2WriteBuilder(fileStoreTable, info.schema())
         } else {
-          new SparkWriteBuilder(fileStoreTable, options)
+          new PaimonWriteBuilder(fileStoreTable, options)
         }
       case _ =>
         throw new RuntimeException("Only FileStoreTable can be written.")
