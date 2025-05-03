@@ -23,7 +23,7 @@ import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletion
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
-import org.apache.paimon.spark.{SparkFilterConverter, SparkTable}
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
@@ -31,7 +31,6 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.table.{BucketMode, FileStoreTable, KnownSplitsTable}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
-import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
@@ -67,41 +66,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       PaimonSparkWriter(table)
     }
 
-  }
-
-  /**
-   * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`
-   * methods where the `AlwaysTrue` Filter is used.
-   */
-  def isTruncate(filter: Filter): Boolean = {
-    val filters = splitConjunctiveFilters(filter)
-    filters.length == 1 && filters.head.isInstanceOf[AlwaysTrue]
-  }
-
-  /** See [[ org.apache.paimon.spark.SparkWriteBuilder#failIfCanNotOverwrite]] */
-  def convertPartitionFilterToMap(
-      filter: Filter,
-      partitionRowType: RowType): Map[String, String] = {
-    // todo: replace it with SparkV2FilterConverter when we drop Spark3.2
-    val converter = new SparkFilterConverter(partitionRowType)
-    splitConjunctiveFilters(filter).map {
-      case EqualNullSafe(attribute, value) =>
-        (attribute, converter.convertString(attribute, value))
-      case EqualTo(attribute, value) =>
-        (attribute, converter.convertString(attribute, value))
-      case _ =>
-        // Should not happen
-        throw new RuntimeException(
-          s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
-    }.toMap
-  }
-
-  private def splitConjunctiveFilters(filter: Filter): Seq[Filter] = {
-    filter match {
-      case And(filter1, filter2) =>
-        splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
-      case other => other :: Nil
-    }
   }
 
   /** Gets a relative path against the table path. */
