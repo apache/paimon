@@ -114,5 +114,10 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
       sql("SELECT * FROM `T$binlog`"),
       Seq(Row("+I", Array(1), Array(3)), Row("+I", Array(2), Array(2)))
     )
+
+    checkAnswer(
+      sql("SELECT b FROM `T$binlog`"),
+      Seq(Row(Array(3)), Row(Array(2)))
+    )
   }
 }

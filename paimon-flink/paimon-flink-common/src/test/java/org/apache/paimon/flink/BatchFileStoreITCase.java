@@ -808,6 +808,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testBinlogTableWithProjection() {
         sql("CREATE TABLE test_table (a int, b string);");
         sql("INSERT INTO test_table VALUES (1, 'A')");
+        assertThat(sql("SELECT * FROM `test_table$binlog`"))
+                .containsExactly(Row.of("+I", new Integer[] {1}, new String[] {"A"}));
         assertThat(sql("SELECT b FROM `test_table$binlog`"))
                 .containsExactly(Row.of((Object) new String[] {"A"}));
     }
