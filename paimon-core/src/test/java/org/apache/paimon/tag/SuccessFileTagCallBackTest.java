@@ -57,7 +57,7 @@ public class SuccessFileTagCallBackTest extends PrimaryKeyTableTestBase {
         TagManager tagManager = fileStore.newTagManager();
         SuccessFileTagCallback successFileTagCallback = null;
 
-        List<TagCallback> tagCallbacks = fileStore.createTagCallbacks();
+        List<TagCallback> tagCallbacks = fileStore.createTagCallbacks(table);
         assertThat(tagCallbacks).hasAtLeastOneElementOfType(SuccessFileTagCallback.class);
 
         for (TagCallback tagCallback : tagCallbacks) {
@@ -89,7 +89,7 @@ public class SuccessFileTagCallBackTest extends PrimaryKeyTableTestBase {
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
         FileStore<?> fileStore = table.store();
         TagManager tagManager = fileStore.newTagManager();
-        List<TagCallback> tagCallbacks = fileStore.createTagCallbacks();
+        List<TagCallback> tagCallbacks = fileStore.createTagCallbacks(table);
         assertThat(tagCallbacks).doesNotHaveAnyElementsOfTypes(SuccessFileTagCallback.class);
 
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
