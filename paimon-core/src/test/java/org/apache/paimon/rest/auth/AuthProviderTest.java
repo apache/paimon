@@ -31,6 +31,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.HashMap;
@@ -111,7 +112,7 @@ public class AuthProviderTest {
         tokenFile2Token = generateTokenAndWriteToFile(fileName);
         token = tokenFile2Token.getRight();
         tokenFile = tokenFile2Token.getLeft();
-        FileUtils.writeStringToFile(tokenFile, token);
+        FileUtils.writeStringToFile(tokenFile, token, StandardCharsets.UTF_8);
         authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(authProvider.getFreshToken());
         assertEquals(token, authToken);
     }
@@ -410,7 +411,7 @@ public class AuthProviderTest {
         String secret = UUID.randomUUID().toString();
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = OBJECT_MAPPER_INSTANCE.writeValueAsString(token);
-        FileUtils.writeStringToFile(tokenFile, tokenStr);
+        FileUtils.writeStringToFile(tokenFile, tokenStr, StandardCharsets.UTF_8);
         return Pair.of(tokenFile, tokenStr);
     }
 
