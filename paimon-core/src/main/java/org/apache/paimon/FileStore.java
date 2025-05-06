@@ -111,13 +111,13 @@ public interface FileStore<T> {
             Duration checkInterval,
             PartitionExpireStrategy expireStrategy);
 
-    TagAutoManager newTagCreationManager();
+    TagAutoManager newTagCreationManager(FileStoreTable table);
 
     ServiceManager newServiceManager();
 
     boolean mergeSchema(RowType rowType, boolean allowExplicitCast);
 
-    List<TagCallback> createTagCallbacks();
+    List<TagCallback> createTagCallbacks(FileStoreTable table);
 
     void setManifestCache(SegmentsCache<Path> manifestCache);
 
