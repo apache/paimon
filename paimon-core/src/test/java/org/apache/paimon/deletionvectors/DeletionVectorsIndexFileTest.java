@@ -297,20 +297,6 @@ public class DeletionVectorsIndexFileTest {
 
     @Test
     public void testReadOldDeletionVector32Bit() throws IOException {
-        // write
-        //        LocalFileIO fileIO = LocalFileIO.create();
-        //        try (DeletionFileWriter writer = new DeletionFileWriter(new
-        // Path("/tmp/dvindex-32"), fileIO)) {
-        //            BitmapDeletionVector vector1 = new BitmapDeletionVector();
-        //            vector1.delete(2);
-        //            vector1.delete(3);
-        //            writer.write("file2.parquet", vector1);
-        //
-        //            BitmapDeletionVector vector2 = new BitmapDeletionVector();
-        //            vector2.delete(1);
-        //            writer.write("file1.parquet", vector2);
-        //        }
-
         try (InputStream inputStream =
                 DeletionVectorsIndexFile.class
                         .getClassLoader()
@@ -332,19 +318,6 @@ public class DeletionVectorsIndexFileTest {
 
     @Test
     public void testReadOldDeletionVector64Bit() throws IOException {
-        // write
-        //        LocalFileIO fileIO = LocalFileIO.create();
-        //        try (DeletionFileWriter writer = new DeletionFileWriter(new
-        // Path("/tmp/dvindex-64"), fileIO)) {
-        //            Bitmap64DeletionVector vector1 = new Bitmap64DeletionVector();
-        //            vector1.delete(2);
-        //            vector1.delete(3);
-        //            writer.write("file2.parquet", vector1);
-        //
-        //            Bitmap64DeletionVector vector2 = new Bitmap64DeletionVector();
-        //            vector2.delete(1);
-        //            writer.write("file1.parquet", vector2);
-        //        }
         try (InputStream inputStream =
                 DeletionVectorsIndexFile.class
                         .getClassLoader()
