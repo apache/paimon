@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst.analysis.expressions
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.{SparkFilterConverter, SparkV2FilterConverter}
 import org.apache.paimon.spark.catalyst.Compatibility
-import org.apache.paimon.spark.write.SparkWriteBuilder
+import org.apache.paimon.spark.write.PaimonWriteBuilder
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.{Column, SparkSession}
@@ -66,6 +66,11 @@ trait ExpressionHelper extends ExpressionHelperBase {
       Some(PredicateBuilder.and(predicates: _*))
     }
   }
+}
+
+trait ExpressionHelperBase extends PredicateHelper {
+
+  import ExpressionHelper._
 
   /**
    * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`
@@ -76,7 +81,7 @@ trait ExpressionHelper extends ExpressionHelperBase {
     filters.length == 1 && filters.head.isInstanceOf[AlwaysTrue]
   }
 
-  /** See [[ SparkWriteBuilder#failIfCanNotOverwrite]] */
+  /** See [[ PaimonWriteBuilder#failIfCanNotOverwrite]] */
   def convertPartitionFilterToMap(
       filter: SourceFilter,
       partitionRowType: RowType): Map[String, String] = {
@@ -101,11 +106,6 @@ trait ExpressionHelper extends ExpressionHelperBase {
       case other => other :: Nil
     }
   }
-}
-
-trait ExpressionHelperBase extends PredicateHelper {
-
-  import ExpressionHelper._
 
   def toColumn(expr: Expression): Column = {
     SparkShimLoader.getSparkShim.column(expr)
