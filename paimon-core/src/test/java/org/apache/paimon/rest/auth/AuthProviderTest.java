@@ -376,6 +376,34 @@ public class AuthProviderTest {
                 header.get(DLFAuthProvider.DLF_CONTENT_SHA56_HEADER_KEY));
     }
 
+    @Test
+    public void testCreateDLFAuthProviderByEmptyParams() throws IOException {
+        Options options = new Options();
+        String akId = UUID.randomUUID().toString();
+        String akSecret = UUID.randomUUID().toString();
+        // security token is empty
+        DLFToken token = new DLFToken(akId, akSecret, "", null);
+        options.set(DLF_ACCESS_KEY_ID.key(), token.getAccessKeyId());
+        options.set(DLF_ACCESS_KEY_SECRET.key(), token.getAccessKeySecret());
+
+        options.set(DLF_REGION.key(), "cn-hangzhou");
+        options.set(TOKEN_PROVIDER, "dlf");
+        DLFAuthProvider authProvider =
+                (DLFAuthProvider) AuthProviderFactory.createAuthProvider(options);
+        String authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(authProvider.getFreshToken());
+        assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
+
+        // add empty security token to options
+        options.set(DLF_SECURITY_TOKEN.key(), token.getSecurityToken());
+        authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(authProvider.getFreshToken());
+        assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
+
+        // expiration is empty
+        token = new DLFToken(akId, akSecret, "", "");
+        authToken = OBJECT_MAPPER_INSTANCE.writeValueAsString(authProvider.getFreshToken());
+        assertEquals(OBJECT_MAPPER_INSTANCE.writeValueAsString(token), authToken);
+    }
+
     private Pair<File, String> generateTokenAndWriteToFile(String fileName) throws IOException {
         File tokenFile = folder.newFile(fileName);
         String expiration = ZonedDateTime.now(ZoneOffset.UTC).format(TOKEN_DATE_FORMATTER);

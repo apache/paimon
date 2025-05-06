@@ -49,10 +49,11 @@ public class DLFToken {
     @JsonProperty(ACCESS_KEY_SECRET_FIELD_NAME)
     private final String accessKeySecret;
 
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @JsonProperty(SECURITY_TOKEN_FIELD_NAME)
     private final String securityToken;
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @JsonProperty(EXPIRATION_FIELD_NAME)
     @Nullable
     private final String expiration;
@@ -69,7 +70,7 @@ public class DLFToken {
         this.accessKeySecret = accessKeySecret;
         this.securityToken = securityToken;
         this.expiration = expiration;
-        if (expiration == null) {
+        if (expiration == null || expiration.isEmpty()) {
             this.expirationAtMills = null;
         } else {
             LocalDateTime dateTime = LocalDateTime.parse(expiration, TOKEN_DATE_FORMATTER);

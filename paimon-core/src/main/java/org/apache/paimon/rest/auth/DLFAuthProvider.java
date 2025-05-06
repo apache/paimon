@@ -146,7 +146,7 @@ public class DLFAuthProvider implements AuthProvider {
             signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE.toString());
             signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, DLFAuthSignature.md5(data));
         }
-        if (securityToken != null) {
+        if (securityToken != null && !securityToken.isEmpty()) {
             signHeaders.put(DLF_SECURITY_TOKEN_HEADER_KEY, securityToken);
         }
         return signHeaders;
