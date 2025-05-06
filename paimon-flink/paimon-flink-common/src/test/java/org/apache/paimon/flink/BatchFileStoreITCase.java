@@ -812,5 +812,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 .containsExactly(Row.of("+I", new Integer[] {1}, new String[] {"A"}));
         assertThat(sql("SELECT b FROM `test_table$binlog`"))
                 .containsExactly(Row.of((Object) new String[] {"A"}));
+        assertThat(sql("SELECT rowkind, b FROM `test_table$binlog`"))
+                .containsExactly(Row.of("+I", new String[] {"A"}));
     }
 }
