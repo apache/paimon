@@ -90,6 +90,8 @@ public class BinlogTable extends AuditLogTable {
 
     private class BinlogRead extends AuditLogRead {
 
+        private RowType readType = wrapped.rowType();
+
         private BinlogRead(InnerTableRead dataRead) {
             super(dataRead);
         }
@@ -104,13 +106,14 @@ public class BinlogTable extends AuditLogTable {
                     fields.add(field.newType(((ArrayType) field.type()).getElementType()));
                 }
             }
-            return super.withReadType(readType.copy(fields));
+            this.readType = readType.copy(fields);
+            return super.withReadType(this.readType);
         }
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
-            InternalRow.FieldGetter[] fieldGetters = wrapped.rowType().fieldGetters();
+            InternalRow.FieldGetter[] fieldGetters = readType.fieldGetters();
 
             if (dataSplit.isStreaming()) {
                 return new PackChangelogReader(
