@@ -178,6 +178,80 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(indexDir.listFiles()).hasSize(1);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testReadAndWriteMixedDv(boolean bitmap64) {
+        // write first kind dv
+        initIndexHandler(bitmap64);
+        DeletionVectorsMaintainer.Factory factory1 =
+                new DeletionVectorsMaintainer.Factory(fileHandler);
+        DeletionVectorsMaintainer dvMaintainer1 = factory1.create();
+        dvMaintainer1.notifyNewDeletion("f1", 1);
+        dvMaintainer1.notifyNewDeletion("f1", 3);
+        dvMaintainer1.notifyNewDeletion("f2", 1);
+        dvMaintainer1.notifyNewDeletion("f2", 3);
+        assertThat(dvMaintainer1.bitmap64()).isEqualTo(bitmap64);
+
+        List<IndexFileMeta> fileMetas1 = dvMaintainer1.writeDeletionVectorsIndex();
+        assertThat(fileMetas1.size()).isEqualTo(1);
+        CommitMessage commitMessage1 =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        1,
+                        DataIncrement.emptyIncrement(),
+                        CompactIncrement.emptyIncrement(),
+                        new IndexIncrement(fileMetas1));
+        BatchTableCommit commit1 = table.newBatchWriteBuilder().newCommit();
+        commit1.commit(Collections.singletonList(commitMessage1));
+
+        // write second kind dv
+        initIndexHandler(!bitmap64);
+        DeletionVectorsMaintainer.Factory factory2 =
+                new DeletionVectorsMaintainer.Factory(fileHandler);
+        DeletionVectorsMaintainer dvMaintainer2 =
+                factory2.createOrRestore(table.latestSnapshot().get(), BinaryRow.EMPTY_ROW, 0);
+        dvMaintainer2.notifyNewDeletion("f1", 10);
+        dvMaintainer2.notifyNewDeletion("f3", 1);
+        dvMaintainer2.notifyNewDeletion("f3", 3);
+        assertThat(dvMaintainer2.bitmap64()).isEqualTo(!bitmap64);
+
+        // verify two kinds of dv can exist in the same dv maintainer
+        Map<String, DeletionVector> dvs = dvMaintainer2.deletionVectors();
+        assertThat(dvs.size()).isEqualTo(3);
+        assertThat(dvs.get("f1").getCardinality()).isEqualTo(3);
+        assertThat(dvs.get("f2"))
+                .isInstanceOf(bitmap64 ? Bitmap64DeletionVector.class : BitmapDeletionVector.class);
+        assertThat(dvs.get("f3"))
+                .isInstanceOf(bitmap64 ? BitmapDeletionVector.class : Bitmap64DeletionVector.class);
+
+        List<IndexFileMeta> fileMetas2 = dvMaintainer2.writeDeletionVectorsIndex();
+        assertThat(fileMetas2.size()).isEqualTo(1);
+        CommitMessage commitMessage2 =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        1,
+                        DataIncrement.emptyIncrement(),
+                        CompactIncrement.emptyIncrement(),
+                        new IndexIncrement(fileMetas2));
+        BatchTableCommit commit2 = table.newBatchWriteBuilder().newCommit();
+        commit2.commit(Collections.singletonList(commitMessage2));
+
+        // test read dv index file which contains two kinds of dv
+        Map<String, DeletionVector> readDvs =
+                fileHandler.readAllDeletionVectors(
+                        fileHandler.scan(
+                                table.latestSnapshot().get(),
+                                "DELETION_VECTORS",
+                                BinaryRow.EMPTY_ROW,
+                                0));
+        assertThat(readDvs.size()).isEqualTo(3);
+        assertThat(dvs.get("f1").getCardinality()).isEqualTo(3);
+        assertThat(dvs.get("f2").getCardinality()).isEqualTo(2);
+        assertThat(dvs.get("f3").getCardinality()).isEqualTo(2);
+    }
+
     private DeletionVector createDeletionVector(boolean bitmap64) {
         return bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
     }
