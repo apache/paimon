@@ -506,34 +506,34 @@ public class CloneActionITCase extends ActionITCaseBase {
                 "CREATE TABLE test.test_table (id string, id2 int, id3 int, PRIMARY KEY (id, id2, id3) NOT ENFORCED) "
                         + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
                         + format
-                        + "','file.compression' = 'none');";
+                        + ");";
         // has different partition keys
         String ddl1 =
                 "CREATE TABLE test.test_table (id string, id2 int, id3 int) "
                         + "PARTITIONED BY (id, id3) with ('bucket' = '-1', 'file.format' = '"
                         + format
-                        + "','file.compression' = 'none');";
+                        + "');";
         // size of fields is different
         String ddl2 =
                 "CREATE TABLE test.test_table (id2 int, id3 int) "
                         + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
                         + format
-                        + "','file.compression' = 'none');";
+                        + "');";
 
         // different format
         String ddl3 =
                 "CREATE TABLE test.test_table (id2 int, id3 int) "
                         + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
                         + randomFormat(format)
-                        + "','file.compression' = 'none');";
+                        + "');";
 
         // normal
         String ddl4 =
                 "CREATE TABLE test.test_table (id string, id2 int, id3 int) "
                         + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
                         + format
-                        + "','file.compression' = 'none');";
-        return new String[] {ddl0, ddl1, ddl2, ddl3};
+                        + "');";
+        return new String[] {ddl0, ddl1, ddl2, ddl3, ddl4};
     }
 
     private String[] exceptionMsg() {

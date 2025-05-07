@@ -45,7 +45,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -145,27 +144,6 @@ public class ListCloneFilesFunction
                         sourceSchema.options().get(FILE_FORMAT.key()),
                         existedTable.coreOptions().formatType()),
                 "source table format is not compatible with existed paimon table format.");
-
-        Map<String, String> sourceFormatOptions =
-                HiveCloneUtils.getIdentifierPrefixOptions(
-                        sourceSchema.options().get(FILE_FORMAT.key()), sourceSchema.options());
-        Map<String, String> existedFormatOptions =
-                HiveCloneUtils.getIdentifierPrefixOptions(
-                        existedTable.coreOptions().formatType(), existedTable.schema().options());
-        for (String key : sourceFormatOptions.keySet()) {
-            checkState(
-                    existedFormatOptions.containsKey(key)
-                            && Objects.equals(
-                                    sourceFormatOptions.get(key), existedFormatOptions.get(key)),
-                    "source table format options is not compatible with existed paimon table format options.");
-        }
-
-        // check compression
-        checkState(
-                Objects.equals(
-                        sourceSchema.options().get(FILE_COMPRESSION.key()),
-                        existedTable.coreOptions().fileCompression()),
-                "source table compression is not compatible with existed paimon table compression.");
 
         // check partition keys
         List<String> sourcePartitionFields = sourceSchema.partitionKeys();
