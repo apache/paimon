@@ -140,6 +140,8 @@ SELECT * FROM my_table$audit_log;
 
 You can query the binlog through binlog table. In the binlog system table, the update before and update after will be packed in one row.
 
+Currently, the binlog table is unable to display Flink's computed columns.
+
 ```sql
 SELECT * FROM T$binlog;
 
