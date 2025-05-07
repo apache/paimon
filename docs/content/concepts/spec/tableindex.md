@@ -51,7 +51,18 @@ The deletion file is a binary file, and the format is as follows:
 - Then, record <size of serialized bin, serialized bin, checksum of serialized bin> in sequence.
 - Size and checksum are BIG_ENDIAN Integer.
 
-For each serialized bin:
+For each serialized bin, its serialization format is determined by `deletion-vectors.bitmap64`. 
+Paimon will use a 32-bit bitmap to store deleted records by default, but if `deletion-vectors.bitmap64` is set to true, a 64-bit bitmap will be used.
+Serialization of the two bitmaps is different. Note that only 64-bit bitmap implementation is compatible with Iceberg.
 
+Serialized bin for 32-bit bitmap:(default)
 - First, record a const magic number by an int (BIG_ENDIAN). Current the magic number is 1581511376.
-- Then, record serialized bitmap. Which is a [RoaringBitmap](https://github.com/RoaringBitmap/RoaringBitmap) (org.roaringbitmap.RoaringBitmap).
+- Then, record a 32-bit serialized bitmap. Which is a [RoaringBitmap](https://github.com/RoaringBitmap/RoaringBitmap) (org.roaringbitmap.RoaringBitmap).
+
+Serialized bin for 64-bit bitmap:
+- First, record a const magic number by an int (LITTLE_ENDIAN). Current the magic number is 1681511377.
+- Then, record a 64-bit serialized bitmap. Which supports positive 64-bit positions (the most significant bit must be 0), 
+  but is optimized for cases where most positions fit in 32 bits by using an array of 32-bit Roaring bitmaps. The internal bitmap array is grown as needed to accommodate the largest position.
+  The serialization of the 64-bit bitmap is as follows:
+  - First, record the size of bitmaps array by a long (LITTLE_ENDIAN).
+  - Then, record the index by an int (LITTLE_ENDIAN) and serialized bytes of each bitmap in the array in sequence.
