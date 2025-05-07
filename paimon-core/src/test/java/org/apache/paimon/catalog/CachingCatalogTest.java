@@ -64,7 +64,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.data.BinaryString.fromString;
-import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
@@ -200,6 +200,34 @@ class CachingCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testTableExpiresAfterWrite() throws Exception {
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(
+                        this.catalog, Duration.ofMinutes(5), Duration.ofMinutes(8), ticker);
+
+        Identifier tableIdent = new Identifier("db", "tbl");
+        catalog.createTable(tableIdent, DEFAULT_TABLE_SCHEMA, false);
+        Table table = catalog.getTable(tableIdent);
+
+        ticker.advance(Duration.ofMinutes(2));
+
+        // refresh from get
+        catalog.getTable(tableIdent);
+
+        // not expire
+        ticker.advance(Duration.ofMinutes(4));
+        assertThat(catalog.tableCache().asMap()).containsKey(tableIdent);
+        catalog.getTable(tableIdent);
+
+        // advance 10 minutes to expire from write
+        ticker.advance(HALF_OF_EXPIRATION.plus(Duration.ofSeconds(4)));
+        assertThat(catalog.tableCache().asMap()).doesNotContainKey(tableIdent);
+        assertThat(catalog.getTable(tableIdent))
+                .as("CachingCatalog should return a new instance after expiration")
+                .isNotSameAs(table);
+    }
+
+    @Test
     public void testCatalogExpirationTtlRefreshesAfterAccessViaCatalog() throws Exception {
         TestableCachingCatalog catalog =
                 new TestableCachingCatalog(this.catalog, EXPIRATION_TTL, ticker);
@@ -320,7 +348,7 @@ class CachingCatalogTest extends CatalogTestBase {
                         () -> new TestableCachingCatalog(this.catalog, Duration.ZERO, ticker))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
-                        "When cache.expiration-interval is set to negative or 0, the catalog cache should be disabled.");
+                        "When 'cache.expire-after-access' is set to negative or 0, the catalog cache should be disabled.");
     }
 
     @Test
@@ -378,7 +406,7 @@ class CachingCatalogTest extends CatalogTestBase {
 
     private void innerTestManifestCache(long manifestCacheThreshold) throws Exception {
         Options options = new Options();
-        options.set(CACHE_EXPIRATION_INTERVAL_MS, Duration.ofSeconds(10));
+        options.set(CACHE_EXPIRE_AFTER_ACCESS, Duration.ofSeconds(10));
         options.set(CACHE_MANIFEST_SMALL_FILE_MEMORY, MemorySize.ofMebiBytes(1));
         options.set(
                 CACHE_MANIFEST_SMALL_FILE_THRESHOLD, MemorySize.ofBytes(manifestCacheThreshold));

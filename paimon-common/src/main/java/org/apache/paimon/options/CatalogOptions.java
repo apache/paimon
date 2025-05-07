@@ -89,12 +89,20 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls whether the catalog will cache databases, tables, manifests and partitions.");
 
-    public static final ConfigOption<Duration> CACHE_EXPIRATION_INTERVAL_MS =
-            key("cache.expiration-interval")
+    public static final ConfigOption<Duration> CACHE_EXPIRE_AFTER_ACCESS =
+            key("cache.expire-after-access")
                     .durationType()
                     .defaultValue(Duration.ofMinutes(10))
+                    .withFallbackKeys("cache.expiration-interval")
                     .withDescription(
-                            "Controls the duration for which databases and tables in the catalog are cached.");
+                            "Cache expiration policy: marks cache entries to expire after a specified duration has passed since their last access.");
+
+    public static final ConfigOption<Duration> CACHE_EXPIRE_AFTER_WRITE =
+            key("cache.expire-after-write")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(30))
+                    .withDescription(
+                            "Cache expiration policy: marks cache entries to expire after a specified duration has passed since their last refresh.");
 
     public static final ConfigOption<Long> CACHE_PARTITION_MAX_NUM =
             key("cache.partition.max-num")
