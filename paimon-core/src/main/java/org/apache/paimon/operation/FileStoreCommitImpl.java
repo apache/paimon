@@ -1319,7 +1319,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     + " Otherwise, continuous expired records will cause the job to failover restart continuously."
                                     + " Expired partitions are: "
                                     + expiredPartitions
-                                    + " ,tableName: " + tableName);
+                                    + " ,tableName: "
+                                    + tableName);
                 }
             }
             conflictHandler.accept(e);
