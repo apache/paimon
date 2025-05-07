@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,7 +35,9 @@ import java.util.List;
 import java.util.TimeZone;
 
 /** Refresh black list for {@link FileStoreLookupFunction}. */
-public class RefreshBlacklist {
+public class RefreshBlacklist implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private static final Logger LOG = LoggerFactory.getLogger(RefreshBlacklist.class);
 
