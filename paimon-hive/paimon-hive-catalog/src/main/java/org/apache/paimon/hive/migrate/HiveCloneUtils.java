@@ -128,10 +128,16 @@ public class HiveCloneUtils {
         String format = parseFormat(hiveTable);
         paimonOptions.put(FILE_FORMAT.key(), format);
         Map<String, String> formatOptions = getIdentifierPrefixOptions(format, hiveTableOptions);
+        Map<String, String> sdFormatOptions =
+                getIdentifierPrefixOptions(
+                        format, hiveTable.getSd().getSerdeInfo().getParameters());
+        formatOptions.putAll(sdFormatOptions);
         paimonOptions.putAll(formatOptions);
 
         String compression = parseCompression(hiveTable, format, formatOptions);
-        paimonOptions.put(FILE_COMPRESSION.key(), compression);
+        if (compression != null) {
+            paimonOptions.put(FILE_COMPRESSION.key(), compression);
+        }
 
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
@@ -250,17 +256,14 @@ public class HiveCloneUtils {
             Table table, String format, Map<String, String> formatOptions) {
         String compression = null;
         if (Objects.equals(format, "avro")) {
-            compression = formatOptions.get("avro.codec");
+            compression = formatOptions.getOrDefault("avro.codec", parseCompression(table.getSd()));
         } else if (Objects.equals(format, "parquet")) {
-            compression = formatOptions.get("parquet.compression");
+            compression =
+                    formatOptions.getOrDefault(
+                            "parquet.compression", parseCompression(table.getSd()));
         } else if (Objects.equals(format, "orc")) {
-            compression = formatOptions.get("orc.compress");
-        }
-        if (compression == null) {
-            compression = parseCompression(table.getSd());
-        }
-        if (compression == null) {
-            compression = "none";
+            compression =
+                    formatOptions.getOrDefault("orc.compress", parseCompression(table.getSd()));
         }
         return compression;
     }
