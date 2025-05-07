@@ -1652,6 +1652,9 @@ public class CoreOptions implements Serializable {
                             "Set a time duration when a partition has no new data after this time duration, "
                                     + "start to report the partition statistics to hms.");
 
+    public static final ConfigOption<Boolean> QUERY_AUTH_ENABLED =
+            key("query-auth.enabled").booleanType().defaultValue(false).withDescription(".");
+
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =
             key("materialized-table.definition-query")
@@ -2036,6 +2039,10 @@ public class CoreOptions implements Serializable {
 
     public MergeEngine mergeEngine() {
         return options.get(MERGE_ENGINE);
+    }
+
+    public boolean queryAuthEnabled() {
+        return options.get(QUERY_AUTH_ENABLED);
     }
 
     public boolean ignoreDelete() {

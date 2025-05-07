@@ -154,7 +154,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     private InnerTableScan configureScan(InnerTableScan scan) {
-        scan.withFilter(filter).withPartitionFilter(partitionSpec);
+        scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionSpec);
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
                 "Bucket filter and shard configuration cannot be used together. "

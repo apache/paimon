@@ -127,6 +127,17 @@ public class ResourcePaths {
                 "snapshot");
     }
 
+    public String authTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "auth");
+    }
+
     public String partitions(String databaseName, String objectName) {
         return SLASH.join(
                 V1,

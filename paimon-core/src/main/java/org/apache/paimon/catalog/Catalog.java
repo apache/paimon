@@ -666,6 +666,19 @@ public interface Catalog extends AutoCloseable {
     void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException;
 
+    // ==================== Table Auth ==========================
+
+    /**
+     * Auth table query select and filter.
+     *
+     * @param identifier path of the table to alter partitions
+     * @param select projection fields
+     * @param filter query filter
+     * @throws TableNotExistException if the table does not exist
+     */
+    void authTableQuery(Identifier identifier, List<String> select, List<String> filter)
+            throws TableNotExistException;
+
     // ==================== Catalog Information ==========================
 
     /** Catalog options for re-creating this catalog. */
