@@ -338,7 +338,7 @@ public class PartitionExpireTest {
                 .hasMessage(
                         "You are writing data to expired partitions, and you can filter "
                                 + "this data to avoid job failover. Otherwise, continuous expired records will cause the"
-                                + " job to failover restart continuously. Expired partitions are: [20230101], tableName: "
+                                + " job to failover restart continuously. Expired partitions are: [20230101] ,tableName: "
                                 + table.name());
     }
 
