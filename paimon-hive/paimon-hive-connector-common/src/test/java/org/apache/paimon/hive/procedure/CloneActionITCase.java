@@ -384,7 +384,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @Test
     public void testCloneWithExistedTable() throws Exception {
-        String format = "avro";
+        String format = randomFormat();
 
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
