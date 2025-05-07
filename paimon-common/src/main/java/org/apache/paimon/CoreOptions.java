@@ -1653,7 +1653,12 @@ public class CoreOptions implements Serializable {
                                     + "start to report the partition statistics to hms.");
 
     public static final ConfigOption<Boolean> QUERY_AUTH_ENABLED =
-            key("query-auth.enabled").booleanType().defaultValue(false).withDescription(".");
+            key("query-auth.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable query auth to give Catalog the opportunity to perform "
+                                    + "column level and row level permission validation on queries.");
 
     @ExcludeFromDocumentation("Only used internally to support materialized table")
     public static final ConfigOption<String> MATERIALIZED_TABLE_DEFINITION_QUERY =

@@ -590,6 +590,51 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/auth:
+    post:
+      tags:
+        - table
+      summary: Auth table query
+      operationId: authTableQuery
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthTableQueryRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        404:
+          description:
+            Not Found
+            - TableNotExistException, table does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+              examples:
+                TableNotExist:
+                  $ref: '#/components/examples/TableNotExistError'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/snapshot:
     get:
       tags:
@@ -1791,7 +1836,6 @@ components:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
         - $ref: '#/components/schemas/TagInstant'
-
     BaseInstant:
       discriminator:
         propertyName: action
@@ -1911,6 +1955,17 @@ components:
       properties:
         snapshot:
           $ref: '#/components/schemas/TableSnapshot'
+    AuthTableQueryRequest:
+      type: object
+      properties:
+        select:
+          type: array
+          items:
+            type: string
+        filter:
+          type: array
+          items:
+            type: string
     AlterDatabaseRequest:
       type: object
       properties:
