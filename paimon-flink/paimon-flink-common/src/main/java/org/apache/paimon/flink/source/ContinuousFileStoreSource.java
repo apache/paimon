@@ -82,7 +82,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
         StreamTableScan scan = readBuilder.newStreamScan();
         if (metricGroup(context) != null) {
             ((StreamDataTableScan) scan)
-                    .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
+                    .withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
         }
         scan.restore(nextSnapshotId);
         return buildEnumerator(context, splits, nextSnapshotId, scan);

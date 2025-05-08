@@ -20,8 +20,10 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.NestedProjectedRowData;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
@@ -29,6 +31,7 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.metrics.groups.SourceReaderMetricGroup;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
@@ -59,11 +62,14 @@ public abstract class FlinkSource
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
         IOManager ioManager =
                 IOManager.create(splitPaths(context.getConfiguration().get(CoreOptions.TMP_DIRS)));
+        SourceReaderMetricGroup metricGroup = context.metricGroup();
         FileStoreSourceReaderMetrics sourceReaderMetrics =
-                new FileStoreSourceReaderMetrics(context.metricGroup());
+                new FileStoreSourceReaderMetrics(metricGroup);
+        TableRead tableRead =
+                readBuilder.newRead().withMetricRegistry(new FlinkMetricRegistry(metricGroup));
         return new FileStoreSourceReader(
                 context,
-                readBuilder.newRead(),
+                tableRead,
                 sourceReaderMetrics,
                 ioManager,
                 limit,

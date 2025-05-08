@@ -32,7 +32,7 @@ public class CommitMetrics {
     private final MetricGroup metricGroup;
 
     public CommitMetrics(MetricRegistry registry, String tableName) {
-        this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
+        this.metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         registerGenericCommitMetrics();
     }
 
