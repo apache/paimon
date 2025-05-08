@@ -16,11 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.newreader;
+package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
-import org.apache.paimon.format.parquet.reader.ParquetDictionary;
 import org.apache.paimon.types.DataType;
 
 import org.apache.parquet.CorruptDeltaByteArrays;
@@ -44,10 +43,6 @@ import org.apache.parquet.schema.PrimitiveType;
 import java.io.IOException;
 
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BOOLEAN;
-
-/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
 
 /** Decoder to return values from a single column. */
 public class VectorizedColumnReader {
