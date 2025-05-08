@@ -44,7 +44,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
-import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_WRITE;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_MAX_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_MEMORY;
 import static org.apache.paimon.options.CatalogOptions.CACHE_MANIFEST_SMALL_FILE_THRESHOLD;
@@ -57,7 +58,8 @@ public class CachingCatalog extends DelegateCatalog {
 
     private final Options options;
 
-    private final Duration expirationInterval;
+    private final Duration expireAfterAccess;
+    private final Duration expireAfterWrite;
     private final int snapshotMaxNumPerTable;
     private final long cachedPartitionMaxNum;
 
@@ -80,11 +82,17 @@ public class CachingCatalog extends DelegateCatalog {
             manifestCacheThreshold = Long.MAX_VALUE;
         }
 
-        this.expirationInterval = options.get(CACHE_EXPIRATION_INTERVAL_MS);
-        if (expirationInterval.isZero() || expirationInterval.isNegative()) {
+        this.expireAfterAccess = options.get(CACHE_EXPIRE_AFTER_ACCESS);
+        if (expireAfterAccess.isZero() || expireAfterAccess.isNegative()) {
             throw new IllegalArgumentException(
-                    "When cache.expiration-interval is set to negative or 0, the catalog cache should be disabled.");
+                    "When 'cache.expire-after-access' is set to negative or 0, the catalog cache should be disabled.");
         }
+        this.expireAfterWrite = options.get(CACHE_EXPIRE_AFTER_WRITE);
+        if (expireAfterWrite.isZero() || expireAfterWrite.isNegative()) {
+            throw new IllegalArgumentException(
+                    "When 'cache.expire-after-write' is set to negative or 0, the catalog cache should be disabled.");
+        }
+
         this.snapshotMaxNumPerTable = options.get(CACHE_SNAPSHOT_MAX_NUM_PER_TABLE);
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
 
@@ -98,14 +106,16 @@ public class CachingCatalog extends DelegateCatalog {
                 Caffeine.newBuilder()
                         .softValues()
                         .executor(Runnable::run)
-                        .expireAfterAccess(expirationInterval)
+                        .expireAfterAccess(expireAfterAccess)
+                        .expireAfterWrite(expireAfterWrite)
                         .ticker(ticker)
                         .build();
         this.tableCache =
                 Caffeine.newBuilder()
                         .softValues()
                         .executor(Runnable::run)
-                        .expireAfterAccess(expirationInterval)
+                        .expireAfterAccess(expireAfterAccess)
+                        .expireAfterWrite(expireAfterWrite)
                         .ticker(ticker)
                         .build();
         this.partitionCache =
@@ -114,7 +124,8 @@ public class CachingCatalog extends DelegateCatalog {
                         : Caffeine.newBuilder()
                                 .softValues()
                                 .executor(Runnable::run)
-                                .expireAfterAccess(expirationInterval)
+                                .expireAfterAccess(expireAfterAccess)
+                                .expireAfterWrite(expireAfterWrite)
                                 .weigher(
                                         (Weigher<Identifier, List<Partition>>)
                                                 (identifier, v) -> v.size())
@@ -239,14 +250,16 @@ public class CachingCatalog extends DelegateCatalog {
             storeTable.setSnapshotCache(
                     Caffeine.newBuilder()
                             .softValues()
-                            .expireAfterAccess(expirationInterval)
+                            .expireAfterAccess(expireAfterAccess)
+                            .expireAfterWrite(expireAfterWrite)
                             .maximumSize(snapshotMaxNumPerTable)
                             .executor(Runnable::run)
                             .build());
             storeTable.setStatsCache(
                     Caffeine.newBuilder()
                             .softValues()
-                            .expireAfterAccess(expirationInterval)
+                            .expireAfterAccess(expireAfterAccess)
+                            .expireAfterWrite(expireAfterWrite)
                             .maximumSize(5)
                             .executor(Runnable::run)
                             .build());
