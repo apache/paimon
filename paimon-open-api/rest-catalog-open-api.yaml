@@ -622,6 +622,8 @@ paths:
           description: Success, no content
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
         404:
           description:
             Not Found
@@ -1208,6 +1210,17 @@ components:
           example: {
             "message": "No auth for this resource",
             "code": 401
+          }
+    ForbiddenErrorResponse:
+      description:
+        Used for 403 errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example: {
+            "message": "Table has no permission",
+            "code": 403
           }
     ResourceNotExistErrorResponse:
       description:
