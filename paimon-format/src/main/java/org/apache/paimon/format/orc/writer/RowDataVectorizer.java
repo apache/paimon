@@ -34,10 +34,6 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
 
     private final List<FieldWriter> fieldWriters;
 
-    public RowDataVectorizer(TypeDescription schema, DataType[] fieldTypes) {
-        this(schema, fieldTypes, false);
-    }
-
     public RowDataVectorizer(
             TypeDescription schema, DataType[] fieldTypes, boolean legacyTimestampLtzType) {
         super(schema);

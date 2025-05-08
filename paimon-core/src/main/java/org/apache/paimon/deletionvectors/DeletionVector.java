@@ -26,11 +26,16 @@ import org.apache.paimon.table.source.DeletionFile;
 
 import javax.annotation.Nullable;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Optional;
+
+import static org.apache.paimon.deletionvectors.Bitmap64DeletionVector.toLittleEndianInt;
 
 /**
  * The DeletionVector can efficiently record the positions of rows that are deleted in a file, which
@@ -85,53 +90,66 @@ public interface DeletionVector {
     /** @return the number of distinct integers added to the DeletionVector. */
     long getCardinality();
 
-    /**
-     * Serializes the deletion vector to a byte array for storage or transmission.
-     *
-     * @return A byte array representing the serialized deletion vector.
-     */
-    byte[] serializeToBytes();
-
-    /**
-     * Deserializes a deletion vector from a byte array.
-     *
-     * @param bytes The byte array containing the serialized deletion vector.
-     * @return A DeletionVector instance that represents the deserialized data.
-     */
-    static DeletionVector deserializeFromBytes(byte[] bytes) {
-        try {
-            ByteBuffer buffer = ByteBuffer.wrap(bytes);
-            int magicNum = buffer.getInt();
-            if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {
-                return BitmapDeletionVector.deserializeFromByteBuffer(buffer);
-            } else {
-                throw new RuntimeException("Invalid magic number: " + magicNum);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("Unable to deserialize deletion vector", e);
-        }
-    }
+    /** Serializes the deletion vector. */
+    int serializeTo(DataOutputStream out) throws IOException;
 
     static DeletionVector read(FileIO fileIO, DeletionFile deletionFile) throws IOException {
         Path path = new Path(deletionFile.path());
         try (SeekableInputStream input = fileIO.newInputStream(path)) {
             input.seek(deletionFile.offset());
             DataInputStream dis = new DataInputStream(input);
-            int actualSize = dis.readInt();
-            if (actualSize != deletionFile.length()) {
+            return read(dis, deletionFile.length());
+        }
+    }
+
+    static DeletionVector read(DataInputStream dis, @Nullable Long length) throws IOException {
+        // read bitmap length
+        int bitmapLength = dis.readInt();
+        // read magic number
+        int magicNumber = dis.readInt();
+
+        if (magicNumber == BitmapDeletionVector.MAGIC_NUMBER) {
+            if (length != null && bitmapLength != length) {
                 throw new RuntimeException(
                         "Size not match, actual size: "
-                                + actualSize
+                                + bitmapLength
                                 + ", expected size: "
-                                + deletionFile.length()
-                                + ", file path: "
-                                + path);
+                                + length);
             }
 
-            // read DeletionVector bytes
-            byte[] bytes = new byte[actualSize];
+            // magic number has been read
+            byte[] bytes = new byte[bitmapLength - BitmapDeletionVector.MAGIC_NUMBER_SIZE_BYTES];
             dis.readFully(bytes);
-            return deserializeFromBytes(bytes);
+            dis.skipBytes(4); // skip crc
+            return BitmapDeletionVector.deserializeFromByteBuffer(ByteBuffer.wrap(bytes));
+        } else if (toLittleEndianInt(magicNumber) == Bitmap64DeletionVector.MAGIC_NUMBER) {
+            if (length != null) {
+                long expectedBitmapLength =
+                        length
+                                - Bitmap64DeletionVector.LENGTH_SIZE_BYTES
+                                - Bitmap64DeletionVector.CRC_SIZE_BYTES;
+                if (bitmapLength != expectedBitmapLength) {
+                    throw new RuntimeException(
+                            "Size not match, actual size: "
+                                    + bitmapLength
+                                    + ", expected size: "
+                                    + expectedBitmapLength);
+                }
+            }
+
+            // magic number have been read
+            byte[] bytes = new byte[bitmapLength - Bitmap64DeletionVector.MAGIC_NUMBER_SIZE_BYTES];
+            dis.readFully(bytes);
+            dis.skipBytes(4); // skip crc
+            return Bitmap64DeletionVector.deserializeFromBitmapDataBytes(bytes);
+        } else {
+            throw new RuntimeException(
+                    "Invalid magic number: "
+                            + magicNumber
+                            + ", v1 dv magic number: "
+                            + BitmapDeletionVector.MAGIC_NUMBER
+                            + ", v2 magic number: "
+                            + Bitmap64DeletionVector.MAGIC_NUMBER);
         }
     }
 
@@ -156,6 +174,27 @@ public interface DeletionVector {
             }
             return Optional.empty();
         };
+    }
+
+    static byte[] serializeToBytes(DeletionVector deletionVector) {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        DataOutputStream dos = new DataOutputStream(bos);
+        try {
+            deletionVector.serializeTo(dos);
+            return bos.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    static DeletionVector deserializeFromBytes(byte[] bytes) {
+        ByteArrayInputStream bis = new ByteArrayInputStream(bytes);
+        DataInputStream dis = new DataInputStream(bis);
+        try {
+            return read(dis, null);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /** Interface to create {@link DeletionVector}. */

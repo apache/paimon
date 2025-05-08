@@ -109,7 +109,8 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           spark.sql(
             s"""
                |CREATE TABLE target (a INT, b INT, c STRING)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.bitmap64' = '${Random
+                .nextBoolean()}', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
           spark.sql(
             "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
@@ -160,6 +161,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                        |CREATE TABLE T (id INT, name STRING)
                        |TBLPROPERTIES (
                        |  'deletion-vectors.enabled' = 'true',
+                       |  'deletion-vectors.bitmap64' = '${Random.nextBoolean()}',
                        |  'bucket' = '$bucket' $bucketKey)
                        |""".stripMargin)
 
@@ -231,7 +233,8 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
             s"""
                |CREATE TABLE T (id INT, name STRING, pt STRING)
                |PARTITIONED BY(pt)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.bitmap64' = '${Random
+                .nextBoolean()}', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -317,7 +320,8 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           spark.sql(
             s"""
                |CREATE TABLE T (id INT, name STRING)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.bitmap64' = '${Random
+                .nextBoolean()}', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -373,7 +377,8 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
             s"""
                |CREATE TABLE T (id INT, name STRING, pt STRING)
                |PARTITIONED BY(pt)
-               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'bucket' = '$bucket' $bucketKey)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'deletion-vectors.bitmap64' = '${Random
+                .nextBoolean()}', 'bucket' = '$bucket' $bucketKey)
                |""".stripMargin)
 
           val table = loadTable("T")
@@ -446,7 +451,8 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                    | 'bucket' = '1',
                    | 'primary-key' = 'id',
                    | 'file.format' = 'parquet',
-                   | 'deletion-vectors.enabled' = 'true'
+                   | 'deletion-vectors.enabled' = 'true',
+                   | 'deletion-vectors.bitmap64' = '${Random.nextBoolean()}'
                    |)
                    |""".stripMargin)
       val table = loadTable("T")
@@ -513,6 +519,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                  |TBLPROPERTIES (
                  | 'primary-key' = 'id, pt',
                  | 'deletion-vectors.enabled' = 'true',
+                 | 'deletion-vectors.bitmap64' = '${Random.nextBoolean()}',
                  | 'bucket' = '$bucket',
                  | 'changelog-producer' = '$changelogProducer',
                  | 'file.format' = '$format',
@@ -596,6 +603,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
                  |TBLPROPERTIES (
                  | 'primary-key' = 'id',
                  | 'deletion-vectors.enabled' = 'true',
+                 | 'deletion-vectors.bitmap64' = '${Random.nextBoolean()}',
                  | 'file.format' = '$format',
                  | 'file.block-size' = '${blockSize}b',
                  | 'bucket' = '1'
@@ -635,6 +643,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
            |CREATE TABLE T (id INT)
            |TBLPROPERTIES (
            | 'deletion-vectors.enabled' = 'true',
+           | 'deletion-vectors.bitmap64' = '${Random.nextBoolean()}',
            | 'bucket-key' = 'id',
            | 'bucket' = '1'
            |)
@@ -656,6 +665,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
            |CREATE TABLE T (id INT)
            |TBLPROPERTIES (
            | 'deletion-vectors.enabled' = 'true',
+           | 'deletion-vectors.bitmap64' = '${Random.nextBoolean()}',
            | 'bucket-key' = 'id',
            | 'bucket' = '1',
            | 'data-file.path-directory' = 'data'
@@ -665,6 +675,28 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ id FROM range (1, 50000)")
     sql("DELETE FROM T WHERE id >= 111 and id <= 444")
     checkAnswer(sql("SELECT count(*) FROM T"), Row(49665))
+  }
+
+  test("Paimon deletionVector: work v1 with v2") {
+    sql(s"""
+           |CREATE TABLE T (id INT)
+           |TBLPROPERTIES (
+           | 'deletion-vectors.enabled' = 'true',
+           | 'deletion-vectors.bitmap64' = 'false',
+           | 'file.format' = 'avro'
+           |)
+           |""".stripMargin)
+    // file 1
+    sql("INSERT INTO T VALUES (1), (2)")
+    // file 2
+    sql("INSERT INTO T VALUES (3), (4)")
+    // delete in file 1
+    sql("DELETE FROM T WHERE id = 1")
+    // alter to v2 deletion vectors
+    sql("ALTER TABLE T SET TBLPROPERTIES ('deletion-vectors.bitmap64' = 'true')")
+    // delete in file 2
+    sql("DELETE FROM T WHERE id = 3")
+    checkAnswer(sql("SELECT * FROM T"), Row(2) :: Row(4) :: Nil)
   }
 
   private def getPathName(path: String): String = {

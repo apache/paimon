@@ -19,11 +19,11 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.io.FileNotFoundException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -32,9 +32,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * CoreOptions.StartupMode#FROM_SNAPSHOT_FULL} startup mode of a batch read.
  */
 public class StaticFromSnapshotStartingScanner extends ReadPlanStartingScanner {
-
-    private static final Logger LOG =
-            LoggerFactory.getLogger(StaticFromSnapshotStartingScanner.class);
 
     public StaticFromSnapshotStartingScanner(SnapshotManager snapshotManager, long snapshotId) {
         super(snapshotManager);
@@ -48,21 +45,29 @@ public class StaticFromSnapshotStartingScanner extends ReadPlanStartingScanner {
 
     @Override
     public SnapshotReader configure(SnapshotReader snapshotReader) {
-        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(getSnapshot());
+    }
 
-        if (earliestSnapshotId == null || latestSnapshotId == null) {
-            throw new IllegalArgumentException("There is currently no snapshot.");
+    public Snapshot getSnapshot() {
+        try {
+            return snapshotManager.tryGetSnapshot(startingSnapshotId);
+        } catch (FileNotFoundException e) {
+            Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+            Long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+            if (earliestSnapshotId == null || latestSnapshotId == null) {
+                throw new IllegalArgumentException("There is currently no snapshot.");
+            }
+
+            // Checks earlier whether the specified scan snapshot id is valid.
+            checkArgument(
+                    startingSnapshotId >= earliestSnapshotId
+                            && startingSnapshotId <= latestSnapshotId,
+                    "The specified scan snapshotId %s is out of available snapshotId range [%s, %s].",
+                    startingSnapshotId,
+                    earliestSnapshotId,
+                    latestSnapshotId);
+            throw new RuntimeException(e);
         }
-
-        // Checks earlier whether the specified scan snapshot id is valid.
-        checkArgument(
-                startingSnapshotId >= earliestSnapshotId && startingSnapshotId <= latestSnapshotId,
-                "The specified scan snapshotId %s is out of available snapshotId range [%s, %s].",
-                startingSnapshotId,
-                earliestSnapshotId,
-                latestSnapshotId);
-
-        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
     }
 }

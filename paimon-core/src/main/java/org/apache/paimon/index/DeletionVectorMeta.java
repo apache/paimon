@@ -45,10 +45,10 @@ public class DeletionVectorMeta {
     @Nullable private final Long cardinality;
 
     public DeletionVectorMeta(
-            String dataFileName, int start, int size, @Nullable Long cardinality) {
+            String dataFileName, int start, int length, @Nullable Long cardinality) {
         this.dataFileName = dataFileName;
         this.offset = start;
-        this.length = size;
+        this.length = length;
         this.cardinality = cardinality;
     }
 

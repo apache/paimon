@@ -241,7 +241,4 @@ public class HttpClient implements RESTClient {
                 new RESTAuthParameter(path, queryParams, method, data);
         return headerFunction.apply(restAuthParameter);
     }
-
-    @Override
-    public void close() {}
 }

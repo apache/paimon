@@ -16,27 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.write
 
-import org.apache.paimon.options.Options
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.connector.write.{SupportsOverwrite, WriteBuilder}
-import org.apache.spark.sql.sources.{AlwaysFalse, AlwaysTrue, And, EqualNullSafe, EqualTo, Filter, Not, Or}
+import org.apache.spark.sql.connector.write.WriteBuilder
+import org.apache.spark.sql.sources._
 
 import scala.collection.JavaConverters._
 
-private class SparkWriteBuilder(table: FileStoreTable, options: Options)
+abstract class BaseWriteBuilder(table: FileStoreTable)
   extends WriteBuilder
-  with SupportsOverwrite
+  with ExpressionHelper
   with SQLConfHelper {
 
-  private var saveMode: SaveMode = InsertInto
-
-  override def build = new SparkWrite(table, saveMode, options)
-
-  private def failWithReason(filter: Filter): Unit = {
+  protected def failWithReason(filter: Filter): Unit = {
     throw new RuntimeException(
       s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
   }
@@ -55,7 +51,7 @@ private class SparkWriteBuilder(table: FileStoreTable, options: Options)
 
   // `SupportsOverwrite#canOverwrite` is added since Spark 3.4.0.
   // We do this checking by self to work with previous Spark version.
-  private def failIfCanNotOverwrite(filters: Array[Filter]): Unit = {
+  protected def failIfCanNotOverwrite(filters: Array[Filter]): Unit = {
     // For now, we only support overwrite with two cases:
     // - overwrite with partition columns to be compatible with v1 insert overwrite
     //   See [[org.apache.spark.sql.catalyst.analysis.Analyzer.ResolveInsertInto#staticDeleteExpression]].
@@ -81,17 +77,4 @@ private class SparkWriteBuilder(table: FileStoreTable, options: Options)
     }
     filters.foreach(validateFilter)
   }
-
-  override def overwrite(filters: Array[Filter]): WriteBuilder = {
-    failIfCanNotOverwrite(filters)
-
-    val conjunctiveFilters = if (filters.nonEmpty) {
-      Some(filters.reduce((l, r) => And(l, r)))
-    } else {
-      None
-    }
-    this.saveMode = Overwrite(conjunctiveFilters)
-    this
-  }
-
 }

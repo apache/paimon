@@ -165,13 +165,19 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All tables will be
+     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
+     *     escape the underline if you want to match it exactly.
      * @return a list of the names of tables with provided page size in this database and next page
      *     token, or a list of the names of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
      */
     PagedList<String> listTablesPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern)
             throws DatabaseNotExistException;
 
     /**
@@ -186,13 +192,19 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param tableNamePattern A sql LIKE pattern (% and _) for table names. All table details will
+     *     be returned if not set or empty. Currently, only prefix matching is supported. Note
+     *     please escape the underline if you want to match it exactly.
      * @return a list of the table details with provided page size in this database and next page
      *     token, or a list of the details of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
      */
     PagedList<Table> listTableDetailsPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern)
             throws DatabaseNotExistException;
 
     /**
@@ -311,13 +323,19 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param partitionNamePattern A sql LIKE pattern (% and _) for partition names. All partitions
+     *     will be * returned if not set or empty. Currently, only prefix matching is supported.
+     *     Note please * escape the underline if you want to match it exactly.
      * @return a list of the partitions with provided page size(@param maxResults) in this table and
      *     next page token, or a list of all partitions of the table if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
      * @throws TableNotExistException if the table does not exist
      */
     PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
             throws TableNotExistException;
 
     // ======================= view methods ===============================
@@ -381,13 +399,19 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param viewNamePattern A sql LIKE pattern (% and _) for view names. All views will be
+     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
+     *     escape the underline if you want to match it exactly.
      * @return a list of the names of views with provided page size in this database and next page
      *     token, or a list of the names of all views in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
      */
     default PagedList<String> listViewsPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         return new PagedList<>(listViews(databaseName), null);
     }
@@ -402,13 +426,19 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param viewNamePattern A sql LIKE pattern (% and _) for view names. All view details will be
+     *     returned if not set or empty. Currently, only prefix matching is supported. Note please
+     *     escape the underline if you want to match it exactly.
      * @return a list of the view details with provided page size (@param maxResults) in this
      *     database and next page token, or a list of the details of all views in this database if
      *     the catalog does not {@link #supportsListObjectsPaged()}.
      * @throws DatabaseNotExistException if the database does not exist
      */
     default PagedList<View> listViewDetailsPaged(
-            String databaseName, @Nullable Integer maxResults, @Nullable String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String viewNamePattern)
             throws DatabaseNotExistException {
         return new PagedList<>(Collections.emptyList(), null);
     }
@@ -468,20 +498,37 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
-     * Whether this catalog supports version management for tables. If not, corresponding methods
-     * will fall back to listing all objects. For example, {@link #listTablesPaged(String, Integer,
+     * Whether this catalog supports list objects paged. If not, corresponding methods will fall
+     * back to listing all objects. For example, {@link #listTablesPaged(String, Integer, String,
      * String)} would fall back to {@link #listTables(String)}.
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String)}.
-     *   <li>{@link #listTablesPaged(String, Integer, String)}.
-     *   <li>{@link #listTableDetailsPaged(String, Integer, String)}.
-     *   <li>{@link #listViewsPaged(String, Integer, String)}.
-     *   <li>{@link #listViewDetailsPaged(String, Integer, String)}.
-     *   <li>{@link #listPartitionsPaged(Identifier, Integer, String)}.
+     *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
+     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listPartitionsPaged(Identifier, Integer, String, String)}.
      * </ul>
      */
     boolean supportsListObjectsPaged();
+
+    /**
+     * Whether this catalog supports name pattern filter when list objects paged. If not,
+     * corresponding methods will throw exception if name pattern provided.
+     *
+     * <ul>
+     *   <li>{@link #listDatabasesPaged(Integer, String)}.
+     *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
+     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listPartitionsPaged(Identifier, Integer, String, String)}.
+     * </ul>
+     */
+    default boolean supportsListByPattern() {
+        return false;
+    }
 
     // ==================== Version management methods ==========================
 

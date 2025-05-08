@@ -19,11 +19,11 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.deletionvectors.BitmapDeletionVector
+import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.index.IndexFileMeta
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement, IndexIncrement}
-import org.apache.paimon.spark.{SparkFilterConverter, SparkTable}
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
@@ -31,7 +31,6 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.table.{BucketMode, FileStoreTable, KnownSplitsTable}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
-import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
@@ -41,7 +40,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode, LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, EqualTo, Filter}
+import org.apache.spark.sql.sources._
 
 import java.net.URI
 import java.util.Collections
@@ -67,41 +66,6 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       PaimonSparkWriter(table)
     }
 
-  }
-
-  /**
-   * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`
-   * methods where the `AlwaysTrue` Filter is used.
-   */
-  def isTruncate(filter: Filter): Boolean = {
-    val filters = splitConjunctiveFilters(filter)
-    filters.length == 1 && filters.head.isInstanceOf[AlwaysTrue]
-  }
-
-  /** See [[ org.apache.paimon.spark.SparkWriteBuilder#failIfCanNotOverwrite]] */
-  def convertPartitionFilterToMap(
-      filter: Filter,
-      partitionRowType: RowType): Map[String, String] = {
-    // todo: replace it with SparkV2FilterConverter when we drop Spark3.2
-    val converter = new SparkFilterConverter(partitionRowType)
-    splitConjunctiveFilters(filter).map {
-      case EqualNullSafe(attribute, value) =>
-        (attribute, converter.convertString(attribute, value))
-      case EqualTo(attribute, value) =>
-        (attribute, converter.convertString(attribute, value))
-      case _ =>
-        // Should not happen
-        throw new RuntimeException(
-          s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
-    }.toMap
-  }
-
-  private def splitConjunctiveFilters(filter: Filter): Seq[Filter] = {
-    filter match {
-      case And(filter1, filter2) =>
-        splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
-      case other => other :: Nil
-    }
   }
 
   /** Gets a relative path against the table path. */
@@ -226,7 +190,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
       dataFilePathToMeta: Map[String, SparkDataFileMeta],
       condition: Expression,
       relation: DataSourceV2Relation,
-      sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
+      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     val filteredRelation = createNewScanPlan(candidateDataSplits, condition, relation)
     val dataWithMetadataColumns = createDataset(sparkSession, filteredRelation)
     collectDeletionVectors(dataFilePathToMeta, dataWithMetadataColumns, sparkSession)
@@ -235,7 +199,7 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
   protected def collectDeletionVectors(
       dataFilePathToMeta: Map[String, SparkDataFileMeta],
       dataWithMetadataColumns: Dataset[Row],
-      sparkSession: SparkSession): Dataset[SparkDeletionVectors] = {
+      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     import sparkSession.implicits._
 
     val resolver = sparkSession.sessionState.conf.resolver
@@ -252,13 +216,15 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
 
     val my_table = table
     val location = my_table.location
+    val dvBitmap64 = my_table.coreOptions().deletionVectorBitmap64()
     dataWithMetadataColumns
       .select(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
       .as[(String, Long)]
       .groupByKey(_._1)
       .mapGroups {
         (filePath, iter) =>
-          val dv = new BitmapDeletionVector()
+          val dv =
+            if (dvBitmap64) new Bitmap64DeletionVector() else new BitmapDeletionVector()
           while (iter.hasNext) {
             dv.delete(iter.next()._2)
           }
@@ -270,11 +236,12 @@ trait PaimonCommand extends WithFileStoreTable with ExpressionHelper with SQLCon
             .relativeBucketPath(partition, bucket)
             .toString
 
-          SparkDeletionVectors(
+          SparkDeletionVector(
             relativeBucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
-            Seq((new Path(filePath).getName, dv.serializeToBytes()))
+            new Path(filePath).getName,
+            DeletionVector.serializeToBytes(dv)
           )
       }
   }

@@ -36,7 +36,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.zip.CRC32;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -45,26 +44,23 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class DeletionVectorsIndexFile extends IndexFile {
 
     public static final String DELETION_VECTORS_INDEX = "DELETION_VECTORS";
-    // Current version id is 1
     public static final byte VERSION_ID_V1 = 1;
-    public static final byte VERSION_ID_V2 = 2;
 
-    private final byte writeVersionID;
     private final MemorySize targetSizePerIndexFile;
-
-    public DeletionVectorsIndexFile(
-            FileIO fileIO, PathFactory pathFactory, MemorySize targetSizePerIndexFile) {
-        this(fileIO, pathFactory, targetSizePerIndexFile, VERSION_ID_V1);
-    }
+    private final boolean bitmap64;
 
     public DeletionVectorsIndexFile(
             FileIO fileIO,
             PathFactory pathFactory,
             MemorySize targetSizePerIndexFile,
-            byte writeVersionID) {
+            boolean bitmap64) {
         super(fileIO, pathFactory);
         this.targetSizePerIndexFile = targetSizePerIndexFile;
-        this.writeVersionID = writeVersionID;
+        this.bitmap64 = bitmap64;
+    }
+
+    public boolean bitmap64() {
+        return bitmap64;
     }
 
     /**
@@ -83,12 +79,12 @@ public class DeletionVectorsIndexFile extends IndexFile {
         Map<String, DeletionVector> deletionVectors = new HashMap<>();
         Path filePath = pathFactory.toPath(indexFileName);
         try (SeekableInputStream inputStream = fileIO.newInputStream(filePath)) {
-            int version = checkVersion(inputStream);
+            checkVersion(inputStream);
             DataInputStream dataInputStream = new DataInputStream(inputStream);
             for (DeletionVectorMeta deletionVectorMeta : deletionVectorMetas.values()) {
                 deletionVectors.put(
                         deletionVectorMeta.dataFileName(),
-                        readDeletionVector(dataInputStream, deletionVectorMeta.length(), version));
+                        DeletionVector.read(dataInputStream, (long) deletionVectorMeta.length()));
             }
         } catch (Exception e) {
             throw new RuntimeException(
@@ -117,15 +113,14 @@ public class DeletionVectorsIndexFile extends IndexFile {
 
         String indexFile = dataFileToDeletionFiles.values().stream().findAny().get().path();
         try (SeekableInputStream inputStream = fileIO.newInputStream(new Path(indexFile))) {
-            int version = checkVersion(inputStream);
+            checkVersion(inputStream);
             for (String dataFile : dataFileToDeletionFiles.keySet()) {
                 DeletionFile deletionFile = dataFileToDeletionFiles.get(dataFile);
                 checkArgument(deletionFile.path().equals(indexFile));
                 inputStream.seek(deletionFile.offset());
                 DataInputStream dataInputStream = new DataInputStream(inputStream);
                 deletionVectors.put(
-                        dataFile,
-                        readDeletionVector(dataInputStream, (int) deletionFile.length(), version));
+                        dataFile, DeletionVector.read(dataInputStream, deletionFile.length()));
             }
         } catch (Exception e) {
             throw new RuntimeException("Unable to read deletion vector from file: " + indexFile, e);
@@ -136,11 +131,11 @@ public class DeletionVectorsIndexFile extends IndexFile {
     public DeletionVector readDeletionVector(DeletionFile deletionFile) {
         String indexFile = deletionFile.path();
         try (SeekableInputStream inputStream = fileIO.newInputStream(new Path(indexFile))) {
-            int version = checkVersion(inputStream);
+            checkVersion(inputStream);
             checkArgument(deletionFile.path().equals(indexFile));
             inputStream.seek(deletionFile.offset());
             DataInputStream dataInputStream = new DataInputStream(inputStream);
-            return readDeletionVector(dataInputStream, (int) deletionFile.length(), version);
+            return DeletionVector.read(dataInputStream, deletionFile.length());
         } catch (Exception e) {
             throw new RuntimeException("Unable to read deletion vector from file: " + indexFile, e);
         }
@@ -162,84 +157,21 @@ public class DeletionVectorsIndexFile extends IndexFile {
         try {
             DeletionVectorIndexFileWriter writer =
                     new DeletionVectorIndexFileWriter(
-                            this.fileIO,
-                            this.pathFactory,
-                            this.targetSizePerIndexFile,
-                            writeVersionID);
+                            this.fileIO, this.pathFactory, this.targetSizePerIndexFile);
             return writer.write(input);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write deletion vectors.", e);
         }
     }
 
-    private int checkVersion(InputStream in) throws IOException {
+    private void checkVersion(InputStream in) throws IOException {
         int version = in.read();
-        if (version != VERSION_ID_V1 && version != VERSION_ID_V2) {
+        if (version != VERSION_ID_V1) {
             throw new RuntimeException(
                     "Version not match, actual version: "
                             + version
                             + ", expected version: "
-                            + VERSION_ID_V1
-                            + " or "
-                            + VERSION_ID_V2);
+                            + VERSION_ID_V1);
         }
-        return version;
-    }
-
-    private DeletionVector readDeletionVector(
-            DataInputStream inputStream, int size, int readVersion) {
-        if (readVersion == VERSION_ID_V1) {
-            return readV1DeletionVector(inputStream, size);
-        } else if (readVersion == VERSION_ID_V2) {
-            return readV2DeletionVector(inputStream, size);
-        } else {
-            throw new RuntimeException("Unsupported DeletionVector version: " + writeVersionID);
-        }
-    }
-
-    private DeletionVector readV1DeletionVector(DataInputStream inputStream, int size) {
-        try {
-            // check size
-            int actualSize = inputStream.readInt();
-            if (actualSize != size) {
-                throw new RuntimeException(
-                        "Size not match, actual size: " + actualSize + ", expected size: " + size);
-            }
-
-            // read DeletionVector bytes
-            byte[] bytes = new byte[size];
-            inputStream.readFully(bytes);
-
-            // check checksum
-            int checkSum = calculateChecksum(bytes);
-            int actualCheckSum = inputStream.readInt();
-            if (actualCheckSum != checkSum) {
-                throw new RuntimeException(
-                        "Checksum not match, actual checksum: "
-                                + actualCheckSum
-                                + ", expected checksum: "
-                                + checkSum);
-            }
-            return DeletionVector.deserializeFromBytes(bytes);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Unable to read deletion vector", e);
-        }
-    }
-
-    private DeletionVector readV2DeletionVector(DataInputStream inputStream, int size) {
-        try {
-            byte[] bytes = new byte[size];
-            inputStream.readFully(bytes);
-
-            return Bitmap64DeletionVector.deserializeFromBytes(bytes);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Unable to read deletion vector", e);
-        }
-    }
-
-    public static int calculateChecksum(byte[] bytes) {
-        CRC32 crc = new CRC32();
-        crc.update(bytes);
-        return (int) crc.getValue();
     }
 }

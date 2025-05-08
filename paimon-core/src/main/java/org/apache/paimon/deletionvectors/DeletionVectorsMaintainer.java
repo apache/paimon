@@ -41,13 +41,19 @@ public class DeletionVectorsMaintainer {
 
     private final IndexFileHandler indexFileHandler;
     private final Map<String, DeletionVector> deletionVectors;
+    protected final boolean bitmap64;
     private boolean modified;
 
     private DeletionVectorsMaintainer(
             IndexFileHandler fileHandler, Map<String, DeletionVector> deletionVectors) {
         this.indexFileHandler = fileHandler;
         this.deletionVectors = deletionVectors;
+        this.bitmap64 = indexFileHandler.deletionVectorsIndex().bitmap64();
         this.modified = false;
+    }
+
+    private DeletionVector createNewDeletionVector() {
+        return bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
     }
 
     /**
@@ -59,7 +65,7 @@ public class DeletionVectorsMaintainer {
      */
     public void notifyNewDeletion(String fileName, long position) {
         DeletionVector deletionVector =
-                deletionVectors.computeIfAbsent(fileName, k -> new BitmapDeletionVector());
+                deletionVectors.computeIfAbsent(fileName, k -> createNewDeletionVector());
         if (deletionVector.checkedDelete(position)) {
             modified = true;
         }
@@ -137,6 +143,10 @@ public class DeletionVectorsMaintainer {
     @VisibleForTesting
     public Map<String, DeletionVector> deletionVectors() {
         return deletionVectors;
+    }
+
+    public boolean bitmap64() {
+        return bitmap64;
     }
 
     public static Factory factory(IndexFileHandler handler) {

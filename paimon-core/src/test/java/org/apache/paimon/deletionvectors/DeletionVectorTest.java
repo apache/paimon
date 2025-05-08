@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link DeletionVector}. */
 public class DeletionVectorTest {
+
     @Test
     public void testBitmapDeletionVector() {
         HashSet<Integer> toDelete = new HashSet<>();
@@ -50,7 +51,8 @@ public class DeletionVectorTest {
             assertThat(deletionVector.checkedDelete(i)).isFalse();
         }
         DeletionVector deserializedDeletionVector =
-                DeletionVector.deserializeFromBytes(deletionVector.serializeToBytes());
+                DeletionVector.deserializeFromBytes(
+                        DeletionVector.serializeToBytes(deletionVector));
 
         assertThat(deletionVector.isEmpty()).isFalse();
         assertThat(deserializedDeletionVector.isEmpty()).isFalse();
@@ -70,6 +72,7 @@ public class DeletionVectorTest {
         for (int i = 0; i < 10000; i++) {
             toDelete.add(ThreadLocalRandom.current().nextLong(Integer.MAX_VALUE * 2L));
         }
+        toDelete.add(1L);
         HashSet<Long> notDelete = new HashSet<>();
         for (long i = 0; i < 10000; i++) {
             if (!toDelete.contains(i)) {
@@ -85,7 +88,8 @@ public class DeletionVectorTest {
             assertThat(deletionVector.checkedDelete(i)).isFalse();
         }
         DeletionVector deserializedDeletionVector =
-                Bitmap64DeletionVector.deserializeFromBytes(deletionVector.serializeToBytes());
+                DeletionVector.deserializeFromBytes(
+                        DeletionVector.serializeToBytes(deletionVector));
 
         assertThat(deletionVector.isEmpty()).isFalse();
         assertThat(deserializedDeletionVector.isEmpty()).isFalse();

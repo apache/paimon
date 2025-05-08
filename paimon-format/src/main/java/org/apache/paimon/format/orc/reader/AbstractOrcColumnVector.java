@@ -61,11 +61,6 @@ public abstract class AbstractOrcColumnVector
     }
 
     public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(
-            ColumnVector vector, VectorizedRowBatch orcBatch, DataType dataType) {
-        return createPaimonVector(vector, orcBatch, dataType, false);
-    }
-
-    public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(
             ColumnVector vector,
             VectorizedRowBatch orcBatch,
             DataType dataType,
@@ -86,12 +81,19 @@ public abstract class AbstractOrcColumnVector
             return new OrcTimestampColumnVector(vector, orcBatch, dataType, legacyTimestampLtzType);
         } else if (vector instanceof ListColumnVector) {
             return new OrcArrayColumnVector(
-                    (ListColumnVector) vector, orcBatch, (ArrayType) dataType);
+                    (ListColumnVector) vector,
+                    orcBatch,
+                    (ArrayType) dataType,
+                    legacyTimestampLtzType);
         } else if (vector instanceof StructColumnVector) {
             return new OrcRowColumnVector(
-                    (StructColumnVector) vector, orcBatch, (RowType) dataType);
+                    (StructColumnVector) vector,
+                    orcBatch,
+                    (RowType) dataType,
+                    legacyTimestampLtzType);
         } else if (vector instanceof MapColumnVector) {
-            return new OrcMapColumnVector((MapColumnVector) vector, orcBatch, (MapType) dataType);
+            return new OrcMapColumnVector(
+                    (MapColumnVector) vector, orcBatch, (MapType) dataType, legacyTimestampLtzType);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported vector: " + vector.getClass().getName());

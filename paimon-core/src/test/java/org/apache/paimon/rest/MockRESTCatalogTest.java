@@ -99,7 +99,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         String akSecret = "akSecret" + UUID.randomUUID();
         String securityToken = "securityToken" + UUID.randomUUID();
         String region = "cn-hangzhou";
-        this.authProvider = DLFAuthProvider.buildAKToken(akId, akSecret, securityToken, region);
+        this.authProvider = DLFAuthProvider.fromAccessKey(akId, akSecret, securityToken, region);
         this.authMap =
                 ImmutableMap.of(
                         RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
@@ -122,7 +122,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         new Options(
                                 ImmutableMap.of(
                                         RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
-        this.authProvider = DLFAuthProvider.buildRefreshToken(tokenLoader, 1000_000L, region);
+        this.authProvider = DLFAuthProvider.fromTokenLoader(tokenLoader, region);
         this.authMap =
                 ImmutableMap.of(
                         RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
@@ -156,9 +156,10 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
         PagedList<String> listTablesPaged =
-                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101");
+                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101", null);
         PagedList<String> listTablesPaged2 =
-                restCatalog.listTablesPaged(databaseName, 1, listTablesPaged.getNextPageToken());
+                restCatalog.listTablesPaged(
+                        databaseName, 1, listTablesPaged.getNextPageToken(), null);
         assertEquals(listTablesPaged.getElements().get(0), "dt=20230102");
         assertEquals(listTablesPaged2.getElements().get(0), "dt=20230103");
     }

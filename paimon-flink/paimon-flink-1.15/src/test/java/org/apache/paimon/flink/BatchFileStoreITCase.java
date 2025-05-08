@@ -80,7 +80,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='0') */"))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class,
+                                Exception.class,
                                 "The specified scan snapshotId 0 is out of available snapshotId range [1, 4]."));
 
         assertThatThrownBy(
@@ -89,7 +89,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='0') */"))
                 .satisfies(
                         anyCauseMatches(
-                                IllegalArgumentException.class,
+                                Exception.class,
                                 "The specified scan snapshotId 0 is out of available snapshotId range [1, 4]."));
 
         assertThat(

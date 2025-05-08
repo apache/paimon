@@ -181,8 +181,12 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, Integer maxResults, String pageToken)
+            Identifier identifier,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern)
             throws TableNotExistException {
+        CatalogUtils.validateNamePattern(this, partitionNamePattern);
         return new PagedList<>(listPartitions(identifier), null);
     }
 
@@ -244,15 +248,17 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, tableNamePattern);
         return new PagedList<>(listTables(databaseName), null);
     }
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, tableNamePattern);
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
                     SystemTableLoader.loadGlobalTableNames().stream()
@@ -285,7 +291,8 @@ public abstract class AbstractCatalog implements Catalog {
     protected PagedList<Table> listTableDetailsPagedImpl(
             String databaseName, Integer maxResults, String pageToken)
             throws DatabaseNotExistException {
-        PagedList<String> pagedTableNames = listTablesPaged(databaseName, maxResults, pageToken);
+        PagedList<String> pagedTableNames =
+                listTablesPaged(databaseName, maxResults, pageToken, null);
         return new PagedList<>(
                 pagedTableNames.getElements().stream()
                         .map(

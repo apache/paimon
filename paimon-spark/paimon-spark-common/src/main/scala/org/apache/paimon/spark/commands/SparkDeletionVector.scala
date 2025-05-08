@@ -28,43 +28,37 @@ import scala.collection.JavaConverters._
  * This class will be used as Dataset's pattern type. So here use Array[Byte] instead of BinaryRow
  * or DeletionVector.
  */
-case class SparkDeletionVectors(
+case class SparkDeletionVector(
     partitionAndBucket: String,
     partition: Array[Byte],
     bucket: Int,
-    dataFileAndDeletionVector: Seq[(String, Array[Byte])]
+    dataFileName: String,
+    deletionVector: Array[Byte]
 ) {
-  def relativePaths(fileStorePathFactory: FileStorePathFactory): Seq[String] = {
-    val prefix = fileStorePathFactory
+  def relativePath(pathFactory: FileStorePathFactory): String = {
+    val prefix = pathFactory
       .relativeBucketPath(SerializationUtils.deserializeBinaryRow(partition), bucket)
       .toUri
       .toString + "/"
-    dataFileAndDeletionVector.map(prefix + _._1)
+    prefix + dataFileName
   }
 }
 
-object SparkDeletionVectors {
+object SparkDeletionVector {
   def toDataSplit(
-      sparkDeletionVectors: SparkDeletionVectors,
+      deletionVector: SparkDeletionVector,
       root: Path,
       pathFactory: FileStorePathFactory,
       dataFilePathToMeta: Map[String, SparkDataFileMeta]): DataSplit = {
-    val (dataFiles, deletionFiles, totalBuckets) = sparkDeletionVectors
-      .relativePaths(pathFactory)
-      .map {
-        dataFile =>
-          val meta = dataFilePathToMeta(dataFile)
-          (meta.dataFileMeta, meta.deletionFile.orNull, meta.totalBuckets)
-      }
-      .unzip3
+    val meta = dataFilePathToMeta(deletionVector.relativePath(pathFactory))
     DataSplit
       .builder()
-      .withBucketPath(root + "/" + sparkDeletionVectors.partitionAndBucket)
-      .withPartition(SerializationUtils.deserializeBinaryRow(sparkDeletionVectors.partition))
-      .withBucket(sparkDeletionVectors.bucket)
-      .withTotalBuckets(totalBuckets.head)
-      .withDataFiles(dataFiles.toList.asJava)
-      .withDataDeletionFiles(deletionFiles.toList.asJava)
+      .withBucketPath(root + "/" + deletionVector.partitionAndBucket)
+      .withPartition(SerializationUtils.deserializeBinaryRow(deletionVector.partition))
+      .withBucket(deletionVector.bucket)
+      .withTotalBuckets(meta.totalBuckets)
+      .withDataFiles(Seq(meta.dataFileMeta).asJava)
+      .withDataDeletionFiles(Seq(meta.deletionFile.orNull).asJava)
       .rawConvertible(true)
       .build()
   }
