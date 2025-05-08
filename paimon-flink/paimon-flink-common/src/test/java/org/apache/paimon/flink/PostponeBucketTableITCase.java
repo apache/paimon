@@ -587,6 +587,12 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
                 .containsExactlyInAnyOrder(
                         "+I[1, 11]", "+I[2, 20]", "+I[3, 30]", "+I[4, 40]", "+I[5, 51]");
+
+        tEnv.executeSql("INSERT INTO T VALUES (2, 52), (3, 32)").await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 11]", "+I[2, 52]", "+I[3, 32]", "+I[4, 40]", "+I[5, 51]");
     }
 
     private List<String> collect(TableResult result) throws Exception {

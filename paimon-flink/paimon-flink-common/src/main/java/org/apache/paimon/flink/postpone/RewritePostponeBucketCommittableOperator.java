@@ -55,7 +55,7 @@ public class RewritePostponeBucketCommittableOperator
     private final FileStoreTable table;
 
     private transient FileStorePathFactory pathFactory;
-    private transient Map<BinaryRow, Map<Integer, BucketFiles>> bucketFiles;
+    private transient Map<BinaryRow, Map<Integer, BucketFiles>> buckets;
 
     public RewritePostponeBucketCommittableOperator(FileStoreTable table) {
         this.table = table;
@@ -64,7 +64,7 @@ public class RewritePostponeBucketCommittableOperator
     @Override
     public void open() throws Exception {
         pathFactory = table.store().pathFactory();
-        bucketFiles = new HashMap<>();
+        buckets = new HashMap<>();
     }
 
     @Override
@@ -75,8 +75,7 @@ public class RewritePostponeBucketCommittableOperator
         }
 
         CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
-        bucketFiles
-                .computeIfAbsent(message.partition(), p -> new HashMap<>())
+        buckets.computeIfAbsent(message.partition(), p -> new HashMap<>())
                 .computeIfAbsent(
                         message.bucket(),
                         b ->
@@ -93,8 +92,7 @@ public class RewritePostponeBucketCommittableOperator
     }
 
     protected void emitAll(long checkpointId) {
-        for (Map.Entry<BinaryRow, Map<Integer, BucketFiles>> partitionEntry :
-                bucketFiles.entrySet()) {
+        for (Map.Entry<BinaryRow, Map<Integer, BucketFiles>> partitionEntry : buckets.entrySet()) {
             for (Map.Entry<Integer, BucketFiles> bucketEntry :
                     partitionEntry.getValue().entrySet()) {
                 BucketFiles bucketFiles = bucketEntry.getValue();
@@ -107,7 +105,7 @@ public class RewritePostponeBucketCommittableOperator
                                                 partitionEntry.getKey(), bucketEntry.getKey()))));
             }
         }
-        bucketFiles.clear();
+        buckets.clear();
     }
 
     private static class BucketFiles {
