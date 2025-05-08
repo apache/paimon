@@ -107,10 +107,9 @@ public class FileTypeNotMatchReadTypeTest {
                             new LocalOutputFile(new File(fileWholePath).toPath()), rowTypeWrite);
 
             ParquetWriter<InternalRow> parquetWriter = parquetRowDataBuilder.build();
-            Decimal decimal = Decimal.fromBigDecimal(
-                    new java.math.BigDecimal(1.0), writePrecision, 0);
-            parquetWriter.write(
-                    GenericRow.of(decimal));
+            Decimal decimal =
+                    Decimal.fromBigDecimal(new java.math.BigDecimal(1.0), writePrecision, 0);
+            parquetWriter.write(GenericRow.of(decimal));
             parquetWriter.write(
                     GenericRow.of(
                             Decimal.fromBigDecimal(
