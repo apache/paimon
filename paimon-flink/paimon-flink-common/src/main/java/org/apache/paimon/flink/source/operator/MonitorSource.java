@@ -229,7 +229,9 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                                 singleOutputStreamOperator, shuffleBucketWithPartition);
 
         return sourceDataStream.transform(
-                name + "-Reader", typeInfo, new ReadOperator(readBuilder, nestedProjectedRowData));
+                name + "-Reader",
+                typeInfo,
+                new ReadOperator(readBuilder::newRead, nestedProjectedRowData));
     }
 
     private static DataStream<Split> shuffleUnwareBucket(

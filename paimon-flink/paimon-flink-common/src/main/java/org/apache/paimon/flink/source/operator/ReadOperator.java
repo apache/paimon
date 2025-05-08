@@ -24,10 +24,10 @@ import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.SerializableSupplier;
 
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.runtime.metrics.MetricNames;
@@ -47,9 +47,9 @@ import javax.annotation.Nullable;
 public class ReadOperator extends AbstractStreamOperator<RowData>
         implements OneInputStreamOperator<Split, RowData> {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
-    private final ReadBuilder readBuilder;
+    private final SerializableSupplier<TableRead> readSupplier;
     @Nullable private final NestedProjectedRowData nestedProjectedRowData;
 
     private transient TableRead read;
@@ -66,8 +66,9 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private transient Counter numRecordsIn;
 
     public ReadOperator(
-            ReadBuilder readBuilder, @Nullable NestedProjectedRowData nestedProjectedRowData) {
-        this.readBuilder = readBuilder;
+            SerializableSupplier<TableRead> readSupplier,
+            @Nullable NestedProjectedRowData nestedProjectedRowData) {
+        this.readSupplier = readSupplier;
         this.nestedProjectedRowData = nestedProjectedRowData;
     }
 
@@ -89,7 +90,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                                 .getEnvironment()
                                 .getIOManager()
                                 .getSpillingDirectoriesPaths());
-        this.read = readBuilder.newRead().withIOManager(ioManager);
+        this.read = readSupplier.get().withIOManager(ioManager);
         this.reuseRow = new FlinkRowData(null);
         this.reuseRecord = new StreamRecord<>(null);
         this.idlingStarted();
