@@ -756,6 +756,15 @@ public class CoreOptions implements Serializable {
                                     + "It is independent of snapshots, but it is imprecise filtering (depending on whether "
                                     + "or not compaction occurs).");
 
+    public static final ConfigOption<Long> SCAN_CREATION_TIME_MILLIS =
+            key("scan.creation-time-millis")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional timestamp used in case of \"from-timestamp\" scan mode. "
+                                    + "If there is no snapshot earlier than this time, the earliest snapshot will be chosen."
+                                    + "If there is no snapshot later than this time, only the data files created after this time will be read.");
+
     public static final ConfigOption<Long> SCAN_SNAPSHOT_ID =
             key("scan.snapshot-id")
                     .longType()
@@ -2304,6 +2313,10 @@ public class CoreOptions implements Serializable {
         return options.get(SCAN_FILE_CREATION_TIME_MILLIS);
     }
 
+    public Long scanCreationTimeMills() {
+        return options.get(SCAN_CREATION_TIME_MILLIS);
+    }
+
     public Long scanBoundedWatermark() {
         return options.get(SCAN_BOUNDED_WATERMARK);
     }
@@ -2764,13 +2777,21 @@ public class CoreOptions implements Serializable {
                 "from-timestamp",
                 "For streaming sources, continuously reads changes "
                         + "starting from timestamp specified by \"scan.timestamp-millis\", "
+                        + "without consuming the snapshot at the beginning. "
+                        + "For batch sources, consumes a snapshot at timestamp specified by \"scan.timestamp-millis\" "
+                        + "but does not read new changes."),
+
+        FROM_CREATION_TIMESTAMP(
+                "from-creation-timestamp",
+                "For streaming sources, continuously reads changes "
+                        + "starting from timestamp specified by \"scan.creation-time-millis\", "
                         + "without producing a snapshot at the beginning. "
-                        + "For batch sources, produces a snapshot at timestamp specified by \"scan.timestamp-millis\" "
+                        + "For batch sources, consumes a snapshot at timestamp specified by \"scan.timestamp-millis\" "
                         + "but does not read new changes."),
 
         FROM_FILE_CREATION_TIME(
                 "from-file-creation-time",
-                "For streaming and batch sources, produces a snapshot and filters the data files by creation time. "
+                "For streaming and batch sources, consumes a snapshot and filters the data files by creation time. "
                         + "For streaming sources, upon first startup, and continue to read the latest changes."),
 
         FROM_SNAPSHOT(
