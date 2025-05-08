@@ -18,21 +18,24 @@
 
 package org.apache.paimon.metrics;
 
+import org.apache.paimon.annotation.Public;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Factory to create {@link MetricGroup}s. */
-public abstract class MetricRegistry {
+/**
+ * Factory to create {@link MetricGroup}s.
+ *
+ * @since 1.2.0
+ */
+@Public
+public interface MetricRegistry {
 
-    private static final String KEY_TABLE = "table";
-
-    public MetricGroup tableMetricGroup(String groupName, String tableName) {
+    default MetricGroup createTableMetricGroup(String groupName, String tableName) {
         Map<String, String> variables = new LinkedHashMap<>();
-        variables.put(KEY_TABLE, tableName);
-
+        variables.put("table", tableName);
         return createMetricGroup(groupName, variables);
     }
 
-    protected abstract MetricGroup createMetricGroup(
-            String groupName, Map<String, String> variables);
+    MetricGroup createMetricGroup(String groupName, Map<String, String> variables);
 }

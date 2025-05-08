@@ -43,7 +43,7 @@ public class ScanMetrics {
     private ScanStats latestScan;
 
     public ScanMetrics(MetricRegistry registry, String tableName) {
-        metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
+        metricGroup = registry.createTableMetricGroup(GROUP_NAME, tableName);
         metricGroup.gauge(
                 LAST_SCAN_DURATION, () -> latestScan == null ? 0L : latestScan.getDuration());
         durationHistogram = metricGroup.histogram(SCAN_DURATION, HISTOGRAM_WINDOW_SIZE);

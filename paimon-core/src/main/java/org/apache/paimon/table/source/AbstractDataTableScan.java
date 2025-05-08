@@ -113,7 +113,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
-    public AbstractDataTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+    public AbstractDataTableScan withMetricRegistry(MetricRegistry metricsRegistry) {
         snapshotReader.withMetricRegistry(metricsRegistry);
         return this;
     }

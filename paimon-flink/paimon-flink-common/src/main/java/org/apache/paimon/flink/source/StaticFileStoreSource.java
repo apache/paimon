@@ -93,7 +93,7 @@ public class StaticFileStoreSource extends FlinkSource {
         // register scan metrics
         if (context.metricGroup() != null) {
             ((InnerTableScan) scan)
-                    .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
+                    .withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
         }
         return splitGenerator.createSplits(scan.plan());
     }

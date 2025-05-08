@@ -46,7 +46,7 @@ import java.util.function.Supplier;
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
  */
-public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
+public final class KeyValueTableRead extends AbstractDataTableRead {
 
     private final List<SplitReadProvider> readProviders;
 

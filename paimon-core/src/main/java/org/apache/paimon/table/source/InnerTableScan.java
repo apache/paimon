@@ -59,7 +59,8 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
-    default InnerTableScan withMetricsRegistry(MetricRegistry metricRegistry) {
+    @Override
+    default InnerTableScan withMetricRegistry(MetricRegistry metricRegistry) {
         // do nothing, should implement this if need
         return this;
     }
