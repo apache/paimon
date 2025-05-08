@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.heap.HeapBytesVector;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.heap.HeapLongVector;
 import org.apache.paimon.data.columnar.writable.WritableBooleanVector;
@@ -187,9 +188,14 @@ public class ParquetVectorUpdaterFactory {
             return c -> {
                 if (c.getPrimitiveType().getPrimitiveTypeName()
                         == PrimitiveType.PrimitiveTypeName.INT64) {
-                    return new LongUpdater();
+                    return new LongTimestampUpdater(timestampType.getPrecision());
+                } else if (c.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.INT96) {
+                    return new TimestampUpdater(timestampType.getPrecision());
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Only support timestamp with int64 and int96 in parquet file yet");
                 }
-                return new TimestampUpdater();
             };
         }
 
@@ -200,7 +206,7 @@ public class ParquetVectorUpdaterFactory {
                         == PrimitiveType.PrimitiveTypeName.INT64) {
                     return new LongUpdater();
                 }
-                return new TimestampUpdater();
+                return new TimestampUpdater(localZonedTimestampType.getPrecision());
             };
         }
 
@@ -387,25 +393,86 @@ public class ParquetVectorUpdaterFactory {
         }
     }
 
-    private static class TimestampUpdater implements ParquetVectorUpdater<WritableTimestampVector> {
+    private abstract static class AbstractTimestampUpdater
+            implements ParquetVectorUpdater<WritableColumnVector> {
+
+        protected final int precision;
+
+        AbstractTimestampUpdater(int precision) {
+            this.precision = precision;
+        }
+
+        @Override
+        public void readValues(
+                int total,
+                int offset,
+                WritableColumnVector values,
+                VectorizedValuesReader valuesReader) {
+            for (int i = 0; i < total; i++) {
+                readValue(offset + i, values, valuesReader);
+            }
+        }
+    }
+
+    private static class LongTimestampUpdater extends AbstractTimestampUpdater {
+
+        public LongTimestampUpdater(int precision) {
+            super(precision);
+        }
+
+        @Override
+        public void skipValues(int total, VectorizedValuesReader valuesReader) {
+            valuesReader.skipLongs(total);
+        }
+
+        @Override
+        public void readValue(
+                int offset, WritableColumnVector values, VectorizedValuesReader valuesReader) {
+            long value = valuesReader.readLong();
+            putTimestamp(values, offset, value);
+        }
+
+        @Override
+        public void decodeSingleDictionaryId(
+                int offset,
+                WritableColumnVector values,
+                WritableIntVector dictionaryIds,
+                Dictionary dictionary) {
+            long value = dictionary.decodeToLong(dictionaryIds.getInt(offset));
+            putTimestamp(values, offset, value);
+        }
+
+        private void putTimestamp(WritableColumnVector vector, int offset, long timestamp) {
+            if (vector instanceof WritableTimestampVector) {
+                ((WritableTimestampVector) vector)
+                        .setTimestamp(offset, Timestamp.fromEpochMillis(timestamp));
+            } else {
+                ((WritableLongVector) vector).setLong(offset, timestamp);
+            }
+        }
+    }
+
+    private static class TimestampUpdater extends AbstractTimestampUpdater {
 
         public static final int JULIAN_EPOCH_OFFSET_DAYS = 2_440_588;
         public static final long MILLIS_IN_DAY = TimeUnit.DAYS.toMillis(1);
         public static final long NANOS_PER_MILLISECOND = TimeUnit.MILLISECONDS.toNanos(1);
         public static final long NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1);
 
+        public TimestampUpdater(int precision) {
+            super(precision);
+        }
+
         @Override
         public void readValues(
                 int total,
                 int offset,
-                WritableTimestampVector values,
+                WritableColumnVector values,
                 VectorizedValuesReader valuesReader) {
-
             for (int i = 0; i < total; i++) {
-                values.setTimestamp(
-                        offset + i,
-                        int96ToTimestamp(
-                                true, valuesReader.readLong(), valuesReader.readInteger()));
+                Timestamp timestamp =
+                        int96ToTimestamp(true, valuesReader.readLong(), valuesReader.readInteger());
+                putTimestamp(values, offset + i, timestamp);
             }
         }
 
@@ -416,8 +483,9 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public void readValue(
-                int offset, WritableTimestampVector values, VectorizedValuesReader valuesReader) {
-            values.setTimestamp(
+                int offset, WritableColumnVector values, VectorizedValuesReader valuesReader) {
+            putTimestamp(
+                    values,
                     offset,
                     int96ToTimestamp(true, valuesReader.readLong(), valuesReader.readInteger()));
         }
@@ -425,11 +493,28 @@ public class ParquetVectorUpdaterFactory {
         @Override
         public void decodeSingleDictionaryId(
                 int offset,
-                WritableTimestampVector values,
+                WritableColumnVector values,
                 WritableIntVector dictionaryIds,
                 Dictionary dictionary) {
-            values.setTimestamp(
-                    offset, decodeInt96ToTimestamp(true, dictionary, dictionaryIds.getInt(offset)));
+            putTimestamp(
+                    values,
+                    offset,
+                    decodeInt96ToTimestamp(true, dictionary, dictionaryIds.getInt(offset)));
+        }
+
+        private void putTimestamp(WritableColumnVector vector, int offset, Timestamp timestamp) {
+            if (vector instanceof WritableTimestampVector) {
+                ((WritableTimestampVector) vector).setTimestamp(offset, timestamp);
+            } else {
+                if (precision <= 3) {
+                    ((WritableLongVector) vector).setLong(offset, timestamp.getMillisecond());
+                } else if (precision <= 6) {
+                    ((WritableLongVector) vector).setLong(offset, timestamp.toMicros());
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Unsupported timestamp precision: " + precision);
+                }
+            }
         }
 
         public static Timestamp decodeInt96ToTimestamp(
@@ -611,9 +696,21 @@ public class ParquetVectorUpdaterFactory {
                 readValue(offset + i, values, valuesReader);
             }
         }
+
+        protected void putDecimal(WritableColumnVector values, int offset, BigDecimal decimal) {
+            int precision = paimonType.getPrecision();
+            if (ParquetSchemaConverter.is32BitDecimal(precision)) {
+                ((HeapIntVector) values).setInt(offset, decimal.intValue());
+            } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
+                ((HeapLongVector) values).setLong(offset, decimal.longValue());
+            } else {
+                byte[] bytes = decimal.unscaledValue().toByteArray();
+                ((WritableBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
+            }
+        }
     }
 
-    private static class IntegerToDecimalUpdater extends DecimalUpdater<WritableIntVector> {
+    private static class IntegerToDecimalUpdater extends DecimalUpdater<WritableColumnVector> {
         private final int parquetScale;
 
         IntegerToDecimalUpdater(ColumnDescriptor descriptor, DecimalType paimonType) {
@@ -634,25 +731,25 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public void readValue(
-                int offset, WritableIntVector values, VectorizedValuesReader valuesReader) {
+                int offset, WritableColumnVector values, VectorizedValuesReader valuesReader) {
             BigDecimal decimal = BigDecimal.valueOf(valuesReader.readInteger(), parquetScale);
-            values.setInt(offset, decimal.unscaledValue().intValue());
+            putDecimal(values, offset, decimal);
         }
 
         @Override
         public void decodeSingleDictionaryId(
                 int offset,
-                WritableIntVector values,
+                WritableColumnVector values,
                 WritableIntVector dictionaryIds,
                 Dictionary dictionary) {
             BigDecimal decimal =
                     BigDecimal.valueOf(
                             dictionary.decodeToInt(dictionaryIds.getInt(offset)), parquetScale);
-            values.setInt(offset, decimal.unscaledValue().intValue());
+            putDecimal(values, offset, decimal);
         }
     }
 
-    private static class LongToDecimalUpdater extends DecimalUpdater<WritableLongVector> {
+    private static class LongToDecimalUpdater extends DecimalUpdater<WritableColumnVector> {
         private final int parquetScale;
 
         LongToDecimalUpdater(ColumnDescriptor descriptor, DecimalType paimonType) {
@@ -673,32 +770,34 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public void readValue(
-                int offset, WritableLongVector values, VectorizedValuesReader valuesReader) {
+                int offset, WritableColumnVector values, VectorizedValuesReader valuesReader) {
             BigDecimal decimal = BigDecimal.valueOf(valuesReader.readLong(), parquetScale);
-            values.setLong(offset, decimal.unscaledValue().longValue());
+            putDecimal(values, offset, decimal);
         }
 
         @Override
         public void decodeSingleDictionaryId(
                 int offset,
-                WritableLongVector values,
+                WritableColumnVector values,
                 WritableIntVector dictionaryIds,
                 Dictionary dictionary) {
             BigDecimal decimal =
                     BigDecimal.valueOf(
                             dictionary.decodeToLong(dictionaryIds.getInt(offset)), parquetScale);
-            values.setLong(offset, decimal.unscaledValue().longValue());
+            putDecimal(values, offset, decimal);
         }
     }
 
-    private static class BinaryToDecimalUpdater extends DecimalUpdater<WritableBytesVector> {
+    private static class BinaryToDecimalUpdater extends DecimalUpdater<WritableColumnVector> {
         private final int parquetScale;
+        private final WritableBytesVector bytesVector;
 
         BinaryToDecimalUpdater(ColumnDescriptor descriptor, DecimalType paimonType) {
             super(paimonType);
             LogicalTypeAnnotation typeAnnotation =
                     descriptor.getPrimitiveType().getLogicalTypeAnnotation();
             this.parquetScale = ((DecimalLogicalTypeAnnotation) typeAnnotation).getScale();
+            this.bytesVector = new HeapBytesVector(1);
         }
 
         @Override
@@ -708,18 +807,17 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public void readValue(
-                int offset, WritableBytesVector values, VectorizedValuesReader valuesReader) {
-            valuesReader.readBinary(1, values, offset);
-            BigInteger value = new BigInteger(values.getBytes(offset).getBytes());
+                int offset, WritableColumnVector values, VectorizedValuesReader valuesReader) {
+            valuesReader.readBinary(1, bytesVector, offset);
+            BigInteger value = new BigInteger(bytesVector.getBytes(offset).getBytes());
             BigDecimal decimal = new BigDecimal(value, parquetScale);
-            byte[] bytes = decimal.unscaledValue().toByteArray();
-            values.putByteArray(offset, bytes, 0, bytes.length);
+            putDecimal(values, offset, decimal);
         }
 
         @Override
         public void decodeSingleDictionaryId(
                 int offset,
-                WritableBytesVector values,
+                WritableColumnVector values,
                 WritableIntVector dictionaryIds,
                 Dictionary dictionary) {
             BigInteger value =
@@ -728,8 +826,7 @@ public class ParquetVectorUpdaterFactory {
                                     .decodeToBinary(dictionaryIds.getInt(offset))
                                     .getBytesUnsafe());
             BigDecimal decimal = new BigDecimal(value, parquetScale);
-            byte[] bytes = decimal.unscaledValue().toByteArray();
-            values.putByteArray(offset, bytes, 0, bytes.length);
+            putDecimal(values, offset, decimal);
         }
     }
 
