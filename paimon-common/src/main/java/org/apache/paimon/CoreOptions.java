@@ -2278,6 +2278,8 @@ public class CoreOptions implements Serializable {
                 return StartupMode.FROM_SNAPSHOT;
             } else if (options.getOptional(SCAN_FILE_CREATION_TIME_MILLIS).isPresent()) {
                 return StartupMode.FROM_FILE_CREATION_TIME;
+            } else if (options.getOptional(SCAN_CREATION_TIME_MILLIS).isPresent()) {
+                return StartupMode.FROM_CREATION_TIMESTAMP;
             } else if (options.getOptional(INCREMENTAL_BETWEEN).isPresent()
                     || options.getOptional(INCREMENTAL_BETWEEN_TIMESTAMP).isPresent()) {
                 return StartupMode.INCREMENTAL;
