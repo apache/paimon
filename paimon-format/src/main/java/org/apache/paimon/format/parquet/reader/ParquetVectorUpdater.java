@@ -16,16 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.newreader;
+package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 
 import org.apache.parquet.column.Dictionary;
-
-/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
 
 /**
  * Interface to update a vector with values read from a Parquet file.

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.newreader;
+package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.writable.WritableBooleanVector;
 import org.apache.paimon.data.columnar.writable.WritableByteVector;
@@ -31,10 +31,6 @@ import org.apache.paimon.data.columnar.writable.WritableShortVector;
 import org.apache.parquet.io.api.Binary;
 
 import java.nio.ByteBuffer;
-
-/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
 
 /** Interface for value decoding that supports vectorized (aka batched) decoding. */
 public interface VectorizedValuesReader {

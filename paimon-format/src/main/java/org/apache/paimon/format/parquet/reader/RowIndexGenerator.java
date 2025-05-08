@@ -16,17 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet.newreader;
+package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.utils.LongIterator;
 
 import org.apache.parquet.column.page.PageReadStore;
 
 import java.util.PrimitiveIterator;
-
-/* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
 
 /** Generate row index for columnar batch. */
 public class RowIndexGenerator {
