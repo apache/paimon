@@ -123,7 +123,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         tableName ->
                                 shouldMonitorTable(tableName, includingPattern, excludingPattern),
                         excludedTables,
-                        typeMapping);
+                        typeMapping,
+                        compositePrimaryKey);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<JdbcTableInfo> jdbcTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);

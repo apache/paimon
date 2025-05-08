@@ -87,7 +87,11 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
     protected Schema retrieveSchema() throws Exception {
         this.mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        cdcSourceConfig, monitorTablePredication(), new ArrayList<>(), typeMapping);
+                        cdcSourceConfig,
+                        monitorTablePredication(),
+                        new ArrayList<>(),
+                        typeMapping,
+                        compositePrimaryKey);
         validateMySqlTableInfos(mySqlSchemasInfo);
         JdbcTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
         return tableInfo.schema();

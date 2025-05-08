@@ -71,7 +71,8 @@ public class PostgresActionUtils {
             Configuration postgresConfig,
             Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables,
-            TypeMapping typeMapping)
+            TypeMapping typeMapping,
+            String compositePrimaryKey)
             throws Exception {
 
         String databaseName = postgresConfig.get(PostgresSourceOptions.DATABASE_NAME);
@@ -103,7 +104,8 @@ public class PostgresActionUtils {
                                                 tableName,
                                                 tableComment,
                                                 typeMapping,
-                                                toPaimonTypeVisitor());
+                                                toPaimonTypeVisitor(),
+                                                compositePrimaryKey);
                                 jdbcSchemasInfo.addSchema(identifier, schemaName, schema);
                             } else {
                                 excludedTables.add(identifier);

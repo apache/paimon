@@ -70,6 +70,7 @@ public class CdcActionCommonUtils {
     public static final String METADATA_COLUMN = "metadata_column";
     public static final String MULTIPLE_TABLE_PARTITION_KEYS = "multiple_table_partition_keys";
     public static final String EAGER_INIT = "eager_init";
+    public static final String COMPOSITE_PRIMARY_KEY = "composite_primary_key";
 
     public static void assertSchemaCompatible(
             TableSchema paimonSchema, List<DataField> sourceTableFields) {
