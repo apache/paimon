@@ -18,11 +18,15 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.data.GenericRow
+import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.table.source.Split
+import org.apache.paimon.types.{DataField, DataTypes, RowType}
 
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.apache.spark.sql.connector.read.{HasPartitionKey, InputPartition, SupportsReportPartitioning}
+
+import scala.collection.JavaConverters._
 
 trait PaimonInputPartition extends InputPartition {
   def splits: Seq[Split]
@@ -46,10 +50,35 @@ object PaimonInputPartition {
   }
 }
 
+/** The partition key to report to Spark. */
+case class OutputPartitionKey(partitionValue: GenericRow, bucket: Int, partitionType: RowType) {
+
+  // append bucket column after partition column
+  private lazy val fullType = {
+    val fields = partitionType.getFields.asScala
+    RowType.of(
+      fields :+ new DataField(
+        RowType.currentHighestFieldId(partitionType.getFields) + 1,
+        "_bucket",
+        DataTypes.INT()): _*)
+  }
+
+  private lazy val fullRow = {
+    val columns =
+      ((0 until partitionValue.getFieldCount).map(p => partitionValue.getField(p)) :+ bucket)
+        .map(_.asInstanceOf[Object])
+    GenericRow.of(columns: _*)
+  }
+
+  lazy val keyRow: SparkInternalRow = {
+    SparkInternalRow.create(fullType).replace(fullRow)
+  }
+}
+
 /** Bucketed input partition should work with [[SupportsReportPartitioning]] together. */
-case class PaimonBucketedInputPartition(splits: Seq[Split], bucket: Int)
+case class PaimonBucketedInputPartition(splits: Seq[Split], key: OutputPartitionKey)
   extends PaimonInputPartition
   with HasPartitionKey {
-  override def partitionKey(): InternalRow = new GenericInternalRow(Array(bucket.asInstanceOf[Any]))
+  override def partitionKey(): InternalRow = key.keyRow
   override def bucketed: Boolean = true
 }
