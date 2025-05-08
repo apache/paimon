@@ -58,15 +58,20 @@ class PartitionMarkDoneTest extends TableTestBase {
 
     @Test
     public void testTriggerByCompaction() throws Exception {
-        innerTest(true);
+        innerTest(true, false);
     }
 
     @Test
     public void testNotTriggerByCompaction() throws Exception {
-        innerTest(false);
+        innerTest(false, false);
     }
 
-    private void innerTest(boolean deletionVectors) throws Exception {
+    @Test
+    public void testTriggerWhenRecoveryFromState() throws Exception {
+        innerTest(false, true);
+    }
+
+    private void innerTest(boolean deletionVectors, boolean recoveryFromState) throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
                 Schema.newBuilder()
@@ -94,6 +99,11 @@ class PartitionMarkDoneTest extends TableTestBase {
                                 table)
                         .get();
 
+        if (recoveryFromState) {
+            notifyCommits(markDone, false, true);
+            assertThat(table.fileIO().exists(successFile)).isEqualTo(false);
+        }
+
         notifyCommits(markDone, true);
         assertThat(table.fileIO().exists(successFile)).isEqualTo(deletionVectors);
 
@@ -104,6 +114,11 @@ class PartitionMarkDoneTest extends TableTestBase {
     }
 
     public static void notifyCommits(PartitionMarkDone markDone, boolean isCompact) {
+        notifyCommits(markDone, isCompact, false);
+    }
+
+    private static void notifyCommits(
+            PartitionMarkDone markDone, boolean isCompact, boolean recoveryFromState) {
         ManifestCommittable committable = new ManifestCommittable(Long.MAX_VALUE);
         DataFileMeta file = DataFileTestUtils.newFile();
         CommitMessageImpl compactMessage;
@@ -127,7 +142,7 @@ class PartitionMarkDoneTest extends TableTestBase {
                             new IndexIncrement(emptyList()));
         }
         committable.addFileCommittable(compactMessage);
-        markDone.notifyCommittable(singletonList(committable));
+        markDone.notifyCommittable(singletonList(committable), recoveryFromState);
     }
 
     public static class MockOperatorStateStore implements OperatorStateStore {
