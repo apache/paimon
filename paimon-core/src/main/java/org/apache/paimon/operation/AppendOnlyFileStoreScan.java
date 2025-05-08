@@ -33,8 +33,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
@@ -47,7 +47,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     private Predicate filter;
 
     // just cache.
-    private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
+    private final Map<Long, Predicate> dataFilterMapping = new ConcurrentHashMap<>();
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
