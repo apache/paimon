@@ -277,35 +277,41 @@ public class CompactAction extends TableActionBase {
 
             bucketOptions = new HashMap<>(table.options());
             bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
-            FileStoreTable realTable = table.copy(table.schema().copy(bucketOptions));
+            // bucket-postpone files won't be read if deletion vectors are set
+            bucketOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "false");
+            FileStoreTable tableForRead = table.copy(table.schema().copy(bucketOptions));
 
             LinkedHashMap<String, String> partitionSpec =
                     partitionComputer.generatePartValues(partition);
             Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
                     PostponeBucketCompactSplitSource.buildSource(
                             env,
-                            realTable.fullName() + partitionSpec,
-                            realTable.rowType(),
-                            realTable
+                            tableForRead.fullName() + partitionSpec,
+                            tableForRead.rowType(),
+                            tableForRead
                                     .newReadBuilder()
                                     .withPartitionFilter(partitionSpec)
                                     .withBucket(BucketMode.POSTPONE_BUCKET),
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
+            bucketOptions = new HashMap<>(table.options());
+            bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
+            FileStoreTable tableForWrite = table.copy(table.schema().copy(bucketOptions));
+
             DataStream<InternalRow> partitioned =
                     FlinkStreamPartitioner.partition(
                             FlinkSinkBuilder.mapToInternalRow(
-                                    sourcePair.getLeft(), realTable.rowType()),
-                            new RowDataChannelComputer(realTable.schema(), false),
+                                    sourcePair.getLeft(), tableForWrite.rowType()),
+                            new RowDataChannelComputer(tableForWrite.schema(), false),
                             null);
-            FixedBucketSink sink = new FixedBucketSink(realTable, null, null);
+            FixedBucketSink sink = new FixedBucketSink(tableForWrite, null, null);
             DataStream<Committable> written =
                     sink.doWrite(partitioned, commitUser, partitioned.getParallelism())
                             .forward()
                             .transform(
                                     "Rewrite compact committable",
                                     new CommittableTypeInfo(),
-                                    new RewritePostponeBucketCommittableOperator(realTable));
+                                    new RewritePostponeBucketCommittableOperator(tableForWrite));
             dataStreams.add(written);
             dataStreams.add(sourcePair.getRight());
         }

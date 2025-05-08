@@ -23,10 +23,12 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -96,16 +98,13 @@ public class RewritePostponeBucketCommittableOperator
             for (Map.Entry<Integer, BucketFiles> bucketEntry :
                     partitionEntry.getValue().entrySet()) {
                 BucketFiles bucketFiles = bucketEntry.getValue();
-                CommitMessageImpl message =
-                        new CommitMessageImpl(
-                                partitionEntry.getKey(),
-                                bucketEntry.getKey(),
-                                bucketFiles.totalBuckets,
-                                DataIncrement.emptyIncrement(),
-                                bucketFiles.makeIncrement());
                 output.collect(
                         new StreamRecord<>(
-                                new Committable(checkpointId, Committable.Kind.FILE, message)));
+                                new Committable(
+                                        checkpointId,
+                                        Committable.Kind.FILE,
+                                        bucketFiles.makeMessage(
+                                                partitionEntry.getKey(), bucketEntry.getKey()))));
             }
         }
         bucketFiles.clear();
@@ -121,6 +120,8 @@ public class RewritePostponeBucketCommittableOperator
         private final List<DataFileMeta> compactBefore;
         private final List<DataFileMeta> compactAfter;
         private final List<DataFileMeta> changelogFiles;
+        private final List<IndexFileMeta> newIndexFiles;
+        private final List<IndexFileMeta> deletedIndexFiles;
 
         private BucketFiles(DataFilePathFactory pathFactory, FileIO fileIO) {
             this.pathFactory = pathFactory;
@@ -130,6 +131,8 @@ public class RewritePostponeBucketCommittableOperator
             this.compactBefore = new ArrayList<>();
             this.compactAfter = new ArrayList<>();
             this.changelogFiles = new ArrayList<>();
+            this.newIndexFiles = new ArrayList<>();
+            this.deletedIndexFiles = new ArrayList<>();
         }
 
         private void update(CommitMessageImpl message) {
@@ -157,13 +160,22 @@ public class RewritePostponeBucketCommittableOperator
             changelogFiles.addAll(message.newFilesIncrement().changelogFiles());
             changelogFiles.addAll(message.compactIncrement().changelogFiles());
 
+            newIndexFiles.addAll(message.indexIncrement().newIndexFiles());
+            deletedIndexFiles.addAll(message.indexIncrement().deletedIndexFiles());
+
             toDelete.forEach((fileName, path) -> fileIO.deleteQuietly(path));
         }
 
-        private CompactIncrement makeIncrement() {
+        private CommitMessageImpl makeMessage(BinaryRow partition, int bucket) {
             List<DataFileMeta> realCompactAfter = new ArrayList<>(newFiles.values());
             realCompactAfter.addAll(compactAfter);
-            return new CompactIncrement(compactBefore, realCompactAfter, changelogFiles);
+            return new CommitMessageImpl(
+                    partition,
+                    bucket,
+                    totalBuckets,
+                    DataIncrement.emptyIncrement(),
+                    new CompactIncrement(compactBefore, realCompactAfter, changelogFiles),
+                    new IndexIncrement(newIndexFiles, deletedIndexFiles));
         }
     }
 }
