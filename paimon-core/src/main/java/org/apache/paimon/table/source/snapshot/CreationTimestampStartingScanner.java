@@ -19,65 +19,71 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.List;
 
 /**
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_CREATION_TIMESTAMP} startup
  * mode.
  */
-public class CreationTimestampStartingScanner extends ReadPlanStartingScanner {
+public class CreationTimestampStartingScanner extends AbstractStartingScanner {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(CreationTimestampStartingScanner.class);
-
-    private final ChangelogManager changelogManager;
-    private final long startupMillis;
-    private final boolean startFromChangelog;
+    private final AbstractStartingScanner scanner;
 
     public CreationTimestampStartingScanner(
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
-            long startupMillis,
-            boolean changelogDecoupled) {
+            long creationMillis,
+            boolean changelogDecoupled,
+            boolean isStreaming) {
         super(snapshotManager);
-        this.changelogManager = changelogManager;
-        this.startupMillis = startupMillis;
-        this.startFromChangelog = changelogDecoupled;
+        Long startingSnapshotPrevId =
+                TimeTravelUtil.earlierThanTimeMills(
+                        snapshotManager,
+                        changelogManager,
+                        creationMillis,
+                        changelogDecoupled,
+                        true);
+        if (startingSnapshotPrevId != null
+                && (snapshotManager.snapshotExists(startingSnapshotPrevId + 1)
+                        || changelogManager.longLivedChangelogExists(startingSnapshotPrevId + 1))) {
+            startingSnapshotId = startingSnapshotPrevId + 1;
+        }
+        if (startingSnapshotId != null) {
+            scanner =
+                    isStreaming
+                            ? new ContinuousFromTimestampStartingScanner(
+                                    snapshotManager,
+                                    changelogManager,
+                                    creationMillis,
+                                    changelogDecoupled)
+                            : new StaticFromTimestampStartingScanner(
+                                    snapshotManager, creationMillis);
+        } else {
+            scanner = new FileCreationTimeStartingScanner(snapshotManager, creationMillis);
+        }
+    }
+
+    public AbstractStartingScanner scanner() {
+        return scanner;
     }
 
     @Override
     public ScanMode startingScanMode() {
-        return ScanMode.ALL;
+        return scanner.startingScanMode();
     }
 
     @Override
-    public SnapshotReader configure(SnapshotReader snapshotReader) {
-        Long startingSnapshotPrevId =
-                TimeTravelUtil.earlierThanTimeMills(
-                        snapshotManager, changelogManager, startupMillis, startFromChangelog, true);
-        if (startingSnapshotPrevId == null) {
-            LOG.debug("There is no previous snapshot, so use earliest snapshot.");
-            startingSnapshotId = snapshotManager.earliestSnapshotId();
-        } else if (snapshotManager.snapshotExists(startingSnapshotPrevId + 1)
-                || changelogManager.longLivedChangelogExists(startingSnapshotPrevId + 1)) {
-            startingSnapshotId = startingSnapshotPrevId + 1;
-        } else {
-            LOG.debug("There is no next snapshot, so use latest snapshot.");
-            startingSnapshotId = snapshotManager.latestSnapshotId();
-        }
-        if (startingSnapshotId == null) {
-            LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
-            return null;
-        }
-        return snapshotReader
-                .withMode(ScanMode.ALL)
-                .withSnapshot(startingSnapshotId)
-                .withManifestEntryFilter(
-                        entry -> entry.file().creationTimeEpochMillis() >= startupMillis);
+    public Result scan(SnapshotReader snapshotReader) {
+        return scanner.scan(snapshotReader);
+    }
+
+    @Override
+    public List<PartitionEntry> scanPartitions(SnapshotReader snapshotReader) {
+        return scanner.scanPartitions(snapshotReader);
     }
 }

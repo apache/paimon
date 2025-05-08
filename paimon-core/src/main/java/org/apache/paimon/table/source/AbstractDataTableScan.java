@@ -194,7 +194,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         snapshotManager,
                         changelogManager,
                         creationTimeMills,
-                        options.changelogLifecycleDecoupled());
+                        options.changelogLifecycleDecoupled(),
+                        isStreaming);
 
             case FROM_SNAPSHOT:
                 if (options.scanSnapshotId() != null) {
