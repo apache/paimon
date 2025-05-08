@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -407,7 +408,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE DATABASE test");
         // create a paimon table with the same name
         int ddlIndex = ThreadLocalRandom.current().nextInt(0, 4);
-        tEnv.executeSql(ddls()[ddlIndex]);
+        tEnv.executeSql(ddls(format)[ddlIndex]);
 
         List<String> args =
                 new ArrayList<>(
@@ -428,7 +429,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                                 "--target_catalog_conf",
                                 "warehouse=" + warehouse));
 
-        if (ddlIndex < 3) {
+        if (ddlIndex < 4) {
             assertThatThrownBy(() -> createAction(CloneAction.class, args).run())
                     .rootCause()
                     .hasMessageContaining(exceptionMsg()[ddlIndex]);
@@ -499,31 +500,48 @@ public class CloneActionITCase extends ActionITCaseBase {
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
-    private String[] ddls() {
+    private String[] ddls(String format) {
         // has primary key
         String ddl0 =
                 "CREATE TABLE test.test_table (id string, id2 int, id3 int, PRIMARY KEY (id, id2, id3) NOT ENFORCED) "
-                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1');";
+                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
+                        + format
+                        + ");";
         // has different partition keys
         String ddl1 =
                 "CREATE TABLE test.test_table (id string, id2 int, id3 int) "
-                        + "PARTITIONED BY (id, id3) with ('bucket' = '-1');";
+                        + "PARTITIONED BY (id, id3) with ('bucket' = '-1', 'file.format' = '"
+                        + format
+                        + "');";
         // size of fields is different
         String ddl2 =
                 "CREATE TABLE test.test_table (id2 int, id3 int) "
-                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1');";
-        // normal
+                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
+                        + format
+                        + "');";
+
+        // different format
         String ddl3 =
+                "CREATE TABLE test.test_table (id2 int, id3 int) "
+                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
+                        + randomFormat(format)
+                        + "');";
+
+        // normal
+        String ddl4 =
                 "CREATE TABLE test.test_table (id string, id2 int, id3 int) "
-                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1');";
-        return new String[] {ddl0, ddl1, ddl2, ddl3};
+                        + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
+                        + format
+                        + "');";
+        return new String[] {ddl0, ddl1, ddl2, ddl3, ddl4};
     }
 
     private String[] exceptionMsg() {
         return new String[] {
             "Can not clone data to existed paimon table which has primary keys",
             "source table partition keys is not compatible with existed paimon table partition keys.",
-            "source table partition keys is not compatible with existed paimon table partition keys."
+            "source table partition keys is not compatible with existed paimon table partition keys.",
+            "source table format is not compatible with existed paimon table format."
         };
     }
 
@@ -549,13 +567,18 @@ public class CloneActionITCase extends ActionITCaseBase {
     private String randomFormat() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int i = random.nextInt(3);
-        if (i == 0) {
-            return "orc";
-        } else if (i == 1) {
-            return "parquet";
-        } else {
-            return "avro";
+        String[] formats = new String[] {"orc", "parquet", "avro"};
+        return formats[i];
+    }
+
+    private String randomFormat(String excludedFormat) {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        int i = random.nextInt(3);
+        String[] formats = new String[] {"orc", "parquet", "avro"};
+        if (Objects.equals(excludedFormat, formats[i])) {
+            return formats[(i + 1) % 3];
         }
+        return formats[i];
     }
 
     protected FileStoreTable paimonTable(
