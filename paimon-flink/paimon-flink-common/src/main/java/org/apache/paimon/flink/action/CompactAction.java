@@ -285,12 +285,8 @@ public class CompactAction extends TableActionBase {
             Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
                     PostponeBucketCompactSplitSource.buildSource(
                             env,
-                            realTable.fullName() + partitionSpec,
-                            realTable.rowType(),
-                            realTable
-                                    .newReadBuilder()
-                                    .withPartitionFilter(partitionSpec)
-                                    .withBucket(BucketMode.POSTPONE_BUCKET),
+                            realTable,
+                            partitionSpec,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
             DataStream<InternalRow> partitioned =
