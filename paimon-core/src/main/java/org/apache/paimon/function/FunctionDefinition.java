@@ -18,8 +18,6 @@
 
 package org.apache.paimon.function;
 
-import org.apache.paimon.view.ViewChange;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -27,12 +25,13 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSub
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import java.util.List;
+import java.util.Objects;
 
 /** Function definition. */
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.PROPERTY,
-        property = ViewChange.Actions.FIELD_TYPE)
+        property = FunctionDefinition.Types.FIELD_TYPE)
 @JsonSubTypes({
     @JsonSubTypes.Type(
             value = FunctionDefinition.FileFunctionDefinition.class,
@@ -56,37 +55,91 @@ public interface FunctionDefinition {
                 fileType, storagePaths, language, className, functionName);
     }
 
+    static FunctionDefinition sql(String definition) {
+        return new FunctionDefinition.SQLFunctionDefinition(definition);
+    }
+
+    static FunctionDefinition lambda(String definition, String language) {
+        return new FunctionDefinition.LambdaFunctionDefinition(definition, language);
+    }
+
     /** Definition of a SQL function. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     final class SQLFunctionDefinition implements FunctionDefinition {
+
+        private static final String FIELD_DEFINITION = "definition";
 
         private final String definition;
 
-        public SQLFunctionDefinition(String definition) {
+        public SQLFunctionDefinition(@JsonProperty(FIELD_DEFINITION) String definition) {
             this.definition = definition;
         }
 
+        @JsonGetter(FIELD_DEFINITION)
         public String definition() {
             return definition;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SQLFunctionDefinition that = (SQLFunctionDefinition) o;
+            return definition.equals(that.definition);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(definition);
         }
     }
 
     /** Lambda function definition. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     final class LambdaFunctionDefinition implements FunctionDefinition {
+
+        private static final String FIELD_DEFINITION = "definition";
+        private static final String FIELD_LANGUAGE = "language";
 
         private final String definition;
         private final String language;
 
-        public LambdaFunctionDefinition(String definition, String language) {
+        public LambdaFunctionDefinition(
+                @JsonProperty(FIELD_DEFINITION) String definition,
+                @JsonProperty(FIELD_LANGUAGE) String language) {
             this.definition = definition;
             this.language = language;
         }
 
+        @JsonGetter(FIELD_DEFINITION)
         public String definition() {
             return definition;
         }
 
+        @JsonGetter(FIELD_LANGUAGE)
         public String language() {
             return language;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            LambdaFunctionDefinition that = (LambdaFunctionDefinition) o;
+            return definition.equals(that.definition) && language.equals(that.language);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(definition, language);
         }
     }
 
@@ -94,7 +147,6 @@ public interface FunctionDefinition {
     @JsonIgnoreProperties(ignoreUnknown = true)
     final class FileFunctionDefinition implements FunctionDefinition {
 
-        private static final String FIELD_TYPE = "type";
         private static final String FIELD_FILE_TYPE = "fileType";
         private static final String FIELD_STORAGE_PATHS = "storagePaths";
         private static final String FIELD_LANGUAGE = "language";
@@ -153,8 +205,32 @@ public interface FunctionDefinition {
         public String functionName() {
             return functionName;
         }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            FileFunctionDefinition that = (FileFunctionDefinition) o;
+            return fileType.equals(that.fileType)
+                    && Objects.equals(storagePaths, that.storagePaths)
+                    && Objects.equals(language, that.language)
+                    && Objects.equals(className, that.className)
+                    && Objects.equals(functionName, that.functionName);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Objects.hash(fileType, language, className, functionName);
+            result = 31 * result + Objects.hashCode(storagePaths);
+            return result;
+        }
     }
 
+    /** Types for FunctionDefinition. */
     class Types {
         public static final String FIELD_TYPE = "type";
         public static final String FILE_TYPE = "file";

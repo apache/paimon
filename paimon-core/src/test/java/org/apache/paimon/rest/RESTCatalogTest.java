@@ -1323,8 +1323,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         FunctionDefinition flinkFunction =
                 FunctionDefinition.file(
                         "jar", Lists.newArrayList("/a/b/c.jar"), "java", "className", "eval");
+        FunctionDefinition sparkFunction =
+                FunctionDefinition.lambda(
+                        "(Double length, Double width) -> length * width", "java");
+        FunctionDefinition trinoFunction = FunctionDefinition.sql("length * width");
         Map<String, FunctionDefinition> definitions = Maps.newHashMap();
         definitions.put("flink", flinkFunction);
+        definitions.put("spark", sparkFunction);
+        definitions.put("trino", trinoFunction);
         Function function =
                 new FunctionImpl(
                         UUID.randomUUID().toString(),
@@ -1341,6 +1347,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(catalog.listFunctions().contains(function.name())).isTrue();
         Function getFunction = catalog.getFunction(function.name());
         assertThat(getFunction.name()).isEqualTo(function.name());
+        assertThat(getFunction.definition("flink")).isEqualTo(flinkFunction);
+        assertThat(getFunction.definition("spark")).isEqualTo(sparkFunction);
+        assertThat(getFunction.definition("trino")).isEqualTo(trinoFunction);
     }
 
     private TestPagedResponse generateTestPagedResponse(
