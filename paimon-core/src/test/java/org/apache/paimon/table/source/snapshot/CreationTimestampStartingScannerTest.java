@@ -41,14 +41,12 @@ public class CreationTimestampStartingScannerTest extends ScannerTestBase {
 
         long t1 = System.currentTimeMillis();
         commit.commit(0, write.prepareCommit(true, 0));
-        Thread.sleep(10);
         long t2 = System.currentTimeMillis();
 
         write.write(rowData(1, 11, 100L));
         write.write(rowData(1, 21, 200L));
         write.write(rowData(1, 41, 400L));
         commit.commit(0, write.prepareCommit(true, 0));
-        Thread.sleep(10);
         long t3 = System.currentTimeMillis();
         write.close();
         commit.close();
@@ -59,11 +57,25 @@ public class CreationTimestampStartingScannerTest extends ScannerTestBase {
         assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
         scanner =
                 new CreationTimestampStartingScanner(
+                        snapshotManager, table.changelogManager(), t1, false, false);
+        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+
+        scanner =
+                new CreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t2, false, true);
         assertThat(scanner.scanner() instanceof ContinuousFromTimestampStartingScanner).isTrue();
         scanner =
                 new CreationTimestampStartingScanner(
+                        snapshotManager, table.changelogManager(), t2, false, false);
+        assertThat(scanner.scanner() instanceof StaticFromTimestampStartingScanner).isTrue();
+
+        scanner =
+                new CreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t3, false, true);
+        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+        scanner =
+                new CreationTimestampStartingScanner(
+                        snapshotManager, table.changelogManager(), t3, false, false);
         assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
     }
 }
