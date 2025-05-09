@@ -860,10 +860,7 @@ public class RESTCatalog implements Catalog {
     public void dropFunction(String functionName, boolean ignoreIfNotExists)
             throws FunctionNotExistException {
         try {
-            client.get(
-                    resourcePaths.function(functionName),
-                    GetFunctionResponse.class,
-                    restAuthFunction);
+            client.delete(resourcePaths.function(functionName), restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (ignoreIfNotExists) {
                 return;
