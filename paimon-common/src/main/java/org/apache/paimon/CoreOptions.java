@@ -761,7 +761,7 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional timestamp used in case of \"from-timestamp\" scan mode. "
+                            "Optional timestamp used in case of \"from-creation-timestamp\" scan mode. "
                                     + "If there is no snapshot earlier than this time, the earliest snapshot will be chosen."
                                     + "If there is no snapshot later than this time, only the data files created after this time will be read.");
 
@@ -2787,7 +2787,9 @@ public class CoreOptions implements Serializable {
                 "from-creation-timestamp",
                 "For streaming sources, continuously reads changes "
                         + "starting from timestamp specified by \"scan.creation-time-millis\", "
-                        + "without producing a snapshot at the beginning. "
+                        + "consumes a snapshot at the beginning. "
+                        + "If timestamp is earlier than earliest snapshot or later than latest snapshot, will filter the data files by creation time."
+                        + "If there is not any snapshot, will filter the data files by creation time."
                         + "For batch sources, consumes a snapshot at timestamp specified by \"scan.timestamp-millis\" "
                         + "but does not read new changes."),
 

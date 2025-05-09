@@ -25,6 +25,7 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_CREATION_TIMESTAMP} startup
@@ -48,11 +49,13 @@ public class CreationTimestampStartingScanner extends AbstractStartingScanner {
                         creationMillis,
                         changelogDecoupled,
                         true);
-        if (startingSnapshotPrevId != null
-                && (snapshotManager.snapshotExists(startingSnapshotPrevId + 1)
-                        || changelogManager.longLivedChangelogExists(startingSnapshotPrevId + 1))) {
-            startingSnapshotId = startingSnapshotPrevId + 1;
-        }
+        Optional.ofNullable(startingSnapshotPrevId)
+                .map(id -> id + 1)
+                .filter(
+                        id ->
+                                snapshotManager.snapshotExists(id)
+                                        || changelogManager.longLivedChangelogExists(id))
+                .ifPresent(id -> startingSnapshotId = id);
         if (startingSnapshotId != null) {
             scanner =
                     isStreaming
