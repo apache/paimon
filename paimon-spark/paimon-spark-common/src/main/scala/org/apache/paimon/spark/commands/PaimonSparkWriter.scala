@@ -28,6 +28,7 @@ import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement, IndexIncrement}
 import org.apache.paimon.manifest.FileKind
+import org.apache.paimon.operation.metrics.CommitStats
 import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
@@ -72,6 +73,8 @@ case class PaimonSparkWriter(table: FileStoreTable) {
   @transient private lazy val serializer = new CommitMessageSerializer
 
   val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+
+  var commitStats: CommitStats = null
 
   def writeOnly(): PaimonSparkWriter = {
     PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
@@ -370,6 +373,7 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     val tableCommit = writeBuilder.newCommit()
     try {
       tableCommit.commit(commitMessages.toList.asJava)
+      commitStats = tableCommit.getCommitStats
     } catch {
       case e: Throwable => throw new RuntimeException(e);
     } finally {
@@ -377,6 +381,10 @@ case class PaimonSparkWriter(table: FileStoreTable) {
     }
 
     reportToHms(commitMessages)
+  }
+
+  def getCommitStat(): CommitStats = {
+    commitStats
   }
 
   /** Boostrap and repartition for cross partition mode. */

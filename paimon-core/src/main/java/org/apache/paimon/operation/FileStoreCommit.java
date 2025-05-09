@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
+import org.apache.paimon.operation.metrics.CommitStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -89,6 +90,8 @@ public interface FileStoreCommit extends AutoCloseable {
     FileStorePathFactory pathFactory();
 
     FileIO fileIO();
+
+    CommitStats getCommitStats();
 
     @Override
     void close();
