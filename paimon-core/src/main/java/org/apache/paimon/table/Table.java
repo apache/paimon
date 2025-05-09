@@ -32,6 +32,8 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SimpleFileReader;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.time.Duration;
 import java.util.Arrays;
@@ -121,21 +123,21 @@ public interface Table extends Serializable {
     void createTag(String tagName, long fromSnapshotId);
 
     @Experimental
-    void createTag(String tagName, long fromSnapshotId, Duration timeRetained);
+    void createTag(String tagName, long fromSnapshotId, @Nullable Duration timeRetained);
 
     /** Create a tag from latest snapshot. */
     @Experimental
     void createTag(String tagName);
 
     @Experimental
-    void createTag(String tagName, Duration timeRetained);
+    void createTag(String tagName, @Nullable Duration timeRetained);
 
     @Experimental
     void renameTag(String tagName, String targetTagName);
 
     /** Replace a tag with new snapshot id and new time retained. */
     @Experimental
-    void replaceTag(String tagName, Long fromSnapshotId, Duration timeRetained);
+    void replaceTag(String tagName, @Nullable Long fromSnapshotId, @Nullable Duration timeRetained);
 
     /** Delete a tag by name. */
     @Experimental

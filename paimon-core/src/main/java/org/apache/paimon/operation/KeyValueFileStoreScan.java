@@ -41,9 +41,9 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
@@ -61,7 +61,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private Predicate keyFilter;
     private Predicate valueFilter;
-    private final Map<Long, Predicate> schemaId2DataFilter = new HashMap<>();
+    private final Map<Long, Predicate> schemaId2DataFilter = new ConcurrentHashMap<>();
     private boolean valueFilterForceEnabled = false;
 
     public KeyValueFileStoreScan(

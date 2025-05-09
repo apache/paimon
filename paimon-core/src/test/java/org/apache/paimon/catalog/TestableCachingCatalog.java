@@ -29,7 +29,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
-import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRATION_INTERVAL_MS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
+import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_WRITE;
 import static org.apache.paimon.options.CatalogOptions.CACHE_PARTITION_MAX_NUM;
 
 /**
@@ -41,14 +42,20 @@ public class TestableCachingCatalog extends CachingCatalog {
     private final Duration cacheExpirationInterval;
 
     public TestableCachingCatalog(Catalog catalog, Duration expirationInterval, Ticker ticker) {
-        super(catalog, createOptions(expirationInterval));
-        init(ticker);
-        this.cacheExpirationInterval = expirationInterval;
+        this(catalog, expirationInterval, Duration.ofDays(1), ticker);
     }
 
-    private static Options createOptions(Duration expirationInterval) {
+    public TestableCachingCatalog(
+            Catalog catalog, Duration expireAfterAccess, Duration expireAfterWrite, Ticker ticker) {
+        super(catalog, createOptions(expireAfterAccess, expireAfterWrite));
+        init(ticker);
+        this.cacheExpirationInterval = expireAfterAccess;
+    }
+
+    private static Options createOptions(Duration expireAfterAccess, Duration expireAfterWrite) {
         Options options = new Options();
-        options.set(CACHE_EXPIRATION_INTERVAL_MS, expirationInterval);
+        options.set(CACHE_EXPIRE_AFTER_ACCESS, expireAfterAccess);
+        options.set(CACHE_EXPIRE_AFTER_WRITE, expireAfterWrite);
         options.set(CACHE_PARTITION_MAX_NUM, 100L);
         return options;
     }

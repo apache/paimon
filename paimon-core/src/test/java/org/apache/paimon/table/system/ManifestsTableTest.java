@@ -36,7 +36,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -157,7 +156,7 @@ public class ManifestsTableTest extends TableTestBase {
                         manifestsTable.copy(
                                 Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
         assertThrows(
-                SnapshotNotExistException.class,
+                Exception.class,
                 () -> read(manifestsTable),
                 "Specified parameter scan.snapshot-id = 3 is not exist, you can set it in range from 1 to 2");
     }

@@ -1510,6 +1510,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(2))
                     .withDescription("The target size of deletion vector index file.");
 
+    public static final ConfigOption<Boolean> DELETION_VECTOR_BITMAP64 =
+            key("deletion-vectors.bitmap64")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable 64 bit bitmap implementation. Note that only 64 bit bitmap implementation is compatible with Iceberg.");
+
     public static final ConfigOption<Boolean> DELETION_FORCE_PRODUCE_CHANGELOG =
             key("delete.force-produce-changelog")
                     .booleanType()
@@ -2620,6 +2627,10 @@ public class CoreOptions implements Serializable {
 
     public MemorySize deletionVectorIndexFileTargetSize() {
         return options.get(DELETION_VECTOR_INDEX_FILE_TARGET_SIZE);
+    }
+
+    public boolean deletionVectorBitmap64() {
+        return options.get(DELETION_VECTOR_BITMAP64);
     }
 
     public FileIndexOptions indexColumnsOptions() {

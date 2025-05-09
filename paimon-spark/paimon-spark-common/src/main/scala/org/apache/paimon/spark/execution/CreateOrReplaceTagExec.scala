@@ -23,6 +23,7 @@ import org.apache.paimon.spark.catalyst.plans.logical.TagOptions
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.table.FileStoreTable
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
@@ -35,40 +36,37 @@ case class CreateOrReplaceTagExec(
     create: Boolean,
     replace: Boolean,
     ifNotExists: Boolean)
-  extends PaimonLeafV2CommandExec {
+  extends PaimonLeafV2CommandExec
+  with Logging {
 
   override protected def run(): Seq[InternalRow] = {
-    val table = catalog.loadTable(ident)
-    assert(table.isInstanceOf[SparkTable])
-
-    table.asInstanceOf[SparkTable].getTable match {
-      case paimonTable: FileStoreTable =>
-        val tagIsExists = paimonTable.tagManager().tagExists(tagName)
+    catalog.loadTable(ident) match {
+      case SparkTable(paimonTable: FileStoreTable) =>
+        val tagExists = paimonTable.tagManager().tagExists(tagName)
         val timeRetained = tagOptions.timeRetained.orNull
-        val snapshotId = tagOptions.snapshotId
+        val snapshotIdOpt = tagOptions.snapshotId
 
-        if (create && replace && !tagIsExists) {
-          if (snapshotId.isEmpty) {
-            paimonTable.createTag(tagName, timeRetained)
+        if ((create || replace) && !tagExists) {
+          if (snapshotIdOpt.isDefined) {
+            paimonTable.createTag(tagName, snapshotIdOpt.get, timeRetained)
           } else {
-            paimonTable.createTag(tagName, snapshotId.get, timeRetained)
+            paimonTable.createTag(tagName, timeRetained)
           }
         } else if (replace) {
-          paimonTable.replaceTag(tagName, snapshotId.get, timeRetained)
-        } else {
-          if (tagIsExists && ifNotExists) {
-            return Nil
-          }
-
-          if (snapshotId.isEmpty) {
-            paimonTable.createTag(tagName, timeRetained)
+          if (snapshotIdOpt.isDefined) {
+            paimonTable.replaceTag(tagName, snapshotIdOpt.get, timeRetained)
           } else {
-            paimonTable.createTag(tagName, snapshotId.get, timeRetained)
+            paimonTable.replaceTag(tagName, null, timeRetained)
+          }
+        } else {
+          if (ifNotExists) {
+            logInfo(s"Tag $tagName is exists, skip creating tag.")
+          } else {
+            throw new RuntimeException(s"Tag $tagName is exists.")
           }
         }
       case t =>
-        throw new UnsupportedOperationException(
-          s"Can not create tag for non-paimon FileStoreTable: $t")
+        throw new UnsupportedOperationException(s"Unsupported table : $t")
     }
     Nil
   }

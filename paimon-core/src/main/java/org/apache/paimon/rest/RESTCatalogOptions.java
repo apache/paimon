@@ -21,8 +21,6 @@ package org.apache.paimon.rest;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
-import java.time.Duration;
-
 /** Options for REST Catalog. */
 public class RESTCatalogOptions {
 
@@ -37,12 +35,6 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog auth bear token.");
-
-    public static final ConfigOption<Duration> TOKEN_REFRESH_TIME =
-            ConfigOptions.key("token.refresh-time")
-                    .durationType()
-                    .defaultValue(Duration.ofHours(1))
-                    .withDescription("REST Catalog auth token refresh time.");
 
     public static final ConfigOption<String> TOKEN_PROVIDER =
             ConfigOptions.key("token.provider")

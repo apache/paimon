@@ -23,7 +23,9 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.{ImmutableList,
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonRowType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions._
+import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.KeyAndBucketExtractor.{bucket, bucketKeyHashCode}
+import org.apache.paimon.types.{ArrayType, DataType => PaimonDataType, LocalZonedTimestampType, MapType, RowType, TimestampType}
 import org.apache.paimon.utils.ProjectedRow
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -32,6 +34,8 @@ import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.types.DataTypes.{IntegerType, StringType}
 
 import javax.annotation.Nullable
+
+import scala.collection.JavaConverters._
 
 object PaimonFunctions {
 
@@ -96,6 +100,41 @@ class BucketFunction extends UnboundFunction {
   override def description: String = name
 
   override def name: String = BUCKET
+}
+
+object BucketFunction {
+
+  private val SPARK_TIMESTAMP_PRECISION = 6
+
+  def supportsTable(table: FileStoreTable): Boolean = {
+    table.bucketMode match {
+      case BucketMode.HASH_FIXED =>
+        table.schema().logicalBucketKeyType().getFieldTypes.asScala.forall(supportsType)
+      case _ => false
+    }
+  }
+
+  /**
+   * The reason of this is that Spark's timestamp precision is fixed to 6, and in
+   * [[BucketFunction.bind]], we use `InternalRowSerializer(bucketKeyRowType)` to convert paimon
+   * rows, but the `bucketKeyRowType` is derived from Spark's StructType which will lose the true
+   * precision of timestamp, leading to anomalies in bucket calculations.
+   *
+   * todo: find a way get the correct paimon type in BucketFunction, then remove this checker
+   */
+  private def supportsType(t: PaimonDataType): Boolean = t match {
+    case arrayType: ArrayType =>
+      supportsType(arrayType.getElementType)
+    case mapType: MapType =>
+      supportsType(mapType.getKeyType) && supportsType(mapType.getValueType)
+    case rowType: RowType =>
+      rowType.getFieldTypes.asScala.forall(supportsType)
+    case timestamp: TimestampType =>
+      timestamp.getPrecision == SPARK_TIMESTAMP_PRECISION
+    case localZonedTimestamp: LocalZonedTimestampType =>
+      localZonedTimestamp.getPrecision == SPARK_TIMESTAMP_PRECISION
+    case _ => true
+  }
 }
 
 /**

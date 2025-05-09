@@ -23,9 +23,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
 /**
@@ -34,15 +31,11 @@ import javax.annotation.Nullable;
  */
 public class StaticFromTimestampStartingScanner extends ReadPlanStartingScanner {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(StaticFromTimestampStartingScanner.class);
-
-    private final long startupMillis;
+    private final Snapshot snapshot;
 
     public StaticFromTimestampStartingScanner(SnapshotManager snapshotManager, long startupMillis) {
         super(snapshotManager);
-        this.startupMillis = startupMillis;
-        Snapshot snapshot = timeTravelToTimestamp(snapshotManager, startupMillis);
+        this.snapshot = timeTravelToTimestamp(snapshotManager, startupMillis);
         if (snapshot == null) {
             Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
             throw new IllegalArgumentException(
@@ -56,9 +49,13 @@ public class StaticFromTimestampStartingScanner extends ReadPlanStartingScanner 
         this.startingSnapshotId = snapshot.id();
     }
 
+    public Snapshot getSnapshot() {
+        return snapshot;
+    }
+
     @Override
     public SnapshotReader configure(SnapshotReader snapshotReader) {
-        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(snapshot);
     }
 
     @Nullable

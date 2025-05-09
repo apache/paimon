@@ -99,16 +99,16 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
-        return wrapped.listTablesPaged(databaseName, maxResults, pageToken);
+        return wrapped.listTablesPaged(databaseName, maxResults, pageToken, tableNamePattern);
     }
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
-        return wrapped.listTableDetailsPaged(databaseName, maxResults, pageToken);
+        return wrapped.listTableDetailsPaged(databaseName, maxResults, pageToken, tableNamePattern);
     }
 
     @Override
@@ -139,6 +139,11 @@ public abstract class DelegateCatalog implements Catalog {
     @Override
     public boolean supportsListObjectsPaged() {
         return wrapped.supportsListObjectsPaged();
+    }
+
+    @Override
+    public boolean supportsListByPattern() {
+        return wrapped.supportsListByPattern();
     }
 
     @Override
@@ -239,16 +244,16 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<String> listViewsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
-        return wrapped.listViewsPaged(databaseName, maxResults, pageToken);
+        return wrapped.listViewsPaged(databaseName, maxResults, pageToken, tableNamePattern);
     }
 
     @Override
     public PagedList<View> listViewDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
             throws DatabaseNotExistException {
-        return wrapped.listViewDetailsPaged(databaseName, maxResults, pageToken);
+        return wrapped.listViewDetailsPaged(databaseName, maxResults, pageToken, tableNamePattern);
     }
 
     @Override
@@ -270,9 +275,12 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<Partition> listPartitionsPaged(
-            Identifier identifier, Integer maxResults, String pageToken)
+            Identifier identifier,
+            Integer maxResults,
+            String pageToken,
+            String partitionNamePattern)
             throws TableNotExistException {
-        return wrapped.listPartitionsPaged(identifier, maxResults, pageToken);
+        return wrapped.listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
     }
 
     @Override

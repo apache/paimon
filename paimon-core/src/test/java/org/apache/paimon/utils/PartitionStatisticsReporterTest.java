@@ -77,6 +77,11 @@ public class PartitionStatisticsReporterTest {
                         BinaryString.fromString("a")));
         writer.write(
                 GenericRow.of(
+                        BinaryString.fromString("a"),
+                        BinaryString.fromString("c"),
+                        BinaryString.fromString("c")));
+        writer.write(
+                GenericRow.of(
                         BinaryString.fromString("b"),
                         BinaryString.fromString("a"),
                         BinaryString.fromString("a")));
@@ -129,7 +134,7 @@ public class PartitionStatisticsReporterTest {
         assertThat(partitionParams).containsKey("c1=a/");
         assertThat(partitionParams.get("c1=a/").toString())
                 .isEqualTo(
-                        "{spec={c1=a}, recordCount=1, fileSizeInBytes=662, fileCount=1, lastFileCreationTime=1729598544974}");
+                        "{spec={c1=a}, recordCount=2, fileSizeInBytes=705, fileCount=1, lastFileCreationTime=1729598544974}");
         action.close();
         assertThat(closed).isTrue();
     }

@@ -35,6 +35,7 @@ import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
+import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,9 +49,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
 /** Utils for cloning Hive table to Paimon table. */
@@ -121,6 +125,20 @@ public class HiveCloneUtils {
             paimonOptions.put("hive.comment", hiveTableOptions.get("comment"));
         }
 
+        String format = parseFormat(hiveTable);
+        paimonOptions.put(FILE_FORMAT.key(), format);
+        Map<String, String> formatOptions = getIdentifierPrefixOptions(format, hiveTableOptions);
+        Map<String, String> sdFormatOptions =
+                getIdentifierPrefixOptions(
+                        format, hiveTable.getSd().getSerdeInfo().getParameters());
+        formatOptions.putAll(sdFormatOptions);
+        paimonOptions.putAll(formatOptions);
+
+        String compression = parseCompression(hiveTable, format, formatOptions);
+        if (compression != null) {
+            paimonOptions.put(FILE_COMPRESSION.key(), compression);
+        }
+
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
                         .comment(hiveTableOptions.get("comment"))
@@ -153,7 +171,7 @@ public class HiveCloneUtils {
         List<Partition> partitions =
                 client.listPartitions(
                         identifier.getDatabaseName(), identifier.getTableName(), Short.MAX_VALUE);
-        String format = parseFormat(sourceTable.getSd().getSerdeInfo().toString());
+        String format = parseFormat(sourceTable);
 
         if (partitions.isEmpty()) {
             String location = sourceTable.getSd().getLocation();
@@ -198,15 +216,67 @@ public class HiveCloneUtils {
         return new HivePartitionFiles(partition, paths, fileSizes, format);
     }
 
-    public static String parseFormat(String serder) {
+    private static String parseFormat(StorageDescriptor storageDescriptor) {
+        String serder = storageDescriptor.getSerdeInfo().toString();
         if (serder.contains("avro")) {
             return "avro";
         } else if (serder.contains("parquet")) {
             return "parquet";
         } else if (serder.contains("orc")) {
             return "orc";
-        } else {
-            throw new UnsupportedOperationException("Unknown partition format: " + serder);
         }
+        return null;
+    }
+
+    public static String parseFormat(Table table) {
+        String format = parseFormat(table.getSd());
+        if (format == null) {
+            throw new UnsupportedOperationException("Unknown table format:" + table);
+        }
+        return format;
+    }
+
+    public static String parseFormat(Partition partition) {
+        String format = parseFormat(partition.getSd());
+        if (format == null) {
+            throw new UnsupportedOperationException("Unknown partition format: " + partition);
+        }
+        return format;
+    }
+
+    private static String parseCompression(StorageDescriptor storageDescriptor) {
+        Map<String, String> serderParams = storageDescriptor.getSerdeInfo().getParameters();
+        if (serderParams.containsKey("compression")) {
+            return serderParams.get("compression");
+        }
+        return null;
+    }
+
+    private static String parseCompression(
+            Table table, String format, Map<String, String> formatOptions) {
+        String compression = null;
+        if (Objects.equals(format, "avro")) {
+            compression = formatOptions.getOrDefault("avro.codec", parseCompression(table.getSd()));
+        } else if (Objects.equals(format, "parquet")) {
+            compression =
+                    formatOptions.getOrDefault(
+                            "parquet.compression", parseCompression(table.getSd()));
+        } else if (Objects.equals(format, "orc")) {
+            compression =
+                    formatOptions.getOrDefault("orc.compress", parseCompression(table.getSd()));
+        }
+        return compression;
+    }
+
+    public static Map<String, String> getIdentifierPrefixOptions(
+            String formatIdentifier, Map<String, String> options) {
+        Map<String, String> result = new HashMap<>();
+        String prefix = formatIdentifier.toLowerCase() + ".";
+        for (String key : options.keySet()) {
+            if (key.toLowerCase().startsWith(prefix)) {
+                result.put(prefix + key.substring(prefix.length()), options.get(key));
+            }
+        }
+        return result;
     }
 }

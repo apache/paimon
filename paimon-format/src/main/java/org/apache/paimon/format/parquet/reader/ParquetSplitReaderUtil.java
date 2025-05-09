@@ -53,7 +53,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.parquet.ParquetRuntimeException;
 import org.apache.parquet.column.ColumnDescriptor;
-import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.io.ColumnIO;
 import org.apache.parquet.io.GroupColumnIO;
 import org.apache.parquet.io.MessageColumnIO;
@@ -65,7 +64,6 @@ import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotat
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -74,82 +72,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.parquet.schema.Type.Repetition.REPEATED;
 import static org.apache.parquet.schema.Type.Repetition.REQUIRED;
 
-/** Util for generating {@link ColumnReader}. */
+/** Util for generating parquet readers. */
 public class ParquetSplitReaderUtil {
-
-    @SuppressWarnings("rawtypes")
-    public static ColumnReader createColumnReader(
-            DataType fieldType,
-            Type type,
-            List<ColumnDescriptor> columnDescriptors,
-            PageReadStore pages,
-            ParquetField field,
-            int depth)
-            throws IOException {
-        List<ColumnDescriptor> descriptors =
-                getAllColumnDescriptorByType(depth, type, columnDescriptors);
-        switch (fieldType.getTypeRoot()) {
-            case BOOLEAN:
-                return new BooleanColumnReader(descriptors.get(0), pages);
-            case TINYINT:
-                return new ByteColumnReader(descriptors.get(0), pages);
-            case DOUBLE:
-                return new DoubleColumnReader(descriptors.get(0), pages);
-            case FLOAT:
-                return new FloatColumnReader(descriptors.get(0), pages);
-            case INTEGER:
-            case DATE:
-            case TIME_WITHOUT_TIME_ZONE:
-                return new IntColumnReader(descriptors.get(0), pages);
-            case BIGINT:
-                return new LongColumnReader(descriptors.get(0), pages);
-            case SMALLINT:
-                return new ShortColumnReader(descriptors.get(0), pages);
-            case CHAR:
-            case VARCHAR:
-            case BINARY:
-            case VARBINARY:
-                if (descriptors.get(0).getPrimitiveType().getPrimitiveTypeName()
-                        == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {
-                    return new FixedLenBytesBinaryColumnReader(
-                            descriptors.get(0), pages, ((BinaryType) fieldType).getLength());
-                }
-                return new BytesColumnReader(descriptors.get(0), pages);
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                if (descriptors.get(0).getPrimitiveType().getPrimitiveTypeName()
-                        == PrimitiveType.PrimitiveTypeName.INT64) {
-                    return new LongColumnReader(descriptors.get(0), pages);
-                }
-                return new TimestampColumnReader(true, descriptors.get(0), pages);
-            case DECIMAL:
-                switch (descriptors.get(0).getPrimitiveType().getPrimitiveTypeName()) {
-                    case INT32:
-                        return new IntColumnReader(descriptors.get(0), pages);
-                    case INT64:
-                        return new LongColumnReader(descriptors.get(0), pages);
-                    case BINARY:
-                        return new BytesColumnReader(descriptors.get(0), pages);
-                    case FIXED_LEN_BYTE_ARRAY:
-                        return new FixedLenBytesDecimalColumnReader(
-                                descriptors.get(0),
-                                pages,
-                                ((DecimalType) fieldType).getPrecision());
-                }
-            case VARIANT:
-                List<ColumnReader> fieldReaders = new ArrayList<>();
-                fieldReaders.add(new BytesColumnReader(descriptors.get(0), pages));
-                fieldReaders.add(new BytesColumnReader(descriptors.get(1), pages));
-                return new RowColumnReader(fieldReaders);
-            case ARRAY:
-            case MAP:
-            case MULTISET:
-            case ROW:
-                return new NestedColumnReader(true, pages, field);
-            default:
-                throw new UnsupportedOperationException(fieldType + " is not supported now.");
-        }
-    }
 
     public static WritableColumnVector createWritableColumnVector(
             int batchSize,

@@ -159,7 +159,9 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         BlockingIterator<Row, Row> streamIter =
                 streamSqlBlockIter(
                         "SELECT T.pt, T.id, T.data, D.pt, D.id, D.data "
-                                + "FROM t1 AS T LEFT JOIN d /*+ OPTIONS('lookup.dynamic-partition'='max_pt()', 'scan.snapshot-id'='2') */ "
+                                + "FROM t1 AS T LEFT JOIN d /*+ OPTIONS('lookup.dynamic-partition'='max_pt()', 'scan.snapshot-id'='2', "
+                                // just test that black list won't cause exception
+                                + " 'lookup.refresh.time-periods-blacklist'='2000-01-01 00:00->2000-01-01 01:00') */ "
                                 + "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.id = D.id");
 
         assertThat(streamIter.collect(3))

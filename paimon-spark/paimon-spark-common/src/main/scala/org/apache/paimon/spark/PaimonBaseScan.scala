@@ -68,7 +68,7 @@ abstract class PaimonBaseScan(
     readBuilder
       .newScan()
       .asInstanceOf[InnerTableScan]
-      .withMetricsRegistry(paimonMetricsRegistry)
+      .withMetricRegistry(paimonMetricsRegistry)
       .plan()
       .splits()
       .asScala

@@ -550,6 +550,51 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         it.close();
     }
 
+    @Test
+    public void testDeletionVector() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'deletion-vectors.enabled' = 'true'\n"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 10), (2, 20), (3, 30), (4, 40)").await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, 10]", "+I[2, 20]", "+I[3, 30]", "+I[4, 40]");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 11), (5, 51)").await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 11]", "+I[2, 20]", "+I[3, 30]", "+I[4, 40]", "+I[5, 51]");
+
+        tEnv.executeSql("INSERT INTO T VALUES (2, 52), (3, 32)").await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 11]", "+I[2, 52]", "+I[3, 32]", "+I[4, 40]", "+I[5, 51]");
+    }
+
     private List<String> collect(TableResult result) throws Exception {
         List<String> ret = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {

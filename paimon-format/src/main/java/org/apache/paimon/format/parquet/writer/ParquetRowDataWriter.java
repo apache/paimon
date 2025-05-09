@@ -46,16 +46,19 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static java.lang.String.format;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.computeMinBytesForDecimalPrecision;
-import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.JULIAN_EPOCH_OFFSET_DAYS;
-import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.MILLIS_IN_DAY;
-import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.NANOS_PER_MILLISECOND;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Writes a record to the Parquet API with the expected schema in order to be written to a file. */
 public class ParquetRowDataWriter {
+
+    public static final int JULIAN_EPOCH_OFFSET_DAYS = 2_440_588;
+    public static final long MILLIS_IN_DAY = TimeUnit.DAYS.toMillis(1);
+    public static final long NANOS_PER_MILLISECOND = TimeUnit.MILLISECONDS.toNanos(1);
+    public static final long NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1);
 
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;

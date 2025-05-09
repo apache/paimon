@@ -27,6 +27,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
@@ -855,15 +856,27 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public PagedList<String> listViewsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String viewNamePattern)
+            throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, viewNamePattern);
+        return new PagedList<>(listViews(databaseName), null);
+    }
+
+    @Override
     public PagedList<View> listViewDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName, Integer maxResults, String pageToken, String viewNamePattern)
             throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
             return new PagedList<>(Collections.emptyList(), null);
         }
         getDatabase(databaseName);
 
-        PagedList<String> pagedViewNames = listViewsPaged(databaseName, maxResults, pageToken);
+        PagedList<String> pagedViewNames =
+                listViewsPaged(databaseName, maxResults, pageToken, viewNamePattern);
         return new PagedList<>(
                 pagedViewNames.getElements().stream()
                         .map(
@@ -1308,7 +1321,8 @@ public class HiveCatalog extends AbstractCatalog {
                 fileIO, new SerializableHiveConf(hiveConf), clientClassName, options, warehouse);
     }
 
-    public Table getHmsTable(Identifier identifier) throws TableNotExistException {
+    public Table getHmsTable(Identifier identifier)
+            throws TableNotExistException, TableNoPermissionException {
         try {
             return clients.run(
                     client ->
@@ -1317,6 +1331,9 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (NoSuchObjectException e) {
             throw new TableNotExistException(identifier);
         } catch (TException e) {
+            if (e.getMessage().contains("Permission.NotAllow")) {
+                throw new TableNoPermissionException(identifier, e);
+            }
             throw new RuntimeException(
                     "Cannot determine if table " + identifier.getFullName() + " is a paimon table.",
                     e);

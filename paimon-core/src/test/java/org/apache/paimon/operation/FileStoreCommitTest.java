@@ -62,6 +62,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -870,9 +871,12 @@ public class FileStoreCommitTest {
         fileStoreCommit.close();
     }
 
-    @Test
-    public void testDVIndexFiles() throws Exception {
-        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testDVIndexFiles(boolean bitmap64) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), String.valueOf(bitmap64));
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
 
         // commit 1
         CommitMessageImpl commitMessage1 =

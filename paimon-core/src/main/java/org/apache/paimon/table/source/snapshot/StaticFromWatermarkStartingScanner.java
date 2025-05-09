@@ -34,25 +34,12 @@ public class StaticFromWatermarkStartingScanner extends ReadPlanStartingScanner 
     private static final Logger LOG =
             LoggerFactory.getLogger(StaticFromWatermarkStartingScanner.class);
 
-    private final long watermark;
+    private final Snapshot snapshot;
 
     public StaticFromWatermarkStartingScanner(SnapshotManager snapshotManager, long watermark) {
         super(snapshotManager);
-        this.watermark = watermark;
-        Snapshot snapshot = timeTravelToWatermark(snapshotManager, watermark);
-        if (snapshot != null) {
-            this.startingSnapshotId = snapshot.id();
-        }
-    }
-
-    @Override
-    public ScanMode startingScanMode() {
-        return ScanMode.ALL;
-    }
-
-    @Override
-    public SnapshotReader configure(SnapshotReader snapshotReader) {
-        if (startingSnapshotId == null) {
+        this.snapshot = timeTravelToWatermark(snapshotManager, watermark);
+        if (snapshot == null) {
             LOG.warn(
                     "There is currently no snapshot later than or equal to watermark[{}]",
                     watermark);
@@ -62,7 +49,21 @@ public class StaticFromWatermarkStartingScanner extends ReadPlanStartingScanner 
                                     + "watermark[%d]",
                             watermark));
         }
-        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId);
+        this.startingSnapshotId = snapshot.id();
+    }
+
+    public Snapshot getSnapshot() {
+        return snapshot;
+    }
+
+    @Override
+    public ScanMode startingScanMode() {
+        return ScanMode.ALL;
+    }
+
+    @Override
+    public SnapshotReader configure(SnapshotReader snapshotReader) {
+        return snapshotReader.withMode(ScanMode.ALL).withSnapshot(snapshot);
     }
 
     @Nullable

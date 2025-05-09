@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
@@ -135,6 +136,15 @@ public class CatalogUtils {
                 String.format(
                         "The value of %s property should be %s.",
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+    }
+
+    public static void validateNamePattern(Catalog catalog, String namePattern) {
+        if (Objects.nonNull(namePattern) && !catalog.supportsListByPattern()) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Current catalog %s does not support name pattern filter.",
+                            catalog.getClass().getSimpleName()));
+        }
     }
 
     public static List<Partition> listPartitionsFromFileSystem(Table table) {
