@@ -498,6 +498,9 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public void authTableQuery(Identifier identifier, List<String> select, List<String> filter) {}
+
+    @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {}
 

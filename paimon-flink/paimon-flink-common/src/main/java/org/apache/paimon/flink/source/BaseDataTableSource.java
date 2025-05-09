@@ -373,6 +373,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         List<Split> splits =
                 table.newReadBuilder()
                         .dropStats()
+                        .withProjection(new int[0])
                         .withFilter(getPredicateWithScanPartitions())
                         .newScan()
                         .plan()

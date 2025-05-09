@@ -262,21 +262,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public DataTableBatchScan newScan() {
         return new DataTableBatchScan(
-                tableSchema.primaryKeys().size() > 0,
+                tableSchema,
                 coreOptions(),
                 newSnapshotReader(),
-                DefaultValueAssigner.create(tableSchema));
+                catalogEnvironment.tableQueryAuth(coreOptions()));
     }
 
     @Override
     public StreamDataTableScan newStreamScan() {
         return new DataTableStreamScan(
+                tableSchema,
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
                 changelogManager(),
                 supportStreamingReadOverwrite(),
-                DefaultValueAssigner.create(tableSchema));
+                catalogEnvironment.tableQueryAuth(coreOptions()));
     }
 
     protected abstract SplitGenerator splitGenerator();

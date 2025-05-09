@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.utils.TableScanUtils;
-import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
@@ -75,13 +74,14 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
     @Override
     public StreamDataTableScan newStreamScan() {
         return new LookupDataTableScan(
+                wrapped.schema(),
                 wrapped.coreOptions(),
                 wrapped.newSnapshotReader(),
                 wrapped.snapshotManager(),
                 wrapped.changelogManager(),
                 wrapped.supportStreamingReadOverwrite(),
-                DefaultValueAssigner.create(wrapped.schema()),
-                lookupScanMode);
+                lookupScanMode,
+                wrapped.catalogEnvironment().tableQueryAuth(wrapped.coreOptions()));
     }
 
     @Override
