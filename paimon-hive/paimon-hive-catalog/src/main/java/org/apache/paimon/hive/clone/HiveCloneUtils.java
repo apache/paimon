@@ -38,7 +38,6 @@ import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.hadoop.hive.ql.metadata.Hive;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

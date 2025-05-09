@@ -25,7 +25,6 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.hadoop.hive.metastore.api.Table;
-
 import org.apache.hudi.common.model.HoodieTableType;
 import org.apache.hudi.table.catalog.TableOptionProperties;
 
