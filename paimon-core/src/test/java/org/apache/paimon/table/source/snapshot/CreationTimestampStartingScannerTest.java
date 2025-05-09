@@ -77,5 +77,39 @@ public class CreationTimestampStartingScannerTest extends ScannerTestBase {
                 new CreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t3, false, false);
         assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+
+        scanner =
+                new CreationTimestampStartingScanner(
+                        snapshotManager,
+                        table.changelogManager(),
+                        snapshotManager.earliestSnapshot().timeMillis(),
+                        true,
+                        true);
+        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+        scanner =
+                new CreationTimestampStartingScanner(
+                        snapshotManager,
+                        table.changelogManager(),
+                        snapshotManager.earliestSnapshot().timeMillis(),
+                        false,
+                        false);
+        assertThat(scanner.scanner() instanceof FileCreationTimeStartingScanner).isTrue();
+
+        scanner =
+                new CreationTimestampStartingScanner(
+                        snapshotManager,
+                        table.changelogManager(),
+                        snapshotManager.latestSnapshot().timeMillis(),
+                        true,
+                        true);
+        assertThat(scanner.scanner() instanceof ContinuousFromSnapshotStartingScanner).isTrue();
+        scanner =
+                new CreationTimestampStartingScanner(
+                        snapshotManager,
+                        table.changelogManager(),
+                        snapshotManager.latestSnapshot().timeMillis(),
+                        false,
+                        false);
+        assertThat(scanner.scanner() instanceof StaticFromSnapshotStartingScanner).isTrue();
     }
 }
