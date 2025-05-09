@@ -18,42 +18,105 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.function.FunctionSchema;
+import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.rest.RESTRequest;
+import org.apache.paimon.types.DataField;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+import java.util.Map;
+
 /** Request for creating function. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateFunctionRequest implements RESTRequest {
 
     private static final String FIELD_NAME = "name";
-    private static final String FIELD_SCHEMA = "schema";
+    private static final String FIELD_INPUT_PARAMETERS = "inputParams";
+    private static final String FIELD_RETURN_PARAMETERS = "returnParams";
+    private static final String FIELD_DEFINITIONS = "definitions";
+    private static final String FIELD_DETERMINISTIC = "deterministic";
+    private static final String FIELD_COMMENT = "comment";
+    private static final String FIELD_OPTIONS = "options";
 
     @JsonProperty(FIELD_NAME)
     private final String functionName;
 
-    @JsonProperty(FIELD_SCHEMA)
-    private final FunctionSchema schema;
+    @JsonProperty(FIELD_INPUT_PARAMETERS)
+    private final List<DataField> inputParams;
+
+    @JsonProperty(FIELD_RETURN_PARAMETERS)
+    private final List<DataField> returnParams;
+
+    @JsonProperty(FIELD_DETERMINISTIC)
+    private final boolean deterministic;
+
+    @JsonProperty(FIELD_DEFINITIONS)
+    private final Map<String, FunctionDefinition> definitions;
+
+    @JsonProperty(FIELD_COMMENT)
+    private final String comment;
+
+    @JsonProperty(FIELD_OPTIONS)
+    private final Map<String, String> options;
 
     @JsonCreator
     public CreateFunctionRequest(
             @JsonProperty(FIELD_NAME) String functionName,
-            @JsonProperty(FIELD_SCHEMA) FunctionSchema schema) {
-        this.schema = schema;
+            @JsonProperty(FIELD_INPUT_PARAMETERS) List<DataField> inputParams,
+            @JsonProperty(FIELD_RETURN_PARAMETERS) List<DataField> returnParams,
+            @JsonProperty(FIELD_DETERMINISTIC) boolean deterministic,
+            @JsonProperty(FIELD_DEFINITIONS) Map<String, FunctionDefinition> definitions,
+            @JsonProperty(FIELD_COMMENT) String comment,
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options) {
         this.functionName = functionName;
+        this.inputParams = inputParams;
+        this.returnParams = returnParams;
+        this.deterministic = deterministic;
+        this.definitions = definitions;
+        this.comment = comment;
+        this.options = options;
     }
 
     @JsonGetter(FIELD_NAME)
-    public String getName() {
+    public String name() {
         return functionName;
     }
 
-    @JsonGetter(FIELD_SCHEMA)
-    public FunctionSchema getSchema() {
-        return schema;
+    @JsonGetter(FIELD_INPUT_PARAMETERS)
+    public List<DataField> inputParams() {
+        return inputParams;
+    }
+
+    @JsonGetter(FIELD_RETURN_PARAMETERS)
+    public List<DataField> returnParams() {
+        return returnParams;
+    }
+
+    @JsonGetter(FIELD_DETERMINISTIC)
+    public boolean isDeterministic() {
+        return deterministic;
+    }
+
+    @JsonGetter(FIELD_DEFINITIONS)
+    public Map<String, FunctionDefinition> definitions() {
+        return definitions;
+    }
+
+    public FunctionDefinition definition(String dialect) {
+        return definitions.get(dialect);
+    }
+
+    @JsonGetter(FIELD_COMMENT)
+    public String comment() {
+        return comment;
+    }
+
+    @JsonGetter(FIELD_OPTIONS)
+    public Map<String, String> options() {
+        return options;
     }
 }

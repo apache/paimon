@@ -18,7 +18,6 @@
 
 package org.apache.paimon.open.api;
 
-import org.apache.paimon.function.FunctionSchema;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -990,13 +989,12 @@ public class RESTCatalogController {
         return new GetFunctionResponse(
                 UUID.randomUUID().toString(),
                 function,
-                new FunctionSchema(
-                        ImmutableList.of(),
-                        ImmutableList.of(),
-                        false,
-                        ImmutableMap.of(),
-                        null,
-                        null),
+                ImmutableList.of(),
+                ImmutableList.of(),
+                false,
+                ImmutableMap.of(),
+                null,
+                null,
                 "owner",
                 1L,
                 "owner",

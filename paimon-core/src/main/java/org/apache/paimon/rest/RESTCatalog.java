@@ -31,7 +31,6 @@ import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.FunctionImpl;
-import org.apache.paimon.function.FunctionSchema;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -823,7 +822,15 @@ public class RESTCatalog implements Catalog {
                             resourcePaths.functionDetails(functionName),
                             GetFunctionResponse.class,
                             restAuthFunction);
-            return new FunctionImpl(functionName, response.getId(), response.getSchema());
+            return new FunctionImpl(
+                    functionName,
+                    response.uuid(),
+                    response.inputParams(),
+                    response.returnParams(),
+                    response.isDeterministic(),
+                    response.definitions(),
+                    response.comment(),
+                    response.options());
         } catch (NoSuchResourceException e) {
             throw new FunctionNotExistException(functionName, e);
         }
@@ -836,17 +843,16 @@ public class RESTCatalog implements Catalog {
             boolean ignoreIfExists)
             throws FunctionAlreadyExistException {
         try {
-            FunctionSchema schema =
-                    new FunctionSchema(
+            client.post(
+                    resourcePaths.functions(),
+                    new CreateFunctionRequest(
+                            functionName,
                             function.inputParams(),
                             function.returnParams(),
                             function.isDeterministic(),
                             function.definitions(),
                             function.comment(),
-                            function.options());
-            client.post(
-                    resourcePaths.functions(),
-                    new CreateFunctionRequest(functionName, schema),
+                            function.options()),
                     restAuthFunction);
         } catch (AlreadyExistsException e) {
             if (ignoreIfExists) {

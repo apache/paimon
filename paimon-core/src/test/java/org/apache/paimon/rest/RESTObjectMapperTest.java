@@ -291,7 +291,7 @@ public class RESTObjectMapperTest {
         String responseStr = OBJECT_MAPPER.writeValueAsString(response);
         GetFunctionResponse parseData =
                 OBJECT_MAPPER.readValue(responseStr, GetFunctionResponse.class);
-        assertEquals(response.getId(), parseData.getId());
+        assertEquals(response.uuid(), parseData.uuid());
     }
 
     @Test
@@ -300,6 +300,6 @@ public class RESTObjectMapperTest {
         String requestStr = OBJECT_MAPPER.writeValueAsString(request);
         CreateFunctionRequest parseData =
                 OBJECT_MAPPER.readValue(requestStr, CreateFunctionRequest.class);
-        assertEquals(parseData.getName(), request.getName());
+        assertEquals(parseData.name(), request.name());
     }
 }

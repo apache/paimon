@@ -43,6 +43,4 @@ public interface Function {
     String comment();
 
     Map<String, String> options();
-
-    FunctionSchema schema();
 }

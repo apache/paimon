@@ -20,7 +20,6 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.function.FunctionDefinition;
-import org.apache.paimon.function.FunctionSchema;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -287,22 +286,6 @@ public class MockRESTMessage {
     }
 
     public static GetFunctionResponse getFunctionResponse() {
-        return new GetFunctionResponse(
-                UUID.randomUUID().toString(),
-                "function",
-                functionSchema(),
-                "owner",
-                1L,
-                "owner",
-                1L,
-                "owner");
-    }
-
-    public static CreateFunctionRequest createFunctionRequest() {
-        return new CreateFunctionRequest("function", functionSchema());
-    }
-
-    private static FunctionSchema functionSchema() {
         List<DataField> inputParams =
                 Lists.newArrayList(
                         new DataField(0, "length", DataTypes.DOUBLE()),
@@ -320,7 +303,42 @@ public class MockRESTMessage {
         definitions.put("flink", flinkFunction);
         definitions.put("spark", sparkFunction);
         definitions.put("trino", trinoFunction);
-        return new FunctionSchema(inputParams, returnParams, false, definitions, "comment", null);
+        return new GetFunctionResponse(
+                UUID.randomUUID().toString(),
+                "function",
+                inputParams,
+                returnParams,
+                false,
+                definitions,
+                "comment",
+                null,
+                "owner",
+                1L,
+                "owner",
+                1L,
+                "owner");
+    }
+
+    public static CreateFunctionRequest createFunctionRequest() {
+        List<DataField> inputParams =
+                Lists.newArrayList(
+                        new DataField(0, "length", DataTypes.DOUBLE()),
+                        new DataField(1, "width", DataTypes.DOUBLE()));
+        List<DataField> returnParams =
+                Lists.newArrayList(new DataField(0, "area", DataTypes.DOUBLE()));
+        FunctionDefinition flinkFunction =
+                FunctionDefinition.file(
+                        "jar", Lists.newArrayList("/a/b/c.jar"), "java", "className", "eval");
+        FunctionDefinition sparkFunction =
+                FunctionDefinition.lambda(
+                        "(Double length, Double width) -> length * width", "java");
+        FunctionDefinition trinoFunction = FunctionDefinition.sql("length * width");
+        Map<String, FunctionDefinition> definitions = Maps.newHashMap();
+        definitions.put("flink", flinkFunction);
+        definitions.put("spark", sparkFunction);
+        definitions.put("trino", trinoFunction);
+        return new CreateFunctionRequest(
+                "function", inputParams, returnParams, false, definitions, "comment", null);
     }
 
     private static ViewSchema viewSchema() {

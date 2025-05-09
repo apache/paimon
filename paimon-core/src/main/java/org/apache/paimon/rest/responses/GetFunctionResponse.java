@@ -18,57 +18,119 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.function.FunctionSchema;
-import org.apache.paimon.rest.RESTResponse;
+import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.types.DataField;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+import java.util.Map;
+
 /** Response for getting a function. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GetFunctionResponse extends AuditRESTResponse implements RESTResponse {
+public class GetFunctionResponse extends AuditRESTResponse {
 
-    private static final String FIELD_ID = "id";
+    private static final String FIELD_UUID = "uuid";
     private static final String FIELD_NAME = "name";
-    private static final String FIELD_SCHEMA = "schema";
+    private static final String FIELD_INPUT_PARAMETERS = "inputParams";
+    private static final String FIELD_RETURN_PARAMETERS = "returnParams";
+    private static final String FIELD_DEFINITIONS = "definitions";
+    private static final String FIELD_DETERMINISTIC = "deterministic";
+    private static final String FIELD_COMMENT = "comment";
+    private static final String FIELD_OPTIONS = "options";
 
-    @JsonProperty(FIELD_ID)
-    private final String id;
+    @JsonProperty(FIELD_UUID)
+    private final String uuid;
 
     @JsonProperty(FIELD_NAME)
-    private final String name;
+    private final String functionName;
 
-    @JsonProperty(FIELD_SCHEMA)
-    private final FunctionSchema schema;
+    @JsonProperty(FIELD_INPUT_PARAMETERS)
+    private final List<DataField> inputParams;
 
+    @JsonProperty(FIELD_RETURN_PARAMETERS)
+    private final List<DataField> returnParams;
+
+    @JsonProperty(FIELD_DETERMINISTIC)
+    private final boolean deterministic;
+
+    @JsonProperty(FIELD_DEFINITIONS)
+    private final Map<String, FunctionDefinition> definitions;
+
+    @JsonProperty(FIELD_COMMENT)
+    private final String comment;
+
+    @JsonProperty(FIELD_OPTIONS)
+    private final Map<String, String> options;
+
+    @JsonCreator
     public GetFunctionResponse(
-            @JsonProperty(FIELD_ID) String id,
-            @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_SCHEMA) FunctionSchema schema,
+            @JsonProperty(FIELD_UUID) String uuid,
+            @JsonProperty(FIELD_NAME) String functionName,
+            @JsonProperty(FIELD_INPUT_PARAMETERS) List<DataField> inputParams,
+            @JsonProperty(FIELD_RETURN_PARAMETERS) List<DataField> returnParams,
+            @JsonProperty(FIELD_DETERMINISTIC) boolean deterministic,
+            @JsonProperty(FIELD_DEFINITIONS) Map<String, FunctionDefinition> definitions,
+            @JsonProperty(FIELD_COMMENT) String comment,
+            @JsonProperty(FIELD_OPTIONS) Map<String, String> options,
             @JsonProperty(FIELD_OWNER) String owner,
             @JsonProperty(FIELD_CREATED_AT) long createdAt,
             @JsonProperty(FIELD_CREATED_BY) String createdBy,
             @JsonProperty(FIELD_UPDATED_AT) long updatedAt,
             @JsonProperty(FIELD_UPDATED_BY) String updatedBy) {
         super(owner, createdAt, createdBy, updatedAt, updatedBy);
-        this.id = id;
-        this.name = name;
-        this.schema = schema;
+        this.functionName = functionName;
+        this.uuid = uuid;
+        this.inputParams = inputParams;
+        this.returnParams = returnParams;
+        this.deterministic = deterministic;
+        this.definitions = definitions;
+        this.comment = comment;
+        this.options = options;
     }
 
-    @JsonGetter(FIELD_ID)
-    public String getId() {
-        return this.id;
+    public String uuid() {
+        return this.uuid;
     }
 
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return this.name;
+    public String name() {
+        return this.functionName;
     }
 
-    @JsonGetter(FIELD_SCHEMA)
-    public FunctionSchema getSchema() {
-        return this.schema;
+    @JsonGetter(FIELD_INPUT_PARAMETERS)
+    public List<DataField> inputParams() {
+        return inputParams;
+    }
+
+    @JsonGetter(FIELD_RETURN_PARAMETERS)
+    public List<DataField> returnParams() {
+        return returnParams;
+    }
+
+    @JsonGetter(FIELD_DETERMINISTIC)
+    public boolean isDeterministic() {
+        return deterministic;
+    }
+
+    @JsonGetter(FIELD_DEFINITIONS)
+    public Map<String, FunctionDefinition> definitions() {
+        return definitions;
+    }
+
+    public FunctionDefinition definition(String dialect) {
+        return definitions.get(dialect);
+    }
+
+    @JsonGetter(FIELD_COMMENT)
+    public String comment() {
+        return comment;
+    }
+
+    @JsonGetter(FIELD_OPTIONS)
+    public Map<String, String> options() {
+        return options;
     }
 }

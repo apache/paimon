@@ -35,7 +35,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.fs.local.LocalFileIOLoader;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionImpl;
-import org.apache.paimon.function.FunctionSchema;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -729,7 +728,12 @@ public class RESTCatalogServer {
                     new GetFunctionResponse(
                             function.uuid(),
                             function.name(),
-                            function.schema(),
+                            function.inputParams(),
+                            function.returnParams(),
+                            function.isDeterministic(),
+                            function.definitions(),
+                            function.comment(),
+                            function.options(),
                             "owner",
                             1L,
                             "owner",
@@ -750,11 +754,18 @@ public class RESTCatalogServer {
             case "POST":
                 CreateFunctionRequest requestBody =
                         OBJECT_MAPPER.readValue(data, CreateFunctionRequest.class);
-                String functionName = requestBody.getName();
-                FunctionSchema schema = requestBody.getSchema();
+                String functionName = requestBody.name();
                 if (!functionStore.containsKey(functionName)) {
                     Function function =
-                            new FunctionImpl(functionName, UUID.randomUUID().toString(), schema);
+                            new FunctionImpl(
+                                    functionName,
+                                    UUID.randomUUID().toString(),
+                                    requestBody.inputParams(),
+                                    requestBody.returnParams(),
+                                    requestBody.isDeterministic(),
+                                    requestBody.definitions(),
+                                    requestBody.comment(),
+                                    requestBody.options());
                     functionStore.put(functionName, function);
                     return new MockResponse().setResponseCode(200);
                 } else {
