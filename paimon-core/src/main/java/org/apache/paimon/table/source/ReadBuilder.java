@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.Table;
@@ -74,6 +75,8 @@ public interface ReadBuilder extends Serializable {
 
     /** A name to identify the table. */
     String tableName();
+
+    void withMetricsRegistry(MetricRegistry metricRegistry);
 
     /** Returns read row type. */
     RowType readType();
