@@ -1192,6 +1192,11 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFunctionRequest'
       responses:
         "200":
           description: Success, no content
@@ -1566,6 +1571,31 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ViewChange'
+    CreateFunctionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        inputParams:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        returnParams:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataField'
+        deterministic:
+          type: boolean
+        dialects:
+          type: object
+          additionalProperties:
+            type: string
+        comment:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     ViewChange:
       anyOf:
         - $ref: '#/components/schemas/SetViewOption'
@@ -2243,25 +2273,10 @@ components:
     GetFunctionResponse:
       type: object
       properties:
-        id:
+        uuid:
           type: string
         name:
           type: string
-        schema:
-          $ref: '#/components/schemas/FunctionSchema'
-        owner:
-          type: string
-        createdAt:
-          format: int64
-        createdBy:
-          type: string
-        updatedAt:
-          format: int64
-        updatedBy:
-          type: string
-    FunctionSchema:
-      type: object
-      properties:
         inputParams:
           type: array
           items:
@@ -2282,6 +2297,16 @@ components:
           type: object
           additionalProperties:
             type: string
+        owner:
+          type: string
+        createdAt:
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          format: int64
+        updatedBy:
+          type: string
     ViewSchema:
       type: object
       properties:
