@@ -750,6 +750,50 @@ public class LookupTableTest extends TableTestBase {
         assertThat(result).hasSize(0);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAsyncRefreshPartialLookupTable(boolean refreshAsync) throws Exception {
+        FileStoreTable dimTable = createDimTable(refreshAsync);
+        PrimaryKeyPartialLookupTable table =
+                PrimaryKeyPartialLookupTable.createLocalTable(
+                        dimTable,
+                        new int[] {0, 1, 2},
+                        tempDir.toFile(),
+                        ImmutableList.of("pk1", "pk2"),
+                        null);
+        table.open();
+
+        List<InternalRow> result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        table.refresh();
+        if (refreshAsync) {
+            // wait until async refresh finished
+            table.getRefreshFuture().get();
+        }
+
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, -1, 11);
+        result = table.get(row(2, -2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 2, -2, 22);
+
+        write(dimTable, ioManager, GenericRow.ofKind(RowKind.DELETE, 1, -1, 11));
+        table.refresh();
+        if (refreshAsync) {
+            // wait until async refresh finished
+            table.getRefreshFuture().get();
+        }
+
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+    }
+
     @Test
     public void testPartialLookupTableWithRowFilter() throws Exception {
         Options options = new Options();
@@ -1005,6 +1049,10 @@ public class LookupTableTest extends TableTestBase {
     }
 
     private FileStoreTable createDimTable() throws Exception {
+        return createDimTable(false);
+    }
+
+    private FileStoreTable createDimTable(boolean refreshAsync) throws Exception {
         FileIO fileIO = LocalFileIO.create();
         org.apache.paimon.fs.Path tablePath =
                 new org.apache.paimon.fs.Path(
@@ -1017,6 +1065,9 @@ public class LookupTableTest extends TableTestBase {
                         .primaryKey("pk1", "pk2")
                         .option(CoreOptions.BUCKET.key(), "2")
                         .option(CoreOptions.BUCKET_KEY.key(), "pk2")
+                        .option(
+                                FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC.key(),
+                                String.valueOf(refreshAsync))
                         .build();
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);

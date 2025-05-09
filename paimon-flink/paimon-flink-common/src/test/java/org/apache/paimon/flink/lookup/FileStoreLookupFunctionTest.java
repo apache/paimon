@@ -41,6 +41,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.AfterEach;
@@ -63,6 +64,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
@@ -70,6 +76,7 @@ import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Tests for {@link FileStoreLookupFunction}. */
 public class FileStoreLookupFunctionTest {
@@ -230,6 +237,54 @@ public class FileStoreLookupFunctionTest {
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
     }
 
+    @ParameterizedTest(name = "PartialCache = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testAsyncRefreshLookupTableNoError(boolean joinKeyEqPk) throws Exception {
+        createLookupFunction(false, joinKeyEqPk, false, true);
+
+        ExecutorService commitExecutor =
+                Executors.newSingleThreadExecutor(new ExecutorThreadFactory("commit-thread"));
+        AtomicBoolean commitSuccess = new AtomicBoolean(true);
+
+        int intervalSeconds = 2;
+        int batchWriteSize = 10;
+        int lookupTimes = 100;
+        AtomicInteger commitIdentifier = new AtomicInteger(0);
+
+        // commit new data to lookup table periodically
+        commitExecutor.submit(
+                () -> {
+                    try {
+                        while (!Thread.currentThread().isInterrupted()) {
+                            commit(
+                                    batchWriteCommit(
+                                            batchWriteSize, commitIdentifier.getAndIncrement()));
+                            TimeUnit.SECONDS.sleep(intervalSeconds);
+                        }
+                    } catch (Exception e) {
+                        commitSuccess.set(false);
+                    }
+                });
+
+        for (int i = 0; i < 10; i++) {
+            assertDoesNotThrow(() -> lookupVerify(lookupTimes, joinKeyEqPk));
+            TimeUnit.SECONDS.sleep(intervalSeconds);
+        }
+
+        commitExecutor.shutdown();
+        assertThat(commitSuccess.get()).isTrue();
+    }
+
+    private void lookupVerify(int lookupTimes, boolean joinKeyEqPk) {
+        for (int i = 0; i < lookupTimes; i++) {
+            GenericRow joinKey =
+                    joinKeyEqPk
+                            ? GenericRow.of(RANDOM.nextInt(100), RANDOM.nextInt(100))
+                            : GenericRow.of(RANDOM.nextInt(100));
+            lookupFunction.lookup(new FlinkRowData(joinKey));
+        }
+    }
+
     @Test
     public void testLookupDynamicPartition() throws Exception {
         createLookupFunction(true, false, true, false);
@@ -325,6 +380,17 @@ public class FileStoreLookupFunctionTest {
             writer.write(randomRow());
             messages.addAll(writer.prepareCommit(true, i));
         }
+        return messages;
+    }
+
+    private List<CommitMessage> batchWriteCommit(int batchSize, int commitIdentifier)
+            throws Exception {
+        List<CommitMessage> messages = new ArrayList<>();
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
+        for (int i = 0; i < batchSize; i++) {
+            writer.write(randomRow());
+        }
+        messages.addAll(writer.prepareCommit(true, commitIdentifier));
         return messages;
     }
 
