@@ -23,10 +23,14 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.MetricsFileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.metrics.InputMetrics;
+import org.apache.paimon.fs.metrics.OutputMetrics;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
@@ -89,7 +93,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final String WATERMARK_PREFIX = "watermark-";
 
-    protected final FileIO fileIO;
+    protected final MetricsFileIO fileIO;
+    private InputMetrics inputMetrics;
+    private OutputMetrics outputMetrics;
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
@@ -103,7 +109,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Path path,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
-        this.fileIO = fileIO;
+        this.fileIO = new MetricsFileIO(fileIO);
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
             // make sure table is always available
@@ -113,6 +119,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
+    }
+
+    public AbstractFileStoreTable withMetricRegistry(MetricRegistry registry) {
+        if (coreOptions().isMetricsFileIOEnabled()) {
+            this.inputMetrics =
+                    new InputMetrics(registry, catalogEnvironment.identifier().getTableName());
+            this.outputMetrics =
+                    new OutputMetrics(registry, catalogEnvironment.identifier().getTableName());
+            this.fileIO.withMetrics(inputMetrics, outputMetrics);
+        }
+        return this;
     }
 
     public String currentBranch() {

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
@@ -61,6 +62,11 @@ public class ReadBuilderImpl implements ReadBuilder {
     @Override
     public String tableName() {
         return table.name();
+    }
+
+    @Override
+    public void withMetricsRegistry(MetricRegistry metricRegistry) {
+        this.table.withMetricRegistry(metricRegistry);
     }
 
     @Override
