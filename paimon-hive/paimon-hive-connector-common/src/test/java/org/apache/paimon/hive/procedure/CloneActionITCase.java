@@ -506,7 +506,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                 "CREATE TABLE test.test_table (id string, id2 int, id3 int, PRIMARY KEY (id, id2, id3) NOT ENFORCED) "
                         + "PARTITIONED BY (id2, id3) with ('bucket' = '-1', 'file.format' = '"
                         + format
-                        + ");";
+                        + "');";
         // has different partition keys
         String ddl1 =
                 "CREATE TABLE test.test_table (id string, id2 int, id3 int) "
