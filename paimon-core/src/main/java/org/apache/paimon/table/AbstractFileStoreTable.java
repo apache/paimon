@@ -123,10 +123,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     public AbstractFileStoreTable withMetricRegistry(MetricRegistry registry) {
         if (coreOptions().isMetricsFileIOEnabled()) {
-            this.inputMetrics =
-                    new InputMetrics(registry, catalogEnvironment.identifier().getTableName());
-            this.outputMetrics =
-                    new OutputMetrics(registry, catalogEnvironment.identifier().getTableName());
+            String tableName =
+                    catalogEnvironment.identifier() != null
+                            ? catalogEnvironment.identifier().getTableName()
+                            : "unknown";
+            this.inputMetrics = new InputMetrics(registry, tableName);
+            this.outputMetrics = new OutputMetrics(registry, tableName);
             this.fileIO.withMetrics(inputMetrics, outputMetrics);
         }
         return this;
