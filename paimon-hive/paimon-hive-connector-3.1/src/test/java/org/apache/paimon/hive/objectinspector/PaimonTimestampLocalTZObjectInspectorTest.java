@@ -26,6 +26,7 @@ import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 
@@ -50,8 +51,10 @@ public class PaimonTimestampLocalTZObjectInspectorTest {
     public void testGetPrimitiveJavaObject() {
         PaimonTimestampLocalTZObjectInspector oi = new PaimonTimestampLocalTZObjectInspector();
 
-        LocalDateTime now = LocalDateTime.now().plusNanos(123);
-        Timestamp input = Timestamp.fromLocalDateTime(now);
+        long nowMs = System.currentTimeMillis();
+        LocalDateTime now =
+                LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMs), ZoneId.systemDefault());
+        Timestamp input = Timestamp.fromEpochMillis(nowMs);
         TimestampTZ expected = new TimestampTZ(now.atZone(ZoneId.systemDefault()));
         assertThat(oi.getPrimitiveJavaObject(input)).isEqualTo(expected);
 
@@ -62,8 +65,10 @@ public class PaimonTimestampLocalTZObjectInspectorTest {
     public void testGetPrimitiveWritableObject() {
         PaimonTimestampLocalTZObjectInspector oi = new PaimonTimestampLocalTZObjectInspector();
 
-        LocalDateTime now = LocalDateTime.now().plusNanos(123);
-        Timestamp input = Timestamp.fromLocalDateTime(now);
+        long nowMs = System.currentTimeMillis();
+        LocalDateTime now =
+                LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMs), ZoneId.systemDefault());
+        Timestamp input = Timestamp.fromEpochMillis(nowMs);
         TimestampTZ expected = new TimestampTZ(now.atZone(ZoneId.systemDefault()));
         assertThat(oi.getPrimitiveWritableObject(input).getTimestampTZ()).isEqualTo(expected);
 
@@ -92,8 +97,10 @@ public class PaimonTimestampLocalTZObjectInspectorTest {
     public void testConvertObject() {
         PaimonTimestampLocalTZObjectInspector oi = new PaimonTimestampLocalTZObjectInspector();
 
-        LocalDateTime now = LocalDateTime.now().plusNanos(123);
-        Timestamp expected = Timestamp.fromLocalDateTime(now);
+        long nowMs = System.currentTimeMillis();
+        LocalDateTime now =
+                LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMs), ZoneId.systemDefault());
+        Timestamp expected = Timestamp.fromEpochMillis(nowMs);
         TimestampTZ input = new TimestampTZ(now.atZone(ZoneId.systemDefault()));
         assertThat(oi.convert(input)).isEqualTo(expected);
 
