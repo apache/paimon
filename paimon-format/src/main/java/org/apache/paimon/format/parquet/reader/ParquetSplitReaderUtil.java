@@ -61,7 +61,6 @@ import org.apache.parquet.io.PrimitiveColumnIO;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.InvalidSchemaException;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
-import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 
@@ -225,10 +224,6 @@ public class ParquetSplitReaderUtil {
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 int precision = DataTypeChecks.getPrecision(fieldType);
                 if (precision > 6) {
-                    checkArgument(
-                            typeName == PrimitiveType.PrimitiveTypeName.INT96,
-                            "Unexpected type: %s",
-                            typeName);
                     return new HeapTimestampVector(batchSize);
                 } else {
                     return new HeapLongVector(batchSize);
@@ -236,31 +231,10 @@ public class ParquetSplitReaderUtil {
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) fieldType;
                 if (ParquetSchemaConverter.is32BitDecimal(decimalType.getPrecision())) {
-                    checkArgument(
-                            (typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY
-                                            || typeName == PrimitiveType.PrimitiveTypeName.INT32)
-                                    && primitiveType.getLogicalTypeAnnotation()
-                                            instanceof DecimalLogicalTypeAnnotation,
-                            "Unexpected type: %s",
-                            typeName);
                     return new HeapIntVector(batchSize);
                 } else if (ParquetSchemaConverter.is64BitDecimal(decimalType.getPrecision())) {
-                    checkArgument(
-                            (typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY
-                                            || typeName == PrimitiveType.PrimitiveTypeName.INT64)
-                                    && primitiveType.getLogicalTypeAnnotation()
-                                            instanceof DecimalLogicalTypeAnnotation,
-                            "Unexpected type: %s",
-                            typeName);
                     return new HeapLongVector(batchSize);
                 } else {
-                    checkArgument(
-                            (typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY
-                                            || typeName == PrimitiveType.PrimitiveTypeName.BINARY)
-                                    && primitiveType.getLogicalTypeAnnotation()
-                                            instanceof DecimalLogicalTypeAnnotation,
-                            "Unexpected type: %s",
-                            typeName);
                     return new HeapBytesVector(batchSize);
                 }
             case ARRAY:
