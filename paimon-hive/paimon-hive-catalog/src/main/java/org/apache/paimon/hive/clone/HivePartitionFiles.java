@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.hive.migrate;
+package org.apache.paimon.hive.clone;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
