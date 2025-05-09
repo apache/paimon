@@ -63,11 +63,11 @@ public class CreationTimestampStartingScannerTest extends ScannerTestBase {
         scanner =
                 new CreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t2, false, true);
-        assertThat(scanner.scanner() instanceof ContinuousFromTimestampStartingScanner).isTrue();
+        assertThat(scanner.scanner() instanceof ContinuousFromSnapshotStartingScanner).isTrue();
         scanner =
                 new CreationTimestampStartingScanner(
                         snapshotManager, table.changelogManager(), t2, false, false);
-        assertThat(scanner.scanner() instanceof StaticFromTimestampStartingScanner).isTrue();
+        assertThat(scanner.scanner() instanceof StaticFromSnapshotStartingScanner).isTrue();
 
         scanner =
                 new CreationTimestampStartingScanner(

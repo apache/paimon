@@ -59,13 +59,13 @@ public class CreationTimestampStartingScanner extends AbstractStartingScanner {
         if (startingSnapshotId != null) {
             scanner =
                     isStreaming
-                            ? new ContinuousFromTimestampStartingScanner(
+                            ? new ContinuousFromSnapshotStartingScanner(
                                     snapshotManager,
                                     changelogManager,
-                                    creationMillis,
+                                    startingSnapshotId,
                                     changelogDecoupled)
-                            : new StaticFromTimestampStartingScanner(
-                                    snapshotManager, creationMillis);
+                            : new StaticFromSnapshotStartingScanner(
+                                    snapshotManager, startingSnapshotId);
         } else {
             scanner = new FileCreationTimeStartingScanner(snapshotManager, creationMillis);
         }
