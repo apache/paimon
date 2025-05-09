@@ -57,11 +57,15 @@ public class IcebergDataFileMetaSerializer extends ObjectSerializer<IcebergDataF
                 file.fileSizeInBytes(),
                 file.nullValueCounts(),
                 file.lowerBounds(),
-                file.upperBounds());
+                file.upperBounds(),
+                BinaryString.fromString(file.referencedDataFile()),
+                file.contentOffset(),
+                file.contentSizeInBytes());
     }
 
     @Override
     public IcebergDataFileMeta fromRow(InternalRow row) {
+        // TODO: compatible with the old?
         return new IcebergDataFileMeta(
                 IcebergDataFileMeta.Content.fromId(row.getInt(0)),
                 row.getString(1).toString(),
@@ -71,6 +75,9 @@ public class IcebergDataFileMetaSerializer extends ObjectSerializer<IcebergDataF
                 row.getLong(5),
                 nullValueCountsSerializer.copy(row.getMap(6)),
                 lowerBoundsSerializer.copy(row.getMap(7)),
-                upperBoundsSerializer.copy(row.getMap(8)));
+                upperBoundsSerializer.copy(row.getMap(8)),
+                row.isNullAt(9) ? null : row.getString(9).toString(),
+                row.isNullAt(10) ? null : row.getLong(10),
+                row.isNullAt(11) ? null : row.getLong(11));
     }
 }
