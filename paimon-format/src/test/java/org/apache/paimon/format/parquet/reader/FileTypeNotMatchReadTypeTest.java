@@ -56,6 +56,9 @@ public class FileTypeNotMatchReadTypeTest {
             int writePrecision = RANDOM.nextInt(10);
             int readPrecision = writePrecision == 0 ? 0 : RANDOM.nextInt(writePrecision);
 
+            // precision 0-3 and 3-6 are all long type (INT64) in file.
+            // but precision 0-3 is TIMESTAMP_MICROS and 3-6 is TIMESTAMP_MILLIS in file.
+            // so we need to set readPrecision to 4 if writePrecision is 4-6.
             if (readPrecision <= 3 && writePrecision > 3) {
                 readPrecision = 4;
             }
