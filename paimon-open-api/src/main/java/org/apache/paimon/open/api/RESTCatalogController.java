@@ -18,6 +18,7 @@
 
 package org.apache.paimon.open.api;
 
+import org.apache.paimon.function.FunctionSchema;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -25,6 +26,7 @@ import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
@@ -36,12 +38,14 @@ import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
+import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -148,7 +152,7 @@ public class RESTCatalogController {
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
     @PostMapping("/v1/{prefix}/databases")
-    public void createDatabases(
+    public void createDatabase(
             @PathVariable String prefix, @RequestBody CreateDatabaseRequest request) {}
 
     @Operation(
@@ -928,4 +932,121 @@ public class RESTCatalogController {
             @PathVariable String database,
             @PathVariable String view,
             @RequestBody AlterViewRequest request) {}
+
+    @Operation(
+            summary = "List functions",
+            tags = {"function"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {
+                    @Content(schema = @Schema(implementation = ListFunctionsResponse.class))
+                }),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/functions")
+    public ListFunctionsResponse listFunctions(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @RequestParam(required = false) Integer maxResults,
+            @RequestParam(required = false) String pageToken) {
+        return new ListFunctionsResponse(ImmutableList.of("f1"), null);
+    }
+
+    @Operation(
+            summary = "Get function",
+            tags = {"function"})
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                content = {@Content(schema = @Schema(implementation = GetFunctionResponse.class))}),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/functions/{function}")
+    public GetFunctionResponse getFunction(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String function) {
+        return new GetFunctionResponse(
+                UUID.randomUUID().toString(),
+                function,
+                new FunctionSchema(
+                        ImmutableList.of(),
+                        ImmutableList.of(),
+                        false,
+                        ImmutableMap.of(),
+                        null,
+                        null),
+                "owner",
+                1L,
+                "owner",
+                1L,
+                "owner");
+    }
+
+    @Operation(
+            summary = "Create Function",
+            tags = {"function"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "409",
+                description = "Resource has exist",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
+    })
+    @PostMapping("/v1/{prefix}/databases/{database}/functions")
+    public void createFunction(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @RequestBody CreateFunctionRequest request) {}
+
+    @Operation(
+            summary = "Drop function",
+            tags = {"function"})
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Success, no content"),
+        @ApiResponse(
+                responseCode = "401",
+                description = "Unauthorized",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "404",
+                description = "Resource not found",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))}),
+        @ApiResponse(
+                responseCode = "500",
+                content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
+    })
+    @GetMapping("/v1/{prefix}/databases/{database}/functions/{function}")
+    public void dropFunction(
+            @PathVariable String prefix,
+            @PathVariable String database,
+            @PathVariable String function) {}
 }

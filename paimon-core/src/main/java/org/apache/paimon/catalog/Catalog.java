@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.function.Function;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
@@ -666,6 +667,38 @@ public interface Catalog extends AutoCloseable {
     void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException;
 
+    /** List all functions in catalog. */
+    List<String> listFunctions();
+
+    /**
+     * Get function by identifier.
+     *
+     * @param functionName
+     * @throws FunctionNotExistException
+     */
+    Function getFunction(String functionName) throws FunctionNotExistException;
+
+    /**
+     * Create function.
+     *
+     * @param functionName
+     * @param function
+     * @param ignoreIfExists
+     * @throws FunctionAlreadyExistException
+     */
+    void createFunction(String functionName, Function function, boolean ignoreIfExists)
+            throws FunctionAlreadyExistException;
+
+    /**
+     * Drop function.
+     *
+     * @param functionName
+     * @param ignoreIfNotExists
+     * @throws FunctionNotExistException
+     */
+    void dropFunction(String functionName, boolean ignoreIfNotExists)
+            throws FunctionNotExistException;
+
     // ==================== Catalog Information ==========================
 
     /** Catalog options for re-creating this catalog. */
@@ -1083,6 +1116,48 @@ public interface Catalog extends AutoCloseable {
 
         public String dialect() {
             return dialect;
+        }
+    }
+
+    /** Exception for trying to create a function that already exists. */
+    class FunctionAlreadyExistException extends Exception {
+
+        private static final String MSG = "Function %s already exists.";
+
+        private final String functionName;
+
+        public FunctionAlreadyExistException(String functionName) {
+            this(functionName, null);
+        }
+
+        public FunctionAlreadyExistException(String functionName, Throwable cause) {
+            super(String.format(MSG, functionName), cause);
+            this.functionName = functionName;
+        }
+
+        public String functionName() {
+            return functionName;
+        }
+    }
+
+    /** Exception for trying to get a function that doesn't exist. */
+    class FunctionNotExistException extends Exception {
+
+        private static final String MSG = "Function %s doesn't exist.";
+
+        private final String functionName;
+
+        public FunctionNotExistException(String functionName) {
+            this(functionName, null);
+        }
+
+        public FunctionNotExistException(String functionName, Throwable cause) {
+            super(String.format(MSG, functionName), cause);
+            this.functionName = functionName;
+        }
+
+        public String functionName() {
+            return functionName;
         }
     }
 }

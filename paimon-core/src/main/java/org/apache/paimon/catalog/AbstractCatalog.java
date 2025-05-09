@@ -25,6 +25,7 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.function.Function;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -49,6 +50,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -515,6 +517,28 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
             throws TableNotExistException {}
+
+    @Override
+    public List<String> listFunctions() {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public Function getFunction(String functionName) throws FunctionNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void createFunction(String functionName, Function function, boolean ignoreIfExists)
+            throws FunctionAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void dropFunction(String functionName, boolean ignoreIfNotExists)
+            throws FunctionNotExistException {
+        throw new UnsupportedOperationException();
+    }
 
     /**
      * Create a {@link FormatTable} identified by the given {@link Identifier}.

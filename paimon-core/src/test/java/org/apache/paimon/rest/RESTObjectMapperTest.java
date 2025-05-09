@@ -22,6 +22,7 @@ import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -30,6 +31,7 @@ import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
@@ -41,6 +43,8 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import org.junit.Test;
 
@@ -279,5 +283,23 @@ public class RESTObjectMapperTest {
         for (int i = 0; i < request.viewChanges().size(); i++) {
             assertEquals(parseData.viewChanges().get(i), request.viewChanges().get(i));
         }
+    }
+
+    @Test
+    public void getFunctionResponseParseTest() throws Exception {
+        GetFunctionResponse response = MockRESTMessage.getFunctionResponse();
+        String responseStr = OBJECT_MAPPER.writeValueAsString(response);
+        GetFunctionResponse parseData =
+                OBJECT_MAPPER.readValue(responseStr, GetFunctionResponse.class);
+        assertEquals(response.getId(), parseData.getId());
+    }
+
+    @Test
+    public void createFunctionRequestParseTest() throws JsonProcessingException {
+        CreateFunctionRequest request = MockRESTMessage.createFunctionRequest();
+        String requestStr = OBJECT_MAPPER.writeValueAsString(request);
+        CreateFunctionRequest parseData =
+                OBJECT_MAPPER.readValue(requestStr, CreateFunctionRequest.class);
+        assertEquals(parseData.getName(), request.getName());
     }
 }

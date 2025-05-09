@@ -19,17 +19,21 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.function.FunctionSchema;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
+import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
+import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
@@ -51,6 +55,7 @@ import org.apache.paimon.view.ViewSchema;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -279,6 +284,43 @@ public class MockRESTMessage {
         viewChanges.add(ViewChange.updateDialect("dialect", "query"));
         viewChanges.add(ViewChange.dropDialect("dialect"));
         return new AlterViewRequest(viewChanges);
+    }
+
+    public static GetFunctionResponse getFunctionResponse() {
+        return new GetFunctionResponse(
+                UUID.randomUUID().toString(),
+                "function",
+                functionSchema(),
+                "owner",
+                1L,
+                "owner",
+                1L,
+                "owner");
+    }
+
+    public static CreateFunctionRequest createFunctionRequest() {
+        return new CreateFunctionRequest("function", functionSchema());
+    }
+
+    private static FunctionSchema functionSchema() {
+        List<DataField> inputParams =
+                Lists.newArrayList(
+                        new DataField(0, "length", DataTypes.DOUBLE()),
+                        new DataField(1, "width", DataTypes.DOUBLE()));
+        List<DataField> returnParams =
+                Lists.newArrayList(new DataField(0, "area", DataTypes.DOUBLE()));
+        FunctionDefinition flinkFunction =
+                FunctionDefinition.file(
+                        "jar", Lists.newArrayList("/a/b/c.jar"), "java", "className", "eval");
+        FunctionDefinition sparkFunction =
+                FunctionDefinition.lambda(
+                        "(Double length, Double width) -> length * width", "java");
+        FunctionDefinition trinoFunction = FunctionDefinition.sql("length * width");
+        Map<String, FunctionDefinition> definitions = Maps.newHashMap();
+        definitions.put("flink", flinkFunction);
+        definitions.put("spark", sparkFunction);
+        definitions.put("trino", trinoFunction);
+        return new FunctionSchema(inputParams, returnParams, false, definitions, "comment", null);
     }
 
     private static ViewSchema viewSchema() {
