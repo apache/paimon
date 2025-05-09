@@ -2783,14 +2783,10 @@ public class CoreOptions implements Serializable {
 
         FROM_CREATION_TIMESTAMP(
                 "from-creation-timestamp",
-                "For streaming sources, continuously reads changes "
-                        + "starting from timestamp specified by \"scan.creation-time-millis\", "
-                        + "consumes a snapshot at the beginning. "
-                        + "If timestamp is earlier than earliest snapshot or later than latest snapshot, will filter the data files by creation time."
-                        + "If there is not any snapshot, will filter the data files by creation time."
-                        + "For batch sources, "
-                        + "If timestamp is during in the range of earliest snapshot and latest snapshot, consumes the snapshot later or equal the timestamp but does not read new changes. "
-                        + "If timestamp is during is earlier than earliest snapshot or later than latest snapshot, will filter the data files by creation time."),
+                "For streaming sources and batch sources, "
+                        + "If timestamp specified by \"scan.creation-time-millis\" is during in the range of earliest snapshot and latest snapshot: "
+                        + "mode is from-snapshot which snapshot is equal or later the timestamp. "
+                        + "If timestamp is earlier than earliest snapshot or later than latest snapshot, mode is from-file-creation-time."),
 
         FROM_FILE_CREATION_TIME(
                 "from-file-creation-time",
