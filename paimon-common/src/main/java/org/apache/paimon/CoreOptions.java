@@ -761,9 +761,7 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional timestamp used in case of \"from-creation-timestamp\" scan mode. "
-                                    + "If there is no snapshot earlier than this time, the earliest snapshot will be chosen."
-                                    + "If there is no snapshot later than this time, only the data files created after this time will be read.");
+                            "Optional timestamp used in case of \"from-creation-timestamp\" scan mode.");
 
     public static final ConfigOption<Long> SCAN_SNAPSHOT_ID =
             key("scan.snapshot-id")
