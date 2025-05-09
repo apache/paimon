@@ -277,13 +277,13 @@ public class RESTCatalogServer {
                                         .substring((functionUri + "/").length())
                                         .split("/");
                         String functionName = RESTUtil.decodeString(resources[0]);
-                        if (resources.length == 1) {
+                        if (restAuthParameter.method().equals("DELETE")) {
                             if (functionStore.containsKey(functionName)) {
                                 functionStore.remove(functionName);
                             } else {
                                 throw new Catalog.FunctionNotExistException(functionName);
                             }
-                        } else if ("function-details".equals(resources[1])) {
+                        } else if (restAuthParameter.method().equals("GET")) {
                             if (functionStore.containsKey(functionName)) {
                                 return functionDetailsHandler(functionName);
                             }

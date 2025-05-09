@@ -1350,6 +1350,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(getFunction.definition("flink")).isEqualTo(flinkFunction);
         assertThat(getFunction.definition("spark")).isEqualTo(sparkFunction);
         assertThat(getFunction.definition("trino")).isEqualTo(trinoFunction);
+        catalog.dropFunction(function.name(), true);
+        assertThat(catalog.listFunctions().contains(function.name())).isFalse();
     }
 
     private TestPagedResponse generateTestPagedResponse(
