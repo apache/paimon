@@ -29,8 +29,8 @@ public class InputMetrics {
     public static final String GROUP_NAME = "source";
     private final MetricGroup metricGroup;
 
-    public static final String READ_BYTES = "write.bytes";
-    public static final String READ_OPERATIONS = "write.operations";
+    public static final String READ_BYTES = "read.bytes";
+    public static final String READ_OPERATIONS = "read.operations";
 
     private final AtomicLong readBytes = new AtomicLong(0);
     private final AtomicLong readOperations = new AtomicLong(0);
