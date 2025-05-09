@@ -700,9 +700,9 @@ public class ParquetVectorUpdaterFactory {
         protected void putDecimal(WritableColumnVector values, int offset, BigDecimal decimal) {
             int precision = paimonType.getPrecision();
             if (ParquetSchemaConverter.is32BitDecimal(precision)) {
-                ((HeapIntVector) values).setInt(offset, decimal.intValue());
+                ((HeapIntVector) values).setInt(offset, decimal.unscaledValue().intValue());
             } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
-                ((HeapLongVector) values).setLong(offset, decimal.longValue());
+                ((HeapLongVector) values).setLong(offset, decimal.unscaledValue().longValue());
             } else {
                 byte[] bytes = decimal.unscaledValue().toByteArray();
                 ((WritableBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
