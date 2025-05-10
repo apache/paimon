@@ -202,9 +202,9 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public TagAutoManager newTagCreationManager() {
+    public TagAutoManager newTagCreationManager(FileStoreTable table) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.newTagCreationManager();
+        return wrapped.newTagCreationManager(table);
     }
 
     @Override
@@ -220,8 +220,8 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public List<TagCallback> createTagCallbacks() {
-        return wrapped.createTagCallbacks();
+    public List<TagCallback> createTagCallbacks(FileStoreTable table) {
+        return wrapped.createTagCallbacks(table);
     }
 
     @Override
