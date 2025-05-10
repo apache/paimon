@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.hive.migrate;
+package org.apache.paimon.hive.clone;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
+import org.apache.paimon.hudi.HudiCloneUtils;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
@@ -37,6 +38,7 @@ import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hudi.common.model.HoodieRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +52,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -115,7 +118,7 @@ public class HiveCloneUtils {
         }
 
         Table hiveTable = client.getTable(database, table);
-        List<FieldSchema> fields = client.getSchema(database, table);
+        List<FieldSchema> fields = getHiveSchema(client, hiveTable, database, table);
         List<FieldSchema> partitionFields = hiveTable.getPartitionKeys();
         Map<String, String> hiveTableOptions = hiveTable.getParameters();
 
@@ -158,6 +161,23 @@ public class HiveCloneUtils {
         return schemaBuilder.build();
     }
 
+    private static List<FieldSchema> getHiveSchema(
+            IMetaStoreClient client, Table hiveTable, String database, String table)
+            throws Exception {
+        List<FieldSchema> fields = client.getSchema(database, table);
+        if (!HudiCloneUtils.isHoodieTable(hiveTable)) {
+            return fields;
+        }
+
+        Set<String> hudiMetadataFields =
+                Arrays.stream(HoodieRecord.HoodieMetadataField.values())
+                        .map(HoodieRecord.HoodieMetadataField::getFieldName)
+                        .collect(Collectors.toSet());
+        return fields.stream()
+                .filter(f -> !hudiMetadataFields.contains(f.getName()))
+                .collect(Collectors.toList());
+    }
+
     public static List<HivePartitionFiles> listFiles(
             HiveCatalog hiveCatalog,
             Identifier identifier,
@@ -168,6 +188,31 @@ public class HiveCloneUtils {
         IMetaStoreClient client = hiveCatalog.getHmsClient();
         Table sourceTable =
                 client.getTable(identifier.getDatabaseName(), identifier.getTableName());
+
+        if (HudiCloneUtils.isHoodieTable(sourceTable)) {
+            return HudiCloneUtils.listFiles(
+                    sourceTable, hiveCatalog.fileIO(), partitionRowType, predicate);
+        } else {
+            return listFromPureHiveTable(
+                    client,
+                    identifier,
+                    sourceTable,
+                    hiveCatalog.fileIO(),
+                    partitionRowType,
+                    defaultPartitionName,
+                    predicate);
+        }
+    }
+
+    private static List<HivePartitionFiles> listFromPureHiveTable(
+            IMetaStoreClient client,
+            Identifier identifier,
+            Table sourceTable,
+            FileIO fileIO,
+            RowType partitionRowType,
+            String defaultPartitionName,
+            @Nullable PartitionPredicate predicate)
+            throws Exception {
         List<Partition> partitions =
                 client.listPartitions(
                         identifier.getDatabaseName(), identifier.getTableName(), Short.MAX_VALUE);
@@ -176,7 +221,7 @@ public class HiveCloneUtils {
         if (partitions.isEmpty()) {
             String location = sourceTable.getSd().getLocation();
             return Collections.singletonList(
-                    listFiles(hiveCatalog.fileIO(), location, BinaryRow.EMPTY_ROW, format));
+                    listFiles(fileIO, location, BinaryRow.EMPTY_ROW, format));
         } else {
             List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
             partitionRowType
@@ -193,7 +238,7 @@ public class HiveCloneUtils {
                                 valueSetters,
                                 defaultPartitionName);
                 if (predicate == null || predicate.test(partitionRow)) {
-                    results.add(listFiles(hiveCatalog.fileIO(), location, partitionRow, format));
+                    results.add(listFiles(fileIO, location, partitionRow, format));
                 }
             }
             return results;

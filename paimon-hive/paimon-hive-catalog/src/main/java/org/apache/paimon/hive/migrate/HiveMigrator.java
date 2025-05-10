@@ -58,8 +58,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
-import static org.apache.paimon.hive.migrate.HiveCloneUtils.HIDDEN_PATH_FILTER;
-import static org.apache.paimon.hive.migrate.HiveCloneUtils.parseFormat;
+import static org.apache.paimon.hive.clone.HiveCloneUtils.HIDDEN_PATH_FILTER;
+import static org.apache.paimon.hive.clone.HiveCloneUtils.parseFormat;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
