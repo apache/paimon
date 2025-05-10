@@ -30,7 +30,9 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /** Util class for refreshing object table. */
 public class ObjectRefresh {
@@ -60,6 +62,7 @@ public class ObjectRefresh {
     }
 
     private static InternalRow toRow(FileStatus file) {
+        Object metadata = convertMetadataToInternalMap(file.getMetadata());
         return toRow(
                 file.getPath().toString(),
                 file.getPath().getParent().toString(),
@@ -75,7 +78,22 @@ public class ObjectRefresh {
                 Optional.ofNullable(file.getMetadataModificationTime())
                         .map(Timestamp::fromEpochMillis)
                         .orElse(null),
-                Optional.ofNullable(file.getMetadata()).map(GenericMap::new).orElse(null));
+                metadata);
+    }
+
+    private static GenericMap convertMetadataToInternalMap(Map<String, String> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return null;
+        }
+
+        Map<BinaryString, BinaryString> internalMap =
+                metadata.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        entry -> BinaryString.fromString(entry.getKey()),
+                                        entry -> BinaryString.fromString(entry.getValue())));
+
+        return new GenericMap(internalMap);
     }
 
     public static GenericRow toRow(Object... values) {
