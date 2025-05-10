@@ -115,9 +115,15 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     @Override
     public int filterAndCommit(
-            List<ManifestCommittable> globalCommittables, boolean checkAppendFiles) {
+            List<ManifestCommittable> globalCommittables,
+            boolean checkAppendFiles,
+            boolean notifyCommittable) {
+
         int committed = commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles);
-        partitionListeners.notifyCommittable(globalCommittables);
+        if (notifyCommittable) {
+            partitionListeners.notifyCommittable(globalCommittables);
+        }
+
         return committed;
     }
 

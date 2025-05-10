@@ -178,14 +178,16 @@ public class StoreMultiCommitter
 
     @Override
     public int filterAndCommit(
-            List<WrappedManifestCommittable> globalCommittables, boolean checkAppendFiles)
+            List<WrappedManifestCommittable> globalCommittables,
+            boolean checkAppendFiles,
+            boolean notifyCommittable)
             throws IOException {
         int result = 0;
         for (Map.Entry<Identifier, List<ManifestCommittable>> entry :
                 groupByTable(globalCommittables).entrySet()) {
             result +=
                     getStoreCommitter(entry.getKey())
-                            .filterAndCommit(entry.getValue(), checkAppendFiles);
+                            .filterAndCommit(entry.getValue(), checkAppendFiles, notifyCommittable);
         }
         return result;
     }
