@@ -46,6 +46,14 @@ public class MetricsFileIO implements FileIO {
         return this;
     }
 
+    public FileIO getFileIOInternal() {
+        FileIO currentFileIO = fileIO;
+        while (currentFileIO instanceof MetricsFileIO) {
+            currentFileIO = ((MetricsFileIO) currentFileIO).fileIO;
+        }
+        return currentFileIO;
+    }
+
     @VisibleForTesting
     public Boolean isMetricsEnabled() {
         return inputMetrics != null && outputMetrics != null;
