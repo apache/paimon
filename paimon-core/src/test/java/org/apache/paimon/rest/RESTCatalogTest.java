@@ -31,6 +31,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.MetricsFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -1217,7 +1219,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             assertEquals(true, fileStoreTable.fileIO().exists(fileStoreTable.location()));
 
-            RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+            FileIO fileIOOrigin = fileStoreTable.fileIO();
+            FileIO fileIOInternal =
+                    fileIOOrigin instanceof MetricsFileIO
+                            ? ((MetricsFileIO) fileIOOrigin).getFileIOInternal()
+                            : fileIOOrigin;
+            RESTTokenFileIO fileIO = (RESTTokenFileIO) fileIOInternal;
             RESTToken fileDataToken = fileIO.validToken();
             RESTToken serverDataToken = getDataTokenFromRestServer(identifier);
             assertEquals(serverDataToken, fileDataToken);
@@ -1236,7 +1243,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         setDataTokenToRestServerForMock(identifier, expiredDataToken);
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
-        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        FileIO fileIOOrigin = fileStoreTable.fileIO();
+        FileIO fileIOInternal =
+                fileIOOrigin instanceof MetricsFileIO
+                        ? ((MetricsFileIO) fileIOOrigin).getFileIOInternal()
+                        : fileIOOrigin;
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileIOInternal;
         RESTToken fileDataToken = fileIO.validToken();
         assertEquals(expiredDataToken, fileDataToken);
         RESTToken newDataToken =
@@ -1364,7 +1376,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Identifier.create("test_data_token", "table_for_un_exist_date_token");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
-        RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) tableTestWrite.fileIO();
+        FileIO fileIOOrigin = tableTestWrite.fileIO();
+        FileIO fileIOInternal =
+                fileIOOrigin instanceof MetricsFileIO
+                        ? ((MetricsFileIO) fileIOOrigin).getFileIOInternal()
+                        : fileIOOrigin;
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileIOInternal;
+        RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
         List<Integer> data = Lists.newArrayList(12);
         // as RESTTokenFileIO is lazy so we need to call isObjectStore() to init fileIO
         restTokenFileIO.isObjectStore();
