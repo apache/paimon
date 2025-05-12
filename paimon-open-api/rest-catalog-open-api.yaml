@@ -1276,6 +1276,36 @@ paths:
           $ref: '#/components/responses/DatabaseNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - function
+      summary: Alter function
+      operationId: alterFunction
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: function
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlterFunctionRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/FunctionNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
     delete:
       tags:
         - view
@@ -1634,6 +1664,97 @@ components:
           type: object
           additionalProperties:
             type: string
+    AlterFunctionRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/FunctionChange'
+    FunctionChange:
+      anyOf:
+        - $ref: '#/components/schemas/SetFunctionOption'
+        - $ref: '#/components/schemas/RemoveFunctionOption'
+        - $ref: '#/components/schemas/UpdateFunctionComment'
+        - $ref: '#/components/schemas/AddDefinition'
+        - $ref: '#/components/schemas/UpdateDefinition'
+        - $ref: '#/components/schemas/DropDefinition'
+    BaseFunctionChange:
+      discriminator:
+        propertyName: action
+        mapping:
+          setOption: '#/components/schemas/SetFunctionOption'
+          removeOption: '#/components/schemas/RemoveFunctionOption'
+          updateComment: '#/components/schemas/UpdateFunctionComment'
+          addDefinition: '#/components/schemas/AddDefinition'
+          updateDefinition: '#/components/schemas/UpdateDefinition'
+          dropDefinition: '#/components/schemas/DropDefinition'
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+    SetFunctionOption:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "setOption"
+        key:
+          type: string
+        value:
+          type: string
+    RemoveFunctionOption:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "removeOption"
+        key:
+          type: string
+    UpdateFunctionComment:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "updateComment"
+        comment:
+          type: string
+    AddDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "addDefinition"
+        name:
+          type: string
+        definition:
+          $ref: "#/components/schemas/FunctionDefinition"
+    UpdateDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "updateDefinition"
+        name:
+          type: string
+        definition:
+          $ref: "#/components/schemas/FunctionDefinition"
+    DropDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionChange'
+      properties:
+        action:
+          type: string
+          const: "dropDefinition"
+        name:
+          type: string
     FunctionDefinition:
       anyOf:
         - $ref: '#/components/schemas/FileFunctionDefinition'
