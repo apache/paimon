@@ -1184,7 +1184,7 @@ paths:
           $ref: '#/components/responses/ViewAlreadyExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/databases/{database}/functions:
+  /v1/{prefix}/functions:
     get:
       tags:
         - function
@@ -1192,11 +1192,6 @@ paths:
       operationId: listFunctions
       parameters:
         - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
           in: path
           required: true
           schema:
@@ -1234,11 +1229,6 @@ paths:
           required: true
           schema:
             type: string
-        - name: database
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -1256,7 +1246,7 @@ paths:
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
 
-  /v1/{prefix}/databases/{database}/functions/{function}:
+  /v1/{prefix}/functions/{function}:
     get:
       tags:
         - function
@@ -1264,11 +1254,6 @@ paths:
       operationId: getFunction
       parameters:
         - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
           in: path
           required: true
           schema:
@@ -1298,11 +1283,6 @@ paths:
       operationId: dropFunction
       parameters:
         - name: prefix
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: database
           in: path
           required: true
           schema:
@@ -1644,16 +1624,73 @@ components:
             $ref: '#/components/schemas/DataField'
         deterministic:
           type: boolean
-        dialects:
+        definitions:
           type: object
           additionalProperties:
-            type: string
+            $ref: "#/components/schemas/FunctionDefinition"
         comment:
           type: string
         options:
           type: object
           additionalProperties:
             type: string
+    FunctionDefinition:
+      anyOf:
+        - $ref: '#/components/schemas/FileFunctionDefinition'
+        - $ref: '#/components/schemas/SQLFunctionDefinition'
+        - $ref: '#/components/schemas/LambdaFunctionDefinition'
+    BaseFunctionDefinition:
+      discriminator:
+        propertyName: type
+        mapping:
+          file: '#/components/schemas/FileFunctionDefinition'
+          sql: '#/components/schemas/SQLFunctionDefinition'
+          lambda: '#/components/schemas/LambdaFunctionDefinition'
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+    SQLFunctionDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionDefinition'
+      properties:
+        type:
+          type: string
+          const: "sql"
+        definition:
+          type: string
+    FileFunctionDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionDefinition'
+      properties:
+        type:
+          type: string
+          const: "file"
+        fileType:
+          type: string
+        storagePaths:
+          type: array
+          items:
+            type: string
+        language:
+          type: string
+        className:
+          type: string
+        functionName:
+          type: string
+    LambdaFunctionDefinition:
+      allOf:
+        - $ref: '#/components/schemas/BaseFunctionDefinition'
+      properties:
+        type:
+          type: string
+          const: "lambda"
+        definition:
+          type: string
+        language:
+          type: string
     ViewChange:
       anyOf:
         - $ref: '#/components/schemas/SetViewOption'
@@ -2049,13 +2086,13 @@ components:
       required:
         - type
       properties:
-        'type':
+        type:
           type: string
     SnapshotInstant:
       allOf:
         - $ref: '#/components/schemas/BaseInstant'
       properties:
-        'type':
+        type:
           type: string
           const: "snapshot"
         snapshotId:
@@ -2065,7 +2102,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/BaseInstant'
       properties:
-        'type':
+        type:
           type: string
           const: "tag"
         tagName:
@@ -2355,10 +2392,10 @@ components:
             $ref: '#/components/schemas/DataField'
         deterministic:
           type: boolean
-        dialects:
+        definitions:
           type: object
           additionalProperties:
-            type: string
+            $ref: "#/components/schemas/FunctionDefinition"
         comment:
           type: string
         options:

@@ -978,10 +978,9 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
-    @GetMapping("/v1/{prefix}/databases/{database}/functions")
+    @GetMapping("/v1/{prefix}/functions")
     public ListFunctionsResponse listFunctions(
             @PathVariable String prefix,
-            @PathVariable String database,
             @RequestParam(required = false) Integer maxResults,
             @RequestParam(required = false) String pageToken) {
         return new ListFunctionsResponse(ImmutableList.of("f1"), null);
@@ -1006,10 +1005,9 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
-    @GetMapping("/v1/{prefix}/databases/{database}/functions/{function}")
+    @GetMapping("/v1/{prefix}/functions/{function}")
     public GetFunctionResponse getFunction(
             @PathVariable String prefix,
-            @PathVariable String database,
             @PathVariable String function) {
         return new GetFunctionResponse(
                 UUID.randomUUID().toString(),
@@ -1044,10 +1042,9 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
-    @PostMapping("/v1/{prefix}/databases/{database}/functions")
+    @PostMapping("/v1/{prefix}/functions")
     public void createFunction(
             @PathVariable String prefix,
-            @PathVariable String database,
             @RequestBody CreateFunctionRequest request) {}
 
     @Operation(
@@ -1067,9 +1064,8 @@ public class RESTCatalogController {
                 responseCode = "500",
                 content = {@Content(schema = @Schema(implementation = ErrorResponse.class))})
     })
-    @GetMapping("/v1/{prefix}/databases/{database}/functions/{function}")
+    @GetMapping("/v1/{prefix}/functions/{function}")
     public void dropFunction(
             @PathVariable String prefix,
-            @PathVariable String database,
             @PathVariable String function) {}
 }
