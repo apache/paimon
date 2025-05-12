@@ -41,7 +41,7 @@ public class IOManagerImpl implements IOManager {
 
     private final String[] tempDirs;
 
-    private final FileChannelManager fileChannelManager;
+    private volatile FileChannelManager lazyFileChannelManager;
 
     // -------------------------------------------------------------------------
     //               Constructors / Destructors
@@ -53,37 +53,51 @@ public class IOManagerImpl implements IOManager {
      * @param tempDirs The basic directories for files underlying anonymous channels.
      */
     public IOManagerImpl(String... tempDirs) {
+        Preconditions.checkNotNull(tempDirs);
         this.tempDirs = tempDirs;
-        this.fileChannelManager =
-                new FileChannelManagerImpl(Preconditions.checkNotNull(tempDirs), DIR_NAME_PREFIX);
-        if (LOG.isInfoEnabled()) {
-            LOG.info(
-                    "Created a new {} for spilling of task related data to disk (joins, sorting, ...). Used directories:\n\t{}",
-                    FileChannelManager.class.getSimpleName(),
-                    getSpillingDirectoriesPathsString());
+    }
+
+    private FileChannelManager fileChannelManager() {
+        if (lazyFileChannelManager == null) {
+            synchronized (this) {
+                if (lazyFileChannelManager == null) {
+                    this.lazyFileChannelManager =
+                            new FileChannelManagerImpl(tempDirs, DIR_NAME_PREFIX);
+                    if (LOG.isInfoEnabled()) {
+                        LOG.info(
+                                "Created a new {} for spilling of task related data to disk (joins, sorting, ...). Used directories:\n\t{}",
+                                FileChannelManager.class.getSimpleName(),
+                                getSpillingDirectoriesPathsString());
+                    }
+                }
+            }
         }
+
+        return lazyFileChannelManager;
     }
 
     /** Removes all temporary files. */
     @Override
     public void close() throws Exception {
-        fileChannelManager.close();
-        if (LOG.isInfoEnabled()) {
-            LOG.info(
-                    "Closed {} with directories:\n\t{}",
-                    FileChannelManager.class.getSimpleName(),
-                    getSpillingDirectoriesPathsString());
+        if (lazyFileChannelManager != null) {
+            lazyFileChannelManager.close();
+            if (LOG.isInfoEnabled()) {
+                LOG.info(
+                        "Closed {} with directories:\n\t{}",
+                        FileChannelManager.class.getSimpleName(),
+                        getSpillingDirectoriesPathsString());
+            }
         }
     }
 
     @Override
     public ID createChannel() {
-        return fileChannelManager.createChannel();
+        return fileChannelManager().createChannel();
     }
 
     @Override
     public ID createChannel(String prefix) {
-        return fileChannelManager.createChannel(prefix);
+        return fileChannelManager().createChannel(prefix);
     }
 
     @Override
@@ -93,7 +107,7 @@ public class IOManagerImpl implements IOManager {
 
     @Override
     public Enumerator createChannelEnumerator() {
-        return fileChannelManager.createChannelEnumerator();
+        return fileChannelManager().createChannelEnumerator();
     }
 
     /**
@@ -116,7 +130,7 @@ public class IOManagerImpl implements IOManager {
      * @return The directories that the I/O manager spills to.
      */
     public File[] getSpillingDirectories() {
-        return fileChannelManager.getPaths();
+        return fileChannelManager().getPaths();
     }
 
     /**
@@ -125,7 +139,7 @@ public class IOManagerImpl implements IOManager {
      * @return The directories that the I/O manager spills to, as path strings.
      */
     public String[] getSpillingDirectoriesPaths() {
-        File[] paths = fileChannelManager.getPaths();
+        File[] paths = fileChannelManager().getPaths();
         String[] strings = new String[paths.length];
         for (int i = 0; i < strings.length; i++) {
             strings[i] = paths[i].getAbsolutePath();
@@ -134,7 +148,7 @@ public class IOManagerImpl implements IOManager {
     }
 
     private String getSpillingDirectoriesPathsString() {
-        return Arrays.stream(fileChannelManager.getPaths())
+        return Arrays.stream(fileChannelManager().getPaths())
                 .map(File::getAbsolutePath)
                 .collect(Collectors.joining("\n\t"));
     }
