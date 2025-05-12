@@ -81,7 +81,8 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.changelogManager(),
                 wrapped.supportStreamingReadOverwrite(),
                 lookupScanMode,
-                wrapped.catalogEnvironment().tableQueryAuth(wrapped.coreOptions()));
+                wrapped.catalogEnvironment().tableQueryAuth(wrapped.coreOptions()),
+                !wrapped.schema().primaryKeys().isEmpty());
     }
 
     @Override

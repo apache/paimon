@@ -59,7 +59,8 @@ public class LookupDataTableScan extends DataTableStreamScan {
             ChangelogManager changelogManager,
             boolean supportStreamingReadOverwrite,
             LookupStreamScanMode lookupScanMode,
-            TableQueryAuth queryAuth) {
+            TableQueryAuth queryAuth,
+            boolean hasPk) {
         super(
                 schema,
                 options,
@@ -67,7 +68,8 @@ public class LookupDataTableScan extends DataTableStreamScan {
                 snapshotManager,
                 changelogManager,
                 supportStreamingReadOverwrite,
-                queryAuth);
+                queryAuth,
+                hasPk);
         this.startupMode = options.startupMode();
         this.lookupScanMode = lookupScanMode;
         dropStats();
