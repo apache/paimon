@@ -63,6 +63,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 
+/** Tests for {@link DataFileIndexWriter}. */
 public class DataFileIndexWriterTest {
 
     @TempDir java.nio.file.Path tempFile;
