@@ -833,13 +833,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
             baseMetadata.refs().put(tagName, new IcebergRef(snapshotId));
 
-            SchemaCache schemaCache = new SchemaCache();
             IcebergMetadata metadata =
                     new IcebergMetadata(
                             baseMetadata.tableUuid(),
                             baseMetadata.location(),
                             baseMetadata.currentSnapshotId(),
-                            schemaCache.get((int) table.schema().id()).highestFieldId(),
+                            baseMetadata.lastColumnId(),
                             baseMetadata.schemas(),
                             baseMetadata.currentSchemaId(),
                             baseMetadata.partitionSpecs(),
@@ -879,13 +878,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
             baseMetadata.refs().remove(tagName);
 
-            SchemaCache schemaCache = new SchemaCache();
             IcebergMetadata metadata =
                     new IcebergMetadata(
                             baseMetadata.tableUuid(),
                             baseMetadata.location(),
                             baseMetadata.currentSnapshotId(),
-                            schemaCache.get((int) table.schema().id()).highestFieldId(),
+                            baseMetadata.lastColumnId(),
                             baseMetadata.schemas(),
                             baseMetadata.currentSchemaId(),
                             baseMetadata.partitionSpecs(),
